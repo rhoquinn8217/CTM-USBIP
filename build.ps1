@@ -4,7 +4,8 @@ param(
     [string]$Platform = 'x64',
     [ValidateSet('Debug', 'Release')]
     [string]$Configuration = 'Debug',
-    [switch]$WithUsbDisplay
+    [switch]$WithUsbDisplay,
+    [switch]$WithCapture
 )
 
 $ErrorActionPreference = 'Stop'
@@ -76,4 +77,11 @@ if ($WithUsbDisplay) {
     & $msbuild $displayProject /m /p:Configuration=$Configuration /p:Platform=$Platform
     if ($LASTEXITCODE -ne 0) { throw 'ctm-usbdisplay build failed.' }
     Write-Host "Built: $(Join-Path $out 'ctm-usbdisplay.exe')"
+}
+
+if ($WithCapture) {
+    $captureProject = Join-Path $Root 'app\ctm-capture.vcxproj'
+    & $msbuild $captureProject /m /p:Configuration=$Configuration /p:Platform=$Platform
+    if ($LASTEXITCODE -ne 0) { throw 'ctm-capture build failed.' }
+    Write-Host "Built: $(Join-Path $out 'ctm-capture.exe')"
 }
