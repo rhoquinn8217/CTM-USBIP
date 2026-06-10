@@ -1,0 +1,41 @@
+<?xml version='1.0' encoding='utf-8'?>
+<!-- CTM Bridge configuration for the vendored VirtualDisplayDriver (VDD).
+     CustomEdid=true => the virtual monitor uses user_edid.bin (a verbatim copy
+     of the target LG HDR 4K TV's EDID), so Windows sees the TV's identity,
+     mode list, and HDR metadata. With CustomEdid on, the <resolutions> list
+     below is ignored (modes come from the EDID). HDRPlus=true advertises HDR;
+     Windows can still run the display in SDR via the HDR toggle. -->
+<vdd_settings>
+    <monitors>
+        <count>1</count>
+    </monitors>
+    <gpu>
+        <friendlyname>default</friendlyname>
+    </gpu>
+    <global>
+        <g_refresh_rate>60</g_refresh_rate>
+        <g_refresh_rate>120</g_refresh_rate>
+    </global>
+    <resolutions>
+        <resolution>
+            <width>1920</width>
+            <height>1080</height>
+            <refresh_rate>60</refresh_rate>
+        </resolution>
+        <resolution>
+            <width>3840</width>
+            <height>2160</height>
+            <refresh_rate>60</refresh_rate>
+        </resolution>
+    </resolutions>
+    <options>
+        <CustomEdid>true</CustomEdid>        <!-- use user_edid.bin (the LG TV EDID) -->
+        <PreventSpoof>false</PreventSpoof>   <!-- false => present the TV's real manufacturer/identity -->
+        <EdidCeaOverride>false</EdidCeaOverride> <!-- our EDID already carries its own CEA/HDR block -->
+        <HardwareCursor>true</HardwareCursor>
+        <SDR10bit>false</SDR10bit>           <!-- must be false when HDRPlus is true -->
+        <HDRPlus>true</HDRPlus>              <!-- advertise HDR (Win11 23H2+); SDR still works via the HDR toggle -->
+        <logging>false</logging>
+        <debuglogging>false</debuglogging>
+    </options>
+</vdd_settings>
