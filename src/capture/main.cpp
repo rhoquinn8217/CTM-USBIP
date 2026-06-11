@@ -415,6 +415,21 @@ float4 main(float4 pos:SV_Position, float2 uv:TEXCOORD0) : SV_Target {
     if (isHDR == 0) c.rgb = s2l(saturate(c.rgb));   // SDR sRGB8 -> linear scRGB
     return float4(c.rgb, 1);                          // HDR scRGB passes through
 })";
+// Window A. Two stages: decode the captured pixel (FP16 scRGB or 8-bit sRGB)
+// into linear scRGB light, then encode for the window's monitor. HDR display
+// gets linear scRGB; SDR display gets sRGB via the _SRGB backbuffer, and an
+// HDR source is ACES-tonemapped so highlights >1 roll off instead of clipping.
+static const char *kPSSceneDisp = R"(
+Texture2D tex : register(t0); SamplerState smp : register(s0);
+cbuffer CB : register(b0) { int srcHDR; int dstHDR; int2 _pad; };
+float3 s2l(float3 c){ return (c <= 0.04045) ? c/12.92 : pow((c+0.055)/1.055, 2.4); }
+float3 aces(float3 x){ const float a=2.51,b=0.03,c=2.43,d=0.59,e=0.14; return saturate((x*(a*x+b))/(x*(c*x+d)+e)); }
+float4 main(float4 pos:SV_Position, float2 uv:TEXCOORD0) : SV_Target {
+    float4 c = tex.Sample(smp, uv);
+    float3 L = (srcHDR != 0) ? c.rgb : s2l(saturate(c.rgb));            // decode -> linear scRGB
+    float3 o = (dstHDR != 0) ? L : ((srcHDR != 0) ? aces(L) : saturate(L)); // encode -> display
+    return float4(o, 1);
+})";
 static const char *kVSQuad = R"(
 cbuffer Q : register(b0) { float4 rect; float4 extra; };
 struct QO { float4 pos:SV_Position; float2 uv:TEXCOORD0; };
@@ -424,11 +439,14 @@ QO qmain(uint id : SV_VertexID) {
 })";
 static const char *kPSCursor = R"(
 Texture2D ctex : register(t0); SamplerState csmp : register(s0);
-cbuffer Q : register(b0) { float4 rect; float4 extra; };  // extra.x = paperwhite scale
+cbuffer Q : register(b0) { float4 rect; float4 extra; };  // x=paperwhite, y=sRGB target
 float3 s2l(float3 c){ return (c <= 0.04045) ? c/12.92 : pow((c+0.055)/1.055, 2.4); }
 float4 cmain(float4 pos:SV_Position, float2 uv:TEXCOORD0) : SV_Target {
     float4 c = ctex.Sample(csmp, uv);
-    return float4(s2l(saturate(c.rgb)) * extra.x, c.a);   // match desktop SDR-white
+    // extra.y > 0.5: target frame is SDR sRGB8 -> blend the cursor as-is (sRGB).
+    // else: target is scRGB linear -> linearize and scale to SDR-white.
+    float3 rgb = (extra.y > 0.5) ? c.rgb : (s2l(saturate(c.rgb)) * extra.x);
+    return float4(rgb, c.a);
 })";
 
 static ComPtr<ID3DBlob> compile_shader(const char *src, const char *entry, const char *target)
@@ -770,6 +788,46 @@ static HdrInfo read_hdr_info(const OutputRef &ref)
         }
     }
     return h;
+}
+
+static const wchar_t *colorspace_name(DXGI_COLOR_SPACE_TYPE cs)
+{
+    switch (cs) {
+    case DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709:   return L"sRGB G2.2 BT.709 (SDR)";
+    case DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709:   return L"scRGB G1.0 BT.709 (HDR linear)";
+    case DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020:return L"HDR10 PQ BT.2020";
+    case DXGI_COLOR_SPACE_RGB_STUDIO_G2084_NONE_P2020: return L"HDR10 PQ BT.2020 (studio)";
+    default:                                        return L"other";
+    }
+}
+
+static const wchar_t *dxgi_format_name(DXGI_FORMAT f)
+{
+    switch (f) {
+    case DXGI_FORMAT_R16G16B16A16_FLOAT: return L"R16G16B16A16_FLOAT (FP16 scRGB)";
+    case DXGI_FORMAT_B8G8R8A8_UNORM:     return L"B8G8R8A8_UNORM (sRGB)";
+    case DXGI_FORMAT_R8G8B8A8_UNORM:     return L"R8G8B8A8_UNORM (sRGB)";
+    case DXGI_FORMAT_R10G10B10A2_UNORM:  return L"R10G10B10A2_UNORM";
+    default:                             return L"(other)";
+    }
+}
+
+// Log the display's actual color settings so we adapt to it rather than
+// forcing a format. ColorSpace G2084/G10 => HDR is on for this output.
+static void log_display_mode(const OutputRef &ref)
+{
+    ComPtr<IDXGIOutput6> o6;
+    if (FAILED(ref.output1.As(&o6))) { std::wcout << L"display: IDXGIOutput6 unavailable\n"; return; }
+    DXGI_OUTPUT_DESC1 d{};
+    if (FAILED(o6->GetDesc1(&d))) { std::wcout << L"display: GetDesc1 failed\n"; return; }
+    const bool hdr = d.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020 ||
+                     d.ColorSpace == DXGI_COLOR_SPACE_RGB_STUDIO_G2084_NONE_P2020 ||
+                     d.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709;
+    std::wcout << L"display: " << (d.DesktopCoordinates.right - d.DesktopCoordinates.left) << L"x"
+               << (d.DesktopCoordinates.bottom - d.DesktopCoordinates.top)
+               << L" bpc=" << d.BitsPerColor
+               << L" colorspace=" << colorspace_name(d.ColorSpace)
+               << L" HDR=" << (hdr ? L"on" : L"off") << L"\n";
 }
 
 struct EncConfig {
@@ -1203,6 +1261,7 @@ private:
 static const char *kPSDecoded = R"(
 Texture2D texY : register(t0); Texture2D texU : register(t1); Texture2D texV : register(t2);
 SamplerState smp : register(s0);
+cbuffer DV : register(b0) { float2 uvScale; int dstHDR; int _pad; };
 static const float3x3 M2020to709 = {
      1.660491, -0.587641, -0.072850,
     -0.124550,  1.132900, -0.008349,
@@ -1213,6 +1272,7 @@ float3 pq_eotf(float3 E) {            // returns L normalized so 1.0 == 10000 ni
     float3 Ep = pow(max(E, 0.0), 1.0 / m2);
     return pow(max(Ep - c1, 0.0) / (c2 - c3 * Ep), 1.0 / m1);
 }
+float3 aces(float3 x){ const float a=2.51,b=0.03,c=2.43,d=0.59,e=0.14; return saturate((x*(a*x+b))/(x*(c*x+d)+e)); }
 float4 main(float4 pos:SV_Position, float2 uv:TEXCOORD0) : SV_Target {
     float k = 65535.0;                                   // R16 UNORM sample -> 10-bit code
     float Y = texY.Sample(smp, uv).r * k;
@@ -1226,9 +1286,8 @@ float4 main(float4 pos:SV_Position, float2 uv:TEXCOORD0) : SV_Target {
     rgbpq.g = yn - 0.16455 * cb - 0.57135 * cr;
     rgbpq.b = yn + 1.88140 * cb;
     float3 L = pq_eotf(saturate(rgbpq));                 // linear BT.2020, 1.0==10000nit
-    float3 lin2020 = L * 125.0;                          // -> scRGB units (1.0==80nit)
-    float3 scrgb = mul(M2020to709, lin2020);
-    return float4(scrgb, 1.0);
+    float3 scrgb = mul(M2020to709, L * 125.0);           // -> scRGB units (1.0==80nit)
+    return float4(dstHDR != 0 ? scrgb : aces(scrgb), 1.0);
 })";
 
 // Zero-copy variant: sample the decoder's P010 texture array slice directly
@@ -1237,7 +1296,7 @@ float4 main(float4 pos:SV_Position, float2 uv:TEXCOORD0) : SV_Target {
 static const char *kPSDecodedHW = R"(
 Texture2D texY : register(t0); Texture2D texUV : register(t1);
 SamplerState smp : register(s0);
-cbuffer UVCB : register(b0) { float2 uvScale; float2 _pad; };
+cbuffer DV : register(b0) { float2 uvScale; int dstHDR; int _pad; };
 static const float3x3 M2020to709 = {
      1.660491, -0.587641, -0.072850,
     -0.124550,  1.132900, -0.008349,
@@ -1248,6 +1307,7 @@ float3 pq_eotf(float3 E) {
     float3 Ep = pow(max(E, 0.0), 1.0 / m2);
     return pow(max(Ep - c1, 0.0) / (c2 - c3 * Ep), 1.0 / m1);
 }
+float3 aces(float3 x){ const float a=2.51,b=0.03,c=2.43,d=0.59,e=0.14; return saturate((x*(a*x+b))/(x*(c*x+d)+e)); }
 float4 main(float4 pos:SV_Position, float2 uv:TEXCOORD0) : SV_Target {
     float2 tuv = uv * uvScale;
     float k = 65535.0 / 64.0;                            // P010 -> 10-bit code
@@ -1261,7 +1321,8 @@ float4 main(float4 pos:SV_Position, float2 uv:TEXCOORD0) : SV_Target {
     rgbpq.g = yn - 0.16455 * cb - 0.57135 * cr;
     rgbpq.b = yn + 1.88140 * cb;
     float3 L = pq_eotf(saturate(rgbpq));
-    return float4(mul(M2020to709, L * 125.0), 1.0);      // scRGB out
+    float3 scrgb = mul(M2020to709, L * 125.0);
+    return float4(dstHDR != 0 ? scrgb : aces(scrgb), 1.0);
 })";
 
 class DecodedView {
@@ -1328,6 +1389,8 @@ public:
         ctx_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         ctx_->VSSetShader(vs_.Get(), nullptr, 0);
         ctx_->PSSetShader(ps_.Get(), nullptr, 0);
+        set_dv(1.0f, 1.0f);
+        ctx_->PSSetConstantBuffers(0, 1, cbUv_.GetAddressOf());
         ID3D11ShaderResourceView *srvs[3] = {srvY_.Get(), srvU_.Get(), srvV_.Get()};
         ctx_->PSSetShaderResources(0, 3, srvs);
         ctx_->PSSetSamplers(0, 1, samp_.GetAddressOf());
@@ -1337,8 +1400,15 @@ public:
         ctx_->PSSetShaderResources(0, 3, n3);
     }
     bool valid() const { return valid_; }
+    void set_dst_hdr(bool h) { dstHDR_ = h; }
 
 private:
+    void set_dv(float ux, float uy)   // upload uvScale + dstHDR to b0
+    {
+        struct { float ux, uy; int dstHDR, pad; } cb{ux, uy, dstHDR_ ? 1 : 0, 0};
+        D3D11_MAPPED_SUBRESOURCE m{};
+        if (SUCCEEDED(ctx_->Map(cbUv_.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &m))) { memcpy(m.pData, &cb, sizeof(cb)); ctx_->Unmap(cbUv_.Get(), 0); }
+    }
     // Sample the decoder's pool texture (array slice) directly -- no copy.
     void draw_hw(int bbW, int bbH)
     {
@@ -1368,9 +1438,7 @@ private:
         }
         if (!sliceSrv_[slice].first || !sliceSrv_[slice].second) return;
         const int fw = hwFrame_->width, fh = hwFrame_->height;
-        const float cb[4] = {(float)fw / texW_, (float)fh / texH_, 0, 0};
-        D3D11_MAPPED_SUBRESOURCE m{};
-        if (SUCCEEDED(ctx_->Map(cbUv_.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &m))) { memcpy(m.pData, cb, sizeof(cb)); ctx_->Unmap(cbUv_.Get(), 0); }
+        set_dv((float)fw / texW_, (float)fh / texH_);
         const float scale = std::min((float)bbW / fw, (float)bbH / fh);
         const float vw = fw * scale, vh = fh * scale;
         D3D11_VIEWPORT vp{(bbW - vw) / 2, (bbH - vh) / 2, vw, vh, 0, 1};
@@ -1420,7 +1488,7 @@ private:
     ID3D11Texture2D *cachedTex_ = nullptr;                  // pool identity only
     std::vector<std::pair<ComPtr<ID3D11ShaderResourceView>, ComPtr<ID3D11ShaderResourceView>>> sliceSrv_;
     int texW_ = 1, texH_ = 1;
-    int w_ = 0, h_ = 0; bool valid_ = false, hwMode_ = false;
+    int w_ = 0, h_ = 0; bool valid_ = false, hwMode_ = false, dstHDR_ = false;
 };
 
 // per-window resize state (real size arrives via WM_SIZE on ShowWindow; the
@@ -1517,9 +1585,11 @@ public:
         }
         if (!make_swapchain(wndA, scA_, rtvA_, &bbAW_, &bbAH_, err)) return false;
         if (!make_swapchain(wndB, scB_, rtvB_, &bbBW_, &bbBH_, err)) return false;
+        decoded_.set_dst_hdr(dstHDR_);
+        std::wcout << L"preview windows: " << (dstHDR_ ? L"HDR scRGB" : L"SDR (sRGB, HDR tonemapped)") << L"\n";
 
         auto vsb = compile_shader(kVS, "main", "vs_5_0");
-        auto psb = compile_shader(kPS, "main", "ps_5_0");
+        auto psb = compile_shader(kPSSceneDisp, "main", "ps_5_0");
         if (!vsb || !psb) { if (err) *err = L"scene shader compile failed"; return false; }
         dev_->CreateVertexShader(vsb->GetBufferPointer(), vsb->GetBufferSize(), nullptr, &vsScene_);
         dev_->CreatePixelShader(psb->GetBufferPointer(), psb->GetBufferSize(), nullptr, &psScene_);
@@ -1560,6 +1630,7 @@ public:
         capH_ = ref.desc.DesktopCoordinates.bottom - ref.desc.DesktopCoordinates.top;
         { std::lock_guard<std::mutex> lk(g_cfgMtx); applied_ = g_cfgDesired; }
         if (!reconfigure(applied_, err)) return false;
+        log_display_mode(ref_);
         std::wcout << L"HDR monitor info: valid=" << hdr_.valid << L" maxLum=" << hdr_.maxLum
                    << L" maxFALL=" << hdr_.maxFFLum << L" minLum=" << hdr_.minLum << L"\n";
         lastStat_ = now_ms();
@@ -1650,7 +1721,9 @@ public:
             ComPtr<ID3D11Texture2D> tex;
             if (SUCCEEDED(res.As(&tex))) {
                 D3D11_TEXTURE2D_DESC td; tex->GetDesc(&td);
-                if (!frameTex_ || frW_ != (int)td.Width || frH_ != (int)td.Height) {
+                // Follow the display's real format: recreate our copy on a
+                // format change (HDR<->SDR), not just on resize.
+                if (!frameTex_ || frW_ != (int)td.Width || frH_ != (int)td.Height || frFmt_ != td.Format) {
                     frameTex_.Reset(); frameSRV_.Reset(); rtvFrame_.Reset();
                     D3D11_TEXTURE2D_DESC d = td;
                     d.Usage = D3D11_USAGE_DEFAULT;
@@ -1660,12 +1733,17 @@ public:
                         dev_->CreateShaderResourceView(frameTex_.Get(), nullptr, &frameSRV_);
                         dev_->CreateRenderTargetView(frameTex_.Get(), nullptr, &rtvFrame_);
                     }
-                    frW_ = td.Width; frH_ = td.Height;
+                    frW_ = td.Width; frH_ = td.Height; frFmt_ = td.Format;
+                    frameHDR_ = (td.Format == DXGI_FORMAT_R16G16B16A16_FLOAT);  // FP16 == scRGB/HDR
+                }
+                if (!fmtLogged_) {
+                    fmtLogged_ = true;
+                    std::wcout << L"captured surface: " << dxgi_format_name(td.Format)
+                               << L" -> treating as " << (frameHDR_ ? L"HDR/scRGB linear" : L"SDR/sRGB") << L"\n";
                 }
                 if (frameTex_) {
                     ctx_->CopyResource(frameTex_.Get(), tex.Get());
-                    update_cursor(fi);
-                    composite_cursor();        // bake the cursor into the frame
+                    update_cursor(fi);         // refresh shape; capture stays cursorless
                     haveFrame_ = true; fresh = true;
                 }
             }
@@ -1676,6 +1754,7 @@ public:
         const UINT sync = g_vsync.load() ? 1 : 0;
         const UINT pflags = (sync == 0 && tearing_) ? DXGI_PRESENT_ALLOW_TEARING : 0;
         if (haveFrame_) draw_scene(rtvA_.Get(), bbAW_, bbAH_, frameSRV_.Get(), frW_, frH_);
+        draw_cursor_overlay(rtvA_.Get(), bbAW_, bbAH_);
         scA_->Present(sync, pflags);
 
         // 6. reservoir, latest-wins: every fresh frame is submitted; when both
@@ -1708,6 +1787,7 @@ public:
             ctx_->OMSetRenderTargets(1, rtvB_.GetAddressOf(), nullptr);
             decoded_.draw(bbBW_, bbBH_);
         }
+        draw_cursor_overlay(rtvB_.Get(), bbBW_, bbBH_);
         scB_->Present(sync, pflags);
 
         const double dt = now_ms() - loopT0;
@@ -1781,27 +1861,43 @@ private:
     {
         RECT rc; GetClientRect(hwnd, &rc);
         *w = std::max(1L, rc.right); *h = std::max(1L, rc.bottom);
-        DXGI_SWAP_CHAIN_DESC1 sd{};
-        sd.Width = *w; sd.Height = *h;
-        sd.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;     // scRGB; HDR passthrough
-        sd.SampleDesc.Count = 1;
-        sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-        sd.BufferCount = 2;
-        sd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-        sd.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
-        sd.Scaling = DXGI_SCALING_STRETCH;
-        sd.Flags = tearing_ ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
-        ComPtr<IDXGISwapChain1> sc1;
-        if (FAILED(fac_->CreateSwapChainForHwnd(dev_.Get(), hwnd, &sd, nullptr, nullptr, &sc1))) { if (err) *err = L"CreateSwapChainForHwnd failed"; return false; }
-        sc1.As(&sc);
+        auto create = [&](DXGI_FORMAT fmt) -> bool {
+            sc.Reset();
+            DXGI_SWAP_CHAIN_DESC1 sd{};
+            sd.Width = *w; sd.Height = *h; sd.Format = fmt; sd.SampleDesc.Count = 1;
+            sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT; sd.BufferCount = 2;
+            sd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD; sd.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
+            sd.Scaling = DXGI_SCALING_STRETCH;
+            sd.Flags = tearing_ ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
+            ComPtr<IDXGISwapChain1> sc1;
+            if (FAILED(fac_->CreateSwapChainForHwnd(dev_.Get(), hwnd, &sd, nullptr, nullptr, &sc1))) return false;
+            return SUCCEEDED(sc1.As(&sc));
+        };
+        // Follow the window's monitor: scRGB FP16 if it can present HDR, else an
+        // 8-bit backbuffer with an _SRGB RTV (hardware sRGB-encodes our linear
+        // output). dstHDR_ tells the shaders which to produce.
+        if (!create(DXGI_FORMAT_R16G16B16A16_FLOAT)) { if (err) *err = L"CreateSwapChainForHwnd failed"; return false; }
         UINT sup = 0;
-        if (sc && SUCCEEDED(sc->CheckColorSpaceSupport(DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709, &sup)) &&
-            (sup & DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT))
+        const bool hdrOut = SUCCEEDED(sc->CheckColorSpaceSupport(DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709, &sup)) &&
+                            (sup & DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT);
+        if (hdrOut) {
             sc->SetColorSpace1(DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709);
+            dstHDR_ = true; rtvFmt_ = DXGI_FORMAT_R16G16B16A16_FLOAT;
+        } else {
+            if (!create(DXGI_FORMAT_B8G8R8A8_UNORM)) { if (err) *err = L"CreateSwapChainForHwnd failed"; return false; }
+            dstHDR_ = false; rtvFmt_ = DXGI_FORMAT_B8G8R8A8_UNORM_SRGB;
+        }
+        make_rtv(sc, rtv);
+        return true;
+    }
+
+    void make_rtv(ComPtr<IDXGISwapChain3> &sc, ComPtr<ID3D11RenderTargetView> &rtv)
+    {
         ComPtr<ID3D11Texture2D> bb;
         sc->GetBuffer(0, IID_PPV_ARGS(&bb));
-        dev_->CreateRenderTargetView(bb.Get(), nullptr, &rtv);
-        return true;
+        D3D11_RENDER_TARGET_VIEW_DESC rd{};
+        rd.Format = rtvFmt_; rd.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
+        dev_->CreateRenderTargetView(bb.Get(), &rd, &rtv);
     }
 
     void resize_one(ComPtr<IDXGISwapChain3> &sc, ComPtr<ID3D11RenderTargetView> &rtv, WinState *ws, long *w, long *h)
@@ -1811,9 +1907,7 @@ private:
         *w = ws->w.load(); *h = ws->h.load();
         sc->ResizeBuffers(0, (UINT)*w, (UINT)*h, DXGI_FORMAT_UNKNOWN,
                           tearing_ ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0);
-        ComPtr<ID3D11Texture2D> bb;
-        sc->GetBuffer(0, IID_PPV_ARGS(&bb));
-        dev_->CreateRenderTargetView(bb.Get(), nullptr, &rtv);
+        make_rtv(sc, rtv);
     }
     void resize_backbuffers()
     {
@@ -1831,7 +1925,8 @@ private:
         const float vw = fw * scale, vh = fh * scale;
         D3D11_VIEWPORT vp{(bbW - vw) / 2, (bbH - vh) / 2, vw, vh, 0, 1};
         ctx_->RSSetViewports(1, &vp);
-        int cb[4] = {1, 0, 0, 0};     // isHDR = 1: scRGB passthrough
+        // {srcHDR, dstHDR}: decode by source, encode (tonemap) by display
+        int cb[4] = {frameHDR_ ? 1 : 0, dstHDR_ ? 1 : 0, 0, 0};
         D3D11_MAPPED_SUBRESOURCE m{};
         if (SUCCEEDED(ctx_->Map(cbScene_.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &m))) { memcpy(m.pData, cb, sizeof(cb)); ctx_->Unmap(cbScene_.Get(), 0); }
         ctx_->IASetInputLayout(nullptr);
@@ -1897,28 +1992,33 @@ private:
         curValid_ = true;
     }
 
-    // Blend the cursor onto frameTex_ (sRGB->scRGB). Position comes from
-    // GetCursorPos -- live input-rate coordinates -- rather than DDA's
-    // PointerPosition, which is a captured frame old and reads as "floaty";
-    // the DDA shape's hotspot anchors the live point to the shape's top-left.
-    void composite_cursor()
+    // Draw the cursor as an OVERLAY on a window's swapchain (not baked into the
+    // captured frame / stream). Position is the live GetCursorPos minus the DDA
+    // shape hotspot, mapped through the same letterbox as the content -- so it's
+    // crisp (window-res) and snappy (redrawn every present, decoupled from
+    // capture). Same call for both windows: both show the full source.
+    void draw_cursor_overlay(ID3D11RenderTargetView *rtv, long bbW, long bbH)
     {
-        if (!curVisible_ || !curValid_ || curW_ <= 0 || !rtvFrame_ || frW_ <= 0) return;
-        POINT pos = curPos_;
+        if (!curVisible_ || !curValid_ || curW_ <= 0 || capW_ <= 0) return;
         POINT live;
-        if (GetCursorPos(&live)) {
-            pos.x = live.x - ref_.desc.DesktopCoordinates.left - curHotX_;
-            pos.y = live.y - ref_.desc.DesktopCoordinates.top - curHotY_;
-        }
-        D3D11_VIEWPORT vp{0, 0, (float)frW_, (float)frH_, 0, 1};
-        ctx_->RSSetViewports(1, &vp);
-        ctx_->OMSetRenderTargets(1, rtvFrame_.GetAddressOf(), nullptr);
+        if (!GetCursorPos(&live)) return;
+        int cx = live.x - ref_.desc.DesktopCoordinates.left;
+        int cy = live.y - ref_.desc.DesktopCoordinates.top;
+        if (cx < 0 || cy < 0 || cx >= capW_ || cy >= capH_) return;   // not over this display
+        cx -= curHotX_; cy -= curHotY_;
+        const float s = std::min((float)bbW / capW_, (float)bbH / capH_);   // letterbox source
+        const float vw = capW_ * s, vh = capH_ * s;
+        const float vx = (bbW - vw) / 2, vy = (bbH - vh) / 2;
+        const float x0 = vx + cx * s, y0 = vy + cy * s;
+        const float x1 = x0 + curW_ * s, y1 = y0 + curH_ * s;
         const float q[8] = {
-            (float)pos.x / frW_ * 2 - 1, 1 - (float)pos.y / frH_ * 2,
-            (float)(pos.x + curW_) / frW_ * 2 - 1, 1 - (float)(pos.y + curH_) / frH_ * 2,
-            g_paperwhite_nits / 80.0f, 0, 0, 0};
+            x0 / bbW * 2 - 1, 1 - y0 / bbH * 2, x1 / bbW * 2 - 1, 1 - y1 / bbH * 2,
+            dstHDR_ ? g_paperwhite_nits / 80.0f : 1.0f, 0.0f, 0, 0};   // extra.x scale, extra.y=0: linear out
         D3D11_MAPPED_SUBRESOURCE m{};
         if (SUCCEEDED(ctx_->Map(cbCursor_.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &m))) { memcpy(m.pData, q, sizeof(q)); ctx_->Unmap(cbCursor_.Get(), 0); }
+        D3D11_VIEWPORT vp{0, 0, (float)bbW, (float)bbH, 0, 1};
+        ctx_->RSSetViewports(1, &vp);
+        ctx_->OMSetRenderTargets(1, &rtv, nullptr);
         ctx_->IASetInputLayout(nullptr);
         ctx_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
         ctx_->VSSetShader(vsCursor_.Get(), nullptr, 0);
@@ -1931,8 +2031,6 @@ private:
         ctx_->OMSetBlendState(blendOver_.Get(), bf, 0xffffffff);
         ctx_->Draw(4, 0);
         ctx_->OMSetBlendState(nullptr, nullptr, 0xffffffff);
-        ID3D11RenderTargetView *nr = nullptr;
-        ctx_->OMSetRenderTargets(1, &nr, nullptr);
         ID3D11ShaderResourceView *n = nullptr;
         ctx_->PSSetShaderResources(0, 1, &n);
     }
@@ -1940,9 +2038,15 @@ private:
     bool reinit_dup(std::wstring *err)
     {
         dup_.Reset();
+        fmtLogged_ = false;
+        // Offer BOTH formats: DXGI hands back whichever the desktop is actually
+        // composing in -- FP16 scRGB when HDR is on, BGRA8 sRGB when SDR. Native
+        // to each, no up-convert. Plain DuplicateOutput can't do this: it only
+        // ever returns 8-bit BGRA, so HDR cannot be captured through it.
+        // An HDR<->SDR toggle raises ACCESS_LOST -> we reinit and re-pick.
         ComPtr<IDXGIOutput5> o5;
         if (SUCCEEDED(ref_.output1.As(&o5))) {
-            const DXGI_FORMAT fmts[] = {DXGI_FORMAT_R16G16B16A16_FLOAT};   // lock to FP16 scRGB
+            const DXGI_FORMAT fmts[] = {DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_B8G8R8A8_UNORM};
             if (SUCCEEDED(o5->DuplicateOutput1(dev_.Get(), 0, ARRAYSIZE(fmts), fmts, &dup_)))
                 return true;
         }
@@ -2023,10 +2127,15 @@ private:
     ComPtr<ID3D11RenderTargetView> rtvA_, rtvB_;
     long bbAW_ = 1, bbAH_ = 1, bbBW_ = 1, bbBH_ = 1;
     bool tearing_ = false;
+    bool dstHDR_ = false;                       // window's monitor presents HDR?
+    DXGI_FORMAT rtvFmt_ = DXGI_FORMAT_R16G16B16A16_FLOAT;
     ComPtr<IDXGIOutputDuplication> dup_;
     ComPtr<ID3D11Texture2D> frameTex_;
     ComPtr<ID3D11ShaderResourceView> frameSRV_;
     int frW_ = 0, frH_ = 0; bool haveFrame_ = false;
+    DXGI_FORMAT frFmt_ = DXGI_FORMAT_UNKNOWN;   // real duplicated format
+    bool frameHDR_ = false;                     // FP16 scRGB vs 8-bit sRGB
+    bool fmtLogged_ = false;                     // log the captured format once
     ComPtr<ID3D11VertexShader> vsScene_;
     ComPtr<ID3D11PixelShader> psScene_;
     ComPtr<ID3D11SamplerState> samp_;
