@@ -1033,7 +1033,10 @@ public:
         ctx_->pix_fmt = AV_PIX_FMT_P010LE;    // shader already produced PQ BT.2020 YCbCr
         ctx_->time_base = av_make_q(1, 60);
         ctx_->framerate = av_make_q(60, 1);
-        ctx_->gop_size = 60;
+        // Long GOP: an IDR every second (~60) caused a visible 1 Hz hiccup on
+        // the TV (multi-megabit burst + heavier decode). New clients don't
+        // wait for the GOP anyway -- joining forces an IDR.
+        ctx_->gop_size = 600;
         ctx_->max_b_frames = 0;
         ctx_->color_primaries = AVCOL_PRI_BT2020;
         ctx_->color_trc = AVCOL_TRC_SMPTE2084;
