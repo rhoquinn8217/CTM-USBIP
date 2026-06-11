@@ -10,6 +10,8 @@
 #ifndef NOMINMAX
 #define NOMINMAX        // keep windows.h from defining min()/max() macros
 #endif
+#include <winsock2.h>   // before windows.h
+#include <ws2tcpip.h>
 #include <windows.h>
 #include <unknwn.h>      // IStream for gdiplus under WIN32_LEAN_AND_MEAN
 #include <objidl.h>      // PROPID for gdiplus
@@ -48,6 +50,9 @@ extern "C" {
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "d3dcompiler.lib")
 #pragma comment(lib, "gdiplus.lib")
+#pragma comment(lib, "ws2_32.lib")
+
+#include "ctm_stream_protocol.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -1491,6 +1496,277 @@ private:
     int w_ = 0, h_ = 0; bool valid_ = false, hwMode_ = false, dstHDR_ = false;
 };
 
+// ===================== CTMS stream transport (loopback now, TV later) ======
+// Host side: listens on CTMS_PORT, one client at a time. Caches STREAM_INFO
+// and the cursor shape so a (re)connecting client always gets them first.
+class StreamSender {
+public:
+    bool start(uint16_t port, std::wstring *err)
+    {
+        listenSock_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (listenSock_ == INVALID_SOCKET) { if (err) *err = L"socket() failed"; return false; }
+        BOOL yes = TRUE;
+        setsockopt(listenSock_, SOL_SOCKET, SO_REUSEADDR, (const char *)&yes, sizeof(yes));
+        sockaddr_in a{};
+        a.sin_family = AF_INET; a.sin_port = htons(port); a.sin_addr.s_addr = htonl(INADDR_ANY);
+        if (bind(listenSock_, (sockaddr *)&a, sizeof(a)) != 0 || listen(listenSock_, 1) != 0) {
+            if (err) *err = L"bind/listen failed"; return false;
+        }
+        acceptThread_ = std::thread(&StreamSender::accept_loop, this);
+        return true;
+    }
+
+    void stop()
+    {
+        exit_.store(true);
+        if (listenSock_ != INVALID_SOCKET) { closesocket(listenSock_); listenSock_ = INVALID_SOCKET; }
+        {
+            std::lock_guard<std::mutex> lk(mtx_);
+            if (client_ != INVALID_SOCKET) { closesocket(client_); client_ = INVALID_SOCKET; }
+        }
+        if (acceptThread_.joinable()) acceptThread_.join();
+    }
+    ~StreamSender() { stop(); }
+
+    void set_info(const CtmsStreamInfo &si)
+    {
+        std::lock_guard<std::mutex> lk(mtx_);
+        info_ = si; haveInfo_ = true;
+        send_msg(CTMS_STREAM_INFO, 0, 0, &info_, sizeof(info_));
+    }
+    void set_cursor_shape(int w, int h, int hotX, int hotY, const uint8_t *rgba)
+    {
+        std::lock_guard<std::mutex> lk(mtx_);
+        shapeHdr_ = {(uint16_t)w, (uint16_t)h, (int16_t)hotX, (int16_t)hotY};
+        shapePix_.assign(rgba, rgba + (size_t)w * h * 4);
+        send_shape();
+    }
+    void send_cursor_pos(int x, int y, bool visible)
+    {
+        std::lock_guard<std::mutex> lk(mtx_);
+        CtmsCursorPos p{x, y, visible ? (uint8_t)1 : (uint8_t)0, {}};
+        send_msg(CTMS_CURSOR_POS, 0, (uint64_t)now_ms(), &p, sizeof(p));
+    }
+    void send_video(const uint8_t *data, int size, int64_t pts, bool idr)
+    {
+        std::lock_guard<std::mutex> lk(mtx_);
+        send_msg(CTMS_VIDEO_FRAME, idr ? CTMS_FLAG_IDR : 0, (uint64_t)pts, data, size);
+    }
+    bool connected() { std::lock_guard<std::mutex> lk(mtx_); return client_ != INVALID_SOCKET; }
+
+private:
+    void accept_loop()
+    {
+        while (!exit_.load()) {
+            SOCKET c = accept(listenSock_, nullptr, nullptr);
+            if (c == INVALID_SOCKET) { if (exit_.load()) return; continue; }
+            BOOL nd = TRUE;
+            setsockopt(c, IPPROTO_TCP, TCP_NODELAY, (const char *)&nd, sizeof(nd));
+            std::lock_guard<std::mutex> lk(mtx_);
+            if (client_ != INVALID_SOCKET) closesocket(client_);
+            client_ = c;
+            if (haveInfo_) send_msg(CTMS_STREAM_INFO, 0, 0, &info_, sizeof(info_));
+            if (!shapePix_.empty()) send_shape();
+        }
+    }
+    void send_shape()   // mtx_ held
+    {
+        std::vector<uint8_t> buf(sizeof(CtmsCursorShape) + shapePix_.size());
+        memcpy(buf.data(), &shapeHdr_, sizeof(shapeHdr_));
+        memcpy(buf.data() + sizeof(shapeHdr_), shapePix_.data(), shapePix_.size());
+        send_msg(CTMS_CURSOR_SHAPE, 0, 0, buf.data(), (int)buf.size());
+    }
+    void send_msg(uint16_t type, uint16_t flags, uint64_t pts, const void *payload, int len)   // mtx_ held
+    {
+        if (client_ == INVALID_SOCKET) return;
+        CtmsHdr h{CTMS_MAGIC, type, flags, pts, (uint32_t)len};
+        if (!send_all(&h, sizeof(h)) || !send_all(payload, len)) {
+            closesocket(client_);
+            client_ = INVALID_SOCKET;   // accept_loop picks up the next client
+        }
+    }
+    bool send_all(const void *p, int len)
+    {
+        const char *b = static_cast<const char *>(p);
+        while (len > 0) {
+            int n = send(client_, b, len, 0);
+            if (n <= 0) return false;
+            b += n; len -= n;
+        }
+        return true;
+    }
+
+    SOCKET listenSock_ = INVALID_SOCKET, client_ = INVALID_SOCKET;
+    std::thread acceptThread_;
+    std::atomic<bool> exit_{false};
+    std::mutex mtx_;
+    CtmsStreamInfo info_{}; bool haveInfo_ = false;
+    CtmsCursorShape shapeHdr_{};
+    std::vector<uint8_t> shapePix_;
+};
+
+// Receiver: exactly what the TV will run -- connect, parse CTMS, feed the
+// decoder, track the remote cursor. Here it feeds window B over loopback so
+// B shows the true protocol+decode path (minus only network ping).
+class StreamReceiver {
+public:
+    // dispatchT: pts&127 -> capture time ring (same process), for the lat stat
+    void start(uint16_t port, AVBufferRef *hwDev, const double *dispatchT)
+    {
+        hwDev_ = hwDev; dispatchT_ = dispatchT;
+        thread_ = std::thread(&StreamReceiver::run, this, port);
+    }
+    void stop()
+    {
+        exit_.store(true);
+        {
+            std::lock_guard<std::mutex> lk(sockMtx_);
+            if (sock_ != INVALID_SOCKET) { closesocket(sock_); sock_ = INVALID_SOCKET; }
+        }
+        if (thread_.joinable()) thread_.join();
+        if (decodedLatest_) av_frame_free(&decodedLatest_);
+    }
+    ~StreamReceiver() { stop(); }
+
+    AVFrame *take_decoded()
+    {
+        std::lock_guard<std::mutex> lk(decMtx_);
+        AVFrame *f = decodedLatest_; decodedLatest_ = nullptr; return f;
+    }
+    // Copies out cursor state; returns true if the shape changed since last call.
+    bool cursor_state(int *x, int *y, bool *visible, int *w, int *h, std::vector<uint8_t> *rgbaIfDirty)
+    {
+        std::lock_guard<std::mutex> lk(curMtx_);
+        *x = curX_; *y = curY_; *visible = curVis_; *w = curW_; *h = curH_;
+        if (!shapeDirty_) return false;
+        shapeDirty_ = false;
+        *rgbaIfDirty = curPix_;
+        return true;
+    }
+
+    std::atomic<double> decMs{0}, latMs{0};
+    std::atomic<int64_t> decFrames{0};
+    std::atomic<bool> hwdec{false};
+
+private:
+    void run(uint16_t port)
+    {
+        while (!exit_.load()) {
+            SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+            sockaddr_in a{};
+            a.sin_family = AF_INET; a.sin_port = htons(port);
+            inet_pton(AF_INET, "127.0.0.1", &a.sin_addr);
+            if (connect(s, (sockaddr *)&a, sizeof(a)) != 0) {
+                closesocket(s);
+                std::this_thread::sleep_for(std::chrono::milliseconds(200));
+                continue;
+            }
+            BOOL nd = TRUE;
+            setsockopt(s, IPPROTO_TCP, TCP_NODELAY, (const char *)&nd, sizeof(nd));
+            { std::lock_guard<std::mutex> lk(sockMtx_); sock_ = s; }
+            read_loop(s);
+            { std::lock_guard<std::mutex> lk(sockMtx_); if (sock_ == s) sock_ = INVALID_SOCKET; }
+            closesocket(s);
+            dec_.close();
+        }
+    }
+
+    void read_loop(SOCKET s)
+    {
+        std::vector<uint8_t> payload;
+        while (!exit_.load()) {
+            CtmsHdr h{};
+            if (!recv_all(s, &h, sizeof(h)) || h.magic != CTMS_MAGIC) return;
+            payload.resize(h.payloadLen);
+            if (h.payloadLen && !recv_all(s, payload.data(), h.payloadLen)) return;
+            switch (h.type) {
+            case CTMS_STREAM_INFO:
+                if (h.payloadLen >= sizeof(CtmsStreamInfo)) {
+                    memcpy(&info_, payload.data(), sizeof(info_));
+                    std::string e;
+                    dec_.open(info_.codec == 2 ? EncConfig::AV1 : EncConfig::HEVC, hwDev_, &e);
+                    hwdec.store(dec_.is_hw());
+                }
+                break;
+            case CTMS_VIDEO_FRAME: {
+                AVPacket *p = av_packet_alloc();
+                if (p && av_new_packet(p, (int)h.payloadLen) == 0) {
+                    memcpy(p->data, payload.data(), h.payloadLen);
+                    p->pts = p->dts = (int64_t)h.pts;
+                    const double t0 = now_ms();
+                    if (AVFrame *f = dec_.decode(p)) {
+                        if (AVFrame *cl = av_frame_clone(f)) {
+                            std::lock_guard<std::mutex> lk(decMtx_);
+                            if (decodedLatest_) av_frame_free(&decodedLatest_);
+                            decodedLatest_ = cl;
+                        }
+                        if (f->pts >= 0 && dispatchT_)
+                            latMs.store(now_ms() - dispatchT_[f->pts & 127]);
+                        decFrames.fetch_add(1);
+                    }
+                    decMs.store(now_ms() - t0);
+                    if (dec_.hw_failed()) {
+                        std::string e;
+                        dec_.open_sw(&e);
+                        hwdec.store(false);
+                        std::wcout << L"[rx] hw decode unavailable, software fallback\n";
+                    }
+                }
+                av_packet_free(&p);
+                break;
+            }
+            case CTMS_CURSOR_POS:
+                if (h.payloadLen >= sizeof(CtmsCursorPos)) {
+                    CtmsCursorPos p;
+                    memcpy(&p, payload.data(), sizeof(p));
+                    std::lock_guard<std::mutex> lk(curMtx_);
+                    curX_ = p.x; curY_ = p.y; curVis_ = p.visible != 0;
+                }
+                break;
+            case CTMS_CURSOR_SHAPE:
+                if (h.payloadLen >= sizeof(CtmsCursorShape)) {
+                    CtmsCursorShape sh;
+                    memcpy(&sh, payload.data(), sizeof(sh));
+                    const size_t need = (size_t)sh.width * sh.height * 4;
+                    if (h.payloadLen >= sizeof(sh) + need) {
+                        std::lock_guard<std::mutex> lk(curMtx_);
+                        curW_ = sh.width; curH_ = sh.height;
+                        curPix_.assign(payload.begin() + sizeof(sh), payload.begin() + sizeof(sh) + need);
+                        shapeDirty_ = true;
+                    }
+                }
+                break;
+            }
+        }
+    }
+
+    static bool recv_all(SOCKET s, void *p, int len)
+    {
+        char *b = static_cast<char *>(p);
+        while (len > 0) {
+            int n = recv(s, b, len, 0);
+            if (n <= 0) return false;
+            b += n; len -= n;
+        }
+        return true;
+    }
+
+    std::thread thread_;
+    std::atomic<bool> exit_{false};
+    std::mutex sockMtx_;
+    SOCKET sock_ = INVALID_SOCKET;
+    AVBufferRef *hwDev_ = nullptr;
+    const double *dispatchT_ = nullptr;
+    Decoder dec_;
+    CtmsStreamInfo info_{};
+    std::mutex decMtx_;
+    AVFrame *decodedLatest_ = nullptr;
+    std::mutex curMtx_;
+    int curX_ = 0, curY_ = 0, curW_ = 0, curH_ = 0;
+    bool curVis_ = false, shapeDirty_ = false;
+    std::vector<uint8_t> curPix_;
+};
+
 // per-window resize state (real size arrives via WM_SIZE on ShowWindow; the
 // swapchain is first created at the actual client size, so start un-dirty)
 struct WinState {
@@ -1628,6 +1904,12 @@ public:
 
         capW_ = ref.desc.DesktopCoordinates.right - ref.desc.DesktopCoordinates.left;
         capH_ = ref.desc.DesktopCoordinates.bottom - ref.desc.DesktopCoordinates.top;
+        WSADATA wsa{};
+        WSAStartup(MAKEWORD(2, 2), &wsa);
+        if (!sender_.start(CTMS_PORT, err)) return false;
+        rx_.start(CTMS_PORT, hwDev_, dispatchT_);
+        std::wcout << L"CTMS stream on port " << CTMS_PORT << L" (local receiver attached)\n";
+
         { std::lock_guard<std::mutex> lk(g_cfgMtx); applied_ = g_cfgDesired; }
         if (!reconfigure(applied_, err)) return false;
         log_display_mode(ref_);
@@ -1643,12 +1925,11 @@ public:
         { std::lock_guard<std::mutex> lk(jobMtx_); workerExit_ = true; }
         jobCv_.notify_all();
         if (codecThread_.joinable()) codecThread_.join();
+        rx_.stop();          // receiver owns the decoder; stop before hwDev unref
+        sender_.stop();
         if (inFlightSlot_ >= 0) conv_.unmap(inFlightSlot_);
-        {
-            std::lock_guard<std::mutex> lk(decMtx_);
-            if (decodedLatest_) av_frame_free(&decodedLatest_);
-        }
         if (hwDev_) av_buffer_unref(&hwDev_);   // decoder/frames hold own refs
+        WSACleanup();
     }
 
     bool render_once()
@@ -1756,6 +2037,7 @@ public:
         if (haveFrame_) draw_scene(rtvA_.Get(), bbAW_, bbAH_, frameSRV_.Get(), frW_, frH_);
         draw_cursor_overlay(rtvA_.Get(), bbAW_, bbAH_);
         scA_->Present(sync, pflags);
+        send_cursor_pos();   // CTMS: position on change (shape goes in update_cursor)
 
         // 6. reservoir, latest-wins: every fresh frame is submitted; when both
         //    rotating slots hold submissions, overwrite the older one (drop).
@@ -1772,11 +2054,10 @@ public:
             }
         }
 
-        // 7. window B: pick up the newest decoded frame from the worker.
-        //    D3D11 frames are handed to the view (zero-copy, it keeps the ref);
-        //    software frames are uploaded then freed.
-        AVFrame *take = nullptr;
-        { std::lock_guard<std::mutex> lk(decMtx_); take = decodedLatest_; decodedLatest_ = nullptr; }
+        // 7. window B: newest decoded frame from the CTMS receiver (the same
+        //    path the TV runs); cursor drawn from RECEIVED metadata, so B
+        //    shows the cursor's true through-the-pipe latency.
+        AVFrame *take = rx_.take_decoded();
         if (take) {
             if (take->format == AV_PIX_FMT_D3D11) decoded_.set_hw(take);
             else { decoded_.upload(take); av_frame_free(&take); }
@@ -1787,7 +2068,7 @@ public:
             ctx_->OMSetRenderTargets(1, rtvB_.GetAddressOf(), nullptr);
             decoded_.draw(bbBW_, bbBH_);
         }
-        draw_cursor_overlay(rtvB_.Get(), bbBW_, bbBH_);
+        draw_rx_cursor_overlay(rtvB_.Get(), bbBW_, bbBH_);
         scB_->Present(sync, pflags);
 
         const double dt = now_ms() - loopT0;
@@ -1818,38 +2099,14 @@ public:
             if (er < 0) encErrs_.fetch_add(1);
             encMsA_.store(now_ms() - t0);
             size_t bytes = 0;
-            wstage_.store(2);                  // decoding
-            double t1 = now_ms();
-            for (AVPacket *p : pkts) {
+            for (AVPacket *p : pkts) {         // ship over CTMS; the receiver decodes
                 bytes += p->size;
                 if (p->pts != AV_NOPTS_VALUE && p->dts != AV_NOPTS_VALUE && p->pts != p->dts)
                     reorder_.fetch_add(1);   // pts!=dts => B-frame style reordering
-                if (AVFrame *f = dec_.decode(p)) {
-                    if (!loggedFmt_) {
-                        loggedFmt_ = true;
-                        // AV_PIX_FMT_YUV420P10LE == 62 in this build; anything
-                        // else means upload()'s 3-plane assumption is wrong.
-                        std::wcout << L"[dec] first frame fmt=" << f->format
-                                   << L" " << f->width << L"x" << f->height << L"\n";
-                    }
-                    if (AVFrame *cl = av_frame_clone(f)) {     // refcounted, no deep copy
-                        std::lock_guard<std::mutex> lk(decMtx_);
-                        if (decodedLatest_) av_frame_free(&decodedLatest_);
-                        decodedLatest_ = cl;
-                    }
-                    if (f->pts >= 0)                           // capture->decoded latency
-                        latMsA_.store(now_ms() - dispatchT_[f->pts & 127]);
-                    decFrames_.fetch_add(1);
-                }
+                sender_.send_video(p->data, p->size, p->pts, (p->flags & AV_PKT_FLAG_KEY) != 0);
                 av_packet_free(&p);
             }
-            decMsA_.store(now_ms() - t1);
             winBytes_.fetch_add(bytes);
-            if (dec_.hw_failed()) {            // D3D11VA refused at first frame:
-                std::string e;                 // drop to software; picture
-                dec_.open_sw(&e);              // recovers at the next IDR
-                std::wcout << L"[dec] hw decode unavailable, software fallback\n";
-            }
             wstage_.store(0);                  // idle
             jobDone_.store(true);
         }
@@ -1990,6 +2247,72 @@ private:
         }
         ctx_->UpdateSubresource(curTex_.Get(), 0, nullptr, rgba.data(), w * 4, 0);
         curValid_ = true;
+        sender_.set_cursor_shape(w, h, curHotX_, curHotY_, rgba.data());   // CTMS
+    }
+
+    // CTMS: send the cursor position (capture-space top-left) when it changes.
+    void send_cursor_pos()
+    {
+        if (!curValid_ || capW_ <= 0) return;
+        POINT live;
+        if (!GetCursorPos(&live)) return;
+        const int cx = live.x - ref_.desc.DesktopCoordinates.left;
+        const int cy = live.y - ref_.desc.DesktopCoordinates.top;
+        const bool vis = curVisible_ && cx >= 0 && cy >= 0 && cx < capW_ && cy < capH_;
+        const int x = cx - curHotX_, y = cy - curHotY_;
+        if (x == lastSentX_ && y == lastSentY_ && vis == lastSentVis_) return;
+        lastSentX_ = x; lastSentY_ = y; lastSentVis_ = vis;
+        sender_.send_cursor_pos(x, y, vis);
+    }
+
+    // Window B's cursor: drawn from RECEIVED CTMS metadata (position + shape),
+    // exactly as the TV will do it.
+    void draw_rx_cursor_overlay(ID3D11RenderTargetView *rtv, long bbW, long bbH)
+    {
+        int x = 0, y = 0, w = 0, h = 0;
+        bool vis = false;
+        std::vector<uint8_t> rgba;
+        if (rx_.cursor_state(&x, &y, &vis, &w, &h, &rgba) && w > 0) {   // shape changed
+            if (!rxCurTex_ || rxCurW_ != w || rxCurH_ != h) {
+                rxCurTex_.Reset(); rxCurSRV_.Reset();
+                D3D11_TEXTURE2D_DESC d{};
+                d.Width = w; d.Height = h; d.MipLevels = 1; d.ArraySize = 1;
+                d.Format = DXGI_FORMAT_R8G8B8A8_UNORM; d.SampleDesc.Count = 1;
+                d.Usage = D3D11_USAGE_DEFAULT; d.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+                if (FAILED(dev_->CreateTexture2D(&d, nullptr, &rxCurTex_))) return;
+                dev_->CreateShaderResourceView(rxCurTex_.Get(), nullptr, &rxCurSRV_);
+                rxCurW_ = w; rxCurH_ = h;
+            }
+            ctx_->UpdateSubresource(rxCurTex_.Get(), 0, nullptr, rgba.data(), w * 4, 0);
+        }
+        if (!vis || !rxCurSRV_ || rxCurW_ <= 0 || capW_ <= 0) return;
+        const float s = std::min((float)bbW / capW_, (float)bbH / capH_);
+        const float vw = capW_ * s, vh = capH_ * s;
+        const float vx = (bbW - vw) / 2, vy = (bbH - vh) / 2;
+        const float x0 = vx + x * s, y0 = vy + y * s;
+        const float x1 = x0 + rxCurW_ * s, y1 = y0 + rxCurH_ * s;
+        const float q[8] = {
+            x0 / bbW * 2 - 1, 1 - y0 / bbH * 2, x1 / bbW * 2 - 1, 1 - y1 / bbH * 2,
+            dstHDR_ ? g_paperwhite_nits / 80.0f : 1.0f, 0.0f, 0, 0};
+        D3D11_MAPPED_SUBRESOURCE m{};
+        if (SUCCEEDED(ctx_->Map(cbCursor_.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &m))) { memcpy(m.pData, q, sizeof(q)); ctx_->Unmap(cbCursor_.Get(), 0); }
+        D3D11_VIEWPORT vp{0, 0, (float)bbW, (float)bbH, 0, 1};
+        ctx_->RSSetViewports(1, &vp);
+        ctx_->OMSetRenderTargets(1, &rtv, nullptr);
+        ctx_->IASetInputLayout(nullptr);
+        ctx_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+        ctx_->VSSetShader(vsCursor_.Get(), nullptr, 0);
+        ctx_->VSSetConstantBuffers(0, 1, cbCursor_.GetAddressOf());
+        ctx_->PSSetShader(psCursor_.Get(), nullptr, 0);
+        ctx_->PSSetConstantBuffers(0, 1, cbCursor_.GetAddressOf());
+        ctx_->PSSetShaderResources(0, 1, rxCurSRV_.GetAddressOf());
+        ctx_->PSSetSamplers(0, 1, samp_.GetAddressOf());
+        const float bf[4] = {0, 0, 0, 0};
+        ctx_->OMSetBlendState(blendOver_.Get(), bf, 0xffffffff);
+        ctx_->Draw(4, 0);
+        ctx_->OMSetBlendState(nullptr, nullptr, 0xffffffff);
+        ID3D11ShaderResourceView *n = nullptr;
+        ctx_->PSSetShaderResources(0, 1, &n);
     }
 
     // Draw the cursor as an OVERLAY on a window's swapchain (not baked into the
@@ -2071,10 +2394,16 @@ private:
             std::wcerr << L"encoder open failed: " << std::wstring(e8.begin(), e8.end()) << L"\n";
             if (err) *err = L"encoder open failed"; return false;
         }
-        if (!dec_.open(c.codec, hwDev_, &e8)) {
-            std::wcerr << L"decoder open failed: " << std::wstring(e8.begin(), e8.end()) << L"\n";
-            if (err) *err = L"decoder open failed"; return false;
-        }
+        CtmsStreamInfo si{};
+        si.codec = (c.codec == EncConfig::AV1) ? 2 : 1;
+        si.width = (uint16_t)w; si.height = (uint16_t)h;
+        si.fps = 60;
+        si.isHDR = 1;   // encoder is PQ BT.2020 for now (task #14: follow source)
+        const float prim[8] = {hdr_.rx, hdr_.ry, hdr_.gx, hdr_.gy, hdr_.bx, hdr_.by, hdr_.wx, hdr_.wy};
+        memcpy(si.primaries, prim, sizeof(prim));
+        si.maxLum = hdr_.maxLum; si.minLum = hdr_.minLum;
+        si.maxCLL = hdr_.maxLum; si.maxFALL = hdr_.maxFFLum;
+        sender_.set_info(si);
         applied_ = c; encW_ = w; encH_ = h;
         std::wcout << L"reconfigured: " << kCodecName[c.codec] << L" " << kModeName[c.mode]
                    << L" " << kUsageName[c.usage] << L" " << w << L"x" << h
@@ -2094,7 +2423,7 @@ private:
         const double worst = worstLoop_;
         worstLoop_ = 0;
         const double mbps = winBytes_.exchange(0) * 8.0 / 1000.0 / el;   // window-averaged
-        const double encMs = encMsA_.load(), decMs = decMsA_.load(), latMs = latMsA_.load();
+        const double encMs = encMsA_.load(), decMs = rx_.decMs.load(), latMs = rx_.latMs.load();
         wchar_t buf[360];
         swprintf(buf, 360, L"CTM decoded | %ls %ls %ls %dx%d br %dk/max %dk qp %d | loop %.0ffps worst %.1fms | enc %.1f dec %.1f lat %.0f ms | ~%.1f Mb/s vsync=%d",
                  kCodecName[applied_.codec], kModeName[applied_.mode], kUsageName[applied_.usage],
@@ -2106,13 +2435,14 @@ private:
                    << L" | loop " << fps << L"fps worst " << worst << L"ms map " << mapMs_
                    << L"ms | enc " << encMs << L"ms dec " << decMs << L"ms lat " << latMs
                    << L"ms | ~" << mbps
-                   << L" Mb/s enc#=" << pts_ << L" dec#=" << decFrames_.load()
+                   << L" Mb/s enc#=" << pts_ << L" dec#=" << rx_.decFrames.load()
                    << L" shown=" << (decoded_.valid() ? 1 : 0)
                    << L" vsync=" << (g_vsync.load() ? 1 : 0)
                    << L" wstage=" << wstage_.load() << L" inflight=" << (jobInFlight_.load() ? 1 : 0)
                    << L" encErr=" << encErrs_.load()
                    << L" skp=" << drops_ << L" bfr=" << reorder_.load()
-                   << L" hwdec=" << (dec_.is_hw() ? 1 : 0) << L"\n";
+                   << L" hwdec=" << (rx_.hwdec.load() ? 1 : 0)
+                   << L" rxconn=" << (sender_.connected() ? 1 : 0) << L"\n";
     }
 
     OutputRef ref_;
@@ -2153,11 +2483,17 @@ private:
     Converter conv_;
     DecodedView decoded_;
     Encoder enc_;
-    Decoder dec_;
     EncConfig applied_;
     int capW_ = 0, capH_ = 0, encW_ = 0, encH_ = 0;
     int64_t pts_ = 0;
-    bool loggedFmt_ = false;
+
+    // CTMS stream: sender (host) + local receiver feeding window B
+    StreamSender sender_;
+    StreamReceiver rx_;
+    int lastSentX_ = INT_MIN, lastSentY_ = INT_MIN; bool lastSentVis_ = false;
+    ComPtr<ID3D11Texture2D> rxCurTex_;
+    ComPtr<ID3D11ShaderResourceView> rxCurSRV_;
+    int rxCurW_ = 0, rxCurH_ = 0;
 
     // codec worker handoff
     std::thread codecThread_;
@@ -2171,17 +2507,13 @@ private:
     int subNew_ = -1, subOld_ = -1, inFlightSlot_ = -1;   // latest-wins reservoir
     double submitT_[8] = {};                 // slot -> capture-submit time
     int drops_ = 0;                          // frames replaced before encoding
-    std::mutex decMtx_;
-    AVFrame *decodedLatest_ = nullptr;       // newest decoded frame, owned
 
     // stats
-    std::atomic<double> encMsA_{0}, decMsA_{0};
+    std::atomic<double> encMsA_{0};
     std::atomic<uint64_t> winBytes_{0};
-    std::atomic<int64_t> decFrames_{0};
-    std::atomic<int> wstage_{0};               // 0 idle, 1 encoding, 2 decoding
+    std::atomic<int> wstage_{0};               // 0 idle, 1 encoding
     std::atomic<int> encErrs_{0};
     std::atomic<int> reorder_{0};              // packets with pts != dts (B-frames)
-    std::atomic<double> latMsA_{0};            // capture-submit -> decoded
     double dispatchT_[128] = {};               // pts & 127 -> dispatch time
     int statLoops_ = 0;
     double worstLoop_ = 0, mapMs_ = 0, lastStat_ = 0;
