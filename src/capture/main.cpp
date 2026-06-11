@@ -853,44 +853,36 @@ public:
         return true;
     }
 
-    static const int kSlots = 3;   // 1 mapped by the codec thread + 2 rotating (latest-wins)
-
-    bool resize(int w, int h)
+    // Render src directly into the P010 pool frame the encoder will consume
+    // (zero-copy): planar RTVs select the plane by view format -- R16_UNORM
+    // writes Y, R16G16_UNORM writes interleaved CbCr at half res.
+    bool render(AVFrame *f, ID3D11ShaderResourceView *srcSRV)
     {
-        if (w == w_ && h == h_ && rtY_) return true;
-        w_ = w; h_ = h;
-        auto mkRT = [&](int tw, int th, DXGI_FORMAT fmt, ComPtr<ID3D11Texture2D> &t, ComPtr<ID3D11RenderTargetView> &r) {
-            t.Reset(); r.Reset();
-            D3D11_TEXTURE2D_DESC td{};
-            td.Width = tw; td.Height = th; td.MipLevels = 1; td.ArraySize = 1;
-            td.Format = fmt; td.SampleDesc.Count = 1;
-            td.Usage = D3D11_USAGE_DEFAULT; td.BindFlags = D3D11_BIND_RENDER_TARGET;
-            if (FAILED(dev_->CreateTexture2D(&td, nullptr, &t))) return false;
-            return SUCCEEDED(dev_->CreateRenderTargetView(t.Get(), nullptr, &r));
-        };
-        auto mkStage = [&](int tw, int th, DXGI_FORMAT fmt, ComPtr<ID3D11Texture2D> &t) {
-            t.Reset();
-            D3D11_TEXTURE2D_DESC td{};
-            td.Width = tw; td.Height = th; td.MipLevels = 1; td.ArraySize = 1;
-            td.Format = fmt; td.SampleDesc.Count = 1;
-            td.Usage = D3D11_USAGE_STAGING; td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-            return SUCCEEDED(dev_->CreateTexture2D(&td, nullptr, &t));
-        };
-        if (!mkRT(w, h, DXGI_FORMAT_R16_UNORM, rtY_, rtvY_)) return false;
-        if (!mkRT(w / 2, h / 2, DXGI_FORMAT_R16G16_UNORM, rtUV_, rtvUV_)) return false;
-        for (int i = 0; i < kSlots; ++i) {
-            if (!mkStage(w, h, DXGI_FORMAT_R16_UNORM, stagY_[i])) return false;
-            if (!mkStage(w / 2, h / 2, DXGI_FORMAT_R16G16_UNORM, stagUV_[i])) return false;
+        auto *tex = reinterpret_cast<ID3D11Texture2D *>(f->data[0]);
+        const UINT slice = (UINT)(uintptr_t)f->data[1];
+        if (!tex) return false;
+        if (tex != cachedTex_) {                 // new pool: rebuild RTV cache
+            D3D11_TEXTURE2D_DESC d{};
+            tex->GetDesc(&d);
+            sliceRtv_.clear();
+            sliceRtv_.resize(d.ArraySize);
+            cachedTex_ = tex;
         }
-        return true;
-    }
+        if (slice >= sliceRtv_.size()) return false;
+        auto &rt = sliceRtv_[slice];
+        if (!rt.first) {
+            D3D11_RENDER_TARGET_VIEW_DESC rd{};
+            rd.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2DARRAY;
+            rd.Texture2DArray.MipSlice = 0;
+            rd.Texture2DArray.FirstArraySlice = slice;
+            rd.Texture2DArray.ArraySize = 1;
+            rd.Format = DXGI_FORMAT_R16_UNORM;        // P010 plane 0 (Y)
+            if (FAILED(dev_->CreateRenderTargetView(tex, &rd, &rt.first))) return false;
+            rd.Format = DXGI_FORMAT_R16G16_UNORM;     // P010 plane 1 (CbCr)
+            if (FAILED(dev_->CreateRenderTargetView(tex, &rd, &rt.second))) return false;
+        }
+        const int w = f->width, h = f->height;
 
-    // Render src -> P010 planes at target res and queue copies into slot's
-    // staging pair. map() comes later (next loop), once the GPU has finished,
-    // so the readback never stalls the render thread.
-    bool submit(ID3D11ShaderResourceView *srcSRV, int slot)
-    {
-        if (!rtY_ || slot < 0 || slot >= kSlots) return false;
         ctx_->IASetInputLayout(nullptr);
         ctx_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         ctx_->VSSetShader(vs_.Get(), nullptr, 0);
@@ -898,59 +890,34 @@ public:
         ctx_->PSSetShaderResources(0, 1, &srcSRV);
         ctx_->OMSetBlendState(nullptr, nullptr, 0xffffffff);
 
-        D3D11_VIEWPORT vpY{0, 0, (float)w_, (float)h_, 0, 1};
+        D3D11_VIEWPORT vpY{0, 0, (float)w, (float)h, 0, 1};
         ctx_->RSSetViewports(1, &vpY);
-        ctx_->OMSetRenderTargets(1, rtvY_.GetAddressOf(), nullptr);
+        ctx_->OMSetRenderTargets(1, rt.first.GetAddressOf(), nullptr);
         ctx_->PSSetShader(psY_.Get(), nullptr, 0);
         ctx_->Draw(3, 0);
 
-        D3D11_VIEWPORT vpC{0, 0, (float)(w_ / 2), (float)(h_ / 2), 0, 1};
+        D3D11_VIEWPORT vpC{0, 0, (float)(w / 2), (float)(h / 2), 0, 1};
         ctx_->RSSetViewports(1, &vpC);
-        ctx_->OMSetRenderTargets(1, rtvUV_.GetAddressOf(), nullptr);
+        ctx_->OMSetRenderTargets(1, rt.second.GetAddressOf(), nullptr);
         ctx_->PSSetShader(psUV_.Get(), nullptr, 0);
         ctx_->Draw(3, 0);
 
         ID3D11ShaderResourceView *nullSRV = nullptr;
         ctx_->PSSetShaderResources(0, 1, &nullSRV);
-        ctx_->CopyResource(stagY_[slot].Get(), rtY_.Get());
-        ctx_->CopyResource(stagUV_[slot].Get(), rtUV_.Get());
+        ID3D11RenderTargetView *nr = nullptr;
+        ctx_->OMSetRenderTargets(1, &nr, nullptr);
         return true;
     }
 
-    // 1 = both planes mapped, 0 = GPU still copying (retry), -1 = error
-    int map(int slot, const uint8_t **y, int *yPitch, const uint8_t **uv, int *uvPitch)
-    {
-        if (slot < 0 || slot >= kSlots || !stagY_[slot] || !stagUV_[slot]) return -1;
-        HRESULT hr = ctx_->Map(stagY_[slot].Get(), 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &mapY_);
-        if (hr == DXGI_ERROR_WAS_STILL_DRAWING) return 0;
-        if (FAILED(hr)) return -1;
-        hr = ctx_->Map(stagUV_[slot].Get(), 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &mapUV_);
-        if (hr == DXGI_ERROR_WAS_STILL_DRAWING) { ctx_->Unmap(stagY_[slot].Get(), 0); return 0; }
-        if (FAILED(hr)) { ctx_->Unmap(stagY_[slot].Get(), 0); return -1; }
-        *y = static_cast<const uint8_t *>(mapY_.pData);
-        *yPitch = (int)mapY_.RowPitch;
-        *uv = static_cast<const uint8_t *>(mapUV_.pData);
-        *uvPitch = (int)mapUV_.RowPitch;
-        return 1;
-    }
-    void unmap(int slot)
-    {
-        if (slot < 0 || slot >= kSlots) return;
-        if (stagY_[slot]) ctx_->Unmap(stagY_[slot].Get(), 0);
-        if (stagUV_[slot]) ctx_->Unmap(stagUV_[slot].Get(), 0);
-    }
-    int width() const { return w_; }
-    int height() const { return h_; }
+    void reset_cache() { sliceRtv_.clear(); cachedTex_ = nullptr; }
 
 private:
     ID3D11Device *dev_ = nullptr; ID3D11DeviceContext *ctx_ = nullptr;
     ComPtr<ID3D11VertexShader> vs_;
     ComPtr<ID3D11PixelShader> psY_, psUV_;
     ComPtr<ID3D11SamplerState> samp_;
-    ComPtr<ID3D11Texture2D> rtY_, rtUV_, stagY_[kSlots], stagUV_[kSlots];
-    ComPtr<ID3D11RenderTargetView> rtvY_, rtvUV_;
-    D3D11_MAPPED_SUBRESOURCE mapY_{}, mapUV_{};
-    int w_ = 0, h_ = 0;
+    ID3D11Texture2D *cachedTex_ = nullptr;   // pool identity only
+    std::vector<std::pair<ComPtr<ID3D11RenderTargetView>, ComPtr<ID3D11RenderTargetView>>> sliceRtv_;
 };
 
 // --- AMF encoder (libavcodec hevc_amf / av1_amf), 10-bit x2bgr10le input ---
@@ -958,16 +925,20 @@ static AVRational q_xy(float v) { return av_make_q((int)(v * 50000.0f + 0.5f), 5
 
 class Encoder {
 public:
-    bool open(const EncConfig &cfg, int w, int h, const HdrInfo &hdr, std::string *err)
+    bool open(const EncConfig &cfg, int w, int h, const HdrInfo &hdr, AVBufferRef *frames, std::string *err)
     {
         close();
+        hdr_ = hdr;
         const char *name = (cfg.codec == EncConfig::HEVC) ? "hevc_amf" : "av1_amf";
         const AVCodec *codec = avcodec_find_encoder_by_name(name);
         if (!codec) { if (err) *err = std::string("encoder not found: ") + name; return false; }
         ctx_ = avcodec_alloc_context3(codec);
         if (!ctx_) { if (err) *err = "alloc encoder ctx failed"; return false; }
         ctx_->width = w; ctx_->height = h;
-        ctx_->pix_fmt = AV_PIX_FMT_P010LE;    // shader already produced PQ BT.2020 YCbCr
+        // Zero-copy: frames are P010 textures on our D3D11 device; amfenc
+        // wraps them for VCN directly (no readback/upload, no AMF CSC).
+        ctx_->pix_fmt = AV_PIX_FMT_D3D11;
+        ctx_->hw_frames_ctx = av_buffer_ref(frames);
         ctx_->time_base = av_make_q(1, 60);
         ctx_->framerate = av_make_q(60, 1);
         ctx_->gop_size = 60;
@@ -1016,48 +987,35 @@ public:
 
         if (avcodec_open2(ctx_, codec, nullptr) < 0) { if (err) *err = std::string("avcodec_open2 failed for ") + name; close(); return false; }
 
-        frame_ = av_frame_alloc();
-        frame_->format = AV_PIX_FMT_P010LE; frame_->width = w; frame_->height = h;
-        frame_->color_primaries = AVCOL_PRI_BT2020;
-        frame_->color_trc = AVCOL_TRC_SMPTE2084;
-        frame_->colorspace = AVCOL_SPC_BT2020_NCL;
-        frame_->color_range = AVCOL_RANGE_MPEG;            // shader outputs limited range
-        if (av_frame_get_buffer(frame_, 0) < 0) { if (err) *err = "frame buffer alloc failed"; close(); return false; }
-
-        // HDR10 static metadata from the monitor, written by AMF as SEI.
-        if (AVMasteringDisplayMetadata *md = av_mastering_display_metadata_create_side_data(frame_)) {
-            md->display_primaries[0][0] = q_xy(hdr.rx); md->display_primaries[0][1] = q_xy(hdr.ry);
-            md->display_primaries[1][0] = q_xy(hdr.gx); md->display_primaries[1][1] = q_xy(hdr.gy);
-            md->display_primaries[2][0] = q_xy(hdr.bx); md->display_primaries[2][1] = q_xy(hdr.by);
-            md->white_point[0] = q_xy(hdr.wx); md->white_point[1] = q_xy(hdr.wy);
-            md->min_luminance = av_make_q((int)(hdr.minLum * 10000.0f), 10000);
-            md->max_luminance = av_make_q((int)hdr.maxLum, 1);
-            md->has_primaries = 1; md->has_luminance = 1;
-        }
-        if (AVContentLightMetadata *cl = av_content_light_metadata_create_side_data(frame_)) {
-            cl->MaxCLL = (unsigned)hdr.maxLum; cl->MaxFALL = (unsigned)hdr.maxFFLum;
-        }
         pkt_ = av_packet_alloc();
         w_ = w; h_ = h;
         return true;
     }
 
-    // Copy mapped P010 planes (Y full res, interleaved CbCr half res) and
-    // encode. Appends emitted packets (caller frees with av_packet_free).
-    int encode(const uint8_t *y, int yPitch, const uint8_t *uv, int uvPitch,
-               int64_t pts, std::vector<AVPacket *> &out)
+    // Encode a D3D11 pool frame (already rendered into by the converter).
+    // Does not take ownership. Appends emitted packets (caller frees).
+    int encode(AVFrame *f, int64_t pts, std::vector<AVPacket *> &out)
     {
-        if (!ctx_) return -1;
-        if (av_frame_make_writable(frame_) < 0) return -1;
-        const int bytes = w_ * 2;              // both planes: w_*2 bytes per row
-        for (int r = 0; r < h_; ++r)
-            memcpy(frame_->data[0] + (size_t)r * frame_->linesize[0],
-                   y + (size_t)r * yPitch, bytes);
-        for (int r = 0; r < h_ / 2; ++r)
-            memcpy(frame_->data[1] + (size_t)r * frame_->linesize[1],
-                   uv + (size_t)r * uvPitch, bytes);
-        frame_->pts = pts;
-        int r = avcodec_send_frame(ctx_, frame_);
+        if (!ctx_ || !f) return -1;
+        f->pts = pts;
+        f->color_primaries = AVCOL_PRI_BT2020;
+        f->color_trc = AVCOL_TRC_SMPTE2084;
+        f->colorspace = AVCOL_SPC_BT2020_NCL;
+        f->color_range = AVCOL_RANGE_MPEG;     // shader outputs limited range
+        // HDR10 static metadata from the monitor, written by AMF as SEI.
+        if (AVMasteringDisplayMetadata *md = av_mastering_display_metadata_create_side_data(f)) {
+            md->display_primaries[0][0] = q_xy(hdr_.rx); md->display_primaries[0][1] = q_xy(hdr_.ry);
+            md->display_primaries[1][0] = q_xy(hdr_.gx); md->display_primaries[1][1] = q_xy(hdr_.gy);
+            md->display_primaries[2][0] = q_xy(hdr_.bx); md->display_primaries[2][1] = q_xy(hdr_.by);
+            md->white_point[0] = q_xy(hdr_.wx); md->white_point[1] = q_xy(hdr_.wy);
+            md->min_luminance = av_make_q((int)(hdr_.minLum * 10000.0f), 10000);
+            md->max_luminance = av_make_q((int)hdr_.maxLum, 1);
+            md->has_primaries = 1; md->has_luminance = 1;
+        }
+        if (AVContentLightMetadata *cl = av_content_light_metadata_create_side_data(f)) {
+            cl->MaxCLL = (unsigned)hdr_.maxLum; cl->MaxFALL = (unsigned)hdr_.maxFFLum;
+        }
+        int r = avcodec_send_frame(ctx_, f);
         if (r < 0) return r;
         // Low latency = 1-in/1-out: wait (bounded) for this frame's packet
         // instead of letting it ride out on a later call.
@@ -1082,7 +1040,6 @@ public:
     void close()
     {
         if (pkt_) av_packet_free(&pkt_);
-        if (frame_) av_frame_free(&frame_);
         if (ctx_) avcodec_free_context(&ctx_);
         w_ = h_ = 0;
     }
@@ -1091,8 +1048,8 @@ public:
 private:
     static const char *kUsageNameA(int u) { return u == 0 ? "ultralowlatency" : u == 1 ? "lowlatency" : "transcoding"; }
     AVCodecContext *ctx_ = nullptr;
-    AVFrame *frame_ = nullptr;
     AVPacket *pkt_ = nullptr;
+    HdrInfo hdr_;
     int w_ = 0, h_ = 0;
 };
 
@@ -1505,6 +1462,12 @@ public:
             dev_->AddRef();                       // ctx takes ownership of one ref
             if (av_hwdevice_ctx_init(hwDev_) < 0) av_buffer_unref(&hwDev_);
         }
+        if (!hwDev_) { if (err) *err = L"D3D11VA hwdevice init failed"; return false; }
+        UINT p010sup = 0;
+        if (FAILED(dev_->CheckFormatSupport(DXGI_FORMAT_P010, &p010sup)) ||
+            !(p010sup & D3D11_FORMAT_SUPPORT_RENDER_TARGET)) {
+            if (err) *err = L"P010 render targets unsupported on this GPU"; return false;
+        }
         if (FAILED(ref.adapter->GetParent(IID_PPV_ARGS(&fac_)))) { if (err) *err = L"no IDXGIFactory2"; return false; }
         {
             // uncapped windowed presents (otherwise Present(0) blocks once the
@@ -1572,11 +1535,13 @@ public:
         { std::lock_guard<std::mutex> lk(jobMtx_); workerExit_ = true; }
         jobCv_.notify_all();
         if (codecThread_.joinable()) codecThread_.join();
-        if (inFlightSlot_ >= 0) conv_.unmap(inFlightSlot_);
+        if (jobFrame_) av_frame_free(&jobFrame_);     // dispatched but never taken
+        if (pendingHw_) av_frame_free(&pendingHw_);
         {
             std::lock_guard<std::mutex> lk(decMtx_);
             if (decodedLatest_) av_frame_free(&decodedLatest_);
         }
+        if (framesRef_) av_buffer_unref(&framesRef_);
         if (hwDev_) av_buffer_unref(&hwDev_);   // decoder/frames hold own refs
     }
 
@@ -1584,57 +1549,34 @@ public:
     {
         const double loopT0 = now_ms();
 
-        // 1. collect a finished codec job (worker is done with the mapped slot)
-        if (jobDone_.exchange(false)) {
-            if (inFlightSlot_ >= 0) { conv_.unmap(inFlightSlot_); inFlightSlot_ = -1; }
-            jobInFlight_.store(false);
-        }
+        // 1. collect a finished codec job
+        if (jobDone_.exchange(false)) jobInFlight_.store(false);
 
         // 2. live reconfigure, only while the codec worker is idle (it owns
-        //    enc_/dec_ during a job and reads a mapped staging slot)
+        //    enc_/dec_ during a job)
         if (g_cfgDirty.load() && !jobInFlight_.load()) {
             g_cfgDirty.store(false);
             EncConfig want; { std::lock_guard<std::mutex> lk(g_cfgMtx); want = g_cfgDesired; }
             if (want.encoderDiffers(applied_)) {
                 std::wstring e;
                 reconfigure(want, &e);
-                subNew_ = subOld_ = -1;   // staged frames are at the old resolution
+                if (pendingHw_) av_frame_free(&pendingHw_);   // old-resolution frame
             }
         }
 
-        // 3. dispatch to the codec worker: newest completed copy wins. Try the
-        //    most recent submission first; if its GPU copy isn't finished yet,
-        //    fall back to the older one. Whatever is staler gets dropped.
-        if (!jobInFlight_.load() && (subNew_ >= 0 || subOld_ >= 0)) {
-            const int order[2] = {subNew_, subOld_};
-            for (int k = 0; k < 2; ++k) {
-                const int s = order[k];
-                if (s < 0) continue;
-                const uint8_t *dy = nullptr, *duv = nullptr; int py = 0, puv = 0;
-                const double m0 = now_ms();
-                const int mr = conv_.map(s, &dy, &py, &duv, &puv);
-                if (mr == 1) {
-                    mapMs_ = now_ms() - m0;
-                    {
-                        std::lock_guard<std::mutex> lk(jobMtx_);
-                        jobY_ = dy; jobPY_ = py; jobUV_ = duv; jobPUV_ = puv; jobPts_ = pts_++;
-                        dispatchT_[jobPts_ & 127] = submitT_[s];   // latency from capture, not dispatch
-                        jobReady_ = true;
-                    }
-                    inFlightSlot_ = s;
-                    if (s == subNew_) {
-                        subNew_ = -1;
-                        if (subOld_ >= 0) { subOld_ = -1; drops_++; }   // older content: drop
-                    } else {
-                        subOld_ = -1;          // newest still copying; it dispatches next
-                    }
-                    jobInFlight_.store(true);
-                    jobCv_.notify_one();
-                    break;
-                }
-                if (mr < 0) { (s == subNew_ ? subNew_ : subOld_) = -1; }
-                // mr == 0: copy not finished; try the older slot / next loop
+        // 3. dispatch the pending rendered frame to the codec worker. D3D11
+        //    orders the conversion draws before AMF's reads on the same
+        //    device, so no CPU-side GPU sync is needed.
+        if (pendingHw_ && !jobInFlight_.load()) {
+            {
+                std::lock_guard<std::mutex> lk(jobMtx_);
+                jobFrame_ = pendingHw_; pendingHw_ = nullptr;
+                jobPts_ = pts_++;
+                dispatchT_[jobPts_ & 127] = pendingT_;   // latency from capture
+                jobReady_ = true;
             }
+            jobInFlight_.store(true);
+            jobCv_.notify_one();
         }
 
         resize_backbuffers();
@@ -1678,18 +1620,18 @@ public:
         if (haveFrame_) draw_scene(rtvA_.Get(), bbAW_, bbAH_, frameSRV_.Get(), frW_, frH_);
         scA_->Present(sync, pflags);
 
-        // 6. reservoir, latest-wins: every fresh frame is submitted; when both
-        //    rotating slots hold submissions, overwrite the older one (drop).
-        //    Never re-copy onto the slot dispatch is probing -- rotation keeps
-        //    the probe target stable, so no Map livelock.
-        if (fresh && haveFrame_) {
-            int slot;
-            if (subOld_ >= 0) { slot = subOld_; drops_++; }      // superseded; reuse
-            else { slot = 0; while (slot == inFlightSlot_ || slot == subNew_) ++slot; }
-            if (conv_.submit(frameSRV_.Get(), slot)) {
-                subOld_ = subNew_;
-                subNew_ = slot;
-                submitT_[slot] = now_ms();
+        // 6. reservoir, latest-wins: render every fresh frame into a pool
+        //    frame; if one is already waiting for the worker, replace it
+        //    (the pool recycles the dropped frame's texture).
+        if (fresh && haveFrame_ && framesRef_) {
+            AVFrame *hf = av_frame_alloc();
+            if (hf && av_hwframe_get_buffer(framesRef_, hf, 0) == 0 &&
+                conv_.render(hf, frameSRV_.Get())) {
+                if (pendingHw_) { av_frame_free(&pendingHw_); drops_++; }
+                pendingHw_ = hf;
+                pendingT_ = now_ms();
+            } else if (hf) {
+                av_frame_free(&hf);   // pool exhausted or render failed: skip
             }
         }
 
@@ -1723,18 +1665,19 @@ public:
     void codec_worker()
     {
         for (;;) {
-            const uint8_t *dy = nullptr, *duv = nullptr; int py = 0, puv = 0; int64_t pts = 0;
+            AVFrame *f = nullptr; int64_t pts = 0;
             {
                 std::unique_lock<std::mutex> lk(jobMtx_);
                 jobCv_.wait(lk, [&] { return jobReady_ || workerExit_; });
                 if (workerExit_) return;
                 jobReady_ = false;
-                dy = jobY_; py = jobPY_; duv = jobUV_; puv = jobPUV_; pts = jobPts_;
+                f = jobFrame_; jobFrame_ = nullptr; pts = jobPts_;
             }
             std::vector<AVPacket *> pkts;
             wstage_.store(1);                  // encoding
             double t0 = now_ms();
-            int er = enc_.encode(dy, py, duv, puv, pts, pkts);
+            int er = enc_.encode(f, pts, pkts);
+            av_frame_free(&f);                 // amfenc keeps its own ref while encoding
             if (er < 0) encErrs_.fetch_add(1);
             encMsA_.store(now_ms() - t0);
             size_t bytes = 0;
@@ -1860,6 +1803,8 @@ private:
         UINT req = 0;
         DXGI_OUTDUPL_POINTER_SHAPE_INFO info{};
         if (FAILED(dup_->GetFramePointerShape((UINT)shapeBuf_.size(), shapeBuf_.data(), &req, &info))) return;
+        curHotX_ = (int)info.HotSpot.x;
+        curHotY_ = (int)info.HotSpot.y;
         const int w = (int)info.Width;
         const bool mono = info.Type == DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MONOCHROME;
         const int h = mono ? (int)info.Height / 2 : (int)info.Height;
@@ -1895,16 +1840,25 @@ private:
         curValid_ = true;
     }
 
-    // Blend the cursor onto frameTex_ at its desktop position (sRGB->scRGB).
+    // Blend the cursor onto frameTex_ (sRGB->scRGB). Position comes from
+    // GetCursorPos -- live input-rate coordinates -- rather than DDA's
+    // PointerPosition, which is a captured frame old and reads as "floaty";
+    // the DDA shape's hotspot anchors the live point to the shape's top-left.
     void composite_cursor()
     {
         if (!curVisible_ || !curValid_ || curW_ <= 0 || !rtvFrame_ || frW_ <= 0) return;
+        POINT pos = curPos_;
+        POINT live;
+        if (GetCursorPos(&live)) {
+            pos.x = live.x - ref_.desc.DesktopCoordinates.left - curHotX_;
+            pos.y = live.y - ref_.desc.DesktopCoordinates.top - curHotY_;
+        }
         D3D11_VIEWPORT vp{0, 0, (float)frW_, (float)frH_, 0, 1};
         ctx_->RSSetViewports(1, &vp);
         ctx_->OMSetRenderTargets(1, rtvFrame_.GetAddressOf(), nullptr);
         const float q[8] = {
-            (float)curPos_.x / frW_ * 2 - 1, 1 - (float)curPos_.y / frH_ * 2,
-            (float)(curPos_.x + curW_) / frW_ * 2 - 1, 1 - (float)(curPos_.y + curH_) / frH_ * 2,
+            (float)pos.x / frW_ * 2 - 1, 1 - (float)pos.y / frH_ * 2,
+            (float)(pos.x + curW_) / frW_ * 2 - 1, 1 - (float)(pos.y + curH_) / frH_ * 2,
             g_paperwhite_nits / 80.0f, 0, 0, 0};
         D3D11_MAPPED_SUBRESOURCE m{};
         if (SUCCEEDED(ctx_->Map(cbCursor_.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &m))) { memcpy(m.pData, q, sizeof(q)); ctx_->Unmap(cbCursor_.Get(), 0); }
@@ -1950,9 +1904,31 @@ private:
     bool reconfigure(const EncConfig &c, std::wstring *err)
     {
         int w, h; target_res(c, &w, &h);
-        conv_.resize(w, h);
+
+        // P010 frame pool on our device, render-target capable: the converter
+        // draws into these and AMF encodes them in place.
+        if (framesRef_) av_buffer_unref(&framesRef_);   // in-flight frames keep old ctx alive
+        conv_.reset_cache();
+        // Some drivers reject a P010 texture ARRAY with render-target bind but
+        // accept individual textures; pool_size 0 = one ArraySize=1 texture per
+        // frame, recycled by the buffer pool.
+        const int poolSizes[] = {8, 0};
+        for (int ps : poolSizes) {
+            framesRef_ = av_hwframe_ctx_alloc(hwDev_);
+            if (!framesRef_) break;
+            auto *fc = reinterpret_cast<AVHWFramesContext *>(framesRef_->data);
+            fc->format = AV_PIX_FMT_D3D11;
+            fc->sw_format = AV_PIX_FMT_P010LE;
+            fc->width = w; fc->height = h;
+            fc->initial_pool_size = ps;
+            auto *hwf = reinterpret_cast<AVD3D11VAFramesContext *>(fc->hwctx);
+            hwf->BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+            if (av_hwframe_ctx_init(framesRef_) >= 0) break;
+            av_buffer_unref(&framesRef_);
+        }
+        if (!framesRef_) { if (err) *err = L"P010 render-target frame pool failed"; return false; }
         std::string e8;
-        if (!enc_.open(c, w, h, hdr_, &e8)) {
+        if (!enc_.open(c, w, h, hdr_, framesRef_, &e8)) {
             std::wcerr << L"encoder open failed: " << std::wstring(e8.begin(), e8.end()) << L"\n";
             if (err) *err = L"encoder open failed"; return false;
         }
@@ -1988,7 +1964,7 @@ private:
         SetWindowTextW(wndB_, buf);
         std::wcout << L"[stat] " << kCodecName[applied_.codec] << L" " << kModeName[applied_.mode]
                    << L" " << kUsageName[applied_.usage] << L" " << encW_ << L"x" << encH_
-                   << L" | loop " << fps << L"fps worst " << worst << L"ms map " << mapMs_
+                   << L" | loop " << fps << L"fps worst " << worst
                    << L"ms | enc " << encMs << L"ms dec " << decMs << L"ms lat " << latMs
                    << L"ms | ~" << mbps
                    << L" Mb/s enc#=" << pts_ << L" dec#=" << decFrames_.load()
@@ -2027,7 +2003,8 @@ private:
     ComPtr<ID3D11RenderTargetView> rtvFrame_;
     ComPtr<ID3D11Texture2D> curTex_;
     ComPtr<ID3D11ShaderResourceView> curSRV_;
-    int curW_ = 0, curH_ = 0; POINT curPos_{}; bool curVisible_ = false, curValid_ = false;
+    int curW_ = 0, curH_ = 0, curHotX_ = 0, curHotY_ = 0;
+    POINT curPos_{}; bool curVisible_ = false, curValid_ = false;
     std::vector<uint8_t> shapeBuf_;
     Converter conv_;
     DecodedView decoded_;
@@ -2043,12 +2020,13 @@ private:
     std::mutex jobMtx_;
     std::condition_variable jobCv_;
     bool jobReady_ = false, workerExit_ = false;
-    const uint8_t *jobY_ = nullptr, *jobUV_ = nullptr;
-    int jobPY_ = 0, jobPUV_ = 0; int64_t jobPts_ = 0;
+    AVFrame *jobFrame_ = nullptr;            // owned by worker once dispatched
+    int64_t jobPts_ = 0;
     std::atomic<bool> jobInFlight_{false};   // dispatch .. collect
     std::atomic<bool> jobDone_{false};       // worker -> render thread
-    int subNew_ = -1, subOld_ = -1, inFlightSlot_ = -1;   // latest-wins reservoir
-    double submitT_[8] = {};                 // slot -> capture-submit time
+    AVBufferRef *framesRef_ = nullptr;       // P010 pool (render target + SRV)
+    AVFrame *pendingHw_ = nullptr;           // latest-wins reservoir (depth 1)
+    double pendingT_ = 0;                    // its capture/render time
     int drops_ = 0;                          // frames replaced before encoding
     std::mutex decMtx_;
     AVFrame *decodedLatest_ = nullptr;       // newest decoded frame, owned
@@ -2063,7 +2041,7 @@ private:
     std::atomic<double> latMsA_{0};            // capture-submit -> decoded
     double dispatchT_[128] = {};               // pts & 127 -> dispatch time
     int statLoops_ = 0;
-    double worstLoop_ = 0, mapMs_ = 0, lastStat_ = 0;
+    double worstLoop_ = 0, lastStat_ = 0;
 };
 
 static int run_dual(OutputRef ref)
