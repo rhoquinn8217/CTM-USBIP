@@ -1048,6 +1048,8 @@ public:
         // releases packet N after ~16 more submits -- seconds of latency when
         // the screen is mostly static.
         av_opt_set_int(ctx_, "async_depth", 1, AV_OPT_SEARCH_CHILDREN);
+        // honor pict_type=I as a full IDR (new stream clients sync on it)
+        av_opt_set_int(ctx_, "forced_idr", 1, AV_OPT_SEARCH_CHILDREN);
         av_opt_set(ctx_, "usage", usage, AV_OPT_SEARCH_CHILDREN);
         av_opt_set(ctx_, "quality", cfg.usage == EncConfig::ULL ? "speed"
                                   : cfg.usage == EncConfig::LL ? "balanced" : "quality",
@@ -1120,6 +1122,7 @@ public:
             memcpy(frame_->data[1] + (size_t)r * frame_->linesize[1],
                    uv + (size_t)r * uvPitch, bytes);
         frame_->pts = pts;
+        frame_->pict_type = forceIdr_.exchange(false) ? AV_PICTURE_TYPE_I : AV_PICTURE_TYPE_NONE;
         int r = avcodec_send_frame(ctx_, frame_);
         if (r < 0) return r;
         // Low latency = 1-in/1-out: wait (bounded) for this frame's packet
@@ -1142,6 +1145,8 @@ public:
         return 0;                    // safety bound (~200ms); never deadlock
     }
 
+    void force_idr() { forceIdr_.store(true); }
+
     void close()
     {
         if (pkt_) av_packet_free(&pkt_);
@@ -1156,6 +1161,7 @@ private:
     AVCodecContext *ctx_ = nullptr;
     AVFrame *frame_ = nullptr;
     AVPacket *pkt_ = nullptr;
+    std::atomic<bool> forceIdr_{false};
     int w_ = 0, h_ = 0;
 };
 
@@ -1522,11 +1528,15 @@ public:
         if (listenSock_ != INVALID_SOCKET) { closesocket(listenSock_); listenSock_ = INVALID_SOCKET; }
         {
             std::lock_guard<std::mutex> lk(mtx_);
-            if (client_ != INVALID_SOCKET) { closesocket(client_); client_ = INVALID_SOCKET; }
+            for (SOCKET c : clients_) closesocket(c);
+            clients_.clear();
         }
         if (acceptThread_.joinable()) acceptThread_.join();
     }
     ~StreamSender() { stop(); }
+
+    // A new client must start on an IDR; the codec worker polls this.
+    bool take_want_idr() { return wantIdr_.exchange(false); }
 
     void set_info(const CtmsStreamInfo &si)
     {
@@ -1552,9 +1562,12 @@ public:
         std::lock_guard<std::mutex> lk(mtx_);
         send_msg(CTMS_VIDEO_FRAME, idr ? CTMS_FLAG_IDR : 0, (uint64_t)pts, data, size);
     }
-    bool connected() { std::lock_guard<std::mutex> lk(mtx_); return client_ != INVALID_SOCKET; }
+    bool connected() { std::lock_guard<std::mutex> lk(mtx_); return !clients_.empty(); }
 
 private:
+    // Multiple simultaneous clients (local preview + TV). Each new client gets
+    // the cached STREAM_INFO + cursor shape, and triggers an IDR so it can
+    // start decoding immediately instead of waiting out the GOP.
     void accept_loop()
     {
         while (!exit_.load()) {
@@ -1563,42 +1576,60 @@ private:
             BOOL nd = TRUE;
             setsockopt(c, IPPROTO_TCP, TCP_NODELAY, (const char *)&nd, sizeof(nd));
             std::lock_guard<std::mutex> lk(mtx_);
-            if (client_ != INVALID_SOCKET) closesocket(client_);
-            client_ = c;
-            if (haveInfo_) send_msg(CTMS_STREAM_INFO, 0, 0, &info_, sizeof(info_));
-            if (!shapePix_.empty()) send_shape();
+            if (clients_.size() >= 4) { closesocket(c); continue; }
+            clients_.push_back(c);
+            if (haveInfo_) send_one(c, CTMS_STREAM_INFO, 0, 0, &info_, sizeof(info_));
+            if (!shapePix_.empty()) {
+                std::vector<uint8_t> buf = shape_buf();
+                send_one(c, CTMS_CURSOR_SHAPE, 0, 0, buf.data(), (int)buf.size());
+            }
+            wantIdr_.store(true);
         }
     }
-    void send_shape()   // mtx_ held
+    std::vector<uint8_t> shape_buf()   // mtx_ held
     {
         std::vector<uint8_t> buf(sizeof(CtmsCursorShape) + shapePix_.size());
         memcpy(buf.data(), &shapeHdr_, sizeof(shapeHdr_));
         memcpy(buf.data() + sizeof(shapeHdr_), shapePix_.data(), shapePix_.size());
+        return buf;
+    }
+    void send_shape()   // mtx_ held
+    {
+        std::vector<uint8_t> buf = shape_buf();
         send_msg(CTMS_CURSOR_SHAPE, 0, 0, buf.data(), (int)buf.size());
     }
     void send_msg(uint16_t type, uint16_t flags, uint64_t pts, const void *payload, int len)   // mtx_ held
     {
-        if (client_ == INVALID_SOCKET) return;
-        CtmsHdr h{CTMS_MAGIC, type, flags, pts, (uint32_t)len};
-        if (!send_all(&h, sizeof(h)) || !send_all(payload, len)) {
-            closesocket(client_);
-            client_ = INVALID_SOCKET;   // accept_loop picks up the next client
+        for (size_t i = 0; i < clients_.size();) {
+            if (send_one(clients_[i], type, flags, pts, payload, len)) {
+                ++i;
+            } else {
+                closesocket(clients_[i]);
+                clients_.erase(clients_.begin() + i);   // dead client; drop it
+            }
         }
     }
-    bool send_all(const void *p, int len)
+    bool send_one(SOCKET s, uint16_t type, uint16_t flags, uint64_t pts, const void *payload, int len)
+    {
+        CtmsHdr h{CTMS_MAGIC, type, flags, pts, (uint32_t)len};
+        return send_all(s, &h, sizeof(h)) && send_all(s, payload, len);
+    }
+    bool send_all(SOCKET s, const void *p, int len)
     {
         const char *b = static_cast<const char *>(p);
         while (len > 0) {
-            int n = send(client_, b, len, 0);
+            int n = send(s, b, len, 0);
             if (n <= 0) return false;
             b += n; len -= n;
         }
         return true;
     }
 
-    SOCKET listenSock_ = INVALID_SOCKET, client_ = INVALID_SOCKET;
+    SOCKET listenSock_ = INVALID_SOCKET;
+    std::vector<SOCKET> clients_;
     std::thread acceptThread_;
     std::atomic<bool> exit_{false};
+    std::atomic<bool> wantIdr_{false};
     std::mutex mtx_;
     CtmsStreamInfo info_{}; bool haveInfo_ = false;
     CtmsCursorShape shapeHdr_{};
@@ -2094,6 +2125,7 @@ public:
             }
             std::vector<AVPacket *> pkts;
             wstage_.store(1);                  // encoding
+            if (sender_.take_want_idr()) enc_.force_idr();   // new client joined
             double t0 = now_ms();
             int er = enc_.encode(dy, py, duv, puv, pts, pkts);
             if (er < 0) encErrs_.fetch_add(1);
