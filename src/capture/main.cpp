@@ -15,6 +15,7 @@
 #include <objidl.h>      // PROPID for gdiplus
 #include <gdiplus.h>
 #include <d3d11.h>
+#include <d3d11_4.h>
 #include <dxgi1_2.h>
 #include <dxgi1_6.h>
 #include <d3dcompiler.h>
@@ -35,6 +36,8 @@
 
 extern "C" {
 #include <libavcodec/avcodec.h>
+#include <libavutil/hwcontext.h>
+#include <libavutil/hwcontext_d3d11va.h>
 #include <libavutil/opt.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/mastering_display_metadata.h>
@@ -794,7 +797,11 @@ static EncConfig g_cfgDesired;
 static std::atomic<bool> g_cfgDirty{false};
 static std::atomic<bool> g_vsync{false};   // V toggles; off = present without vblank wait
 
-// --- GPU converter: captured FP16 scRGB -> PQ BT.2020 10-bit RGB (x2bgr10le) ---
+// --- GPU converter: captured FP16 scRGB -> P010 (PQ BT.2020 YCbCr 4:2:0) ---
+// Y plane rendered full-res into R16_UNORM, interleaved CbCr half-res into
+// R16G16_UNORM; both encode the 10-bit code << 6 exactly like P010, so the
+// readback rows memcpy straight into a P010 AVFrame. Feeding the encoder
+// P010 instead of RGB skips AMF's internal color conversion.
 static const char *kPSConvert = R"(
 Texture2D tex : register(t0); SamplerState smp : register(s0);
 static const float3x3 M709to2020 = {
@@ -807,11 +814,23 @@ float3 pq_oetf(float3 L) {           // L normalized so 1.0 == 10000 nits
     float3 Lp = pow(max(L, 0.0), m1);
     return pow((c1 + c2 * Lp) / (1.0 + c3 * Lp), m2);
 }
-float4 main(float4 pos:SV_Position, float2 uv:TEXCOORD0) : SV_Target {
+float3 pq2020(float2 uv) {
     float3 scrgb = max(tex.Sample(smp, uv).rgb, 0.0);   // linear BT.709, 1.0 == 80 nits
-    float3 lin2020 = mul(M709to2020, scrgb);            // linear BT.2020, 1.0 == 80 nits
-    float3 L = lin2020 * (80.0 / 10000.0);              // -> PQ domain [0,1]
-    return float4(pq_oetf(saturate(L)), 1.0);           // PQ BT.2020 R'G'B'
+    float3 L = mul(M709to2020, scrgb) * (80.0 / 10000.0);
+    return pq_oetf(saturate(L));                        // PQ BT.2020 R'G'B'
+}
+float lum(float3 p) { return dot(p, float3(0.2627, 0.6780, 0.0593)); }   // BT.2020 NCL
+float4 mainY(float4 pos:SV_Position, float2 uv:TEXCOORD0) : SV_Target {
+    float Y = lum(pq2020(uv));                          // limited range, code<<6
+    return float4((876.0 * Y + 64.0) * (64.0 / 65535.0), 0, 0, 1);
+}
+float4 mainUV(float4 pos:SV_Position, float2 uv:TEXCOORD0) : SV_Target {
+    float3 p = pq2020(uv);                              // half-res: linear tap ~= 2x2 box
+    float Y = lum(p);
+    float Cb = (p.b - Y) / 1.8814;
+    float Cr = (p.r - Y) / 1.4746;
+    return float4((896.0 * Cb + 512.0) * (64.0 / 65535.0),
+                  (896.0 * Cr + 512.0) * (64.0 / 65535.0), 0, 1);
 })";
 
 class Converter {
@@ -820,10 +839,12 @@ public:
     {
         dev_ = dev; ctx_ = ctx;
         auto vsb = compile_shader(kVS, "main", "vs_5_0");
-        auto psb = compile_shader(kPSConvert, "main", "ps_5_0");
-        if (!vsb || !psb) { if (err) *err = L"converter shader compile failed"; return false; }
+        auto psy = compile_shader(kPSConvert, "mainY", "ps_5_0");
+        auto psc = compile_shader(kPSConvert, "mainUV", "ps_5_0");
+        if (!vsb || !psy || !psc) { if (err) *err = L"converter shader compile failed"; return false; }
         dev_->CreateVertexShader(vsb->GetBufferPointer(), vsb->GetBufferSize(), nullptr, &vs_);
-        dev_->CreatePixelShader(psb->GetBufferPointer(), psb->GetBufferSize(), nullptr, &ps_);
+        dev_->CreatePixelShader(psy->GetBufferPointer(), psy->GetBufferSize(), nullptr, &psY_);
+        dev_->CreatePixelShader(psc->GetBufferPointer(), psc->GetBufferSize(), nullptr, &psUV_);
         D3D11_SAMPLER_DESC s{};
         s.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
         s.AddressU = s.AddressV = s.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
@@ -836,61 +857,87 @@ public:
 
     bool resize(int w, int h)
     {
-        if (w == w_ && h == h_ && rtTex_) return true;
+        if (w == w_ && h == h_ && rtY_) return true;
         w_ = w; h_ = h;
-        rtTex_.Reset(); rtv_.Reset();
-        D3D11_TEXTURE2D_DESC td{};
-        td.Width = w; td.Height = h; td.MipLevels = 1; td.ArraySize = 1;
-        td.Format = DXGI_FORMAT_R10G10B10A2_UNORM; td.SampleDesc.Count = 1;
-        td.Usage = D3D11_USAGE_DEFAULT; td.BindFlags = D3D11_BIND_RENDER_TARGET;
-        if (FAILED(dev_->CreateTexture2D(&td, nullptr, &rtTex_))) return false;
-        if (FAILED(dev_->CreateRenderTargetView(rtTex_.Get(), nullptr, &rtv_))) return false;
-        D3D11_TEXTURE2D_DESC sd = td;
-        sd.BindFlags = 0; sd.Usage = D3D11_USAGE_STAGING; sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        auto mkRT = [&](int tw, int th, DXGI_FORMAT fmt, ComPtr<ID3D11Texture2D> &t, ComPtr<ID3D11RenderTargetView> &r) {
+            t.Reset(); r.Reset();
+            D3D11_TEXTURE2D_DESC td{};
+            td.Width = tw; td.Height = th; td.MipLevels = 1; td.ArraySize = 1;
+            td.Format = fmt; td.SampleDesc.Count = 1;
+            td.Usage = D3D11_USAGE_DEFAULT; td.BindFlags = D3D11_BIND_RENDER_TARGET;
+            if (FAILED(dev_->CreateTexture2D(&td, nullptr, &t))) return false;
+            return SUCCEEDED(dev_->CreateRenderTargetView(t.Get(), nullptr, &r));
+        };
+        auto mkStage = [&](int tw, int th, DXGI_FORMAT fmt, ComPtr<ID3D11Texture2D> &t) {
+            t.Reset();
+            D3D11_TEXTURE2D_DESC td{};
+            td.Width = tw; td.Height = th; td.MipLevels = 1; td.ArraySize = 1;
+            td.Format = fmt; td.SampleDesc.Count = 1;
+            td.Usage = D3D11_USAGE_STAGING; td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+            return SUCCEEDED(dev_->CreateTexture2D(&td, nullptr, &t));
+        };
+        if (!mkRT(w, h, DXGI_FORMAT_R16_UNORM, rtY_, rtvY_)) return false;
+        if (!mkRT(w / 2, h / 2, DXGI_FORMAT_R16G16_UNORM, rtUV_, rtvUV_)) return false;
         for (int i = 0; i < kSlots; ++i) {
-            staging_[i].Reset();
-            if (FAILED(dev_->CreateTexture2D(&sd, nullptr, &staging_[i]))) return false;
+            if (!mkStage(w, h, DXGI_FORMAT_R16_UNORM, stagY_[i])) return false;
+            if (!mkStage(w / 2, h / 2, DXGI_FORMAT_R16G16_UNORM, stagUV_[i])) return false;
         }
         return true;
     }
 
-    // Render src -> PQ BT.2020 10-bit at target res and queue a copy into
-    // staging[slot]. map() comes later (next loop), once the GPU has finished,
+    // Render src -> P010 planes at target res and queue copies into slot's
+    // staging pair. map() comes later (next loop), once the GPU has finished,
     // so the readback never stalls the render thread.
     bool submit(ID3D11ShaderResourceView *srcSRV, int slot)
     {
-        if (!rtTex_ || slot < 0 || slot >= kSlots) return false;
-        D3D11_VIEWPORT vp{0, 0, (float)w_, (float)h_, 0, 1};
-        ctx_->RSSetViewports(1, &vp);
-        ctx_->OMSetRenderTargets(1, rtv_.GetAddressOf(), nullptr);
+        if (!rtY_ || slot < 0 || slot >= kSlots) return false;
         ctx_->IASetInputLayout(nullptr);
         ctx_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         ctx_->VSSetShader(vs_.Get(), nullptr, 0);
-        ctx_->PSSetShader(ps_.Get(), nullptr, 0);
         ctx_->PSSetSamplers(0, 1, samp_.GetAddressOf());
         ctx_->PSSetShaderResources(0, 1, &srcSRV);
         ctx_->OMSetBlendState(nullptr, nullptr, 0xffffffff);
+
+        D3D11_VIEWPORT vpY{0, 0, (float)w_, (float)h_, 0, 1};
+        ctx_->RSSetViewports(1, &vpY);
+        ctx_->OMSetRenderTargets(1, rtvY_.GetAddressOf(), nullptr);
+        ctx_->PSSetShader(psY_.Get(), nullptr, 0);
         ctx_->Draw(3, 0);
+
+        D3D11_VIEWPORT vpC{0, 0, (float)(w_ / 2), (float)(h_ / 2), 0, 1};
+        ctx_->RSSetViewports(1, &vpC);
+        ctx_->OMSetRenderTargets(1, rtvUV_.GetAddressOf(), nullptr);
+        ctx_->PSSetShader(psUV_.Get(), nullptr, 0);
+        ctx_->Draw(3, 0);
+
         ID3D11ShaderResourceView *nullSRV = nullptr;
         ctx_->PSSetShaderResources(0, 1, &nullSRV);
-        ctx_->CopyResource(staging_[slot].Get(), rtTex_.Get());
+        ctx_->CopyResource(stagY_[slot].Get(), rtY_.Get());
+        ctx_->CopyResource(stagUV_[slot].Get(), rtUV_.Get());
         return true;
     }
 
-    // 1 = mapped, 0 = GPU still copying (retry next loop), -1 = error
-    int map(int slot, const uint8_t **outData, int *outPitch)
+    // 1 = both planes mapped, 0 = GPU still copying (retry), -1 = error
+    int map(int slot, const uint8_t **y, int *yPitch, const uint8_t **uv, int *uvPitch)
     {
-        if (slot < 0 || slot >= kSlots || !staging_[slot]) return -1;
-        HRESULT hr = ctx_->Map(staging_[slot].Get(), 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &mapped_);
+        if (slot < 0 || slot >= kSlots || !stagY_[slot] || !stagUV_[slot]) return -1;
+        HRESULT hr = ctx_->Map(stagY_[slot].Get(), 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &mapY_);
         if (hr == DXGI_ERROR_WAS_STILL_DRAWING) return 0;
         if (FAILED(hr)) return -1;
-        *outData = static_cast<const uint8_t *>(mapped_.pData);
-        *outPitch = (int)mapped_.RowPitch;
+        hr = ctx_->Map(stagUV_[slot].Get(), 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &mapUV_);
+        if (hr == DXGI_ERROR_WAS_STILL_DRAWING) { ctx_->Unmap(stagY_[slot].Get(), 0); return 0; }
+        if (FAILED(hr)) { ctx_->Unmap(stagY_[slot].Get(), 0); return -1; }
+        *y = static_cast<const uint8_t *>(mapY_.pData);
+        *yPitch = (int)mapY_.RowPitch;
+        *uv = static_cast<const uint8_t *>(mapUV_.pData);
+        *uvPitch = (int)mapUV_.RowPitch;
         return 1;
     }
     void unmap(int slot)
     {
-        if (slot >= 0 && slot < kSlots && staging_[slot]) ctx_->Unmap(staging_[slot].Get(), 0);
+        if (slot < 0 || slot >= kSlots) return;
+        if (stagY_[slot]) ctx_->Unmap(stagY_[slot].Get(), 0);
+        if (stagUV_[slot]) ctx_->Unmap(stagUV_[slot].Get(), 0);
     }
     int width() const { return w_; }
     int height() const { return h_; }
@@ -898,11 +945,11 @@ public:
 private:
     ID3D11Device *dev_ = nullptr; ID3D11DeviceContext *ctx_ = nullptr;
     ComPtr<ID3D11VertexShader> vs_;
-    ComPtr<ID3D11PixelShader> ps_;
+    ComPtr<ID3D11PixelShader> psY_, psUV_;
     ComPtr<ID3D11SamplerState> samp_;
-    ComPtr<ID3D11Texture2D> rtTex_, staging_[kSlots];
-    ComPtr<ID3D11RenderTargetView> rtv_;
-    D3D11_MAPPED_SUBRESOURCE mapped_{};
+    ComPtr<ID3D11Texture2D> rtY_, rtUV_, stagY_[kSlots], stagUV_[kSlots];
+    ComPtr<ID3D11RenderTargetView> rtvY_, rtvUV_;
+    D3D11_MAPPED_SUBRESOURCE mapY_{}, mapUV_{};
     int w_ = 0, h_ = 0;
 };
 
@@ -920,7 +967,7 @@ public:
         ctx_ = avcodec_alloc_context3(codec);
         if (!ctx_) { if (err) *err = "alloc encoder ctx failed"; return false; }
         ctx_->width = w; ctx_->height = h;
-        ctx_->pix_fmt = AV_PIX_FMT_X2BGR10LE;
+        ctx_->pix_fmt = AV_PIX_FMT_P010LE;    // shader already produced PQ BT.2020 YCbCr
         ctx_->time_base = av_make_q(1, 60);
         ctx_->framerate = av_make_q(60, 1);
         ctx_->gop_size = 60;
@@ -970,11 +1017,11 @@ public:
         if (avcodec_open2(ctx_, codec, nullptr) < 0) { if (err) *err = std::string("avcodec_open2 failed for ") + name; close(); return false; }
 
         frame_ = av_frame_alloc();
-        frame_->format = AV_PIX_FMT_X2BGR10LE; frame_->width = w; frame_->height = h;
+        frame_->format = AV_PIX_FMT_P010LE; frame_->width = w; frame_->height = h;
         frame_->color_primaries = AVCOL_PRI_BT2020;
         frame_->color_trc = AVCOL_TRC_SMPTE2084;
         frame_->colorspace = AVCOL_SPC_BT2020_NCL;
-        frame_->color_range = AVCOL_RANGE_JPEG;            // RGB input is full range
+        frame_->color_range = AVCOL_RANGE_MPEG;            // shader outputs limited range
         if (av_frame_get_buffer(frame_, 0) < 0) { if (err) *err = "frame buffer alloc failed"; close(); return false; }
 
         // HDR10 static metadata from the monitor, written by AMF as SEI.
@@ -995,16 +1042,20 @@ public:
         return true;
     }
 
-    // Copy a tightly/loosely packed x2bgr10le buffer and encode it. Appends any
-    // emitted packets (ownership transferred to caller; free with av_packet_free).
-    int encode(const uint8_t *data, int rowpitch, int64_t pts, std::vector<AVPacket *> &out)
+    // Copy mapped P010 planes (Y full res, interleaved CbCr half res) and
+    // encode. Appends emitted packets (caller frees with av_packet_free).
+    int encode(const uint8_t *y, int yPitch, const uint8_t *uv, int uvPitch,
+               int64_t pts, std::vector<AVPacket *> &out)
     {
         if (!ctx_) return -1;
         if (av_frame_make_writable(frame_) < 0) return -1;
-        const int bytes = w_ * 4;
-        for (int y = 0; y < h_; ++y)
-            memcpy(frame_->data[0] + (size_t)y * frame_->linesize[0],
-                   data + (size_t)y * rowpitch, bytes);
+        const int bytes = w_ * 2;              // both planes: w_*2 bytes per row
+        for (int r = 0; r < h_; ++r)
+            memcpy(frame_->data[0] + (size_t)r * frame_->linesize[0],
+                   y + (size_t)r * yPitch, bytes);
+        for (int r = 0; r < h_ / 2; ++r)
+            memcpy(frame_->data[1] + (size_t)r * frame_->linesize[1],
+                   uv + (size_t)r * uvPitch, bytes);
         frame_->pts = pts;
         int r = avcodec_send_frame(ctx_, frame_);
         if (r < 0) return r;
@@ -1045,29 +1096,59 @@ private:
     int w_ = 0, h_ = 0;
 };
 
-// --- decoder (native hevc / av1) -> yuv420p10le ---
+// --- decoder: D3D11VA hardware (zero-copy P010 textures), sw fallback ---
 class Decoder {
 public:
-    bool open(EncConfig::Codec c, std::string *err)
+    bool open(EncConfig::Codec c, AVBufferRef *hwdev, std::string *err)
     {
         close();
-        // FFmpeg's built-in "av1" decoder is hwaccel-only (no software path), so
-        // use libdav1d for AV1 software decode. "hevc" has a software decoder.
-        const char *name = (c == EncConfig::HEVC) ? "hevc" : "libdav1d";
+        codec_ = c;
+        hwFailed_.store(false);
+        if (hwdev) {
+            const char *name = (c == EncConfig::HEVC) ? "hevc" : "av1";
+            if (const AVCodec *codec = avcodec_find_decoder_by_name(name)) {
+                ctx_ = avcodec_alloc_context3(codec);
+                if (ctx_) {
+                    ctx_->opaque = this;
+                    ctx_->get_format = &Decoder::get_hw_format;
+                    ctx_->hw_device_ctx = av_buffer_ref(hwdev);
+                    ctx_->thread_count = 1;          // hwaccel: no CPU threading
+                    ctx_->flags |= AV_CODEC_FLAG_LOW_DELAY;
+                    if (avcodec_open2(ctx_, codec, nullptr) >= 0) {
+                        frame_ = av_frame_alloc();
+                        hw_ = true;
+                        return true;
+                    }
+                    avcodec_free_context(&ctx_);
+                }
+            }
+        }
+        return open_sw(err);
+    }
+
+    // Software path. FFmpeg's built-in "av1" decoder is hwaccel-only, so AV1
+    // uses libdav1d here. Slice threads only -- frame threading buffers
+    // ~core-count frames and turns a static screen into seconds of latency.
+    bool open_sw(std::string *err)
+    {
+        close();
+        const char *name = (codec_ == EncConfig::HEVC) ? "hevc" : "libdav1d";
         const AVCodec *codec = avcodec_find_decoder_by_name(name);
         if (!codec) { if (err) *err = std::string("decoder not found: ") + name; return false; }
         ctx_ = avcodec_alloc_context3(codec);
         if (!ctx_) { if (err) *err = "decoder alloc failed"; return false; }
-        // Slice threads only. Frame threading buffers ~core-count frames and
-        // only flushes them as MORE packets arrive -- on a mostly-static screen
-        // that pipeline depth turns into seconds of latency on window B.
         ctx_->thread_count = 0;
         ctx_->thread_type = FF_THREAD_SLICE;
         ctx_->flags |= AV_CODEC_FLAG_LOW_DELAY;
         if (avcodec_open2(ctx_, codec, nullptr) < 0) { if (err) *err = "decoder open failed"; close(); return false; }
         frame_ = av_frame_alloc();
+        hw_ = false;
+        hwFailed_.store(false);
         return true;
     }
+
+    bool is_hw() const { return hw_; }
+    bool hw_failed() const { return hwFailed_.load(); }
     // Returns the decoded frame (owned by decoder, valid until next call) or null.
     // NOTE: avcodec_receive_frame() unrefs the frame at its start, so we must NOT
     // call it again before the caller consumes the result -- return on first hit.
@@ -1087,8 +1168,35 @@ public:
     ~Decoder() { close(); }
 
 private:
+    // Choose D3D11 output and size the frame pool ourselves so the decode
+    // textures are also shader-bindable (sampled directly by the display pass).
+    static AVPixelFormat get_hw_format(AVCodecContext *ctx, const AVPixelFormat *fmts)
+    {
+        Decoder *self = static_cast<Decoder *>(ctx->opaque);
+        for (const AVPixelFormat *p = fmts; *p != AV_PIX_FMT_NONE; ++p) {
+            if (*p != AV_PIX_FMT_D3D11) continue;
+            AVBufferRef *fctx = nullptr;
+            if (avcodec_get_hw_frames_parameters(ctx, ctx->hw_device_ctx, AV_PIX_FMT_D3D11, &fctx) >= 0) {
+                auto *fc = reinterpret_cast<AVHWFramesContext *>(fctx->data);
+                auto *hwf = reinterpret_cast<AVD3D11VAFramesContext *>(fc->hwctx);
+                hwf->BindFlags |= D3D11_BIND_SHADER_RESOURCE;
+                fc->initial_pool_size += 4;          // display holds a few refs
+                if (av_hwframe_ctx_init(fctx) >= 0) {
+                    ctx->hw_frames_ctx = fctx;
+                    return AV_PIX_FMT_D3D11;
+                }
+                av_buffer_unref(&fctx);
+            }
+        }
+        if (self) self->hwFailed_.store(true);       // worker reopens software
+        return fmts[0];
+    }
+
     AVCodecContext *ctx_ = nullptr;
     AVFrame *frame_ = nullptr;
+    EncConfig::Codec codec_ = EncConfig::HEVC;
+    bool hw_ = false;
+    std::atomic<bool> hwFailed_{false};
 };
 
 // --- decoded-view: upload yuv420p10le planes, reconstruct scRGB for window B ---
@@ -1123,6 +1231,39 @@ float4 main(float4 pos:SV_Position, float2 uv:TEXCOORD0) : SV_Target {
     return float4(scrgb, 1.0);
 })";
 
+// Zero-copy variant: sample the decoder's P010 texture array slice directly
+// (Y as R16, interleaved CbCr as R16G16; values are the 10-bit code << 6).
+// uvScale compensates for codec surface alignment padding.
+static const char *kPSDecodedHW = R"(
+Texture2D texY : register(t0); Texture2D texUV : register(t1);
+SamplerState smp : register(s0);
+cbuffer UVCB : register(b0) { float2 uvScale; float2 _pad; };
+static const float3x3 M2020to709 = {
+     1.660491, -0.587641, -0.072850,
+    -0.124550,  1.132900, -0.008349,
+    -0.018151, -0.100579,  1.118730 };
+float3 pq_eotf(float3 E) {
+    const float m1 = 0.1593017578125, m2 = 78.84375;
+    const float c1 = 0.8359375, c2 = 18.8515625, c3 = 18.6875;
+    float3 Ep = pow(max(E, 0.0), 1.0 / m2);
+    return pow(max(Ep - c1, 0.0) / (c2 - c3 * Ep), 1.0 / m1);
+}
+float4 main(float4 pos:SV_Position, float2 uv:TEXCOORD0) : SV_Target {
+    float2 tuv = uv * uvScale;
+    float k = 65535.0 / 64.0;                            // P010 -> 10-bit code
+    float Y = texY.Sample(smp, tuv).r * k;
+    float2 C = texUV.Sample(smp, tuv).rg * k;
+    float yn = (Y - 64.0) / 876.0;
+    float cb = (C.x - 512.0) / 896.0;
+    float cr = (C.y - 512.0) / 896.0;
+    float3 rgbpq;
+    rgbpq.r = yn + 1.47460 * cr;
+    rgbpq.g = yn - 0.16455 * cb - 0.57135 * cr;
+    rgbpq.b = yn + 1.88140 * cb;
+    float3 L = pq_eotf(saturate(rgbpq));
+    return float4(mul(M2020to709, L * 125.0), 1.0);      // scRGB out
+})";
+
 class DecodedView {
 public:
     bool init(ID3D11Device *dev, ID3D11DeviceContext *ctx, std::wstring *err)
@@ -1130,15 +1271,37 @@ public:
         dev_ = dev; ctx_ = ctx;
         auto vsb = compile_shader(kVS, "main", "vs_5_0");
         auto psb = compile_shader(kPSDecoded, "main", "ps_5_0");
-        if (!vsb || !psb) { if (err) *err = L"decoded-view shader compile failed"; return false; }
+        auto psh = compile_shader(kPSDecodedHW, "main", "ps_5_0");
+        if (!vsb || !psb || !psh) { if (err) *err = L"decoded-view shader compile failed"; return false; }
         dev_->CreateVertexShader(vsb->GetBufferPointer(), vsb->GetBufferSize(), nullptr, &vs_);
         dev_->CreatePixelShader(psb->GetBufferPointer(), psb->GetBufferSize(), nullptr, &ps_);
+        dev_->CreatePixelShader(psh->GetBufferPointer(), psh->GetBufferSize(), nullptr, &psHw_);
         D3D11_SAMPLER_DESC s{};
         s.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
         s.AddressU = s.AddressV = s.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
         s.MaxLOD = D3D11_FLOAT32_MAX;
         dev_->CreateSamplerState(&s, &samp_);
+        D3D11_BUFFER_DESC cb{};
+        cb.Usage = D3D11_USAGE_DYNAMIC; cb.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+        cb.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE; cb.ByteWidth = 16;
+        dev_->CreateBuffer(&cb, nullptr, &cbUv_);
         return true;
+    }
+
+    // Take ownership of a hardware (AV_PIX_FMT_D3D11) frame. The previous
+    // frame is kept one generation as the GPU may still read it in flight.
+    void set_hw(AVFrame *f)
+    {
+        if (hwFramePrev_) av_frame_free(&hwFramePrev_);
+        hwFramePrev_ = hwFrame_;
+        hwFrame_ = f;
+        hwMode_ = true;
+        valid_ = true;
+    }
+    ~DecodedView()
+    {
+        if (hwFrame_) av_frame_free(&hwFrame_);
+        if (hwFramePrev_) av_frame_free(&hwFramePrev_);
     }
 
     void upload(const AVFrame *f)
@@ -1148,6 +1311,7 @@ public:
         ctx_->UpdateSubresource(texY_.Get(), 0, nullptr, f->data[0], f->linesize[0], 0);
         ctx_->UpdateSubresource(texU_.Get(), 0, nullptr, f->data[1], f->linesize[1], 0);
         ctx_->UpdateSubresource(texV_.Get(), 0, nullptr, f->data[2], f->linesize[2], 0);
+        hwMode_ = false;
         valid_ = true;
     }
 
@@ -1155,6 +1319,7 @@ public:
     void draw(int bbW, int bbH)
     {
         if (!valid_) return;
+        if (hwMode_) { draw_hw(bbW, bbH); return; }
         const float scale = std::min((float)bbW / w_, (float)bbH / h_);
         const float vw = w_ * scale, vh = h_ * scale;
         D3D11_VIEWPORT vp{(bbW - vw) / 2, (bbH - vh) / 2, vw, vh, 0, 1};
@@ -1172,6 +1337,59 @@ public:
         ctx_->PSSetShaderResources(0, 3, n3);
     }
     bool valid() const { return valid_; }
+
+private:
+    // Sample the decoder's pool texture (array slice) directly -- no copy.
+    void draw_hw(int bbW, int bbH)
+    {
+        if (!hwFrame_) return;
+        auto *tex = reinterpret_cast<ID3D11Texture2D *>(hwFrame_->data[0]);
+        const UINT slice = (UINT)(uintptr_t)hwFrame_->data[1];
+        if (!tex) return;
+        if (tex != cachedTex_) {                 // new pool: rebuild SRV cache
+            D3D11_TEXTURE2D_DESC d{};
+            tex->GetDesc(&d);
+            sliceSrv_.clear();
+            sliceSrv_.resize(d.ArraySize);
+            texW_ = (int)d.Width; texH_ = (int)d.Height;
+            cachedTex_ = tex;
+        }
+        if (slice >= sliceSrv_.size()) return;
+        if (!sliceSrv_[slice].first) {
+            D3D11_SHADER_RESOURCE_VIEW_DESC sd{};
+            sd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
+            sd.Texture2DArray.MipLevels = 1;
+            sd.Texture2DArray.FirstArraySlice = slice;
+            sd.Texture2DArray.ArraySize = 1;
+            sd.Format = DXGI_FORMAT_R16_UNORM;
+            dev_->CreateShaderResourceView(tex, &sd, &sliceSrv_[slice].first);
+            sd.Format = DXGI_FORMAT_R16G16_UNORM;
+            dev_->CreateShaderResourceView(tex, &sd, &sliceSrv_[slice].second);
+        }
+        if (!sliceSrv_[slice].first || !sliceSrv_[slice].second) return;
+        const int fw = hwFrame_->width, fh = hwFrame_->height;
+        const float cb[4] = {(float)fw / texW_, (float)fh / texH_, 0, 0};
+        D3D11_MAPPED_SUBRESOURCE m{};
+        if (SUCCEEDED(ctx_->Map(cbUv_.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &m))) { memcpy(m.pData, cb, sizeof(cb)); ctx_->Unmap(cbUv_.Get(), 0); }
+        const float scale = std::min((float)bbW / fw, (float)bbH / fh);
+        const float vw = fw * scale, vh = fh * scale;
+        D3D11_VIEWPORT vp{(bbW - vw) / 2, (bbH - vh) / 2, vw, vh, 0, 1};
+        ctx_->RSSetViewports(1, &vp);
+        ctx_->IASetInputLayout(nullptr);
+        ctx_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        ctx_->VSSetShader(vs_.Get(), nullptr, 0);
+        ctx_->PSSetShader(psHw_.Get(), nullptr, 0);
+        ctx_->PSSetConstantBuffers(0, 1, cbUv_.GetAddressOf());
+        ID3D11ShaderResourceView *srvs[2] = {sliceSrv_[slice].first.Get(), sliceSrv_[slice].second.Get()};
+        ctx_->PSSetShaderResources(0, 2, srvs);
+        ctx_->PSSetSamplers(0, 1, samp_.GetAddressOf());
+        ctx_->OMSetBlendState(nullptr, nullptr, 0xffffffff);
+        ctx_->Draw(3, 0);
+        ID3D11ShaderResourceView *n2[2] = {nullptr, nullptr};
+        ctx_->PSSetShaderResources(0, 2, n2);
+    }
+
+public:
 
 private:
     void ensure(int w, int h)
@@ -1193,11 +1411,16 @@ private:
     }
     ID3D11Device *dev_ = nullptr; ID3D11DeviceContext *ctx_ = nullptr;
     ComPtr<ID3D11VertexShader> vs_;
-    ComPtr<ID3D11PixelShader> ps_;
+    ComPtr<ID3D11PixelShader> ps_, psHw_;
     ComPtr<ID3D11SamplerState> samp_;
+    ComPtr<ID3D11Buffer> cbUv_;
     ComPtr<ID3D11Texture2D> texY_, texU_, texV_;
     ComPtr<ID3D11ShaderResourceView> srvY_, srvU_, srvV_;
-    int w_ = 0, h_ = 0; bool valid_ = false;
+    AVFrame *hwFrame_ = nullptr, *hwFramePrev_ = nullptr;   // owned D3D11 frames
+    ID3D11Texture2D *cachedTex_ = nullptr;                  // pool identity only
+    std::vector<std::pair<ComPtr<ID3D11ShaderResourceView>, ComPtr<ID3D11ShaderResourceView>>> sliceSrv_;
+    int texW_ = 1, texH_ = 1;
+    int w_ = 0, h_ = 0; bool valid_ = false, hwMode_ = false;
 };
 
 // per-window resize state (real size arrives via WM_SIZE on ShowWindow; the
@@ -1263,6 +1486,24 @@ public:
                                      D3D11_CREATE_DEVICE_BGRA_SUPPORT, fls, ARRAYSIZE(fls),
                                      D3D11_SDK_VERSION, &dev_, nullptr, &ctx_))) {
             if (err) *err = L"D3D11CreateDevice failed"; return false;
+        }
+        // Wrap our D3D11 device for libavcodec D3D11VA decode: decoded frames
+        // are textures on THIS device, so the display pass samples them
+        // directly (true zero-copy). FFmpeg only multithread-protects devices
+        // it creates itself -- for a wrapped device we must do it, or the
+        // decoder's video-context calls (worker thread) race the render
+        // thread's context calls and corrupt the driver (0xC0000005).
+        {
+            ComPtr<ID3D11Multithread> mt;
+            if (SUCCEEDED(ctx_.As(&mt))) mt->SetMultithreadProtected(TRUE);
+        }
+        hwDev_ = av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_D3D11VA);
+        if (hwDev_) {
+            auto *dc = reinterpret_cast<AVHWDeviceContext *>(hwDev_->data);
+            auto *d3d = reinterpret_cast<AVD3D11VADeviceContext *>(dc->hwctx);
+            d3d->device = dev_.Get();
+            dev_->AddRef();                       // ctx takes ownership of one ref
+            if (av_hwdevice_ctx_init(hwDev_) < 0) av_buffer_unref(&hwDev_);
         }
         if (FAILED(ref.adapter->GetParent(IID_PPV_ARGS(&fac_)))) { if (err) *err = L"no IDXGIFactory2"; return false; }
         {
@@ -1332,8 +1573,11 @@ public:
         jobCv_.notify_all();
         if (codecThread_.joinable()) codecThread_.join();
         if (inFlightSlot_ >= 0) conv_.unmap(inFlightSlot_);
-        std::lock_guard<std::mutex> lk(decMtx_);
-        if (decodedLatest_) av_frame_free(&decodedLatest_);
+        {
+            std::lock_guard<std::mutex> lk(decMtx_);
+            if (decodedLatest_) av_frame_free(&decodedLatest_);
+        }
+        if (hwDev_) av_buffer_unref(&hwDev_);   // decoder/frames hold own refs
     }
 
     bool render_once()
@@ -1366,14 +1610,14 @@ public:
             for (int k = 0; k < 2; ++k) {
                 const int s = order[k];
                 if (s < 0) continue;
-                const uint8_t *data = nullptr; int pitch = 0;
+                const uint8_t *dy = nullptr, *duv = nullptr; int py = 0, puv = 0;
                 const double m0 = now_ms();
-                const int mr = conv_.map(s, &data, &pitch);
+                const int mr = conv_.map(s, &dy, &py, &duv, &puv);
                 if (mr == 1) {
                     mapMs_ = now_ms() - m0;
                     {
                         std::lock_guard<std::mutex> lk(jobMtx_);
-                        jobPtr_ = data; jobPitch_ = pitch; jobPts_ = pts_++;
+                        jobY_ = dy; jobPY_ = py; jobUV_ = duv; jobPUV_ = puv; jobPts_ = pts_++;
                         dispatchT_[jobPts_ & 127] = submitT_[s];   // latency from capture, not dispatch
                         jobReady_ = true;
                     }
@@ -1449,10 +1693,15 @@ public:
             }
         }
 
-        // 7. window B: pick up the newest decoded frame from the worker
+        // 7. window B: pick up the newest decoded frame from the worker.
+        //    D3D11 frames are handed to the view (zero-copy, it keeps the ref);
+        //    software frames are uploaded then freed.
         AVFrame *take = nullptr;
         { std::lock_guard<std::mutex> lk(decMtx_); take = decodedLatest_; decodedLatest_ = nullptr; }
-        if (take) { decoded_.upload(take); av_frame_free(&take); }
+        if (take) {
+            if (take->format == AV_PIX_FMT_D3D11) decoded_.set_hw(take);
+            else { decoded_.upload(take); av_frame_free(&take); }
+        }
         if (decoded_.valid()) {
             const float black[4] = {0, 0, 0, 1};
             ctx_->ClearRenderTargetView(rtvB_.Get(), black);
@@ -1474,18 +1723,18 @@ public:
     void codec_worker()
     {
         for (;;) {
-            const uint8_t *data = nullptr; int pitch = 0; int64_t pts = 0;
+            const uint8_t *dy = nullptr, *duv = nullptr; int py = 0, puv = 0; int64_t pts = 0;
             {
                 std::unique_lock<std::mutex> lk(jobMtx_);
                 jobCv_.wait(lk, [&] { return jobReady_ || workerExit_; });
                 if (workerExit_) return;
                 jobReady_ = false;
-                data = jobPtr_; pitch = jobPitch_; pts = jobPts_;
+                dy = jobY_; py = jobPY_; duv = jobUV_; puv = jobPUV_; pts = jobPts_;
             }
             std::vector<AVPacket *> pkts;
             wstage_.store(1);                  // encoding
             double t0 = now_ms();
-            int er = enc_.encode(data, pitch, pts, pkts);
+            int er = enc_.encode(dy, py, duv, puv, pts, pkts);
             if (er < 0) encErrs_.fetch_add(1);
             encMsA_.store(now_ms() - t0);
             size_t bytes = 0;
@@ -1516,6 +1765,11 @@ public:
             }
             decMsA_.store(now_ms() - t1);
             winBytes_.fetch_add(bytes);
+            if (dec_.hw_failed()) {            // D3D11VA refused at first frame:
+                std::string e;                 // drop to software; picture
+                dec_.open_sw(&e);              // recovers at the next IDR
+                std::wcout << L"[dec] hw decode unavailable, software fallback\n";
+            }
             wstage_.store(0);                  // idle
             jobDone_.store(true);
         }
@@ -1702,7 +1956,7 @@ private:
             std::wcerr << L"encoder open failed: " << std::wstring(e8.begin(), e8.end()) << L"\n";
             if (err) *err = L"encoder open failed"; return false;
         }
-        if (!dec_.open(c.codec, &e8)) {
+        if (!dec_.open(c.codec, hwDev_, &e8)) {
             std::wcerr << L"decoder open failed: " << std::wstring(e8.begin(), e8.end()) << L"\n";
             if (err) *err = L"decoder open failed"; return false;
         }
@@ -1742,7 +1996,8 @@ private:
                    << L" vsync=" << (g_vsync.load() ? 1 : 0)
                    << L" wstage=" << wstage_.load() << L" inflight=" << (jobInFlight_.load() ? 1 : 0)
                    << L" encErr=" << encErrs_.load()
-                   << L" skp=" << drops_ << L" bfr=" << reorder_.load() << L"\n";
+                   << L" skp=" << drops_ << L" bfr=" << reorder_.load()
+                   << L" hwdec=" << (dec_.is_hw() ? 1 : 0) << L"\n";
     }
 
     OutputRef ref_;
@@ -1751,6 +2006,7 @@ private:
     HdrInfo hdr_;
     ComPtr<ID3D11Device> dev_;
     ComPtr<ID3D11DeviceContext> ctx_;
+    AVBufferRef *hwDev_ = nullptr;           // D3D11VA wrap of dev_
     ComPtr<IDXGIFactory2> fac_;
     ComPtr<IDXGISwapChain3> scA_, scB_;
     ComPtr<ID3D11RenderTargetView> rtvA_, rtvB_;
@@ -1787,7 +2043,8 @@ private:
     std::mutex jobMtx_;
     std::condition_variable jobCv_;
     bool jobReady_ = false, workerExit_ = false;
-    const uint8_t *jobPtr_ = nullptr; int jobPitch_ = 0; int64_t jobPts_ = 0;
+    const uint8_t *jobY_ = nullptr, *jobUV_ = nullptr;
+    int jobPY_ = 0, jobPUV_ = 0; int64_t jobPts_ = 0;
     std::atomic<bool> jobInFlight_{false};   // dispatch .. collect
     std::atomic<bool> jobDone_{false};       // worker -> render thread
     int subNew_ = -1, subOld_ = -1, inFlightSlot_ = -1;   // latest-wins reservoir
