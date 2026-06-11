@@ -1860,6 +1860,8 @@ private:
         UINT req = 0;
         DXGI_OUTDUPL_POINTER_SHAPE_INFO info{};
         if (FAILED(dup_->GetFramePointerShape((UINT)shapeBuf_.size(), shapeBuf_.data(), &req, &info))) return;
+        curHotX_ = (int)info.HotSpot.x;
+        curHotY_ = (int)info.HotSpot.y;
         const int w = (int)info.Width;
         const bool mono = info.Type == DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MONOCHROME;
         const int h = mono ? (int)info.Height / 2 : (int)info.Height;
@@ -1895,16 +1897,25 @@ private:
         curValid_ = true;
     }
 
-    // Blend the cursor onto frameTex_ at its desktop position (sRGB->scRGB).
+    // Blend the cursor onto frameTex_ (sRGB->scRGB). Position comes from
+    // GetCursorPos -- live input-rate coordinates -- rather than DDA's
+    // PointerPosition, which is a captured frame old and reads as "floaty";
+    // the DDA shape's hotspot anchors the live point to the shape's top-left.
     void composite_cursor()
     {
         if (!curVisible_ || !curValid_ || curW_ <= 0 || !rtvFrame_ || frW_ <= 0) return;
+        POINT pos = curPos_;
+        POINT live;
+        if (GetCursorPos(&live)) {
+            pos.x = live.x - ref_.desc.DesktopCoordinates.left - curHotX_;
+            pos.y = live.y - ref_.desc.DesktopCoordinates.top - curHotY_;
+        }
         D3D11_VIEWPORT vp{0, 0, (float)frW_, (float)frH_, 0, 1};
         ctx_->RSSetViewports(1, &vp);
         ctx_->OMSetRenderTargets(1, rtvFrame_.GetAddressOf(), nullptr);
         const float q[8] = {
-            (float)curPos_.x / frW_ * 2 - 1, 1 - (float)curPos_.y / frH_ * 2,
-            (float)(curPos_.x + curW_) / frW_ * 2 - 1, 1 - (float)(curPos_.y + curH_) / frH_ * 2,
+            (float)pos.x / frW_ * 2 - 1, 1 - (float)pos.y / frH_ * 2,
+            (float)(pos.x + curW_) / frW_ * 2 - 1, 1 - (float)(pos.y + curH_) / frH_ * 2,
             g_paperwhite_nits / 80.0f, 0, 0, 0};
         D3D11_MAPPED_SUBRESOURCE m{};
         if (SUCCEEDED(ctx_->Map(cbCursor_.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &m))) { memcpy(m.pData, q, sizeof(q)); ctx_->Unmap(cbCursor_.Get(), 0); }
@@ -2027,7 +2038,8 @@ private:
     ComPtr<ID3D11RenderTargetView> rtvFrame_;
     ComPtr<ID3D11Texture2D> curTex_;
     ComPtr<ID3D11ShaderResourceView> curSRV_;
-    int curW_ = 0, curH_ = 0; POINT curPos_{}; bool curVisible_ = false, curValid_ = false;
+    int curW_ = 0, curH_ = 0, curHotX_ = 0, curHotY_ = 0;
+    POINT curPos_{}; bool curVisible_ = false, curValid_ = false;
     std::vector<uint8_t> shapeBuf_;
     Converter conv_;
     DecodedView decoded_;
