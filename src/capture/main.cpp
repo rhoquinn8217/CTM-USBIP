@@ -28,6 +28,8 @@
 #include <cmath>
 #include <condition_variable>
 #include <cstdint>
+#include <deque>
+#include <memory>
 #include <cstdio>
 #include <cstring>
 #include <iostream>
@@ -859,6 +861,10 @@ static std::mutex g_cfgMtx;
 static EncConfig g_cfgDesired;
 static std::atomic<bool> g_cfgDirty{false};
 static std::atomic<bool> g_vsync{false};   // V toggles; off = present without vblank wait
+static bool g_noPreview = false;           // --nopreview: stream only, windows hidden
+static int g_maxFps = 0;                   // --fps N: optional encode cadence cap for
+                                           // diagnostics; 0 (default) = uncapped, the
+                                           // pipeline runs at capture rate (VDD refresh)
 
 // --- GPU converter: captured FP16 scRGB -> P010 (PQ BT.2020 YCbCr 4:2:0) ---
 // Y plane rendered full-res into R16_UNORM, interleaved CbCr half-res into
@@ -1031,7 +1037,10 @@ public:
         if (!ctx_) { if (err) *err = "alloc encoder ctx failed"; return false; }
         ctx_->width = w; ctx_->height = h;
         ctx_->pix_fmt = AV_PIX_FMT_P010LE;    // shader already produced PQ BT.2020 YCbCr
-        ctx_->time_base = av_make_q(1, 60);
+        // PTS carries real capture time in microseconds -- frames are encoded
+        // only when the desktop changes, so frame-index timing would lie to
+        // the receiver's renderer. framerate stays as a rate-control hint.
+        ctx_->time_base = av_make_q(1, 1000000);
         ctx_->framerate = av_make_q(60, 1);
         // Long GOP: an IDR every second (~60) caused a visible 1 Hz hiccup on
         // the TV (multi-megabit burst + heavier decode). New clients don't
@@ -1531,7 +1540,9 @@ public:
         if (listenSock_ != INVALID_SOCKET) { closesocket(listenSock_); listenSock_ = INVALID_SOCKET; }
         {
             std::lock_guard<std::mutex> lk(mtx_);
-            for (SOCKET c : clients_) closesocket(c);
+            for (auto &cl : clients_) { cl->dead.store(true); cl->qcv.notify_all(); }
+            for (auto &cl : clients_)
+                if (cl->writer.joinable()) cl->writer.join();   // writer closes its socket
             clients_.clear();
         }
         if (acceptThread_.joinable()) acceptThread_.join();
@@ -1568,6 +1579,20 @@ public:
     bool connected() { std::lock_guard<std::mutex> lk(mtx_); return !clients_.empty(); }
 
 private:
+    // One queue + writer thread per client: a slow link (TV on wifi) must
+    // never block the codec worker -- enqueue is wait-free for the producer.
+    // If a client falls more than kMaxQueue behind it is dropped.
+    struct Client {
+        SOCKET sock = INVALID_SOCKET;
+        std::thread writer;
+        std::mutex qm;
+        std::condition_variable qcv;
+        std::deque<std::vector<uint8_t>> q;
+        size_t qBytes = 0;
+        std::atomic<bool> dead{false};
+    };
+    static const size_t kMaxQueue = 32u * 1024u * 1024u;   // ~3 s of 80 Mb/s
+
     // Multiple simultaneous clients (local preview + TV). Each new client gets
     // the cached STREAM_INFO + cursor shape, and triggers an IDR so it can
     // start decoding immediately instead of waiting out the GOP.
@@ -1579,16 +1604,45 @@ private:
             BOOL nd = TRUE;
             setsockopt(c, IPPROTO_TCP, TCP_NODELAY, (const char *)&nd, sizeof(nd));
             std::lock_guard<std::mutex> lk(mtx_);
+            reap_dead();
             if (clients_.size() >= 4) { closesocket(c); continue; }
-            clients_.push_back(c);
-            if (haveInfo_) send_one(c, CTMS_STREAM_INFO, 0, 0, &info_, sizeof(info_));
+            auto cl = std::make_unique<Client>();
+            cl->sock = c;
+            cl->writer = std::thread(&StreamSender::writer_loop, this, cl.get());
+            if (haveInfo_) enqueue_one(cl.get(), CTMS_STREAM_INFO, 0, 0, &info_, sizeof(info_));
             if (!shapePix_.empty()) {
                 std::vector<uint8_t> buf = shape_buf();
-                send_one(c, CTMS_CURSOR_SHAPE, 0, 0, buf.data(), (int)buf.size());
+                enqueue_one(cl.get(), CTMS_CURSOR_SHAPE, 0, 0, buf.data(), (int)buf.size());
             }
+            clients_.push_back(std::move(cl));
             wantIdr_.store(true);
         }
     }
+
+    void writer_loop(Client *cl)
+    {
+        for (;;) {
+            std::vector<uint8_t> msg;
+            {
+                std::unique_lock<std::mutex> lk(cl->qm);
+                cl->qcv.wait(lk, [&] { return !cl->q.empty() || cl->dead.load() || exit_.load(); });
+                if (cl->dead.load() || exit_.load()) break;
+                msg = std::move(cl->q.front());
+                cl->q.pop_front();
+                cl->qBytes -= msg.size();
+            }
+            const char *b = reinterpret_cast<const char *>(msg.data());
+            int len = (int)msg.size();
+            while (len > 0) {
+                int n = send(cl->sock, b, len, 0);
+                if (n <= 0) { cl->dead.store(true); break; }
+                b += n; len -= n;
+            }
+            if (cl->dead.load()) break;
+        }
+        closesocket(cl->sock);
+    }
+
     std::vector<uint8_t> shape_buf()   // mtx_ held
     {
         std::vector<uint8_t> buf(sizeof(CtmsCursorShape) + shapePix_.size());
@@ -1603,33 +1657,41 @@ private:
     }
     void send_msg(uint16_t type, uint16_t flags, uint64_t pts, const void *payload, int len)   // mtx_ held
     {
+        for (auto &cl : clients_) enqueue_one(cl.get(), type, flags, pts, payload, len);
+        reap_dead();
+    }
+    void enqueue_one(Client *cl, uint16_t type, uint16_t flags, uint64_t pts, const void *payload, int len)
+    {
+        if (cl->dead.load()) return;
+        CtmsHdr h{CTMS_MAGIC, type, flags, pts, (uint32_t)len};
+        std::vector<uint8_t> msg(sizeof(h) + len);
+        memcpy(msg.data(), &h, sizeof(h));
+        if (len) memcpy(msg.data() + sizeof(h), payload, len);
+        std::lock_guard<std::mutex> lk(cl->qm);
+        if (cl->qBytes + msg.size() > kMaxQueue) {   // hopelessly behind: drop client
+            cl->dead.store(true);
+            cl->qcv.notify_one();
+            return;
+        }
+        cl->qBytes += msg.size();
+        cl->q.push_back(std::move(msg));
+        cl->qcv.notify_one();
+    }
+    void reap_dead()   // mtx_ held
+    {
         for (size_t i = 0; i < clients_.size();) {
-            if (send_one(clients_[i], type, flags, pts, payload, len)) {
-                ++i;
+            if (clients_[i]->dead.load()) {
+                clients_[i]->qcv.notify_all();
+                if (clients_[i]->writer.joinable()) clients_[i]->writer.join();
+                clients_.erase(clients_.begin() + i);
             } else {
-                closesocket(clients_[i]);
-                clients_.erase(clients_.begin() + i);   // dead client; drop it
+                ++i;
             }
         }
     }
-    bool send_one(SOCKET s, uint16_t type, uint16_t flags, uint64_t pts, const void *payload, int len)
-    {
-        CtmsHdr h{CTMS_MAGIC, type, flags, pts, (uint32_t)len};
-        return send_all(s, &h, sizeof(h)) && send_all(s, payload, len);
-    }
-    bool send_all(SOCKET s, const void *p, int len)
-    {
-        const char *b = static_cast<const char *>(p);
-        while (len > 0) {
-            int n = send(s, b, len, 0);
-            if (n <= 0) return false;
-            b += n; len -= n;
-        }
-        return true;
-    }
 
     SOCKET listenSock_ = INVALID_SOCKET;
-    std::vector<SOCKET> clients_;
+    std::vector<std::unique_ptr<Client>> clients_;
     std::thread acceptThread_;
     std::atomic<bool> exit_{false};
     std::atomic<bool> wantIdr_{false};
@@ -1644,10 +1706,11 @@ private:
 // B shows the true protocol+decode path (minus only network ping).
 class StreamReceiver {
 public:
-    // dispatchT: pts&127 -> capture time ring (same process), for the lat stat
-    void start(uint16_t port, AVBufferRef *hwDev, const double *dispatchT)
+    // t0: sender stream epoch (now_ms at init) -- pts is us since t0, and we
+    // share the clock (same machine), so lat = (now - t0) - pts/1000.
+    void start(uint16_t port, AVBufferRef *hwDev, double t0)
     {
-        hwDev_ = hwDev; dispatchT_ = dispatchT;
+        hwDev_ = hwDev; t0_ = t0;
         thread_ = std::thread(&StreamReceiver::run, this, port);
     }
     void stop()
@@ -1734,8 +1797,8 @@ private:
                             if (decodedLatest_) av_frame_free(&decodedLatest_);
                             decodedLatest_ = cl;
                         }
-                        if (f->pts >= 0 && dispatchT_)
-                            latMs.store(now_ms() - dispatchT_[f->pts & 127]);
+                        if (f->pts >= 0)
+                            latMs.store((now_ms() - t0_) - (double)f->pts / 1000.0);
                         decFrames.fetch_add(1);
                     }
                     decMs.store(now_ms() - t0);
@@ -1790,7 +1853,7 @@ private:
     std::mutex sockMtx_;
     SOCKET sock_ = INVALID_SOCKET;
     AVBufferRef *hwDev_ = nullptr;
-    const double *dispatchT_ = nullptr;
+    double t0_ = 0;
     Decoder dec_;
     CtmsStreamInfo info_{};
     std::mutex decMtx_;
@@ -1940,9 +2003,11 @@ public:
         capH_ = ref.desc.DesktopCoordinates.bottom - ref.desc.DesktopCoordinates.top;
         WSADATA wsa{};
         WSAStartup(MAKEWORD(2, 2), &wsa);
+        t0_ = now_ms();   // stream epoch: pts = us since here
         if (!sender_.start(CTMS_PORT, err)) return false;
-        rx_.start(CTMS_PORT, hwDev_, dispatchT_);
-        std::wcout << L"CTMS stream on port " << CTMS_PORT << L" (local receiver attached)\n";
+        if (!g_noPreview) rx_.start(CTMS_PORT, hwDev_, t0_);
+        std::wcout << L"CTMS stream on port " << CTMS_PORT
+                   << (g_noPreview ? L" (no preview)\n" : L" (local receiver attached)\n");
 
         { std::lock_guard<std::mutex> lk(g_cfgMtx); applied_ = g_cfgDesired; }
         if (!reconfigure(applied_, err)) return false;
@@ -1991,7 +2056,10 @@ public:
         // 3. dispatch to the codec worker: newest completed copy wins. Try the
         //    most recent submission first; if its GPU copy isn't finished yet,
         //    fall back to the older one. Whatever is staler gets dropped.
-        if (!jobInFlight_.load() && (subNew_ >= 0 || subOld_ >= 0)) {
+        //    Cadence-capped to --fps: the reservoir keeps freshness, and the
+        //    receiver's renderer isn't flooded past its display rate.
+        if (!jobInFlight_.load() && (subNew_ >= 0 || subOld_ >= 0) &&
+            (g_maxFps <= 0 || (now_ms() - lastDispatchT_) >= 1000.0 / g_maxFps)) {
             const int order[2] = {subNew_, subOld_};
             for (int k = 0; k < 2; ++k) {
                 const int s = order[k];
@@ -2003,8 +2071,10 @@ public:
                     mapMs_ = now_ms() - m0;
                     {
                         std::lock_guard<std::mutex> lk(jobMtx_);
-                        jobY_ = dy; jobPY_ = py; jobUV_ = duv; jobPUV_ = puv; jobPts_ = pts_++;
-                        dispatchT_[jobPts_ & 127] = submitT_[s];   // latency from capture, not dispatch
+                        jobY_ = dy; jobPY_ = py; jobUV_ = duv; jobPUV_ = puv;
+                        // pts = capture time in us since stream start (real cadence)
+                        jobPts_ = (int64_t)((submitT_[s] - t0_) * 1000.0);
+                        pts_++;   // frame counter, stats only
                         jobReady_ = true;
                     }
                     inFlightSlot_ = s;
@@ -2014,6 +2084,7 @@ public:
                     } else {
                         subOld_ = -1;          // newest still copying; it dispatches next
                     }
+                    lastDispatchT_ = now_ms();
                     jobInFlight_.store(true);
                     jobCv_.notify_one();
                     break;
@@ -2068,9 +2139,11 @@ public:
         // 5. window A: raw scRGB passthrough (never waits on the codec path)
         const UINT sync = g_vsync.load() ? 1 : 0;
         const UINT pflags = (sync == 0 && tearing_) ? DXGI_PRESENT_ALLOW_TEARING : 0;
-        if (haveFrame_) draw_scene(rtvA_.Get(), bbAW_, bbAH_, frameSRV_.Get(), frW_, frH_);
-        draw_cursor_overlay(rtvA_.Get(), bbAW_, bbAH_);
-        scA_->Present(sync, pflags);
+        if (!g_noPreview) {
+            if (haveFrame_) draw_scene(rtvA_.Get(), bbAW_, bbAH_, frameSRV_.Get(), frW_, frH_);
+            draw_cursor_overlay(rtvA_.Get(), bbAW_, bbAH_);
+            scA_->Present(sync, pflags);
+        }
         send_cursor_pos();   // CTMS: position on change (shape goes in update_cursor)
 
         // 6. reservoir, latest-wins: every fresh frame is submitted; when both
@@ -2091,19 +2164,21 @@ public:
         // 7. window B: newest decoded frame from the CTMS receiver (the same
         //    path the TV runs); cursor drawn from RECEIVED metadata, so B
         //    shows the cursor's true through-the-pipe latency.
-        AVFrame *take = rx_.take_decoded();
-        if (take) {
-            if (take->format == AV_PIX_FMT_D3D11) decoded_.set_hw(take);
-            else { decoded_.upload(take); av_frame_free(&take); }
+        if (!g_noPreview) {
+            AVFrame *take = rx_.take_decoded();
+            if (take) {
+                if (take->format == AV_PIX_FMT_D3D11) decoded_.set_hw(take);
+                else { decoded_.upload(take); av_frame_free(&take); }
+            }
+            if (decoded_.valid()) {
+                const float black[4] = {0, 0, 0, 1};
+                ctx_->ClearRenderTargetView(rtvB_.Get(), black);
+                ctx_->OMSetRenderTargets(1, rtvB_.GetAddressOf(), nullptr);
+                decoded_.draw(bbBW_, bbBH_);
+            }
+            draw_rx_cursor_overlay(rtvB_.Get(), bbBW_, bbBH_);
+            scB_->Present(sync, pflags);
         }
-        if (decoded_.valid()) {
-            const float black[4] = {0, 0, 0, 1};
-            ctx_->ClearRenderTargetView(rtvB_.Get(), black);
-            ctx_->OMSetRenderTargets(1, rtvB_.GetAddressOf(), nullptr);
-            decoded_.draw(bbBW_, bbBH_);
-        }
-        draw_rx_cursor_overlay(rtvB_.Get(), bbBW_, bbBH_);
-        scB_->Present(sync, pflags);
 
         const double dt = now_ms() - loopT0;
         statLoops_++;
@@ -2139,6 +2214,7 @@ public:
                 if (p->pts != AV_NOPTS_VALUE && p->dts != AV_NOPTS_VALUE && p->pts != p->dts)
                     reorder_.fetch_add(1);   // pts!=dts => B-frame style reordering
                 sender_.send_video(p->data, p->size, p->pts, (p->flags & AV_PKT_FLAG_KEY) != 0);
+                txFrames_.fetch_add(1);
                 av_packet_free(&p);
             }
             winBytes_.fetch_add(bytes);
@@ -2455,6 +2531,9 @@ private:
         lastStat_ = t;
         const double fps = statLoops_ * 1000.0 / el;
         statLoops_ = 0;
+        const uint64_t tx = txFrames_.load();
+        const double txfps = (double)(tx - lastTx_) * 1000.0 / el;
+        lastTx_ = tx;
         const double worst = worstLoop_;
         worstLoop_ = 0;
         const double mbps = winBytes_.exchange(0) * 8.0 / 1000.0 / el;   // window-averaged
@@ -2470,7 +2549,8 @@ private:
                    << L" | loop " << fps << L"fps worst " << worst << L"ms map " << mapMs_
                    << L"ms | enc " << encMs << L"ms dec " << decMs << L"ms lat " << latMs
                    << L"ms | ~" << mbps
-                   << L" Mb/s enc#=" << pts_ << L" dec#=" << rx_.decFrames.load()
+                   << L" Mb/s txfps=" << txfps
+                   << L" enc#=" << pts_ << L" dec#=" << rx_.decFrames.load()
                    << L" shown=" << (decoded_.valid() ? 1 : 0)
                    << L" vsync=" << (g_vsync.load() ? 1 : 0)
                    << L" wstage=" << wstage_.load() << L" inflight=" << (jobInFlight_.load() ? 1 : 0)
@@ -2549,7 +2629,10 @@ private:
     std::atomic<int> wstage_{0};               // 0 idle, 1 encoding
     std::atomic<int> encErrs_{0};
     std::atomic<int> reorder_{0};              // packets with pts != dts (B-frames)
-    double dispatchT_[128] = {};               // pts & 127 -> dispatch time
+    std::atomic<uint64_t> txFrames_{0};        // video frames handed to the sender
+    double t0_ = 0;                            // stream epoch (pts = us since t0)
+    double lastDispatchT_ = 0;                 // --fps cadence cap
+    uint64_t lastTx_ = 0;
     int statLoops_ = 0;
     double worstLoop_ = 0, mapMs_ = 0, lastStat_ = 0;
 };
@@ -2578,8 +2661,10 @@ static int run_dual(OutputRef ref)
     auto dp = std::make_shared<DualPipeline>();
     std::wstring err;
     if (!dp->init(ref, wndA, wndB, &wsA, &wsB, &err)) { std::wcerr << L"dual init: " << err << L"\n"; return 3; }
-    ShowWindow(wndA, SW_SHOW);
-    ShowWindow(wndB, SW_SHOW);
+    if (!g_noPreview) {
+        ShowWindow(wndA, SW_SHOW);
+        ShowWindow(wndB, SW_SHOW);
+    }
     std::wcout << L"\nHotkeys (focus either window):  C=codec  M=rate-mode  R=resolution  U=usage"
                   L"  V=vsync  Up/Down=bitrate(or qp)  Left/Right=maxrate  Esc=quit\n";
 
@@ -2626,6 +2711,8 @@ int wmain(int argc, wchar_t **argv)
         std::wstring a = argv[i];
         auto next = [&](const wchar_t *def) -> std::wstring { return (i + 1 < argc) ? argv[++i] : def; };
         if (a == L"--single") single = true;
+        else if (a == L"--nopreview") g_noPreview = true;
+        else if (a == L"--fps") g_maxFps = _wtoi(next(L"0").c_str());   // 0/absent = uncapped
         else if (a == L"--output") idx = _wtoi(next(L"0").c_str());
         else if (a == L"--codec") cfg.codec = eqi(next(L"hevc"), L"av1") ? EncConfig::AV1 : EncConfig::HEVC;
         else if (a == L"--bitrate") cfg.bitrateKbps = std::max(500, _wtoi(next(L"40000").c_str()));
