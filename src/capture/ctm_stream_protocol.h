@@ -11,19 +11,35 @@
 
 enum CtmsType : uint16_t {
     CTMS_STREAM_INFO  = 1,   // CtmsStreamInfo (sent on connect + every encoder reconfigure)
-    CTMS_VIDEO_FRAME  = 2,   // Annex-B ES payload; hdr.pts = frame pts, flags bit0 = IDR
+    CTMS_VIDEO_FRAME  = 2,   // Annex-B ES payload; hdr.pts=t0 present, hdr.t1=encoded; flags bit0=IDR
     CTMS_CURSOR_POS   = 3,   // CtmsCursorPos (sent on change)
     CTMS_CURSOR_SHAPE = 4,   // CtmsCursorShape + RGBA8 pixels (sent when shape changes)
+    CTMS_PING         = 5,   // client->host: CtmsPing (clock sync)
+    CTMS_PONG         = 6,   // host->client: CtmsPong (echo + host clock)
+    CTMS_AUDIO_FRAME  = 7,   // interleaved S16LE PCM; hdr.pts = capture time (us)
 };
 
 #define CTMS_FLAG_IDR   0x0001
 
+// All host timestamps are microseconds since the host's stream epoch (t0_ at
+// stream start). pts/t1 let the receiver build a present->encode->arrive
+// timeline; PING/PONG resolve the host<->client clock offset + network RTT.
 struct CtmsHdr {
     uint32_t magic;          // CTMS_MAGIC
     uint16_t type;           // CtmsType
     uint16_t flags;
-    uint64_t pts;            // video: frame pts; cursor: sender ms timestamp
+    uint64_t pts;            // video: t0 = Windows present time (us); cursor: send time
+    uint64_t tEnc;           // video: encode-START time (us); enc = t1 - tEnc
+    uint64_t t1;             // video: encode-done time (us); else 0
     uint32_t payloadLen;     // bytes following this header
+};
+
+struct CtmsPing {
+    uint64_t clientUs;       // client clock at send (echoed back)
+};
+struct CtmsPong {
+    uint64_t clientUs;       // echo of CtmsPing.clientUs
+    uint64_t hostUs;         // host clock (us since host stream epoch) at reply
 };
 
 struct CtmsStreamInfo {
@@ -36,6 +52,10 @@ struct CtmsStreamInfo {
     float    primaries[8];   // rx,ry,gx,gy,bx,by,wx,wy
     float    maxLum, minLum; // mastering display nits
     float    maxCLL, maxFALL;
+    uint8_t  hasAudio;       // 1 = an audio stream follows (S16LE PCM)
+    uint8_t  audioChannels;  // e.g. 2
+    uint16_t _apad;
+    uint32_t audioRate;      // PCM sample rate, Hz (e.g. 48000)
 };
 
 struct CtmsCursorPos {

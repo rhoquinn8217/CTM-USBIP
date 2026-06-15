@@ -1,0 +1,165 @@
+// Native AMD AMF encoder (HEVC + AV1) -- true zero-copy.
+//
+// Wraps OUR OWN single D3D11 P010 texture (the one the converter renders into) as
+// an AMF input surface via CreateSurfaceFromDX11Native and encodes it directly --
+// no ffmpeg hwframe pool (AMD rejects a P010 texture ARRAY), no copy, no readback.
+// amfrt64.dll ships with the AMD driver. ffmpeg is only the CPU fallback now.
+//
+// Included into main.cpp after EncConfig/HdrInfo/now_ms are defined.
+#include <core/Factory.h>
+#include <core/Context.h>
+#include <core/Surface.h>
+#include <core/Buffer.h>
+#include <core/Data.h>
+#include <components/Component.h>
+#include <components/VideoEncoderHEVC.h>
+#include <components/VideoEncoderAV1.h>
+
+using namespace amf;   // amf_int64/amf_pts/AMF_OK/AMFConstructSize/enum values/etc.
+
+class AmfEncoder {
+public:
+    // dll/factory/context are created once and reused across reconfigures; only
+    // the encoder component is rebuilt. Returns false (and leaves is_open()==false)
+    // if AMF is unavailable -- the caller then falls back to ffmpeg/CPU.
+    bool open(const EncConfig &cfg, int w, int h, const HdrInfo &hdr, ID3D11Device *dev, std::string *err)
+    {
+        if (enc_) { enc_->Terminate(); enc_->Release(); enc_ = nullptr; }
+        ok_ = false;
+        if (!dev) { if (err) *err = "no D3D11 device"; return false; }
+        if (!dll_) dll_ = LoadLibraryW(AMF_DLL_NAME);
+        if (!dll_) { if (err) *err = "amfrt64.dll not found (AMD driver missing?)"; return false; }
+        if (!factory_) {
+            auto initFn = reinterpret_cast<AMFInit_Fn>(GetProcAddress(dll_, AMF_INIT_FUNCTION_NAME));
+            if (!initFn || initFn(AMF_FULL_VERSION, &factory_) != AMF_OK || !factory_) {
+                if (err) *err = "AMFInit failed"; return false;
+            }
+        }
+        if (!ctx_) {
+            if (factory_->CreateContext(&ctx_) != AMF_OK || !ctx_) { if (err) *err = "CreateContext failed"; return false; }
+            if (ctx_->InitDX11(dev) != AMF_OK) { if (err) *err = "InitDX11 failed"; return false; }
+        }
+        av1_ = (cfg.codec == EncConfig::AV1);
+        if (factory_->CreateComponent(ctx_, av1_ ? AMFVideoEncoder_AV1 : AMFVideoEncoder_HEVC, &enc_) != AMF_OK || !enc_) {
+            if (err) *err = "CreateComponent failed"; return false;
+        }
+
+        const amf_int64 br = (amf_int64)cfg.bitrateKbps * 1000;
+        const amf_int64 mr = (amf_int64)std::max(cfg.maxrateKbps, cfg.bitrateKbps) * 1000;
+        const amf_int64 gop = cfg.allIntra ? 1 : 600;   // all-intra: IDR every frame
+        if (av1_) {
+            enc_->SetProperty(AMF_VIDEO_ENCODER_AV1_USAGE,
+                cfg.usage == EncConfig::ULL ? (amf_int64)AMF_VIDEO_ENCODER_AV1_USAGE_ULTRA_LOW_LATENCY
+              : cfg.usage == EncConfig::LL  ? (amf_int64)AMF_VIDEO_ENCODER_AV1_USAGE_LOW_LATENCY
+                                            : (amf_int64)AMF_VIDEO_ENCODER_AV1_USAGE_TRANSCODING);
+            enc_->SetProperty(AMF_VIDEO_ENCODER_AV1_FRAMESIZE, AMFConstructSize(w, h));
+            enc_->SetProperty(AMF_VIDEO_ENCODER_AV1_COLOR_BIT_DEPTH, (amf_int64)AMF_COLOR_BIT_DEPTH_10);
+            enc_->SetProperty(AMF_VIDEO_ENCODER_AV1_PROFILE, (amf_int64)AMF_VIDEO_ENCODER_AV1_PROFILE_MAIN);
+            enc_->SetProperty(AMF_VIDEO_ENCODER_AV1_QUALITY_PRESET,
+                cfg.usage == EncConfig::ULL ? (amf_int64)AMF_VIDEO_ENCODER_AV1_QUALITY_PRESET_SPEED
+              : cfg.usage == EncConfig::LL  ? (amf_int64)AMF_VIDEO_ENCODER_AV1_QUALITY_PRESET_BALANCED
+                                            : (amf_int64)AMF_VIDEO_ENCODER_AV1_QUALITY_PRESET_QUALITY);
+            enc_->SetProperty(AMF_VIDEO_ENCODER_AV1_ALIGNMENT_MODE, (amf_int64)AMF_VIDEO_ENCODER_AV1_ALIGNMENT_MODE_NO_RESTRICTIONS);
+            enc_->SetProperty(AMF_VIDEO_ENCODER_AV1_RATE_CONTROL_METHOD,
+                cfg.mode == EncConfig::CBR ? (amf_int64)AMF_VIDEO_ENCODER_AV1_RATE_CONTROL_METHOD_CBR
+              : cfg.mode == EncConfig::CQP ? (amf_int64)AMF_VIDEO_ENCODER_AV1_RATE_CONTROL_METHOD_CONSTANT_QP
+                                           : (amf_int64)AMF_VIDEO_ENCODER_AV1_RATE_CONTROL_METHOD_PEAK_CONSTRAINED_VBR);
+            enc_->SetProperty(AMF_VIDEO_ENCODER_AV1_TARGET_BITRATE, br);
+            enc_->SetProperty(AMF_VIDEO_ENCODER_AV1_PEAK_BITRATE, mr);
+            enc_->SetProperty(AMF_VIDEO_ENCODER_AV1_FRAMERATE, AMFConstructRate(60, 1));
+            enc_->SetProperty(AMF_VIDEO_ENCODER_AV1_GOP_SIZE, gop);
+        } else {
+            enc_->SetProperty(AMF_VIDEO_ENCODER_HEVC_USAGE,
+                cfg.usage == EncConfig::ULL ? (amf_int64)AMF_VIDEO_ENCODER_HEVC_USAGE_ULTRA_LOW_LATENCY
+              : cfg.usage == EncConfig::LL  ? (amf_int64)AMF_VIDEO_ENCODER_HEVC_USAGE_LOW_LATENCY
+                                            : (amf_int64)AMF_VIDEO_ENCODER_HEVC_USAGE_TRANSCODING);
+            enc_->SetProperty(AMF_VIDEO_ENCODER_HEVC_FRAMESIZE, AMFConstructSize(w, h));
+            enc_->SetProperty(AMF_VIDEO_ENCODER_HEVC_COLOR_BIT_DEPTH, (amf_int64)AMF_COLOR_BIT_DEPTH_10);
+            enc_->SetProperty(AMF_VIDEO_ENCODER_HEVC_PROFILE, (amf_int64)AMF_VIDEO_ENCODER_HEVC_PROFILE_MAIN_10);
+            enc_->SetProperty(AMF_VIDEO_ENCODER_HEVC_TIER, (amf_int64)AMF_VIDEO_ENCODER_HEVC_TIER_MAIN);
+            enc_->SetProperty(AMF_VIDEO_ENCODER_HEVC_QUALITY_PRESET,
+                cfg.usage == EncConfig::ULL ? (amf_int64)AMF_VIDEO_ENCODER_HEVC_QUALITY_PRESET_SPEED
+              : cfg.usage == EncConfig::LL  ? (amf_int64)AMF_VIDEO_ENCODER_HEVC_QUALITY_PRESET_BALANCED
+                                            : (amf_int64)AMF_VIDEO_ENCODER_HEVC_QUALITY_PRESET_QUALITY);
+            enc_->SetProperty(AMF_VIDEO_ENCODER_HEVC_RATE_CONTROL_METHOD,
+                cfg.mode == EncConfig::CBR ? (amf_int64)AMF_VIDEO_ENCODER_HEVC_RATE_CONTROL_METHOD_CBR
+              : cfg.mode == EncConfig::CQP ? (amf_int64)AMF_VIDEO_ENCODER_HEVC_RATE_CONTROL_METHOD_CONSTANT_QP
+                                           : (amf_int64)AMF_VIDEO_ENCODER_HEVC_RATE_CONTROL_METHOD_PEAK_CONSTRAINED_VBR);
+            enc_->SetProperty(AMF_VIDEO_ENCODER_HEVC_TARGET_BITRATE, br);
+            enc_->SetProperty(AMF_VIDEO_ENCODER_HEVC_PEAK_BITRATE, mr);
+            enc_->SetProperty(AMF_VIDEO_ENCODER_HEVC_FRAMERATE, AMFConstructRate(60, 1));
+            enc_->SetProperty(AMF_VIDEO_ENCODER_HEVC_GOP_SIZE, gop);
+            enc_->SetProperty(AMF_VIDEO_ENCODER_HEVC_NUM_GOPS_PER_IDR, (amf_int64)1);
+        }
+        if (enc_->Init(AMF_SURFACE_P010, w, h) != AMF_OK) { if (err) *err = "encoder Init failed"; return false; }
+        w_ = w; h_ = h; ok_ = true;
+        return true;
+    }
+
+    bool is_open() const { return ok_; }
+    void force_idr() { forceIdr_.store(true); }
+
+    // Encode our D3D11 P010 texture (zero-copy). Appends each Annex-B packet's
+    // bytes to `out` with its keyframe flag in `keys`. 1-in/1-out low latency:
+    // polls (bounded) for this frame's packet. Returns false on a hard error.
+    bool encode(ID3D11Texture2D *p010, int64_t ptsUs,
+                std::vector<std::vector<uint8_t>> &out, std::vector<bool> &keys)
+    {
+        if (!ok_ || !p010) return false;
+        amf::AMFSurfacePtr surf;
+        if (ctx_->CreateSurfaceFromDX11Native(p010, &surf, nullptr) != AMF_OK || !surf) return false;
+        surf->SetPts((amf_pts)ptsUs * 10);   // amf_pts is 100ns units
+        if (forceIdr_.exchange(false)) {
+            if (av1_) surf->SetProperty(AMF_VIDEO_ENCODER_AV1_FORCE_FRAME_TYPE, (amf_int64)AMF_VIDEO_ENCODER_AV1_FORCE_FRAME_TYPE_KEY);
+            else      surf->SetProperty(AMF_VIDEO_ENCODER_HEVC_FORCE_PICTURE_TYPE, (amf_int64)AMF_VIDEO_ENCODER_HEVC_PICTURE_TYPE_IDR);
+        }
+        AMF_RESULT r = enc_->SubmitInput(surf);
+        if (r != AMF_OK && r != AMF_NEED_MORE_INPUT && r != AMF_INPUT_FULL) return false;
+
+        const double dl = now_ms() + 200.0;   // wall-clock safety bound
+        bool got = false;
+        for (;;) {
+            amf::AMFDataPtr data;
+            AMF_RESULT q = enc_->QueryOutput(&data);
+            if (q == AMF_OK && data) {
+                amf::AMFBufferPtr buf(data);
+                if (buf && buf->GetNative() && buf->GetSize()) {
+                    const uint8_t *p = static_cast<const uint8_t *>(buf->GetNative());
+                    out.emplace_back(p, p + buf->GetSize());
+                    amf_int64 t = -1;
+                    if (av1_) data->GetProperty(AMF_VIDEO_ENCODER_AV1_OUTPUT_FRAME_TYPE, &t);
+                    else      data->GetProperty(AMF_VIDEO_ENCODER_HEVC_OUTPUT_DATA_TYPE, &t);
+                    keys.push_back(av1_ ? (t == AMF_VIDEO_ENCODER_AV1_OUTPUT_FRAME_TYPE_KEY)
+                                        : (t == AMF_VIDEO_ENCODER_HEVC_OUTPUT_DATA_TYPE_IDR));
+                    got = true;
+                }
+                continue;            // drain anything else ready
+            }
+            if (q == AMF_REPEAT) {   // not produced yet
+                if (got || now_ms() >= dl) break;
+                YieldProcessor();
+                continue;
+            }
+            break;                   // AMF_EOF or error
+        }
+        return true;
+    }
+
+    void close()
+    {
+        if (enc_) { enc_->Terminate(); enc_->Release(); enc_ = nullptr; }
+        if (ctx_) { ctx_->Terminate(); ctx_->Release(); ctx_ = nullptr; }
+        // factory_ is owned by the runtime; dll_ stays loaded for process life.
+        ok_ = false; w_ = h_ = 0;
+    }
+    ~AmfEncoder() { close(); }
+
+private:
+    HMODULE dll_ = nullptr;
+    amf::AMFFactory *factory_ = nullptr;
+    amf::AMFContext *ctx_ = nullptr;
+    amf::AMFComponent *enc_ = nullptr;
+    std::atomic<bool> forceIdr_{false};
+    bool av1_ = false, ok_ = false;
+    int w_ = 0, h_ = 0;
+};

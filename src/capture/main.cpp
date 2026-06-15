@@ -13,6 +13,9 @@
 #include <winsock2.h>   // before windows.h
 #include <ws2tcpip.h>
 #include <windows.h>
+#include <mmdeviceapi.h>   // WASAPI loopback audio
+#include <audioclient.h>
+#include <mmreg.h>         // WAVEFORMATEXTENSIBLE, WAVE_FORMAT_*
 #include <unknwn.h>      // IStream for gdiplus under WIN32_LEAN_AND_MEAN
 #include <objidl.h>      // PROPID for gdiplus
 #include <gdiplus.h>
@@ -21,6 +24,7 @@
 #include <dxgi1_2.h>
 #include <dxgi1_6.h>
 #include <d3dcompiler.h>
+#include <timeapi.h>       // timeBeginPeriod/timeEndPeriod (1ms scheduler tick)
 #include <wrl/client.h>
 
 #include <algorithm>
@@ -53,10 +57,48 @@ extern "C" {
 #pragma comment(lib, "d3dcompiler.lib")
 #pragma comment(lib, "gdiplus.lib")
 #pragma comment(lib, "ws2_32.lib")
+#pragma comment(lib, "ole32.lib")   // WASAPI (CoCreateInstance / CoInitializeEx)
+#pragma comment(lib, "winmm.lib")   // timeBeginPeriod/timeEndPeriod
 
 #include "ctm_stream_protocol.h"
 
 using Microsoft::WRL::ComPtr;
+
+// Raise the Windows scheduler tick to 1ms for this object's lifetime. Without
+// this, every std::this_thread::sleep_for() and any sub-tick wait rounds up to
+// the default ~15.6ms quantum, which silently inflates and quantizes every
+// timing in the profiler (encode poll waits, --fps cadence). Process-wide.
+struct TimerRes {
+    bool on_ = false;
+    TimerRes()  { on_ = (timeBeginPeriod(1) == TIMERR_NOERROR); }
+    ~TimerRes() { if (on_) timeEndPeriod(1); }
+};
+
+// Per-window latency-sample accumulator: count + avg/p50/p99/min/max, instead of
+// the old last-value .store() reporting that hid encode/decode spikes (e.g. the
+// scene-change decode spike) by collapsing a whole second to one frame. Thread
+// safe: producers add() from the codec/rx threads, the stats thread flush()es.
+struct StatAcc {
+    void add(double ms) { std::lock_guard<std::mutex> lk(m_); s_.push_back(ms); }
+    struct Summary { int n = 0; double avg = 0, p50 = 0, p99 = 0, mn = 0, mx = 0; };
+    Summary flush()
+    {
+        std::lock_guard<std::mutex> lk(m_);
+        Summary r; r.n = (int)s_.size();
+        if (r.n) {
+            std::sort(s_.begin(), s_.end());
+            double sum = 0; for (double v : s_) sum += v;
+            r.avg = sum / r.n; r.mn = s_.front(); r.mx = s_.back();
+            r.p50 = s_[(size_t)(0.50 * (r.n - 1) + 0.5)];
+            r.p99 = s_[(size_t)(0.99 * (r.n - 1) + 0.5)];
+        }
+        s_.clear();
+        return r;
+    }
+private:
+    std::mutex m_;
+    std::vector<double> s_;
+};
 
 struct OutputRef {
     ComPtr<IDXGIAdapter1> adapter;
@@ -727,6 +769,7 @@ private:
 
 static int run_preview(OutputRef ref)
 {
+    TimerRes timerRes;   // 1ms scheduler tick so timings aren't tick-quantized (#1)
     const wchar_t *cls = L"CtmCapturePreview";
     WNDCLASSW wc{};
     wc.lpfnWndProc = WndProc;
@@ -845,13 +888,14 @@ struct EncConfig {
     int bitrateKbps = 40000;   // target
     int maxrateKbps = 60000;   // peak / ceiling (VBR, CBR)
     int qp = 24;               // CQP qp / qvbr quality level
+    bool allIntra = false;     // true = every frame an IDR (no P-frames)
     bool encoderDiffers(const EncConfig &o) const {
         return codec != o.codec || mode != o.mode || usage != o.usage ||
                bitrateKbps != o.bitrateKbps || maxrateKbps != o.maxrateKbps ||
-               qp != o.qp || resIndex != o.resIndex;
+               qp != o.qp || resIndex != o.resIndex || allIntra != o.allIntra;
     }
 };
-static const int kResHeights[] = {0, 2160, 1440, 1080, 720};
+static const int kResHeights[] = {0, 2160, 1440, 1080, 720, 540};
 static const wchar_t *kCodecName[] = {L"HEVC", L"AV1"};
 static const wchar_t *kModeName[]  = {L"CBR", L"VBR", L"CQP"};
 static const wchar_t *kUsageName[] = {L"ultralowlatency", L"lowlatency", L"transcoding"};
@@ -862,6 +906,15 @@ static EncConfig g_cfgDesired;
 static std::atomic<bool> g_cfgDirty{false};
 static std::atomic<bool> g_vsync{false};   // V toggles; off = present without vblank wait
 static bool g_noPreview = false;           // --nopreview: stream only, windows hidden
+static bool g_profile = false;             // --profile: measure true HW-decode GPU
+                                           // time (forces decode completion via a
+                                           // timestamp query); adds a sync, so off
+                                           // by default to keep the live path async
+static bool g_cpucopy = false;             // --cpucopy: force the old GPU->CPU->GPU
+                                           // encode input (readback + AMF re-upload).
+                                           // Default OFF = zero-copy: convert renders
+                                           // straight into the encoder's D3D11 P010
+                                           // hwframe, no readback, no re-upload.
 static int g_maxFps = 0;                   // --fps N: optional encode cadence cap for
                                            // diagnostics; 0 (default) = uncapped, the
                                            // pipeline runs at capture rate (VDD refresh)
@@ -951,6 +1004,26 @@ public:
             if (!mkStage(w, h, DXGI_FORMAT_R16_UNORM, stagY_[i])) return false;
             if (!mkStage(w / 2, h / 2, DXGI_FORMAT_R16G16_UNORM, stagUV_[i])) return false;
         }
+        // single P010 RT texture for the zero-copy encode path: render the convert
+        // into this, then CopySubresourceRegion it into the encoder pool slice (the
+        // pool can't be an RT array on AMD). Plane RTVs select Y/UV by format.
+        encRt_.Reset(); encRtY_.Reset(); encRtUV_.Reset();
+        {
+            D3D11_TEXTURE2D_DESC pd{};
+            pd.Width = w; pd.Height = h; pd.MipLevels = 1; pd.ArraySize = 1;
+            pd.Format = DXGI_FORMAT_P010; pd.SampleDesc.Count = 1;
+            pd.Usage = D3D11_USAGE_DEFAULT; pd.BindFlags = D3D11_BIND_RENDER_TARGET;
+            if (SUCCEEDED(dev_->CreateTexture2D(&pd, nullptr, &encRt_))) {
+                D3D11_RENDER_TARGET_VIEW_DESC rd{};
+                rd.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D; rd.Texture2D.MipSlice = 0;
+                rd.Format = DXGI_FORMAT_R16_UNORM;
+                dev_->CreateRenderTargetView(encRt_.Get(), &rd, &encRtY_);
+                rd.Format = DXGI_FORMAT_R16G16_UNORM;
+                dev_->CreateRenderTargetView(encRt_.Get(), &rd, &encRtUV_);
+            } else {
+                std::wcout << L"converter: single P010 RT texture create failed; zero-copy convert unavailable\n";
+            }
+        }
         return true;
     }
 
@@ -983,6 +1056,49 @@ public:
         ctx_->PSSetShaderResources(0, 1, &nullSRV);
         ctx_->CopyResource(stagY_[slot].Get(), rtY_.Get());
         ctx_->CopyResource(stagUV_[slot].Get(), rtUV_.Get());
+        return true;
+    }
+
+    // Render src -> our single P010 RT texture (encRt_). The native AMF encoder
+    // wraps encRt_ directly (true zero-copy); the ffmpeg fallback copies it into
+    // its pool (submit_to_planes). Y/UV plane RTVs select planes by format.
+    bool render_p010(ID3D11ShaderResourceView *srcSRV)
+    {
+        if (!srcSRV || !encRt_ || !encRtY_ || !encRtUV_) return false;
+        ctx_->IASetInputLayout(nullptr);
+        ctx_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        ctx_->VSSetShader(vs_.Get(), nullptr, 0);
+        ctx_->PSSetSamplers(0, 1, samp_.GetAddressOf());
+        ctx_->PSSetShaderResources(0, 1, &srcSRV);
+        ctx_->OMSetBlendState(nullptr, nullptr, 0xffffffff);
+
+        D3D11_VIEWPORT vpY{0, 0, (float)w_, (float)h_, 0, 1};
+        ctx_->RSSetViewports(1, &vpY);
+        ctx_->OMSetRenderTargets(1, encRtY_.GetAddressOf(), nullptr);   // Y plane
+        ctx_->PSSetShader(psY_.Get(), nullptr, 0);
+        ctx_->Draw(3, 0);
+
+        D3D11_VIEWPORT vpC{0, 0, (float)(w_ / 2), (float)(h_ / 2), 0, 1};
+        ctx_->RSSetViewports(1, &vpC);
+        ctx_->OMSetRenderTargets(1, encRtUV_.GetAddressOf(), nullptr);  // UV plane
+        ctx_->PSSetShader(psUV_.Get(), nullptr, 0);
+        ctx_->Draw(3, 0);
+
+        ID3D11ShaderResourceView *nullSRV = nullptr;
+        ctx_->PSSetShaderResources(0, 1, &nullSRV);
+        ID3D11RenderTargetView *nullRTV = nullptr;
+        ctx_->OMSetRenderTargets(1, &nullRTV, nullptr);
+        ctx_->Flush();                                     // submit before the encoder reads it
+        return true;
+    }
+    ID3D11Texture2D *p010_texture() const { return encRt_.Get(); }
+
+    // ffmpeg fallback: render into encRt_, then GPU-copy into the pool slice.
+    bool submit_to_planes(ID3D11ShaderResourceView *srcSRV, ID3D11Texture2D *p010, UINT index)
+    {
+        if (!render_p010(srcSRV) || !p010) return false;
+        ctx_->CopySubresourceRegion(p010, D3D11CalcSubresource(0, index, 1), 0, 0, 0, encRt_.Get(), 0, nullptr);
+        ctx_->Flush();
         return true;
     }
 
@@ -1020,6 +1136,9 @@ private:
     ComPtr<ID3D11RenderTargetView> rtvY_, rtvUV_;
     D3D11_MAPPED_SUBRESOURCE mapY_{}, mapUV_{};
     int w_ = 0, h_ = 0;
+    // single P010 RT texture for the near-zero-copy encode path (submit_to_planes)
+    ComPtr<ID3D11Texture2D> encRt_;
+    ComPtr<ID3D11RenderTargetView> encRtY_, encRtUV_;
 };
 
 // --- AMF encoder (libavcodec hevc_amf / av1_amf), 10-bit x2bgr10le input ---
@@ -1027,16 +1146,16 @@ static AVRational q_xy(float v) { return av_make_q((int)(v * 50000.0f + 0.5f), 5
 
 class Encoder {
 public:
-    bool open(const EncConfig &cfg, int w, int h, const HdrInfo &hdr, std::string *err)
+    bool open(const EncConfig &cfg, int w, int h, const HdrInfo &hdr, AVBufferRef *hwDevice, std::string *err)
     {
         close();
+        hdr_ = hdr;
         const char *name = (cfg.codec == EncConfig::HEVC) ? "hevc_amf" : "av1_amf";
         const AVCodec *codec = avcodec_find_encoder_by_name(name);
         if (!codec) { if (err) *err = std::string("encoder not found: ") + name; return false; }
         ctx_ = avcodec_alloc_context3(codec);
         if (!ctx_) { if (err) *err = "alloc encoder ctx failed"; return false; }
         ctx_->width = w; ctx_->height = h;
-        ctx_->pix_fmt = AV_PIX_FMT_P010LE;    // shader already produced PQ BT.2020 YCbCr
         // PTS carries real capture time in microseconds -- frames are encoded
         // only when the desktop changes, so frame-index timing would lie to
         // the receiver's renderer. framerate stays as a rate-control hint.
@@ -1045,13 +1164,45 @@ public:
         // Long GOP: an IDR every second (~60) caused a visible 1 Hz hiccup on
         // the TV (multi-megabit burst + heavier decode). New clients don't
         // wait for the GOP anyway -- joining forces an IDR.
-        ctx_->gop_size = 600;
+        // All-intra: every frame an IDR (no inter prediction) -- lowest latency,
+        // resilient to loss, much higher bitrate.
+        ctx_->gop_size = cfg.allIntra ? 1 : 600;
         ctx_->max_b_frames = 0;
         ctx_->color_primaries = AVCOL_PRI_BT2020;
         ctx_->color_trc = AVCOL_TRC_SMPTE2084;
         ctx_->colorspace = AVCOL_SPC_BT2020_NCL;
         ctx_->color_range = AVCOL_RANGE_MPEG;
         ctx_->flags |= AV_CODEC_FLAG_LOW_DELAY;
+
+        // Zero-copy input (default): hand the encoder a D3D11 P010 frames pool so
+        // the converter renders straight into encoder textures (BIND_RENDER_TARGET)
+        // -- no GPU->CPU readback and no AMF re-upload. --cpucopy forces the CPU
+        // path; we also fall back to it if the pool won't initialize.
+        hw_ = false;
+        if (hwDevice && !g_cpucopy) {
+            hwFrames_ = av_hwframe_ctx_alloc(hwDevice);
+            if (hwFrames_) {
+                auto *fc = reinterpret_cast<AVHWFramesContext *>(hwFrames_->data);
+                fc->format = AV_PIX_FMT_D3D11;
+                fc->sw_format = AV_PIX_FMT_P010;
+                fc->width = w; fc->height = h;
+                fc->initial_pool_size = 16;
+                auto *d3dfc = reinterpret_cast<AVD3D11VAFramesContext *>(fc->hwctx);
+                // The AMD driver rejects a P010 texture ARRAY with RENDER_TARGET, so
+                // the pool is SHADER_RESOURCE only (creatable, like the decode pool);
+                // the converter renders into its own single P010 RT texture and
+                // GPU-copies it into a pool slice (one blit, no readback).
+                d3dfc->BindFlags = D3D11_BIND_SHADER_RESOURCE;
+                if (av_hwframe_ctx_init(hwFrames_) >= 0) hw_ = true;
+                else av_buffer_unref(&hwFrames_);
+            }
+            if (!hw_) std::wcout << L"encoder: D3D11 zero-copy pool init failed; using CPU copy\n";
+        }
+        ctx_->pix_fmt = hw_ ? AV_PIX_FMT_D3D11 : AV_PIX_FMT_P010LE;  // shader already PQ BT.2020 YCbCr
+        if (hw_) {
+            ctx_->sw_pix_fmt = AV_PIX_FMT_P010;
+            ctx_->hw_frames_ctx = av_buffer_ref(hwFrames_);
+        }
 
         const int64_t br = (int64_t)cfg.bitrateKbps * 1000;
         const int64_t mr = (int64_t)std::max(cfg.maxrateKbps, cfg.bitrateKbps) * 1000;
@@ -1093,38 +1244,45 @@ public:
 
         if (avcodec_open2(ctx_, codec, nullptr) < 0) { if (err) *err = std::string("avcodec_open2 failed for ") + name; close(); return false; }
 
-        frame_ = av_frame_alloc();
-        frame_->format = AV_PIX_FMT_P010LE; frame_->width = w; frame_->height = h;
-        frame_->color_primaries = AVCOL_PRI_BT2020;
-        frame_->color_trc = AVCOL_TRC_SMPTE2084;
-        frame_->colorspace = AVCOL_SPC_BT2020_NCL;
-        frame_->color_range = AVCOL_RANGE_MPEG;            // shader outputs limited range
-        if (av_frame_get_buffer(frame_, 0) < 0) { if (err) *err = "frame buffer alloc failed"; close(); return false; }
-
-        // HDR10 static metadata from the monitor, written by AMF as SEI.
-        if (AVMasteringDisplayMetadata *md = av_mastering_display_metadata_create_side_data(frame_)) {
-            md->display_primaries[0][0] = q_xy(hdr.rx); md->display_primaries[0][1] = q_xy(hdr.ry);
-            md->display_primaries[1][0] = q_xy(hdr.gx); md->display_primaries[1][1] = q_xy(hdr.gy);
-            md->display_primaries[2][0] = q_xy(hdr.bx); md->display_primaries[2][1] = q_xy(hdr.by);
-            md->white_point[0] = q_xy(hdr.wx); md->white_point[1] = q_xy(hdr.wy);
-            md->min_luminance = av_make_q((int)(hdr.minLum * 10000.0f), 10000);
-            md->max_luminance = av_make_q((int)hdr.maxLum, 1);
-            md->has_primaries = 1; md->has_luminance = 1;
-        }
-        if (AVContentLightMetadata *cl = av_content_light_metadata_create_side_data(frame_)) {
-            cl->MaxCLL = (unsigned)hdr.maxLum; cl->MaxFALL = (unsigned)hdr.maxFFLum;
+        if (!hw_) {   // CPU path: one persistent P010 frame, color + HDR stamped once
+            frame_ = av_frame_alloc();
+            frame_->format = AV_PIX_FMT_P010LE; frame_->width = w; frame_->height = h;
+            if (av_frame_get_buffer(frame_, 0) < 0) { if (err) *err = "frame buffer alloc failed"; close(); return false; }
+            stamp_frame(frame_);
         }
         pkt_ = av_packet_alloc();
         w_ = w; h_ = h;
         return true;
     }
 
-    // Copy mapped P010 planes (Y full res, interleaved CbCr half res) and
-    // encode. Appends emitted packets (caller frees with av_packet_free).
+    // Color + HDR10 static metadata (AMF writes it as SEI). On the CPU frame this
+    // is done once; on each zero-copy hwframe it's re-stamped before send.
+    void stamp_frame(AVFrame *f)
+    {
+        f->color_primaries = AVCOL_PRI_BT2020;
+        f->color_trc = AVCOL_TRC_SMPTE2084;
+        f->colorspace = AVCOL_SPC_BT2020_NCL;
+        f->color_range = AVCOL_RANGE_MPEG;            // shader outputs limited range
+        if (AVMasteringDisplayMetadata *md = av_mastering_display_metadata_create_side_data(f)) {
+            md->display_primaries[0][0] = q_xy(hdr_.rx); md->display_primaries[0][1] = q_xy(hdr_.ry);
+            md->display_primaries[1][0] = q_xy(hdr_.gx); md->display_primaries[1][1] = q_xy(hdr_.gy);
+            md->display_primaries[2][0] = q_xy(hdr_.bx); md->display_primaries[2][1] = q_xy(hdr_.by);
+            md->white_point[0] = q_xy(hdr_.wx); md->white_point[1] = q_xy(hdr_.wy);
+            md->min_luminance = av_make_q((int)(hdr_.minLum * 10000.0f), 10000);
+            md->max_luminance = av_make_q((int)hdr_.maxLum, 1);
+            md->has_primaries = 1; md->has_luminance = 1;
+        }
+        if (AVContentLightMetadata *cl = av_content_light_metadata_create_side_data(f)) {
+            cl->MaxCLL = (unsigned)hdr_.maxLum; cl->MaxFALL = (unsigned)hdr_.maxFFLum;
+        }
+    }
+
+    // CPU path (--cpucopy): copy mapped P010 planes (Y full res, interleaved CbCr
+    // half res) into the persistent frame and encode.
     int encode(const uint8_t *y, int yPitch, const uint8_t *uv, int uvPitch,
                int64_t pts, std::vector<AVPacket *> &out)
     {
-        if (!ctx_) return -1;
+        if (!ctx_ || !frame_) return -1;
         if (av_frame_make_writable(frame_) < 0) return -1;
         const int bytes = w_ * 2;              // both planes: w_*2 bytes per row
         for (int r = 0; r < h_; ++r)
@@ -1137,24 +1295,33 @@ public:
         frame_->pict_type = forceIdr_.exchange(false) ? AV_PICTURE_TYPE_I : AV_PICTURE_TYPE_NONE;
         int r = avcodec_send_frame(ctx_, frame_);
         if (r < 0) return r;
-        // Low latency = 1-in/1-out: wait (bounded) for this frame's packet
-        // instead of letting it ride out on a later call.
-        for (int spins = 0; spins < 400; ++spins) {
-            r = avcodec_receive_packet(ctx_, pkt_);
-            if (r == 0) {
-                AVPacket *p = av_packet_alloc();
-                av_packet_move_ref(p, pkt_);
-                out.push_back(p);
-                continue;            // drain anything else that's ready
-            }
-            if (r == AVERROR(EAGAIN)) {
-                if (!out.empty()) return 0;
-                std::this_thread::sleep_for(std::chrono::microseconds(500));
-                continue;
-            }
-            return (r == AVERROR_EOF) ? 0 : r;
-        }
-        return 0;                    // safety bound (~200ms); never deadlock
+        return drain(out);
+    }
+
+    bool is_hw() const { return hw_; }
+
+    // Zero-copy: borrow a P010 D3D11 texture from the encoder pool. The caller
+    // renders into it (Converter::submit_to_planes) then passes it to encode_hw().
+    // Returned frame: data[0]=ID3D11Texture2D*, data[1]=array slice index.
+    AVFrame *get_hwframe()
+    {
+        if (!hw_ || !hwFrames_) return nullptr;
+        AVFrame *f = av_frame_alloc();
+        if (!f) return nullptr;
+        if (av_hwframe_get_buffer(hwFrames_, f, 0) < 0) { av_frame_free(&f); return nullptr; }
+        return f;
+    }
+    // Encode a hwframe the caller already rendered into; takes ownership (frees it).
+    int encode_hw(AVFrame *f, int64_t pts, std::vector<AVPacket *> &out)
+    {
+        if (!ctx_ || !f) { if (f) av_frame_free(&f); return -1; }
+        stamp_frame(f);
+        f->pts = pts;
+        f->pict_type = forceIdr_.exchange(false) ? AV_PICTURE_TYPE_I : AV_PICTURE_TYPE_NONE;
+        int r = avcodec_send_frame(ctx_, f);
+        av_frame_free(&f);                     // send_frame took its own ref
+        if (r < 0) return r;
+        return drain(out);
     }
 
     void force_idr() { forceIdr_.store(true); }
@@ -1164,18 +1331,50 @@ public:
         if (pkt_) av_packet_free(&pkt_);
         if (frame_) av_frame_free(&frame_);
         if (ctx_) avcodec_free_context(&ctx_);
+        if (hwFrames_) av_buffer_unref(&hwFrames_);
+        hw_ = false;
         w_ = h_ = 0;
     }
     ~Encoder() { close(); }
 
 private:
+    // Drain ready packets (1-in/1-out low latency). Busy-poll, never sleep: a
+    // sleep_for() rounds up to the OS timer tick and inflates the measured encMs
+    // (the Fe budget reads this). The wall-clock deadline can never deadlock.
+    int drain(std::vector<AVPacket *> &out)
+    {
+        const double encDeadlineMs = now_ms() + 200.0;
+        for (;;) {
+            int r = avcodec_receive_packet(ctx_, pkt_);
+            if (r == 0) {
+                AVPacket *p = av_packet_alloc();
+                av_packet_move_ref(p, pkt_);
+                out.push_back(p);
+                continue;            // drain anything else that's ready
+            }
+            if (r == AVERROR(EAGAIN)) {
+                if (!out.empty()) return 0;
+                if (now_ms() >= encDeadlineMs) return 0;
+                YieldProcessor();    // tight spin: keeps encMs == true encode latency
+                continue;
+            }
+            return (r == AVERROR_EOF) ? 0 : r;
+        }
+    }
+
     static const char *kUsageNameA(int u) { return u == 0 ? "ultralowlatency" : u == 1 ? "lowlatency" : "transcoding"; }
     AVCodecContext *ctx_ = nullptr;
     AVFrame *frame_ = nullptr;
     AVPacket *pkt_ = nullptr;
+    AVBufferRef *hwFrames_ = nullptr;
+    bool hw_ = false;
+    HdrInfo hdr_{};
     std::atomic<bool> forceIdr_{false};
     int w_ = 0, h_ = 0;
 };
+
+#include "amf_encoder.inl"   // native AMD AMF encoder (HEVC+AV1), true zero-copy
+#include "amf_decoder.inl"   // native AMD AMF decoder (HEVC+AV1), zero-copy D3D11
 
 // --- decoder: D3D11VA hardware (zero-copy P010 textures), sw fallback ---
 class Decoder {
@@ -1481,6 +1680,40 @@ private:
     }
 
 public:
+    // Draw a single AMF-decoded P010 texture (one texture, both planes) -- not an
+    // ffmpeg array-pool slice. SRVs are per-frame (cheap) so we never pin a pool
+    // surface. imgW/imgH = the coded picture size (texture may be padded larger).
+    void draw_amf(ID3D11Texture2D *tex, int imgW, int imgH, int bbW, int bbH)
+    {
+        if (!tex || imgW <= 0 || imgH <= 0) return;
+        D3D11_TEXTURE2D_DESC d{}; tex->GetDesc(&d);
+        ComPtr<ID3D11ShaderResourceView> srvY, srvUV;
+        D3D11_SHADER_RESOURCE_VIEW_DESC sd{};
+        sd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+        sd.Texture2D.MipLevels = 1;
+        sd.Format = DXGI_FORMAT_R16_UNORM;
+        if (FAILED(dev_->CreateShaderResourceView(tex, &sd, &srvY))) return;
+        sd.Format = DXGI_FORMAT_R16G16_UNORM;
+        if (FAILED(dev_->CreateShaderResourceView(tex, &sd, &srvUV))) return;
+        set_dv((float)imgW / (float)d.Width, (float)imgH / (float)d.Height);
+        const float scale = std::min((float)bbW / imgW, (float)bbH / imgH);
+        const float vw = imgW * scale, vh = imgH * scale;
+        D3D11_VIEWPORT vp{(bbW - vw) / 2, (bbH - vh) / 2, vw, vh, 0, 1};
+        ctx_->RSSetViewports(1, &vp);
+        ctx_->IASetInputLayout(nullptr);
+        ctx_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        ctx_->VSSetShader(vs_.Get(), nullptr, 0);
+        ctx_->PSSetShader(psHw_.Get(), nullptr, 0);
+        ctx_->PSSetConstantBuffers(0, 1, cbUv_.GetAddressOf());
+        ID3D11ShaderResourceView *srvs[2] = {srvY.Get(), srvUV.Get()};
+        ctx_->PSSetShaderResources(0, 2, srvs);
+        ctx_->PSSetSamplers(0, 1, samp_.GetAddressOf());
+        ctx_->OMSetBlendState(nullptr, nullptr, 0xffffffff);
+        ctx_->Draw(3, 0);
+        ID3D11ShaderResourceView *n2[2] = {nullptr, nullptr};
+        ctx_->PSSetShaderResources(0, 2, n2);
+        valid_ = true;
+    }
 
 private:
     void ensure(int w, int h)
@@ -1540,9 +1773,15 @@ public:
         if (listenSock_ != INVALID_SOCKET) { closesocket(listenSock_); listenSock_ = INVALID_SOCKET; }
         {
             std::lock_guard<std::mutex> lk(mtx_);
-            for (auto &cl : clients_) { cl->dead.store(true); cl->qcv.notify_all(); }
-            for (auto &cl : clients_)
-                if (cl->writer.joinable()) cl->writer.join();   // writer closes its socket
+            for (auto &cl : clients_) {
+                cl->dead.store(true);
+                cl->qcv.notify_all();
+                closesocket(cl->sock);   // unblock writer send + reader recv
+            }
+            for (auto &cl : clients_) {
+                if (cl->writer.joinable()) cl->writer.join();
+                if (cl->reader.joinable()) cl->reader.join();
+            }
             clients_.clear();
         }
         if (acceptThread_.joinable()) acceptThread_.join();
@@ -1552,11 +1791,15 @@ public:
     // A new client must start on an IDR; the codec worker polls this.
     bool take_want_idr() { return wantIdr_.exchange(false); }
 
+    // host clock in us since stream epoch (set via set_epoch); PONG uses this
+    void set_epoch(double t0ms) { epochMs_ = t0ms; }
+    uint64_t host_us() { return (uint64_t)((now_ms() - epochMs_) * 1000.0); }
+
     void set_info(const CtmsStreamInfo &si)
     {
         std::lock_guard<std::mutex> lk(mtx_);
         info_ = si; haveInfo_ = true;
-        send_msg(CTMS_STREAM_INFO, 0, 0, &info_, sizeof(info_));
+        send_msg(CTMS_STREAM_INFO, 0, 0, 0, 0, &info_, sizeof(info_));
     }
     void set_cursor_shape(int w, int h, int hotX, int hotY, const uint8_t *rgba)
     {
@@ -1569,12 +1812,17 @@ public:
     {
         std::lock_guard<std::mutex> lk(mtx_);
         CtmsCursorPos p{x, y, visible ? (uint8_t)1 : (uint8_t)0, {}};
-        send_msg(CTMS_CURSOR_POS, 0, (uint64_t)now_ms(), &p, sizeof(p));
+        send_msg(CTMS_CURSOR_POS, 0, host_us(), 0, 0, &p, sizeof(p));
     }
-    void send_video(const uint8_t *data, int size, int64_t pts, bool idr)
+    void send_video(const uint8_t *data, int size, int64_t t0Us, int64_t tEncUs, int64_t t1Us, bool idr)
     {
         std::lock_guard<std::mutex> lk(mtx_);
-        send_msg(CTMS_VIDEO_FRAME, idr ? CTMS_FLAG_IDR : 0, (uint64_t)pts, data, size);
+        send_msg(CTMS_VIDEO_FRAME, idr ? CTMS_FLAG_IDR : 0, (uint64_t)t0Us, (uint64_t)tEncUs, (uint64_t)t1Us, data, size);
+    }
+    void send_audio(const uint8_t *pcm, int bytes, int64_t ptsUs)
+    {
+        std::lock_guard<std::mutex> lk(mtx_);
+        send_msg(CTMS_AUDIO_FRAME, 0, (uint64_t)ptsUs, 0, 0, pcm, bytes);
     }
     bool connected() { std::lock_guard<std::mutex> lk(mtx_); return !clients_.empty(); }
 
@@ -1585,13 +1833,15 @@ private:
     struct Client {
         SOCKET sock = INVALID_SOCKET;
         std::thread writer;
+        std::thread reader;      // handles client->host msgs (PING; later input)
         std::mutex qm;
         std::condition_variable qcv;
         std::deque<std::vector<uint8_t>> q;
         size_t qBytes = 0;
         std::atomic<bool> dead{false};
     };
-    static const size_t kMaxQueue = 32u * 1024u * 1024u;   // ~3 s of 80 Mb/s
+    static const size_t kSoftQueue = 4u * 1024u * 1024u;   // drop backlog past this (bounds latency)
+    static const size_t kMaxQueue = 32u * 1024u * 1024u;   // hard cap: drop the client
 
     // Multiple simultaneous clients (local preview + TV). Each new client gets
     // the cached STREAM_INFO + cursor shape, and triggers an IDR so it can
@@ -1609,14 +1859,43 @@ private:
             auto cl = std::make_unique<Client>();
             cl->sock = c;
             cl->writer = std::thread(&StreamSender::writer_loop, this, cl.get());
-            if (haveInfo_) enqueue_one(cl.get(), CTMS_STREAM_INFO, 0, 0, &info_, sizeof(info_));
+            cl->reader = std::thread(&StreamSender::reader_loop, this, cl.get());
+            if (haveInfo_) enqueue_one(cl.get(), CTMS_STREAM_INFO, 0, 0, 0, 0, &info_, sizeof(info_));
             if (!shapePix_.empty()) {
                 std::vector<uint8_t> buf = shape_buf();
-                enqueue_one(cl.get(), CTMS_CURSOR_SHAPE, 0, 0, buf.data(), (int)buf.size());
+                enqueue_one(cl.get(), CTMS_CURSOR_SHAPE, 0, 0, 0, 0, buf.data(), (int)buf.size());
             }
             clients_.push_back(std::move(cl));
             wantIdr_.store(true);
         }
+    }
+
+    // client->host: currently just PING (reply PONG with the host clock so the
+    // client can resolve our clock offset + RTT). Reused later for TV input.
+    void reader_loop(Client *cl)
+    {
+        for (;;) {
+            CtmsHdr h{};
+            if (!recv_all(cl->sock, &h, sizeof(h)) || h.magic != CTMS_MAGIC) break;
+            std::vector<uint8_t> payload(h.payloadLen);
+            if (h.payloadLen && !recv_all(cl->sock, payload.data(), h.payloadLen)) break;
+            if (h.type == CTMS_PING && h.payloadLen >= sizeof(CtmsPing)) {
+                CtmsPing ping; memcpy(&ping, payload.data(), sizeof(ping));
+                CtmsPong pong{ping.clientUs, host_us()};
+                // Priority: push PONG to the FRONT so clock sync isn't skewed
+                // by sitting behind queued video (that caused negative net).
+                std::lock_guard<std::mutex> lk(cl->qm);
+                enqueue_front_locked(cl, CTMS_PONG, 0, 0, 0, 0, &pong, sizeof(pong));
+            }
+        }
+        cl->dead.store(true);
+        cl->qcv.notify_all();
+    }
+    static bool recv_all(SOCKET s, void *p, int len)
+    {
+        char *b = static_cast<char *>(p);
+        while (len > 0) { int n = recv(s, b, len, 0); if (n <= 0) return false; b += n; len -= n; }
+        return true;
     }
 
     void writer_loop(Client *cl)
@@ -1640,7 +1919,8 @@ private:
             }
             if (cl->dead.load()) break;
         }
-        closesocket(cl->sock);
+        // socket close is owned by reap_dead()/stop() (single close unblocks
+        // both this writer and the reader's recv)
     }
 
     std::vector<uint8_t> shape_buf()   // mtx_ held
@@ -1653,22 +1933,37 @@ private:
     void send_shape()   // mtx_ held
     {
         std::vector<uint8_t> buf = shape_buf();
-        send_msg(CTMS_CURSOR_SHAPE, 0, 0, buf.data(), (int)buf.size());
+        send_msg(CTMS_CURSOR_SHAPE, 0, 0, 0, 0, buf.data(), (int)buf.size());
     }
-    void send_msg(uint16_t type, uint16_t flags, uint64_t pts, const void *payload, int len)   // mtx_ held
+    void send_msg(uint16_t type, uint16_t flags, uint64_t pts, uint64_t tEnc, uint64_t t1, const void *payload, int len)   // mtx_ held
     {
-        for (auto &cl : clients_) enqueue_one(cl.get(), type, flags, pts, payload, len);
+        for (auto &cl : clients_) enqueue_one(cl.get(), type, flags, pts, tEnc, t1, payload, len);
         reap_dead();
     }
-    void enqueue_one(Client *cl, uint16_t type, uint16_t flags, uint64_t pts, const void *payload, int len)
+    void enqueue_one(Client *cl, uint16_t type, uint16_t flags, uint64_t pts, uint64_t tEnc, uint64_t t1, const void *payload, int len)
     {
         if (cl->dead.load()) return;
-        CtmsHdr h{CTMS_MAGIC, type, flags, pts, (uint32_t)len};
+        std::lock_guard<std::mutex> lk(cl->qm);
+        enqueue_locked(cl, type, flags, pts, tEnc, t1, payload, len);
+    }
+    void enqueue_locked(Client *cl, uint16_t type, uint16_t flags, uint64_t pts, uint64_t tEnc, uint64_t t1, const void *payload, int len)   // cl->qm held
+    {
+        CtmsHdr h{CTMS_MAGIC, type, flags, pts, tEnc, t1, (uint32_t)len};
         std::vector<uint8_t> msg(sizeof(h) + len);
         memcpy(msg.data(), &h, sizeof(h));
         if (len) memcpy(msg.data() + sizeof(h), payload, len);
-        std::lock_guard<std::mutex> lk(cl->qm);
-        if (cl->qBytes + msg.size() > kMaxQueue) {   // hopelessly behind: drop client
+        // Latest-wins on the wire: a client that can't keep up (e.g. intra at
+        // 4K = 100+ Mbps over a slower link) has its BACKLOG dropped rather than
+        // growing latency until the hard cap disconnects it. Dropping breaks the
+        // GOP, so request a fresh IDR to give the client a clean resync point.
+        bool dropped = false;
+        while (!cl->q.empty() && cl->qBytes + msg.size() > kSoftQueue) {
+            cl->qBytes -= cl->q.front().size();
+            cl->q.pop_front();
+            dropped = true;
+        }
+        if (dropped) wantIdr_.store(true);
+        if (cl->qBytes + msg.size() > kMaxQueue) {   // single msg bigger than the hard cap: give up
             cl->dead.store(true);
             cl->qcv.notify_one();
             return;
@@ -1677,12 +1972,26 @@ private:
         cl->q.push_back(std::move(msg));
         cl->qcv.notify_one();
     }
+    void enqueue_front_locked(Client *cl, uint16_t type, uint16_t flags, uint64_t pts, uint64_t tEnc, uint64_t t1, const void *payload, int len)   // cl->qm held
+    {
+        CtmsHdr h{CTMS_MAGIC, type, flags, pts, tEnc, t1, (uint32_t)len};
+        std::vector<uint8_t> msg(sizeof(h) + len);
+        memcpy(msg.data(), &h, sizeof(h));
+        if (len) memcpy(msg.data() + sizeof(h), payload, len);
+        cl->qBytes += msg.size();
+        cl->q.push_front(std::move(msg));   // ahead of queued video
+        cl->qcv.notify_one();
+    }
     void reap_dead()   // mtx_ held
     {
         for (size_t i = 0; i < clients_.size();) {
             if (clients_[i]->dead.load()) {
                 clients_[i]->qcv.notify_all();
                 if (clients_[i]->writer.joinable()) clients_[i]->writer.join();
+                if (clients_[i]->reader.joinable()) {
+                    closesocket(clients_[i]->sock);   // unblock the reader's recv
+                    clients_[i]->reader.join();
+                }
                 clients_.erase(clients_.begin() + i);
             } else {
                 ++i;
@@ -1696,6 +2005,7 @@ private:
     std::atomic<bool> exit_{false};
     std::atomic<bool> wantIdr_{false};
     std::mutex mtx_;
+    double epochMs_ = 0;     // host stream epoch (now_ms at start)
     CtmsStreamInfo info_{}; bool haveInfo_ = false;
     CtmsCursorShape shapeHdr_{};
     std::vector<uint8_t> shapePix_;
@@ -1743,7 +2053,22 @@ public:
 
     std::atomic<double> decMs{0}, latMs{0};
     std::atomic<int64_t> decFrames{0};
+    std::atomic<uint64_t> decGpuDrops_{0};   // --profile: frames whose GPU sample was disjoint/timed-out
     std::atomic<bool> hwdec{false};
+    // Per-window distributions (#6). decAcc = decode submit (CPU); decGpuAcc =
+    // true GPU-inclusive decode, populated only under --profile; latAcc =
+    // source-present -> decode-submit-returned (NOT glass-to-glass: excludes the
+    // GPU decode, window-B present and TV scanout -- see update_stats label).
+    StatAcc decAcc_, latAcc_, decGpuAcc_;
+
+    // native AMF decoder (primary HW decode path); ffmpeg dec_ is the fallback
+    AmfDecoder amfdec_;
+    std::atomic<bool> useAmfDec_{false};
+    int decW_ = 0, decH_ = 0;
+    bool use_amf_dec() const { return useAmfDec_.load(); }
+    AmfDecoder &amfdec() { return amfdec_; }
+    int dec_w() const { return decW_; }
+    int dec_h() const { return decH_; }
 
 private:
     void run(uint16_t port)
@@ -1780,28 +2105,80 @@ private:
             case CTMS_STREAM_INFO:
                 if (h.payloadLen >= sizeof(CtmsStreamInfo)) {
                     memcpy(&info_, payload.data(), sizeof(info_));
+                    const EncConfig::Codec codec = info_.codec == 2 ? EncConfig::AV1 : EncConfig::HEVC;
+                    decW_ = info_.width; decH_ = info_.height;
                     std::string e;
-                    dec_.open(info_.codec == 2 ? EncConfig::AV1 : EncConfig::HEVC, hwDev_, &e);
-                    hwdec.store(dec_.is_hw());
+                    // HW decode = native AMF (own decoder, real decode-time, low-latency
+                    // DPB, controlled pool). ffmpeg D3D11VA/sw is the fallback.
+                    ID3D11Device *dev = nullptr;
+                    if (hwDev_) {
+                        auto *dc = reinterpret_cast<AVHWDeviceContext *>(hwDev_->data);
+                        dev = reinterpret_cast<AVD3D11VADeviceContext *>(dc->hwctx)->device;
+                    }
+                    useAmfDec_.store(amfdec_.open(codec, dev, decW_, decH_, &e));
+                    if (useAmfDec_.load()) {
+                        hwdec.store(true);
+                        // Stats are stamped by the decoder's drain thread at decode-exit
+                        // (d1), not at network-read cadence -> real d1-d0, real latency.
+                        amfdec_.set_on_frame([this](double dms, int64_t outPts) {
+                            decFrames.fetch_add(1);                       // real decoded-frame count
+                            if (dms > 0) { decMs.store(dms); decAcc_.add(dms); }      // d1 - d0
+                            if (outPts >= 0) {                            // latency at decode-exit
+                                const double lat = (now_ms() - t0_) - (double)outPts / 1000.0;
+                                latMs.store(lat); latAcc_.add(lat);
+                            }
+                        });
+                        std::wcout << L"[rx] decoder: native AMF zero-copy\n";
+                    } else {
+                        std::wcout << L"[rx] AMF decoder unavailable (" << std::wstring(e.begin(), e.end())
+                                   << L"); ffmpeg fallback\n";
+                        dec_.open(codec, hwDev_, &e);
+                        hwdec.store(dec_.is_hw());
+                    }
                 }
                 break;
             case CTMS_VIDEO_FRAME: {
+                if (useAmfDec_.load()) {       // native AMF: submit only; the drain thread
+                    amfdec_.submit(payload.data(), (int)h.payloadLen, (int64_t)h.pts);  // stamps d1 + stats
+                    break;
+                }
                 AVPacket *p = av_packet_alloc();
                 if (p && av_new_packet(p, (int)h.payloadLen) == 0) {
                     memcpy(p->data, payload.data(), h.payloadLen);
                     p->pts = p->dts = (int64_t)h.pts;
                     const double t0 = now_ms();
-                    if (AVFrame *f = dec_.decode(p)) {
+                    // HW decode is async: avcodec_receive_frame returning a D3D11
+                    // surface does NOT mean the GPU finished -- so dec-submit is the
+                    // CPU submit cost only, measured up to tSubmitDone (before any
+                    // GPU wait), which keeps it and lat comparable across --profile
+                    // on/off. Under --profile, decode_timed_gpu also brackets the
+                    // decode with GPU timestamp queries for the true GPU decode (Fd).
+                    double gpuMs = -1.0, tSubmitDone = 0.0;
+                    AVFrame *f;
+                    if (g_profile && dec_.is_hw()) {
+                        f = decode_timed_gpu(p, &gpuMs, &tSubmitDone);
+                    } else {
+                        f = dec_.decode(p);
+                        tSubmitDone = now_ms();
+                    }
+                    if (f) {
                         if (AVFrame *cl = av_frame_clone(f)) {
                             std::lock_guard<std::mutex> lk(decMtx_);
                             if (decodedLatest_) av_frame_free(&decodedLatest_);
                             decodedLatest_ = cl;
                         }
-                        if (f->pts >= 0)
-                            latMs.store((now_ms() - t0_) - (double)f->pts / 1000.0);
+                        if (f->pts >= 0) {
+                            const double lat = (tSubmitDone - t0_) - (double)f->pts / 1000.0;
+                            latMs.store(lat);
+                            latAcc_.add(lat);
+                        }
                         decFrames.fetch_add(1);
+                        if (gpuMs >= 0.0) decGpuAcc_.add(gpuMs);          // produced frame + valid GPU sample
+                        else if (g_profile && dec_.is_hw()) decGpuDrops_.fetch_add(1);   // disjoint/timeout
                     }
-                    decMs.store(now_ms() - t0);
+                    const double dms = tSubmitDone - t0;   // CPU submit only
+                    decMs.store(dms);
+                    decAcc_.add(dms);
                     if (dec_.hw_failed()) {
                         std::string e;
                         dec_.open_sw(&e);
@@ -1848,6 +2225,63 @@ private:
         return true;
     }
 
+    // Lazily create timestamp queries on the decoder's own D3D11 device (the one
+    // wrapped in hwDev_). device_context is the immediate context ffmpeg uses for
+    // decode submission, so a timestamp pair on it brackets the decode's GPU work.
+    bool ensure_gpu_queries()
+    {
+        if (qInit_) return qCtx_ != nullptr;
+        qInit_ = true;
+        if (!hwDev_) return false;
+        auto *dc = reinterpret_cast<AVHWDeviceContext *>(hwDev_->data);
+        auto *d3d = reinterpret_cast<AVD3D11VADeviceContext *>(dc->hwctx);
+        if (!d3d->device || !d3d->device_context) return false;
+        qCtx_ = d3d->device_context;            // ComPtr AddRefs; hwDev_ owns the original
+        if (FAILED(qCtx_.As(&qMt_))) { qCtx_.Reset(); return false; }
+        D3D11_QUERY_DESC qd{};
+        qd.Query = D3D11_QUERY_TIMESTAMP_DISJOINT;
+        if (FAILED(d3d->device->CreateQuery(&qd, &qDisjoint_))) { qCtx_.Reset(); return false; }
+        qd.Query = D3D11_QUERY_TIMESTAMP;
+        if (FAILED(d3d->device->CreateQuery(&qd, &qT0_)) ||
+            FAILED(d3d->device->CreateQuery(&qd, &qT1_))) { qCtx_.Reset(); return false; }
+        return true;
+    }
+
+    // Decode with a GPU timestamp bracket held under the D3D11 multithread lock,
+    // so only the decode's GPU work lands between the two timestamps (the render
+    // thread's commands can't interleave). --profile path only; it adds a sync the
+    // normal async path never pays. *submitDoneMs is stamped the instant the
+    // CPU decode call returns, BEFORE the GPU wait -- so the caller's dec-submit
+    // and lat stay CPU-only and comparable across --profile on/off. *gpuMs is the
+    // isolated GPU decode (Fd), -1 if unavailable (disjoint / timeout / sw).
+    AVFrame *decode_timed_gpu(AVPacket *p, double *gpuMs, double *submitDoneMs)
+    {
+        *gpuMs = -1.0;
+        if (!ensure_gpu_queries()) { AVFrame *f = dec_.decode(p); *submitDoneMs = now_ms(); return f; }
+        qMt_->Enter();
+        qCtx_->Begin(qDisjoint_.Get());
+        qCtx_->End(qT0_.Get());
+        AVFrame *f = dec_.decode(p);            // submits the decode GPU work
+        *submitDoneMs = now_ms();               // CPU submit ends here (pre GPU wait)
+        qCtx_->End(qT1_.Get());
+        qCtx_->End(qDisjoint_.Get());
+        qMt_->Leave();
+        // Bounded wait for GPU completion. gpuMs is read from the GPU timestamps
+        // below, NOT from this poll, so a coarse poll cadence doesn't blur it --
+        // sleep between polls to spare the device multithread lock the render
+        // thread shares (each GetData re-takes it).
+        const double dl = now_ms() + 50.0;
+        while (qCtx_->GetData(qDisjoint_.Get(), nullptr, 0, 0) == S_FALSE && now_ms() < dl)
+            std::this_thread::sleep_for(std::chrono::microseconds(100));
+        D3D11_QUERY_DATA_TIMESTAMP_DISJOINT dj{};
+        UINT64 a = 0, b = 0;
+        if (qCtx_->GetData(qDisjoint_.Get(), &dj, sizeof(dj), 0) == S_OK && !dj.Disjoint && dj.Frequency &&
+            qCtx_->GetData(qT0_.Get(), &a, sizeof(a), 0) == S_OK &&
+            qCtx_->GetData(qT1_.Get(), &b, sizeof(b), 0) == S_OK && b > a)
+            *gpuMs = (double)(b - a) * 1000.0 / (double)dj.Frequency;
+        return f;
+    }
+
     std::thread thread_;
     std::atomic<bool> exit_{false};
     std::mutex sockMtx_;
@@ -1855,6 +2289,11 @@ private:
     AVBufferRef *hwDev_ = nullptr;
     double t0_ = 0;
     Decoder dec_;
+    // GPU decode-timing state (--profile); created lazily on the first HW decode.
+    bool qInit_ = false;
+    ComPtr<ID3D11DeviceContext> qCtx_;
+    ComPtr<ID3D11Multithread> qMt_;
+    ComPtr<ID3D11Query> qDisjoint_, qT0_, qT1_;
     CtmsStreamInfo info_{};
     std::mutex decMtx_;
     AVFrame *decodedLatest_ = nullptr;
@@ -1862,6 +2301,157 @@ private:
     int curX_ = 0, curY_ = 0, curW_ = 0, curH_ = 0;
     bool curVis_ = false, shapeDirty_ = false;
     std::vector<uint8_t> curPix_;
+};
+
+// ---- WASAPI loopback -> Opus -> CTMS audio --------------------------------
+// Captures what the PC is playing (default render endpoint, loopback), encodes
+// Opus (48k stereo, low-delay), and sends CTMS_AUDIO_FRAME stamped with host
+// time. Forces a steady ~20ms cadence (zero-fill on silence) so the TV's
+// NDL A/V pipeline never starves on audio.
+class AudioLoopback {
+public:
+    bool start(StreamSender *sender, std::wstring *err)
+    {
+        sender_ = sender;
+        const AVCodec *c = avcodec_find_encoder_by_name("libopus");
+        if (!c) { if (err) *err = L"libopus encoder not found"; return false; }
+        enc_ = avcodec_alloc_context3(c);
+        enc_->sample_rate = 48000;
+        av_channel_layout_default(&enc_->ch_layout, 2);
+        enc_->sample_fmt = AV_SAMPLE_FMT_S16;
+        enc_->bit_rate = 160000;
+        enc_->time_base = av_make_q(1, 48000);
+        av_opt_set(enc_->priv_data, "application", "lowdelay", 0);
+        av_opt_set(enc_->priv_data, "frame_duration", "20", 0);
+        if (avcodec_open2(enc_, c, nullptr) < 0) { if (err) *err = L"opus open failed"; avcodec_free_context(&enc_); return false; }
+        frameSamples_ = enc_->frame_size > 0 ? enc_->frame_size : 960;   // per channel
+        frame_ = av_frame_alloc();
+        frame_->format = AV_SAMPLE_FMT_S16; frame_->sample_rate = 48000; frame_->nb_samples = frameSamples_;
+        av_channel_layout_default(&frame_->ch_layout, 2);
+        av_frame_get_buffer(frame_, 0);
+        pkt_ = av_packet_alloc();
+        run_.store(true);
+        thread_ = std::thread(&AudioLoopback::run, this);
+        return true;
+    }
+    void stop()
+    {
+        run_.store(false);
+        if (thread_.joinable()) thread_.join();
+        if (pkt_) av_packet_free(&pkt_);
+        if (frame_) av_frame_free(&frame_);
+        if (enc_) avcodec_free_context(&enc_);
+    }
+    ~AudioLoopback() { stop(); }
+    int rate() const { return 48000; }
+    int channels() const { return 2; }
+    bool active() const { return ok_.load(); }
+
+private:
+    void run()
+    {
+        if (FAILED(CoInitializeEx(nullptr, COINIT_MULTITHREADED))) return;
+        if (!setup_wasapi()) { CoUninitialize(); return; }
+        ok_.store(true);
+        client_->Start();
+        const int chOut = 2;
+        std::vector<int16_t> acc;             // interleaved stereo S16
+        double lastEmitMs = now_ms();
+        const double frameMs = 1000.0 * frameSamples_ / 48000.0;
+        while (run_.load()) {
+            // drain available packets
+            UINT32 packet = 0;
+            while (capture_->GetNextPacketSize(&packet) == S_OK && packet > 0) {
+                BYTE *data = nullptr; UINT32 nFrames = 0; DWORD flags = 0;
+                if (capture_->GetBuffer(&data, &nFrames, &flags, nullptr, nullptr) != S_OK) break;
+                const bool silent = (flags & AUDCLNT_BUFFERFLAGS_SILENT) != 0;
+                append_stereo_s16(acc, silent ? nullptr : data, nFrames);
+                capture_->ReleaseBuffer(nFrames);
+            }
+            // emit full frames
+            while ((int)acc.size() >= frameSamples_ * chOut) {
+                encode_send(acc.data());
+                acc.erase(acc.begin(), acc.begin() + frameSamples_ * chOut);
+                lastEmitMs = now_ms();
+            }
+            // keep cadence during silence so NDL audio doesn't underrun
+            if (now_ms() - lastEmitMs >= frameMs) {
+                std::vector<int16_t> sil((size_t)frameSamples_ * chOut, 0);
+                encode_send(sil.data());
+                lastEmitMs = now_ms();
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(4));
+        }
+        client_->Stop();
+        if (mix_) { CoTaskMemFree(mix_); mix_ = nullptr; }
+        CoUninitialize();
+    }
+
+    bool setup_wasapi()
+    {
+        if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+                                    __uuidof(IMMDeviceEnumerator), (void **)&enum_))) return false;
+        if (FAILED(enum_->GetDefaultAudioEndpoint(eRender, eConsole, &dev_))) return false;
+        if (FAILED(dev_->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, (void **)&client_))) return false;
+        if (FAILED(client_->GetMixFormat(&mix_))) return false;
+        // shared loopback uses the device mix format; we convert to 48k stereo S16
+        if (FAILED(client_->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK,
+                                       1000000 /*100ms*/, 0, mix_, nullptr))) return false;
+        if (FAILED(client_->GetService(__uuidof(IAudioCaptureClient), (void **)&capture_))) return false;
+        return true;
+    }
+
+    // Convert the device mix buffer to interleaved stereo S16 at 48k. Assumes
+    // the mix is 48k (typical); float32 or 16-bit input, >=2 channels.
+    void append_stereo_s16(std::vector<int16_t> &acc, const BYTE *data, UINT32 nFrames)
+    {
+        const int ch = mix_->nChannels;
+        // float subtype GUID Data1 == 3 (IEEE_FLOAT), == 1 (PCM); compare Data1
+        // to avoid pulling in the ksmedia GUID symbol.
+        bool isFloat = mix_->wFormatTag == WAVE_FORMAT_IEEE_FLOAT;
+        if (mix_->wFormatTag == WAVE_FORMAT_EXTENSIBLE)
+            isFloat = ((const WAVEFORMATEXTENSIBLE *)mix_)->SubFormat.Data1 == 3;
+        for (UINT32 i = 0; i < nFrames; ++i) {
+            int16_t l = 0, r = 0;
+            if (data) {
+                if (isFloat) {
+                    const float *f = (const float *)(data + (size_t)i * ch * 4);
+                    auto cvt = [](float v) { v = v < -1 ? -1 : v > 1 ? 1 : v; return (int16_t)(v * 32767.0f); };
+                    l = cvt(f[0]); r = cvt(f[ch > 1 ? 1 : 0]);
+                } else {
+                    const int16_t *s = (const int16_t *)(data + (size_t)i * ch * 2);
+                    l = s[0]; r = s[ch > 1 ? 1 : 0];
+                }
+            }
+            acc.push_back(l); acc.push_back(r);
+        }
+    }
+
+    void encode_send(const int16_t *interleavedStereo)
+    {
+        if (av_frame_make_writable(frame_) < 0) return;
+        memcpy(frame_->data[0], interleavedStereo, (size_t)frameSamples_ * 2 * sizeof(int16_t));
+        frame_->pts = framePts_; framePts_ += frameSamples_;
+        if (avcodec_send_frame(enc_, frame_) < 0) return;
+        while (avcodec_receive_packet(enc_, pkt_) == 0) {
+            sender_->send_audio(pkt_->data, pkt_->size, (int64_t)sender_->host_us());
+            av_packet_unref(pkt_);
+        }
+    }
+
+    StreamSender *sender_ = nullptr;
+    ComPtr<IMMDeviceEnumerator> enum_;
+    ComPtr<IMMDevice> dev_;
+    ComPtr<IAudioClient> client_;
+    ComPtr<IAudioCaptureClient> capture_;
+    WAVEFORMATEX *mix_ = nullptr;
+    AVCodecContext *enc_ = nullptr;
+    AVFrame *frame_ = nullptr;
+    AVPacket *pkt_ = nullptr;
+    int frameSamples_ = 960;
+    int64_t framePts_ = 0;
+    std::thread thread_;
+    std::atomic<bool> run_{false}, ok_{false};
 };
 
 // per-window resize state (real size arrives via WM_SIZE on ShowWindow; the
@@ -1881,6 +2471,7 @@ static void apply_hotkey(WPARAM key)
     case 'M': c.mode  = (EncConfig::Mode)(((int)c.mode + 1) % 3); break;
     case 'R': c.resIndex = (c.resIndex + 1) % (int)(sizeof(kResHeights) / sizeof(int)); break;
     case 'U': c.usage = (EncConfig::Usage)(((int)c.usage + 1) % 3); break;
+    case 'I': c.allIntra = !c.allIntra; break;   // inter (P-frames) <-> all-intra
     case VK_UP:
         if (c.mode == EncConfig::CQP) c.qp = std::max(1, c.qp - 1);
         else c.bitrateKbps = std::min(200000, c.bitrateKbps + 5000);
@@ -2004,10 +2595,14 @@ public:
         WSADATA wsa{};
         WSAStartup(MAKEWORD(2, 2), &wsa);
         t0_ = now_ms();   // stream epoch: pts = us since here
+        sender_.set_epoch(t0_);
         if (!sender_.start(CTMS_PORT, err)) return false;
         if (!g_noPreview) rx_.start(CTMS_PORT, hwDev_, t0_);
         std::wcout << L"CTMS stream on port " << CTMS_PORT
                    << (g_noPreview ? L" (no preview)\n" : L" (local receiver attached)\n");
+        { std::wstring ae; audioOn_ = audio_.start(&sender_, &ae);
+          std::wcout << (audioOn_ ? L"audio: WASAPI loopback -> Opus 48k stereo\n"
+                                  : L"audio: disabled (" + ae + L")\n"); }
 
         { std::lock_guard<std::mutex> lk(g_cfgMtx); applied_ = g_cfgDesired; }
         if (!reconfigure(applied_, err)) return false;
@@ -2015,7 +2610,7 @@ public:
         std::wcout << L"HDR monitor info: valid=" << hdr_.valid << L" maxLum=" << hdr_.maxLum
                    << L" maxFALL=" << hdr_.maxFFLum << L" minLum=" << hdr_.minLum << L"\n";
         lastStat_ = now_ms();
-        codecThread_ = std::thread(&DualPipeline::codec_worker, this);
+        codecThread_ = std::thread(&DualPipeline::capture_encode_loop, this);
         return true;
     }
 
@@ -2024,9 +2619,11 @@ public:
         { std::lock_guard<std::mutex> lk(jobMtx_); workerExit_ = true; }
         jobCv_.notify_all();
         if (codecThread_.joinable()) codecThread_.join();
+        audio_.stop();
         rx_.stop();          // receiver owns the decoder; stop before hwDev unref
         sender_.stop();
         if (inFlightSlot_ >= 0) conv_.unmap(inFlightSlot_);
+        if (jobFrame_) av_frame_free(&jobFrame_);   // zero-copy hwframe never consumed
         if (hwDev_) av_buffer_unref(&hwDev_);   // decoder/frames hold own refs
         WSACleanup();
     }
@@ -2034,192 +2631,209 @@ public:
     bool render_once()
     {
         const double loopT0 = now_ms();
-
-        // 1. collect a finished codec job (worker is done with the mapped slot)
-        if (jobDone_.exchange(false)) {
-            if (inFlightSlot_ >= 0) { conv_.unmap(inFlightSlot_); inFlightSlot_ = -1; }
-            jobInFlight_.store(false);
-        }
-
-        // 2. live reconfigure, only while the codec worker is idle (it owns
-        //    enc_/dec_ during a job and reads a mapped staging slot)
-        if (g_cfgDirty.load() && !jobInFlight_.load()) {
-            g_cfgDirty.store(false);
-            EncConfig want; { std::lock_guard<std::mutex> lk(g_cfgMtx); want = g_cfgDesired; }
-            if (want.encoderDiffers(applied_)) {
-                std::wstring e;
-                reconfigure(want, &e);
-                subNew_ = subOld_ = -1;   // staged frames are at the old resolution
-            }
-        }
-
-        // 3. dispatch to the codec worker: newest completed copy wins. Try the
-        //    most recent submission first; if its GPU copy isn't finished yet,
-        //    fall back to the older one. Whatever is staler gets dropped.
-        //    Cadence-capped to --fps: the reservoir keeps freshness, and the
-        //    receiver's renderer isn't flooded past its display rate.
-        if (!jobInFlight_.load() && (subNew_ >= 0 || subOld_ >= 0) &&
-            (g_maxFps <= 0 || (now_ms() - lastDispatchT_) >= 1000.0 / g_maxFps)) {
-            const int order[2] = {subNew_, subOld_};
-            for (int k = 0; k < 2; ++k) {
-                const int s = order[k];
-                if (s < 0) continue;
-                const uint8_t *dy = nullptr, *duv = nullptr; int py = 0, puv = 0;
-                const double m0 = now_ms();
-                const int mr = conv_.map(s, &dy, &py, &duv, &puv);
-                if (mr == 1) {
-                    mapMs_ = now_ms() - m0;
-                    {
-                        std::lock_guard<std::mutex> lk(jobMtx_);
-                        jobY_ = dy; jobPY_ = py; jobUV_ = duv; jobPUV_ = puv;
-                        // pts = capture time in us since stream start (real cadence)
-                        jobPts_ = (int64_t)((submitT_[s] - t0_) * 1000.0);
-                        pts_++;   // frame counter, stats only
-                        jobReady_ = true;
-                    }
-                    inFlightSlot_ = s;
-                    if (s == subNew_) {
-                        subNew_ = -1;
-                        if (subOld_ >= 0) { subOld_ = -1; drops_++; }   // older content: drop
-                    } else {
-                        subOld_ = -1;          // newest still copying; it dispatches next
-                    }
-                    lastDispatchT_ = now_ms();
-                    jobInFlight_.store(true);
-                    jobCv_.notify_one();
-                    break;
-                }
-                if (mr < 0) { (s == subNew_ ? subNew_ : subOld_) = -1; }
-                // mr == 0: copy not finished; try the older slot / next loop
-            }
-        }
-
-        resize_backbuffers();
-
-        // 4. grab a frame (FP16 scRGB)
-        DXGI_OUTDUPL_FRAME_INFO fi{};
-        ComPtr<IDXGIResource> res;
-        HRESULT hr = dup_->AcquireNextFrame(4, &fi, &res);
-        bool fresh = false;
-        if (hr == DXGI_ERROR_ACCESS_LOST) { std::wstring e; reinit_dup(&e); }
-        else if (hr == DXGI_ERROR_WAIT_TIMEOUT) { /* no change */ }
-        else if (SUCCEEDED(hr)) {
-            ComPtr<ID3D11Texture2D> tex;
-            if (SUCCEEDED(res.As(&tex))) {
-                D3D11_TEXTURE2D_DESC td; tex->GetDesc(&td);
-                // Follow the display's real format: recreate our copy on a
-                // format change (HDR<->SDR), not just on resize.
-                if (!frameTex_ || frW_ != (int)td.Width || frH_ != (int)td.Height || frFmt_ != td.Format) {
-                    frameTex_.Reset(); frameSRV_.Reset(); rtvFrame_.Reset();
-                    D3D11_TEXTURE2D_DESC d = td;
-                    d.Usage = D3D11_USAGE_DEFAULT;
-                    d.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;  // RTV for cursor compositing
-                    d.CPUAccessFlags = 0; d.MiscFlags = 0;
-                    if (SUCCEEDED(dev_->CreateTexture2D(&d, nullptr, &frameTex_))) {
-                        dev_->CreateShaderResourceView(frameTex_.Get(), nullptr, &frameSRV_);
-                        dev_->CreateRenderTargetView(frameTex_.Get(), nullptr, &rtvFrame_);
-                    }
-                    frW_ = td.Width; frH_ = td.Height; frFmt_ = td.Format;
-                    frameHDR_ = (td.Format == DXGI_FORMAT_R16G16B16A16_FLOAT);  // FP16 == scRGB/HDR
-                }
-                if (!fmtLogged_) {
-                    fmtLogged_ = true;
-                    std::wcout << L"captured surface: " << dxgi_format_name(td.Format)
-                               << L" -> treating as " << (frameHDR_ ? L"HDR/scRGB linear" : L"SDR/sRGB") << L"\n";
-                }
-                if (frameTex_) {
-                    ctx_->CopyResource(frameTex_.Get(), tex.Get());
-                    update_cursor(fi);         // refresh shape; capture stays cursorless
-                    haveFrame_ = true; fresh = true;
-                }
-            }
-            dup_->ReleaseFrame();
-        }
-
-        // 5. window A: raw scRGB passthrough (never waits on the codec path)
+        { std::lock_guard<std::mutex> g(gpuMtx_); resize_backbuffers(); }
         const UINT sync = g_vsync.load() ? 1 : 0;
         const UINT pflags = (sync == 0 && tearing_) ? DXGI_PRESENT_ALLOW_TEARING : 0;
+
+        // window A: latest captured f1, produced by the capture/encode thread.
+        // gpuMtx_ serializes our ctx_ draws against the capture thread; f1Mtx_
+        // (nested) guards the f1 buffer the capture thread may be republishing.
         if (!g_noPreview) {
-            if (haveFrame_) draw_scene(rtvA_.Get(), bbAW_, bbAH_, frameSRV_.Get(), frW_, frH_);
-            draw_cursor_overlay(rtvA_.Get(), bbAW_, bbAH_);
+            {
+                std::lock_guard<std::mutex> g(gpuMtx_);
+                {
+                    std::lock_guard<std::mutex> lk(f1Mtx_);
+                    if (f1Display_ >= 0 && f1SRV_[f1Display_])
+                        draw_scene(rtvA_.Get(), bbAW_, bbAH_, f1SRV_[f1Display_].Get(), f1W_, f1H_);
+                    else {
+                        const float black[4] = {0, 0, 0, 1};
+                        ctx_->ClearRenderTargetView(rtvA_.Get(), black);
+                    }
+                }
+                draw_cursor_overlay(rtvA_.Get(), bbAW_, bbAH_);
+            }
             scA_->Present(sync, pflags);
         }
-        send_cursor_pos();   // CTMS: position on change (shape goes in update_cursor)
-
-        // 6. reservoir, latest-wins: every fresh frame is submitted; when both
-        //    rotating slots hold submissions, overwrite the older one (drop).
-        //    Never re-copy onto the slot dispatch is probing -- rotation keeps
-        //    the probe target stable, so no Map livelock.
-        if (fresh && haveFrame_) {
-            int slot;
-            if (subOld_ >= 0) { slot = subOld_; drops_++; }      // superseded; reuse
-            else { slot = 0; while (slot == inFlightSlot_ || slot == subNew_) ++slot; }
-            if (conv_.submit(frameSRV_.Get(), slot)) {
-                subOld_ = subNew_;
-                subNew_ = slot;
-                submitT_[slot] = now_ms();
-            }
-        }
+        send_cursor_pos();   // CTMS: cursor position on change
 
         // 7. window B: newest decoded frame from the CTMS receiver (the same
         //    path the TV runs); cursor drawn from RECEIVED metadata, so B
         //    shows the cursor's true through-the-pipe latency.
         if (!g_noPreview) {
-            AVFrame *take = rx_.take_decoded();
-            if (take) {
-                if (take->format == AV_PIX_FMT_D3D11) decoded_.set_hw(take);
-                else { decoded_.upload(take); av_frame_free(&take); }
-            }
-            if (decoded_.valid()) {
+            {
+                std::lock_guard<std::mutex> g(gpuMtx_);
                 const float black[4] = {0, 0, 0, 1};
                 ctx_->ClearRenderTargetView(rtvB_.Get(), black);
                 ctx_->OMSetRenderTargets(1, rtvB_.GetAddressOf(), nullptr);
-                decoded_.draw(bbBW_, bbBH_);
+                if (rx_.use_amf_dec()) {                 // native AMF decoded texture
+                    int64_t fpts = -1; uint64_t gen = 0;
+                    if (ID3D11Texture2D *tex = rx_.amfdec().lock_latest(&fpts, &gen)) {
+                        decoded_.draw_amf(tex, rx_.dec_w(), rx_.dec_h(), bbBW_, bbBH_);  // d2 = now
+                        rx_.amfdec().release_latest();
+                        if (gen != lastShownGen_) {      // NEW frame's first display -> sample once
+                            lastShownGen_ = gen;
+                            if (fpts >= 0) { g2gAcc_.add((now_ms() - t0_) - (double)fpts / 1000.0); dispFrames_++; }
+                        }
+                    }
+                } else {                                 // ffmpeg path
+                    AVFrame *take = rx_.take_decoded();
+                    if (take) {
+                        if (take->format == AV_PIX_FMT_D3D11) decoded_.set_hw(take);
+                        else { decoded_.upload(take); av_frame_free(&take); }
+                    }
+                    if (decoded_.valid()) decoded_.draw(bbBW_, bbBH_);
+                }
+                draw_rx_cursor_overlay(rtvB_.Get(), bbBW_, bbBH_);
             }
-            draw_rx_cursor_overlay(rtvB_.Get(), bbBW_, bbBH_);
             scB_->Present(sync, pflags);
         }
 
         const double dt = now_ms() - loopT0;
         statLoops_++;
+        loopAcc_.add(dt);
         if (dt > worstLoop_) worstLoop_ = dt;
         update_stats();
+        if (g_noPreview) std::this_thread::sleep_for(std::chrono::milliseconds(2));  // nothing to present
         return true;
     }
 
-    // Codec worker: encode + decode off the render thread, so neither window
-    // ever stalls on the codecs (this is where the old per-frame hiccups and
-    // the 142ms scene-change decode spike used to land).
-    void codec_worker()
+    // Capture+encode thread: OWNS the duplication. Blocking AcquireNextFrame
+    // (event-driven, no busy poll) -> copy f1 -> convert (f2) -> encode (f3), all
+    // on ONE thread, so t0->t3 (present -> packet-out) has no handoff and no
+    // --fps gate. Publishes f1 (double-buffered) for the preview thread to draw;
+    // never presents (presents stay on the render thread, off the t0->t3 path).
+    void capture_encode_loop()
     {
-        for (;;) {
-            const uint8_t *dy = nullptr, *duv = nullptr; int py = 0, puv = 0; int64_t pts = 0;
-            {
-                std::unique_lock<std::mutex> lk(jobMtx_);
-                jobCv_.wait(lk, [&] { return jobReady_ || workerExit_; });
-                if (workerExit_) return;
-                jobReady_ = false;
-                dy = jobY_; py = jobPY_; duv = jobUV_; puv = jobPUV_; pts = jobPts_;
+        while (!workerExit_.load()) {
+            // live reconfigure (this thread owns enc_/conv_)
+            if (g_cfgDirty.load()) {
+                g_cfgDirty.store(false);
+                EncConfig want; { std::lock_guard<std::mutex> lk(g_cfgMtx); want = g_cfgDesired; }
+                if (want.encoderDiffers(applied_)) { std::wstring e; reconfigure(want, &e); }
             }
+
+            DXGI_OUTDUPL_FRAME_INFO fi{};
+            ComPtr<IDXGIResource> res;
+            HRESULT hr = dup_->AcquireNextFrame(100, &fi, &res);   // blocks until a frame
+            if (hr == DXGI_ERROR_WAIT_TIMEOUT) continue;           // re-check exit/reconfig
+            if (hr == DXGI_ERROR_ACCESS_LOST) { std::wstring e; reinit_dup(&e); continue; }
+            if (FAILED(hr)) { std::this_thread::sleep_for(std::chrono::milliseconds(5)); continue; }
+
+            ComPtr<ID3D11Texture2D> tex;
+            if (FAILED(res.As(&tex))) { dup_->ReleaseFrame(); continue; }
+            D3D11_TEXTURE2D_DESC td; tex->GetDesc(&td);
+
+            // (re)create the f1 double-buffer on size/format change
+            if (!f1Tex_[0] || f1W_ != (int)td.Width || f1H_ != (int)td.Height || f1Fmt_ != td.Format) {
+                { std::lock_guard<std::mutex> lk(f1Mtx_); f1Display_ = -1; }
+                for (int i = 0; i < 2; ++i) {
+                    f1Tex_[i].Reset(); f1SRV_[i].Reset();
+                    D3D11_TEXTURE2D_DESC d = td;
+                    d.Usage = D3D11_USAGE_DEFAULT;
+                    d.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+                    d.CPUAccessFlags = 0; d.MiscFlags = 0;
+                    if (SUCCEEDED(dev_->CreateTexture2D(&d, nullptr, &f1Tex_[i])))
+                        dev_->CreateShaderResourceView(f1Tex_[i].Get(), nullptr, &f1SRV_[i]);
+                }
+                f1Write_ = 0;
+                f1W_ = (int)td.Width; f1H_ = (int)td.Height; f1Fmt_ = td.Format;
+                f1HDR_ = (td.Format == DXGI_FORMAT_R16G16B16A16_FLOAT);
+                frameHDR_ = f1HDR_;   // draw_scene reads frameHDR_ for the source tonemap
+                if (!fmtLogged_) {
+                    fmtLogged_ = true;
+                    std::wcout << L"captured surface: " << dxgi_format_name(td.Format)
+                               << L" -> " << (f1HDR_ ? L"HDR/scRGB" : L"SDR/sRGB") << L"\n";
+                }
+            }
+            const int w = f1Write_;
+            if (!f1Tex_[w]) { dup_->ReleaseFrame(); continue; }
+
+            {
+                std::lock_guard<std::mutex> g(gpuMtx_);          // serialize ctx_ vs preview draws
+                ctx_->CopyResource(f1Tex_[w].Get(), tex.Get());  // f1
+                update_cursor(fi);                               // cursor metadata (sent via CTMS)
+            }
+            LARGE_INTEGER qf; QueryPerformanceFrequency(&qf);
+            const bool havePresentTs = fi.LastPresentTime.QuadPart != 0;
+            const double t0 = havePresentTs                     // t0 = present (frame ready)
+                ? (double)fi.LastPresentTime.QuadPart * 1000.0 / qf.QuadPart : now_ms();
+            freshFrames_++; if (!havePresentTs) presentFallback_++;
+            dup_->ReleaseFrame();
+
+            const int64_t pts = (int64_t)((t0 - t0_) * 1000.0);  // us since stream epoch
+
+            // convert (f2) + encode (f3); encMs brackets the encode call only.
             std::vector<AVPacket *> pkts;
-            wstage_.store(1);                  // encoding
-            if (sender_.take_want_idr()) enc_.force_idr();   // new client joined
-            double t0 = now_ms();
-            int er = enc_.encode(dy, py, duv, puv, pts, pkts);
-            if (er < 0) encErrs_.fetch_add(1);
-            encMsA_.store(now_ms() - t0);
+            wstage_.store(1);
+            if (sender_.take_want_idr()) { if (useAmf_) amf_.force_idr(); else enc_.force_idr(); }
+            const int64_t tEncUs = (int64_t)((now_ms() - t0_) * 1000.0);
+            double encMs = 0; bool encoded = false;
+            if (useAmf_) {   // native AMF: render P010 into encRt_, AMF wraps it directly
+                bool cvOk;
+                { std::lock_guard<std::mutex> g(gpuMtx_); cvOk = conv_.render_p010(f1SRV_[w].Get()); }
+                if (cvOk) {
+                    amfOut_.clear(); amfKeys_.clear();
+                    const double te0 = now_ms();
+                    amf_.encode(conv_.p010_texture(), pts, amfOut_, amfKeys_);
+                    encMs = now_ms() - te0; encoded = !amfOut_.empty();
+                }
+            } else if (enc_.is_hw()) {
+                if (AVFrame *hf = enc_.get_hwframe()) {
+                    ID3D11Texture2D *htex = reinterpret_cast<ID3D11Texture2D *>(hf->data[0]);
+                    const UINT hidx = (UINT)(intptr_t)hf->data[1];
+                    bool cvOk;
+                    { std::lock_guard<std::mutex> g(gpuMtx_); cvOk = conv_.submit_to_planes(f1SRV_[w].Get(), htex, hidx); }
+                    if (cvOk) {
+                        const double te0 = now_ms();
+                        if (enc_.encode_hw(hf, pts, pkts) < 0) encErrs_.fetch_add(1);
+                        encMs = now_ms() - te0; encoded = true;
+                    } else { av_frame_free(&hf); }
+                }
+            } else {   // --cpucopy fallback: convert to staging, map, encode
+                const uint8_t *dy = nullptr, *duv = nullptr; int py = 0, puv = 0; int mr = 0; bool cvOk = false;
+                {
+                    std::lock_guard<std::mutex> g(gpuMtx_);
+                    cvOk = conv_.submit(f1SRV_[w].Get(), 0);
+                    if (cvOk) { const double dl = now_ms() + 50.0; while ((mr = conv_.map(0, &dy, &py, &duv, &puv)) == 0 && now_ms() < dl) YieldProcessor(); }
+                }
+                if (cvOk && mr == 1) {
+                    const double te0 = now_ms();
+                    if (enc_.encode(dy, py, duv, puv, pts, pkts) < 0) encErrs_.fetch_add(1);
+                    encMs = now_ms() - te0; encoded = true;
+                    { std::lock_guard<std::mutex> g(gpuMtx_); conv_.unmap(0); }
+                }
+            }
+            const double t3 = now_ms();
+            const int64_t encUs = (int64_t)((t3 - t0_) * 1000.0);  // packet-out
+            if (encoded) {
+                encMsA_.store(encMs); encAcc_.add(encMs);
+                const double produce = t3 - t0;                    // t0->t3, no handoff/cadence
+                hostMsA_.store(produce); hostAcc_.add(produce);
+                pts_++;
+            }
+            // publish f1 for the preview thread, then flip the write buffer
+            { std::lock_guard<std::mutex> lk(f1Mtx_); f1Display_ = w; }
+            f1Write_ = 1 - w;
+
             size_t bytes = 0;
-            for (AVPacket *p : pkts) {         // ship over CTMS; the receiver decodes
-                bytes += p->size;
-                if (p->pts != AV_NOPTS_VALUE && p->dts != AV_NOPTS_VALUE && p->pts != p->dts)
-                    reorder_.fetch_add(1);   // pts!=dts => B-frame style reordering
-                sender_.send_video(p->data, p->size, p->pts, (p->flags & AV_PKT_FLAG_KEY) != 0);
-                txFrames_.fetch_add(1);
-                av_packet_free(&p);
+            if (useAmf_) {                     // ship native-AMF packets
+                for (size_t i = 0; i < amfOut_.size(); ++i) {
+                    bytes += amfOut_[i].size();
+                    sender_.send_video(amfOut_[i].data(), (int)amfOut_[i].size(), pts, tEncUs, encUs, amfKeys_[i]);
+                    txFrames_.fetch_add(1);
+                }
+            } else {
+                for (AVPacket *p : pkts) {     // ship ffmpeg packets
+                    bytes += p->size;
+                    if (p->pts != AV_NOPTS_VALUE && p->dts != AV_NOPTS_VALUE && p->pts != p->dts)
+                        reorder_.fetch_add(1);
+                    sender_.send_video(p->data, p->size, p->pts, tEncUs, encUs, (p->flags & AV_PKT_FLAG_KEY) != 0);
+                    txFrames_.fetch_add(1);
+                    av_packet_free(&p);
+                }
             }
             winBytes_.fetch_add(bytes);
-            wstage_.store(0);                  // idle
-            jobDone_.store(true);
+            wstage_.store(0);
         }
     }
 
@@ -2501,9 +3115,18 @@ private:
         int w, h; target_res(c, &w, &h);
         conv_.resize(w, h);
         std::string e8;
-        if (!enc_.open(c, w, h, hdr_, &e8)) {
-            std::wcerr << L"encoder open failed: " << std::wstring(e8.begin(), e8.end()) << L"\n";
-            if (err) *err = L"encoder open failed"; return false;
+        // HW encode = native AMF (true zero-copy from our P010 texture). ffmpeg is
+        // only the CPU fallback if AMF is unavailable.
+        useAmf_ = amf_.open(c, w, h, hdr_, dev_.Get(), &e8);
+        if (useAmf_) {
+            std::wcout << L"encoder: native AMF zero-copy (" << kCodecName[c.codec] << L")\n";
+        } else {
+            std::wcout << L"encoder: AMF unavailable (" << std::wstring(e8.begin(), e8.end())
+                       << L"); ffmpeg/CPU fallback\n";
+            if (!enc_.open(c, w, h, hdr_, hwDev_, &e8)) {
+                std::wcerr << L"encoder open failed: " << std::wstring(e8.begin(), e8.end()) << L"\n";
+                if (err) *err = L"encoder open failed"; return false;
+            }
         }
         CtmsStreamInfo si{};
         si.codec = (c.codec == EncConfig::AV1) ? 2 : 1;
@@ -2514,10 +3137,14 @@ private:
         memcpy(si.primaries, prim, sizeof(prim));
         si.maxLum = hdr_.maxLum; si.minLum = hdr_.minLum;
         si.maxCLL = hdr_.maxLum; si.maxFALL = hdr_.maxFFLum;
+        si.hasAudio = audioOn_ ? 1 : 0;
+        si.audioChannels = (uint8_t)audio_.channels();
+        si.audioRate = (uint32_t)audio_.rate();
         sender_.set_info(si);
         applied_ = c; encW_ = w; encH_ = h;
         std::wcout << L"reconfigured: " << kCodecName[c.codec] << L" " << kModeName[c.mode]
-                   << L" " << kUsageName[c.usage] << L" " << w << L"x" << h
+                   << L" " << kUsageName[c.usage] << L" " << (c.allIntra ? L"INTRA " : L"inter ")
+                   << w << L"x" << h
                    << L" br=" << c.bitrateKbps << L"k max=" << c.maxrateKbps
                    << L"k qp=" << c.qp << L"\n";
         return true;
@@ -2531,32 +3158,68 @@ private:
         lastStat_ = t;
         const double fps = statLoops_ * 1000.0 / el;
         statLoops_ = 0;
+        // Real per-stage fps -- COUNT actual frames over the wall-clock window, per
+        // stage. Each ticks only on a genuine new-frame event, so all go to 0 when
+        // the source is static (no drift, no approximating one stage from another).
         const uint64_t tx = txFrames_.load();
-        const double txfps = (double)(tx - lastTx_) * 1000.0 / el;
+        const double txfps = (double)(tx - lastTx_) * 1000.0 / el;          // encode fps
         lastTx_ = tx;
+        const uint64_t dcf = rx_.decFrames.load();
+        const double decfps = (double)(dcf - lastDec_) * 1000.0 / el;       // decode-output fps
+        lastDec_ = dcf;
+        const double dispfps = (double)(dispFrames_ - lastDisp_) * 1000.0 / el;  // window-B new-frame fps
+        lastDisp_ = dispFrames_;
         const double worst = worstLoop_;
         worstLoop_ = 0;
         const double mbps = winBytes_.exchange(0) * 8.0 / 1000.0 / el;   // window-averaged
-        const double encMs = encMsA_.load(), decMs = rx_.decMs.load(), latMs = rx_.latMs.load();
+
+        // Flush per-window distributions (avg/p50/p99/max + n). A single
+        // last-value sample hid the spikes that decide a latency budget.
+        const StatAcc::Summary enc = encAcc_.flush(),  host = hostAcc_.flush(),
+                               mp  = mapAcc_.flush(),  lp   = loopAcc_.flush(),
+                               dec = rx_.decAcc_.flush(), lat = rx_.latAcc_.flush(),
+                               dgpu = rx_.decGpuAcc_.flush(), g2g = g2gAcc_.flush();
+        const uint64_t fresh = freshFrames_, fb = presentFallback_;
+        freshFrames_ = presentFallback_ = 0;
+
+        // Window title: compact headline (avg, plus enc p99 so spikes show).
         wchar_t buf[360];
-        swprintf(buf, 360, L"CTM decoded | %ls %ls %ls %dx%d br %dk/max %dk qp %d | loop %.0ffps worst %.1fms | enc %.1f dec %.1f lat %.0f ms | ~%.1f Mb/s vsync=%d",
-                 kCodecName[applied_.codec], kModeName[applied_.mode], kUsageName[applied_.usage],
-                 encW_, encH_, applied_.bitrateKbps, applied_.maxrateKbps, applied_.qp,
-                 fps, worst, encMs, decMs, latMs, mbps, g_vsync.load() ? 1 : 0);
+        swprintf(buf, 360, L"CTM | %ls %ls %dx%d | fps e%.0f d%.0f s%.0f | enc %.1f dec %.1f ms | g2g %.0f ms | %.1f Mb/s",
+                 kCodecName[applied_.codec], kUsageName[applied_.usage], encW_, encH_,
+                 txfps, decfps, dispfps,
+                 enc.n ? enc.avg : -1.0, dec.n ? dec.avg : -1.0,
+                 g2g.n ? g2g.avg : -1.0, mbps);
         SetWindowTextW(wndB_, buf);
+
+        // Console: full distributions. n/a (not 0) when a term had no samples --
+        // e.g. dec/lat under --nopreview, where there is no local receiver (#7).
+        auto dump = [](const wchar_t *nm, const StatAcc::Summary &s) {
+            if (s.n) std::wcout << L" | " << nm << L" avg " << s.avg << L" p50 " << s.p50
+                                << L" p99 " << s.p99 << L" max " << s.mx << L" n=" << s.n;
+            else     std::wcout << L" | " << nm << L" n/a";
+        };
         std::wcout << L"[stat] " << kCodecName[applied_.codec] << L" " << kModeName[applied_.mode]
                    << L" " << kUsageName[applied_.usage] << L" " << encW_ << L"x" << encH_
-                   << L" | loop " << fps << L"fps worst " << worst << L"ms map " << mapMs_
-                   << L"ms | enc " << encMs << L"ms dec " << decMs << L"ms lat " << latMs
-                   << L"ms | ~" << mbps
-                   << L" Mb/s txfps=" << txfps
-                   << L" enc#=" << pts_ << L" dec#=" << rx_.decFrames.load()
+                   << L" | loop " << fps << L"fps worst " << worst << L"ms";
+        dump(L"enc(ms)", enc);
+        dump(L"host present->enc(ms)", host);
+        dump(L"decode d1-d0(ms)", dec);                     // real per-frame decode time
+        if (g_profile) { dump(L"dec-GPU(ms)", dgpu);        // true Fd; --profile only
+            std::wcout << L" gpu-drops=" << rx_.decGpuDrops_.exchange(0); }
+        dump(L"lat src->dec-out(ms)", lat);
+        dump(L"g2g d2-t0(ms)", g2g);                        // glass-to-glass (local), new frames only
+        dump(L"map(ms)", mp);
+        dump(L"loop(ms)", lp);
+        std::wcout << L" | ~" << mbps << L" Mb/s | fps enc=" << txfps << L" dec=" << decfps << L" disp=" << dispfps
+                   << L" enc#=" << pts_ << L" dec#=" << rx_.decFrames.load() << L" disp#=" << dispFrames_
+                   << L" present-fallback=" << fb << L"/" << fresh   // #8: anchor trust
                    << L" shown=" << (decoded_.valid() ? 1 : 0)
                    << L" vsync=" << (g_vsync.load() ? 1 : 0)
                    << L" wstage=" << wstage_.load() << L" inflight=" << (jobInFlight_.load() ? 1 : 0)
                    << L" encErr=" << encErrs_.load()
                    << L" skp=" << drops_ << L" bfr=" << reorder_.load()
                    << L" hwdec=" << (rx_.hwdec.load() ? 1 : 0)
+                   << L" prof=" << (g_profile ? 1 : 0)
                    << L" rxconn=" << (sender_.connected() ? 1 : 0) << L"\n";
     }
 
@@ -2573,11 +3236,13 @@ private:
     long bbAW_ = 1, bbAH_ = 1, bbBW_ = 1, bbBH_ = 1;
     bool tearing_ = false;
     bool dstHDR_ = false;                       // window's monitor presents HDR?
+    bool audioOn_ = false;
     DXGI_FORMAT rtvFmt_ = DXGI_FORMAT_R16G16B16A16_FLOAT;
     ComPtr<IDXGIOutputDuplication> dup_;
     ComPtr<ID3D11Texture2D> frameTex_;
     ComPtr<ID3D11ShaderResourceView> frameSRV_;
     int frW_ = 0, frH_ = 0; bool haveFrame_ = false;
+    double framePresentMs_ = 0;                 // Windows present time of last fresh frame
     DXGI_FORMAT frFmt_ = DXGI_FORMAT_UNKNOWN;   // real duplicated format
     bool frameHDR_ = false;                     // FP16 scRGB vs 8-bit sRGB
     bool fmtLogged_ = false;                     // log the captured format once
@@ -2597,7 +3262,11 @@ private:
     std::vector<uint8_t> shapeBuf_;
     Converter conv_;
     DecodedView decoded_;
-    Encoder enc_;
+    Encoder enc_;                            // ffmpeg CPU fallback
+    AmfEncoder amf_;                         // native AMD zero-copy (primary HW path)
+    bool useAmf_ = false;
+    std::vector<std::vector<uint8_t>> amfOut_;
+    std::vector<bool> amfKeys_;
     EncConfig applied_;
     int capW_ = 0, capH_ = 0, encW_ = 0, encH_ = 0;
     int64_t pts_ = 0;
@@ -2605,26 +3274,44 @@ private:
     // CTMS stream: sender (host) + local receiver feeding window B
     StreamSender sender_;
     StreamReceiver rx_;
+    AudioLoopback audio_;
     int lastSentX_ = INT_MIN, lastSentY_ = INT_MIN; bool lastSentVis_ = false;
     ComPtr<ID3D11Texture2D> rxCurTex_;
     ComPtr<ID3D11ShaderResourceView> rxCurSRV_;
     int rxCurW_ = 0, rxCurH_ = 0;
 
-    // codec worker handoff
+    // capture+encode thread (owns the duplication); legacy handoff fields kept
+    // unused so the dtor/teardown stays intact.
     std::thread codecThread_;
     std::mutex jobMtx_;
     std::condition_variable jobCv_;
-    bool jobReady_ = false, workerExit_ = false;
+    bool jobReady_ = false;
+    std::atomic<bool> workerExit_{false};
     const uint8_t *jobY_ = nullptr, *jobUV_ = nullptr;
     int jobPY_ = 0, jobPUV_ = 0; int64_t jobPts_ = 0;
-    std::atomic<bool> jobInFlight_{false};   // dispatch .. collect
-    std::atomic<bool> jobDone_{false};       // worker -> render thread
-    int subNew_ = -1, subOld_ = -1, inFlightSlot_ = -1;   // latest-wins reservoir
-    double submitT_[8] = {};                 // slot -> capture-submit time
-    int drops_ = 0;                          // frames replaced before encoding
+    AVFrame *jobFrame_ = nullptr;
+    std::atomic<bool> jobInFlight_{false};
+    std::atomic<bool> jobDone_{false};
+    int subNew_ = -1, subOld_ = -1, inFlightSlot_ = -1;
+    double submitT_[8] = {};
+    int drops_ = 0;
+    // f1 double-buffer: the capture thread writes f1Tex_[f1Write_], converts +
+    // encodes from it, then publishes it (f1Display_) for the preview thread to
+    // draw window A -- so the encode path owns the one duplication and preview is
+    // a separate reader, never in the t0->t3 path.
+    std::mutex f1Mtx_;
+    ComPtr<ID3D11Texture2D> f1Tex_[2];
+    ComPtr<ID3D11ShaderResourceView> f1SRV_[2];
+    int f1Write_ = 0, f1Display_ = -1;
+    int f1W_ = 0, f1H_ = 0; DXGI_FORMAT f1Fmt_ = DXGI_FORMAT_UNKNOWN; bool f1HDR_ = false;
+    // Serializes immediate-context draw SEQUENCES across the capture thread
+    // (copy/convert) and the preview thread (window A/B draws). The context is a
+    // single state machine; without this their sequences interleave -> flicker.
+    std::mutex gpuMtx_;
 
     // stats
-    std::atomic<double> encMsA_{0};
+    std::atomic<double> encMsA_{0};    // AMF encode call duration
+    std::atomic<double> hostMsA_{0};   // present->encoded (matches TV "enc")
     std::atomic<uint64_t> winBytes_{0};
     std::atomic<int> wstage_{0};               // 0 idle, 1 encoding
     std::atomic<int> encErrs_{0};
@@ -2635,10 +3322,18 @@ private:
     uint64_t lastTx_ = 0;
     int statLoops_ = 0;
     double worstLoop_ = 0, mapMs_ = 0, lastStat_ = 0;
+    // per-window distributions (#6) + present-anchor fallback rate (#8)
+    StatAcc encAcc_, hostAcc_, mapAcc_, loopAcc_;
+    uint64_t freshFrames_ = 0, presentFallback_ = 0;
+    StatAcc g2gAcc_;                          // glass-to-glass (local): d2 - t0, new frames only
+    uint64_t dispFrames_ = 0, lastDisp_ = 0;  // window-B new-frame displays (display-fps)
+    uint64_t lastDec_ = 0;                     // decode-fps window delta
+    uint64_t lastShownGen_ = 0;                // last AMF decode gen displayed (new vs redraw)
 };
 
 static int run_dual(OutputRef ref)
 {
+    TimerRes timerRes;   // 1ms scheduler tick so timings aren't tick-quantized (#1)
     const wchar_t *clsA = L"CtmCaptureRaw", *clsB = L"CtmCaptureDecoded";
     WNDCLASSW wc{};
     wc.lpfnWndProc = DualWndProc;
@@ -2666,7 +3361,7 @@ static int run_dual(OutputRef ref)
         ShowWindow(wndB, SW_SHOW);
     }
     std::wcout << L"\nHotkeys (focus either window):  C=codec  M=rate-mode  R=resolution  U=usage"
-                  L"  V=vsync  Up/Down=bitrate(or qp)  Left/Right=maxrate  Esc=quit\n";
+                  L"  I=intra/inter  V=vsync  Up/Down=bitrate(or qp)  Left/Right=maxrate  Esc=quit\n";
 
     std::thread render([dp]() {
         while (g_running.load()) {
@@ -2712,7 +3407,10 @@ int wmain(int argc, wchar_t **argv)
         auto next = [&](const wchar_t *def) -> std::wstring { return (i + 1 < argc) ? argv[++i] : def; };
         if (a == L"--single") single = true;
         else if (a == L"--nopreview") g_noPreview = true;
+        else if (a == L"--profile") g_profile = true;   // measure true HW-decode GPU time
+        else if (a == L"--cpucopy") g_cpucopy = true;    // force CPU encode input (no zero-copy)
         else if (a == L"--fps") g_maxFps = _wtoi(next(L"0").c_str());   // 0/absent = uncapped
+        else if (a == L"--intra") cfg.allIntra = true;
         else if (a == L"--output") idx = _wtoi(next(L"0").c_str());
         else if (a == L"--codec") cfg.codec = eqi(next(L"hevc"), L"av1") ? EncConfig::AV1 : EncConfig::HEVC;
         else if (a == L"--bitrate") cfg.bitrateKbps = std::max(500, _wtoi(next(L"40000").c_str()));

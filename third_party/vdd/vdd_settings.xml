@@ -15,17 +15,22 @@
     <global>
         <g_refresh_rate>60</g_refresh_rate>
         <g_refresh_rate>120</g_refresh_rate>
+        <g_refresh_rate>144</g_refresh_rate>
     </global>
     <resolutions>
         <resolution>
             <width>1920</width>
             <height>1080</height>
             <refresh_rate>60</refresh_rate>
+            <refresh_rate>120</refresh_rate>
+            <refresh_rate>144</refresh_rate>
         </resolution>
         <resolution>
             <width>3840</width>
             <height>2160</height>
             <refresh_rate>60</refresh_rate>
+            <refresh_rate>120</refresh_rate>
+            <refresh_rate>144</refresh_rate>
         </resolution>
     </resolutions>
     <options>
