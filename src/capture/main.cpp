@@ -882,14 +882,14 @@ static void log_display_mode(const OutputRef &ref)
 
 struct EncConfig {
     enum Codec { HEVC = 0, AV1 = 1 } codec = HEVC;
-    enum Mode  { CBR = 0, VBR = 1, CQP = 2 } mode = VBR;
+    enum Mode  { CBR = 0, VBR = 1, CQP = 2 } mode = CBR;
     enum Usage { ULL = 0, LL = 1, TRANSCODE = 2 } usage = ULL;
     int resIndex = 0;          // index into kResHeights; 0 == native
     int bitrateKbps = 40000;   // target
-    int maxrateKbps = 60000;   // peak / ceiling (VBR, CBR)
+    int maxrateKbps = 99000;   // peak / ceiling (VBR); CBR locks this to 99 Mbps
     int qp = 24;               // CQP qp / qvbr quality level
     bool allIntra = false;     // true = every frame an IDR (no P-frames)
-    bool intraRefresh = false; // rolling intra-refresh: no IDR spike, no VBV latency (TV-friendly)
+    bool intraRefresh = true;  // rolling intra-refresh: no IDR spike, no VBV latency (TV-friendly)
     int slices = 1;            // slices(HEVC)/tiles(AV1) per frame: smaller NALs, loss resilience
     int maxFrameKbits = 0;     // per-frame size cap in kbits (0 = off): clips spikes w/o a buffer
     int fps = 0;               // encoder framerate for rate-control budget (0 = use display refresh)
@@ -2530,7 +2530,8 @@ static void apply_hotkey(WPARAM key)
     EncConfig &c = g_cfgDesired;
     switch (key) {
     case 'C': c.codec = (c.codec == EncConfig::HEVC) ? EncConfig::AV1 : EncConfig::HEVC; break;
-    case 'M': c.mode  = (EncConfig::Mode)(((int)c.mode + 1) % 3); break;
+    case 'M': c.mode  = (EncConfig::Mode)(((int)c.mode + 1) % 3);
+              if (c.mode == EncConfig::CBR) c.maxrateKbps = 99000; break;   // CBR: locked 99 Mbps peak
     case 'R': c.resIndex = (c.resIndex + 1) % (int)(sizeof(kResHeights) / sizeof(int)); break;
     case 'U': c.usage = (EncConfig::Usage)(((int)c.usage + 1) % 3); break;
     case 'I': c.allIntra = !c.allIntra; break;   // inter (P-frames) <-> all-intra
@@ -2546,8 +2547,8 @@ static void apply_hotkey(WPARAM key)
         if (c.mode == EncConfig::CQP) c.qp = std::min(51, c.qp + 1);
         else c.bitrateKbps = std::max(2000, c.bitrateKbps - 5000);
         break;
-    case VK_RIGHT: c.maxrateKbps = std::min(300000, c.maxrateKbps + 5000); break;
-    case VK_LEFT:  c.maxrateKbps = std::max(c.bitrateKbps, c.maxrateKbps - 5000); break;
+    case VK_RIGHT: if (c.mode != EncConfig::CBR) c.maxrateKbps = std::min(300000, c.maxrateKbps + 5000); break;   // locked in CBR
+    case VK_LEFT:  if (c.mode != EncConfig::CBR) c.maxrateKbps = std::max(c.bitrateKbps, c.maxrateKbps - 5000); break;
     default: return;
     }
     g_cfgDirty.store(true);
@@ -3208,6 +3209,7 @@ private:
         // Tell the encoder the real framerate (display refresh) so rate-control
         // budgets per-frame correctly -- otherwise at 120Hz it doubles the rate.
         c.fps = (cIn.fps > 0) ? cIn.fps : display_refresh_hz(ref_.desc.DeviceName);
+        if (c.mode == EncConfig::CBR) c.maxrateKbps = 99000;   // CBR peak locked to 99 Mbps
         int w, h; target_res(c, &w, &h);
         conv_.resize(w, h);
         std::string e8;
