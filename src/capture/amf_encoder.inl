@@ -46,7 +46,10 @@ public:
 
         const amf_int64 br = (amf_int64)cfg.bitrateKbps * 1000;
         const amf_int64 mr = (amf_int64)std::max(cfg.maxrateKbps, cfg.bitrateKbps) * 1000;
-        const amf_int64 gop = cfg.allIntra ? 1 : 600;   // all-intra: IDR every frame
+        const amf_int64 fps = cfg.fps > 0 ? cfg.fps : 60;   // rate-control budget framerate
+        // all-intra: IDR every frame. intra-refresh: push the periodic IDR far out
+        // so the rolling refresh is the only intra (no keyframe spike).
+        const amf_int64 gop = cfg.allIntra ? 1 : (cfg.intraRefresh ? 100000 : 600);
         if (av1_) {
             enc_->SetProperty(AMF_VIDEO_ENCODER_AV1_USAGE,
                 cfg.usage == EncConfig::ULL ? (amf_int64)AMF_VIDEO_ENCODER_AV1_USAGE_ULTRA_LOW_LATENCY
@@ -66,8 +69,11 @@ public:
                                            : (amf_int64)AMF_VIDEO_ENCODER_AV1_RATE_CONTROL_METHOD_PEAK_CONSTRAINED_VBR);
             enc_->SetProperty(AMF_VIDEO_ENCODER_AV1_TARGET_BITRATE, br);
             enc_->SetProperty(AMF_VIDEO_ENCODER_AV1_PEAK_BITRATE, mr);
-            enc_->SetProperty(AMF_VIDEO_ENCODER_AV1_FRAMERATE, AMFConstructRate(60, 1));
+            enc_->SetProperty(AMF_VIDEO_ENCODER_AV1_FRAMERATE, AMFConstructRate((amf_int32)fps, 1));
             enc_->SetProperty(AMF_VIDEO_ENCODER_AV1_GOP_SIZE, gop);
+            if (cfg.slices > 1)        enc_->SetProperty(AMF_VIDEO_ENCODER_AV1_TILES_PER_FRAME, (amf_int64)cfg.slices);
+            if (cfg.maxFrameKbits > 0) enc_->SetProperty(AMF_VIDEO_ENCODER_AV1_MAX_COMPRESSED_FRAME_SIZE, (amf_int64)cfg.maxFrameKbits * 1000);
+            if (cfg.intraRefresh)      enc_->SetProperty(AMF_VIDEO_ENCODER_AV1_INTRA_REFRESH_MODE, (amf_int64)AMF_VIDEO_ENCODER_AV1_INTRA_REFRESH_MODE__CONTINUOUS);
         } else {
             enc_->SetProperty(AMF_VIDEO_ENCODER_HEVC_USAGE,
                 cfg.usage == EncConfig::ULL ? (amf_int64)AMF_VIDEO_ENCODER_HEVC_USAGE_ULTRA_LOW_LATENCY
@@ -87,9 +93,16 @@ public:
                                            : (amf_int64)AMF_VIDEO_ENCODER_HEVC_RATE_CONTROL_METHOD_PEAK_CONSTRAINED_VBR);
             enc_->SetProperty(AMF_VIDEO_ENCODER_HEVC_TARGET_BITRATE, br);
             enc_->SetProperty(AMF_VIDEO_ENCODER_HEVC_PEAK_BITRATE, mr);
-            enc_->SetProperty(AMF_VIDEO_ENCODER_HEVC_FRAMERATE, AMFConstructRate(60, 1));
+            enc_->SetProperty(AMF_VIDEO_ENCODER_HEVC_FRAMERATE, AMFConstructRate((amf_int32)fps, 1));
             enc_->SetProperty(AMF_VIDEO_ENCODER_HEVC_GOP_SIZE, gop);
             enc_->SetProperty(AMF_VIDEO_ENCODER_HEVC_NUM_GOPS_PER_IDR, (amf_int64)1);
+            if (cfg.slices > 1)        enc_->SetProperty(AMF_VIDEO_ENCODER_HEVC_SLICES_PER_FRAME, (amf_int64)cfg.slices);
+            if (cfg.maxFrameKbits > 0) enc_->SetProperty(AMF_VIDEO_ENCODER_HEVC_MAX_AU_SIZE, (amf_int64)cfg.maxFrameKbits * 1000);
+            if (cfg.intraRefresh) {    // spread intra over ~1s (fps frames) of 64x64 CTBs -> no spike
+                const amf_int64 ctbs = (amf_int64)((w + 63) / 64) * ((h + 63) / 64);
+                const amf_int64 perSlot = (ctbs + fps - 1) / fps;
+                enc_->SetProperty(AMF_VIDEO_ENCODER_HEVC_INTRA_REFRESH_NUM_CTBS_PER_SLOT, perSlot > 0 ? perSlot : 1);
+            }
         }
         if (enc_->Init(AMF_SURFACE_P010, w, h) != AMF_OK) { if (err) *err = "encoder Init failed"; return false; }
         w_ = w; h_ = h; ok_ = true;

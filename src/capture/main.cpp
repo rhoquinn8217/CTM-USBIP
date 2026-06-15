@@ -889,10 +889,16 @@ struct EncConfig {
     int maxrateKbps = 60000;   // peak / ceiling (VBR, CBR)
     int qp = 24;               // CQP qp / qvbr quality level
     bool allIntra = false;     // true = every frame an IDR (no P-frames)
+    bool intraRefresh = false; // rolling intra-refresh: no IDR spike, no VBV latency (TV-friendly)
+    int slices = 1;            // slices(HEVC)/tiles(AV1) per frame: smaller NALs, loss resilience
+    int maxFrameKbits = 0;     // per-frame size cap in kbits (0 = off): clips spikes w/o a buffer
+    int fps = 0;               // encoder framerate for rate-control budget (0 = use display refresh)
     bool encoderDiffers(const EncConfig &o) const {
         return codec != o.codec || mode != o.mode || usage != o.usage ||
                bitrateKbps != o.bitrateKbps || maxrateKbps != o.maxrateKbps ||
-               qp != o.qp || resIndex != o.resIndex || allIntra != o.allIntra;
+               qp != o.qp || resIndex != o.resIndex || allIntra != o.allIntra ||
+               intraRefresh != o.intraRefresh || slices != o.slices || maxFrameKbits != o.maxFrameKbits ||
+               fps != o.fps;
     }
 };
 static const int kResHeights[] = {0, 2160, 1440, 1080, 720, 540};
@@ -900,12 +906,24 @@ static const wchar_t *kCodecName[] = {L"HEVC", L"AV1"};
 static const wchar_t *kModeName[]  = {L"CBR", L"VBR", L"CQP"};
 static const wchar_t *kUsageName[] = {L"ultralowlatency", L"lowlatency", L"transcoding"};
 
+// Current refresh of the captured display (Hz) -> the encoder's rate-control
+// framerate, so its per-frame bit budget matches reality at 120Hz, not 60.
+static int display_refresh_hz(const wchar_t *deviceName)
+{
+    DEVMODEW dm{}; dm.dmSize = sizeof(dm);
+    if (deviceName && EnumDisplaySettingsW(deviceName, ENUM_CURRENT_SETTINGS, &dm) && dm.dmDisplayFrequency > 1)
+        return (int)dm.dmDisplayFrequency;
+    return 60;   // safe fallback
+}
+
 // shared live control state (written by WndProc, applied by the render thread)
 static std::mutex g_cfgMtx;
 static EncConfig g_cfgDesired;
 static std::atomic<bool> g_cfgDirty{false};
 static std::atomic<bool> g_vsync{false};   // V toggles; off = present without vblank wait
 static bool g_noPreview = false;           // --nopreview: stream only, windows hidden
+static std::atomic<bool> g_noDecode{false}; // --nodecode / 'D' hotkey: hide window B, no local decode
+static std::atomic<bool> g_decodeBench{false}; // 'B' hotkey: run the serialized decode bench once
 static bool g_profile = false;             // --profile: measure true HW-decode GPU
                                            // time (forces decode completion via a
                                            // timestamp query); adds a sync, so off
@@ -2020,6 +2038,7 @@ public:
     // share the clock (same machine), so lat = (now - t0) - pts/1000.
     void start(uint16_t port, AVBufferRef *hwDev, double t0)
     {
+        exit_.store(false);                 // re-armable: the 'D' toggle restarts us
         hwDev_ = hwDev; t0_ = t0;
         thread_ = std::thread(&StreamReceiver::run, this, port);
     }
@@ -2031,6 +2050,7 @@ public:
             if (sock_ != INVALID_SOCKET) { closesocket(sock_); sock_ = INVALID_SOCKET; }
         }
         if (thread_.joinable()) thread_.join();
+        amfdec_.close();                    // stop the decode drain thread + free the AMF decoder
         if (decodedLatest_) av_frame_free(&decodedLatest_);
     }
     ~StreamReceiver() { stop(); }
@@ -2064,11 +2084,43 @@ public:
     // native AMF decoder (primary HW decode path); ffmpeg dec_ is the fallback
     AmfDecoder amfdec_;
     std::atomic<bool> useAmfDec_{false};
+    std::mutex benchMtx_;                              // guards benchGop_
+    std::vector<std::vector<uint8_t>> benchGop_;       // latest GOP for the 'B' decode bench
     int decW_ = 0, decH_ = 0;
     bool use_amf_dec() const { return useAmfDec_.load(); }
     AmfDecoder &amfdec() { return amfdec_; }
     int dec_w() const { return decW_; }
     int dec_h() const { return decH_; }
+
+    // 'B' hotkey: serialized decode bench on the latest captured GOP, using a
+    // SEPARATE decoder (no drain thread) so the live path is untouched. Prints
+    // real decode latency (submit->exit), throughput, and the pipeline depth.
+    void run_decode_bench()
+    {
+        std::vector<std::vector<uint8_t>> gop;
+        { std::lock_guard<std::mutex> lk(benchMtx_); gop = benchGop_; }
+        if (gop.size() < 2) { std::wcout << L"[bench] no GOP yet (need a keyframe + frames first)\n"; return; }
+        ID3D11Device *dev = nullptr;
+        if (hwDev_) { auto *dc = reinterpret_cast<AVHWDeviceContext *>(hwDev_->data);
+                      dev = reinterpret_cast<AVD3D11VADeviceContext *>(dc->hwctx)->device; }
+        const EncConfig::Codec codec = info_.codec == 2 ? EncConfig::AV1 : EncConfig::HEVC;
+        AmfDecoder bench; std::string e;
+        if (!bench.open(codec, dev, decW_, decH_, &e, /*startDrain=*/false)) {
+            std::wcout << L"[bench] decoder open failed: " << std::wstring(e.begin(), e.end()) << L"\n"; return;
+        }
+        std::wcout << L"[bench] serialized decode: " << gop.size() << L"-frame GOP, target 300 outputs...\n";
+        DecodeBench r{};
+        if (!bench.decode_bench(gop, 300, &r, &e)) {
+            std::wcout << L"[bench] failed: " << std::wstring(e.begin(), e.end()) << L"\n"; bench.close(); return;
+        }
+        std::wcout << L"[bench] LATENCY submit->exit: avg " << r.latAvgMs << L" p50 " << r.latP50Ms
+                   << L" p99 " << r.latP99Ms << L" max " << r.latMaxMs << L" ms (n=" << r.frames << L")\n"
+                   << L"[bench] THROUGHPUT: " << r.throughputFps << L" fps ("
+                   << (r.throughputFps > 0 ? 1000.0 / r.throughputFps : 0.0) << L" ms/frame)\n"
+                   << L"[bench] pipeline depth: " << r.pipelineDepth << L" frame(s) before first output -> "
+                   << (r.pipelineDepth <= 1 ? L"no hold" : L"decoder HOLDS frames") << L"\n";
+        bench.close();
+    }
 
 private:
     void run(uint16_t port)
@@ -2115,20 +2167,12 @@ private:
                         auto *dc = reinterpret_cast<AVHWDeviceContext *>(hwDev_->data);
                         dev = reinterpret_cast<AVD3D11VADeviceContext *>(dc->hwctx)->device;
                     }
-                    useAmfDec_.store(amfdec_.open(codec, dev, decW_, decH_, &e));
+                    // startDrain=false: we drive decode SYNCHRONOUSLY, one frame at a
+                    // time (submit -> wait for it to exit) so d1-d0 is the real decode.
+                    useAmfDec_.store(amfdec_.open(codec, dev, decW_, decH_, &e, /*startDrain=*/false));
                     if (useAmfDec_.load()) {
                         hwdec.store(true);
-                        // Stats are stamped by the decoder's drain thread at decode-exit
-                        // (d1), not at network-read cadence -> real d1-d0, real latency.
-                        amfdec_.set_on_frame([this](double dms, int64_t outPts) {
-                            decFrames.fetch_add(1);                       // real decoded-frame count
-                            if (dms > 0) { decMs.store(dms); decAcc_.add(dms); }      // d1 - d0
-                            if (outPts >= 0) {                            // latency at decode-exit
-                                const double lat = (now_ms() - t0_) - (double)outPts / 1000.0;
-                                latMs.store(lat); latAcc_.add(lat);
-                            }
-                        });
-                        std::wcout << L"[rx] decoder: native AMF zero-copy\n";
+                        std::wcout << L"[rx] decoder: native AMF zero-copy (synchronous, one frame at a time)\n";
                     } else {
                         std::wcout << L"[rx] AMF decoder unavailable (" << std::wstring(e.begin(), e.end())
                                    << L"); ffmpeg fallback\n";
@@ -2138,8 +2182,24 @@ private:
                 }
                 break;
             case CTMS_VIDEO_FRAME: {
-                if (useAmfDec_.load()) {       // native AMF: submit only; the drain thread
-                    amfdec_.submit(payload.data(), (int)h.payloadLen, (int64_t)h.pts);  // stamps d1 + stats
+                if (useAmfDec_.load()) {       // synchronous: submit + wait for this frame to exit
+                    double decMsV = 0.0; int64_t outPts = -1;
+                    const int got = amfdec_.decode_sync(payload.data(), (int)h.payloadLen, (int64_t)h.pts, &decMsV, &outPts, 12);
+                    if (got > 0) {
+                        decFrames.fetch_add(got);                              // real decoded-frame count
+                        if (decMsV > 0) { decMs.store(decMsV); decAcc_.add(decMsV); }   // d1 - d0
+                        if (outPts >= 0) {                                     // src -> decode-exit
+                            const double lat = (now_ms() - t0_) - (double)outPts / 1000.0;
+                            latMs.store(lat); latAcc_.add(lat);
+                        }
+                    }
+                    // Keep the latest GOP (from a keyframe) for the 'B' decode bench.
+                    {
+                        std::lock_guard<std::mutex> lk(benchMtx_);
+                        if (h.flags & CTMS_FLAG_IDR) benchGop_.clear();
+                        if ((!benchGop_.empty() || (h.flags & CTMS_FLAG_IDR)) && benchGop_.size() < 240)
+                            benchGop_.emplace_back(payload.begin(), payload.begin() + h.payloadLen);
+                    }
                     break;
                 }
                 AVPacket *p = av_packet_alloc();
@@ -2464,6 +2524,8 @@ struct WinState {
 static void apply_hotkey(WPARAM key)
 {
     if (key == 'V') { g_vsync.store(!g_vsync.load()); return; }
+    if (key == 'D') { g_noDecode.store(!g_noDecode.load()); return; }   // hide window B / stop local decode
+    if (key == 'B') { g_decodeBench.store(true); return; }              // run serialized decode bench once
     std::lock_guard<std::mutex> lk(g_cfgMtx);
     EncConfig &c = g_cfgDesired;
     switch (key) {
@@ -2472,6 +2534,10 @@ static void apply_hotkey(WPARAM key)
     case 'R': c.resIndex = (c.resIndex + 1) % (int)(sizeof(kResHeights) / sizeof(int)); break;
     case 'U': c.usage = (EncConfig::Usage)(((int)c.usage + 1) % 3); break;
     case 'I': c.allIntra = !c.allIntra; break;   // inter (P-frames) <-> all-intra
+    case 'F': c.intraRefresh = !c.intraRefresh; break;                       // rolling intra-refresh (no IDR spike)
+    case 'S': c.slices = (c.slices >= 8) ? 1 : c.slices * 2; break;          // slices/tiles: 1,2,4,8
+    case 'A': c.maxFrameKbits = (c.maxFrameKbits == 0) ? 1000               // per-frame cap kbits: off,1000,2000,4000
+            : (c.maxFrameKbits >= 4000) ? 0 : c.maxFrameKbits * 2; break;
     case VK_UP:
         if (c.mode == EncConfig::CQP) c.qp = std::max(1, c.qp - 1);
         else c.bitrateKbps = std::min(200000, c.bitrateKbps + 5000);
@@ -2511,7 +2577,7 @@ class DualPipeline {
 public:
     bool init(const OutputRef &ref, HWND wndA, HWND wndB, WinState *wsA, WinState *wsB, std::wstring *err)
     {
-        ref_ = ref; wndB_ = wndB; wsA_ = wsA; wsB_ = wsB;
+        ref_ = ref; wndA_ = wndA; wndB_ = wndB; wsA_ = wsA; wsB_ = wsB;
         hdr_ = read_hdr_info(ref);
         const D3D_FEATURE_LEVEL fls[] = {D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0};
         if (FAILED(D3D11CreateDevice(ref.adapter.Get(), D3D_DRIVER_TYPE_UNKNOWN, nullptr,
@@ -2597,9 +2663,11 @@ public:
         t0_ = now_ms();   // stream epoch: pts = us since here
         sender_.set_epoch(t0_);
         if (!sender_.start(CTMS_PORT, err)) return false;
-        if (!g_noPreview) rx_.start(CTMS_PORT, hwDev_, t0_);
+        if (!g_noPreview && !g_noDecode.load()) { rx_.start(CTMS_PORT, hwDev_, t0_); decodeOn_ = true; }
         std::wcout << L"CTMS stream on port " << CTMS_PORT
-                   << (g_noPreview ? L" (no preview)\n" : L" (local receiver attached)\n");
+                   << (g_noPreview ? L" (no preview)\n"
+                                   : (g_noDecode.load() ? L" (decode off -- window B hidden)\n"
+                                                        : L" (local receiver attached)\n"));
         { std::wstring ae; audioOn_ = audio_.start(&sender_, &ae);
           std::wcout << (audioOn_ ? L"audio: WASAPI loopback -> Opus 48k stereo\n"
                                   : L"audio: disabled (" + ae + L")\n"); }
@@ -2628,9 +2696,25 @@ public:
         WSACleanup();
     }
 
+    // 'D' hotkey / --nodecode: start or stop the local decode path at runtime.
+    // Stopping it closes the AMF decoder (drain thread + GPU) and hides window B,
+    // so the host runs capture+encode only -- clean encode-side profiling.
+    void reconcile_decode()
+    {
+        if (g_noPreview) return;
+        const bool want = !g_noDecode.load();
+        if (want == decodeOn_) return;
+        if (want) { rx_.start(CTMS_PORT, hwDev_, t0_); ShowWindow(wndB_, SW_SHOW); }
+        else      { rx_.stop(); lastShownGen_ = 0; ShowWindow(wndB_, SW_HIDE); }
+        decodeOn_ = want;
+    }
+
     bool render_once()
     {
         const double loopT0 = now_ms();
+        reconcile_decode();
+        if (g_decodeBench.exchange(false) && decodeOn_ && !benchRunning_.exchange(true))
+            std::thread([this] { rx_.run_decode_bench(); benchRunning_.store(false); }).detach();
         { std::lock_guard<std::mutex> g(gpuMtx_); resize_backbuffers(); }
         const UINT sync = g_vsync.load() ? 1 : 0;
         const UINT pflags = (sync == 0 && tearing_) ? DXGI_PRESENT_ALLOW_TEARING : 0;
@@ -2658,34 +2742,42 @@ public:
 
         // 7. window B: newest decoded frame from the CTMS receiver (the same
         //    path the TV runs); cursor drawn from RECEIVED metadata, so B
-        //    shows the cursor's true through-the-pipe latency.
-        if (!g_noPreview) {
-            {
-                std::lock_guard<std::mutex> g(gpuMtx_);
-                const float black[4] = {0, 0, 0, 1};
-                ctx_->ClearRenderTargetView(rtvB_.Get(), black);
-                ctx_->OMSetRenderTargets(1, rtvB_.GetAddressOf(), nullptr);
-                if (rx_.use_amf_dec()) {                 // native AMF decoded texture
-                    int64_t fpts = -1; uint64_t gen = 0;
-                    if (ID3D11Texture2D *tex = rx_.amfdec().lock_latest(&fpts, &gen)) {
-                        decoded_.draw_amf(tex, rx_.dec_w(), rx_.dec_h(), bbBW_, bbBH_);  // d2 = now
-                        rx_.amfdec().release_latest();
-                        if (gen != lastShownGen_) {      // NEW frame's first display -> sample once
-                            lastShownGen_ = gen;
-                            if (fpts >= 0) { g2gAcc_.add((now_ms() - t0_) - (double)fpts / 1000.0); dispFrames_++; }
-                        }
-                    }
-                } else {                                 // ffmpeg path
-                    AVFrame *take = rx_.take_decoded();
-                    if (take) {
-                        if (take->format == AV_PIX_FMT_D3D11) decoded_.set_hw(take);
-                        else { decoded_.upload(take); av_frame_free(&take); }
-                    }
-                    if (decoded_.valid()) decoded_.draw(bbBW_, bbBH_);
+        //    shows the cursor's true through-the-pipe latency. Skipped when
+        //    decode is off ('D'/--nodecode): no decoder, window hidden.
+        // Serialized to the decode output: draw + present window B ONCE per newly
+        // decoded frame, so the window's update rate IS the decode rate (not the
+        // ~600fps render loop). Makes the decode cadence + latency legible.
+        if (decodeOn_) {
+            bool present = false;
+            const float black[4] = {0, 0, 0, 1};
+            std::lock_guard<std::mutex> g(gpuMtx_);
+            if (rx_.use_amf_dec()) {                     // native AMF decoded texture
+                int64_t fpts = -1; uint64_t gen = 0;
+                ID3D11Texture2D *tex = rx_.amfdec().lock_latest(&fpts, &gen);
+                if (tex && gen != lastShownGen_) {       // NEW frame -> draw + present once
+                    ctx_->ClearRenderTargetView(rtvB_.Get(), black);
+                    ctx_->OMSetRenderTargets(1, rtvB_.GetAddressOf(), nullptr);
+                    decoded_.draw_amf(tex, rx_.dec_w(), rx_.dec_h(), bbBW_, bbBH_);  // d2 = now
+                    draw_rx_cursor_overlay(rtvB_.Get(), bbBW_, bbBH_);
+                    lastShownGen_ = gen;
+                    if (fpts >= 0) { g2gAcc_.add((now_ms() - t0_) - (double)fpts / 1000.0); dispFrames_++; }
+                    present = true;
                 }
-                draw_rx_cursor_overlay(rtvB_.Get(), bbBW_, bbBH_);
+                if (tex) rx_.amfdec().release_latest();
+            } else {                                     // ffmpeg path
+                AVFrame *take = rx_.take_decoded();
+                if (take) {
+                    if (take->format == AV_PIX_FMT_D3D11) decoded_.set_hw(take);
+                    else { decoded_.upload(take); av_frame_free(&take); }
+                    ctx_->ClearRenderTargetView(rtvB_.Get(), black);
+                    ctx_->OMSetRenderTargets(1, rtvB_.GetAddressOf(), nullptr);
+                    if (decoded_.valid()) decoded_.draw(bbBW_, bbBH_);
+                    draw_rx_cursor_overlay(rtvB_.Get(), bbBW_, bbBH_);
+                    dispFrames_++;
+                    present = true;
+                }
             }
-            scB_->Present(sync, pflags);
+            if (present) scB_->Present(sync, pflags);   // present only on a new decoded frame
         }
 
         const double dt = now_ms() - loopT0;
@@ -3110,8 +3202,12 @@ private:
         *w = tw & ~1; *h = th & ~1;
     }
 
-    bool reconfigure(const EncConfig &c, std::wstring *err)
+    bool reconfigure(const EncConfig &cIn, std::wstring *err)
     {
+        EncConfig c = cIn;
+        // Tell the encoder the real framerate (display refresh) so rate-control
+        // budgets per-frame correctly -- otherwise at 120Hz it doubles the rate.
+        c.fps = (cIn.fps > 0) ? cIn.fps : display_refresh_hz(ref_.desc.DeviceName);
         int w, h; target_res(c, &w, &h);
         conv_.resize(w, h);
         std::string e8;
@@ -3131,7 +3227,7 @@ private:
         CtmsStreamInfo si{};
         si.codec = (c.codec == EncConfig::AV1) ? 2 : 1;
         si.width = (uint16_t)w; si.height = (uint16_t)h;
-        si.fps = 60;
+        si.fps = (uint16_t)c.fps;
         si.isHDR = 1;   // encoder is PQ BT.2020 for now (task #14: follow source)
         const float prim[8] = {hdr_.rx, hdr_.ry, hdr_.gx, hdr_.gy, hdr_.bx, hdr_.by, hdr_.wx, hdr_.wy};
         memcpy(si.primaries, prim, sizeof(prim));
@@ -3144,9 +3240,10 @@ private:
         applied_ = c; encW_ = w; encH_ = h;
         std::wcout << L"reconfigured: " << kCodecName[c.codec] << L" " << kModeName[c.mode]
                    << L" " << kUsageName[c.usage] << L" " << (c.allIntra ? L"INTRA " : L"inter ")
-                   << w << L"x" << h
+                   << (c.intraRefresh ? L"IR " : L"") << w << L"x" << h << L"@" << c.fps
                    << L" br=" << c.bitrateKbps << L"k max=" << c.maxrateKbps
-                   << L"k qp=" << c.qp << L"\n";
+                   << L"k qp=" << c.qp
+                   << L" slices=" << c.slices << L" auCap=" << c.maxFrameKbits << L"k\n";
         return true;
     }
 
@@ -3182,14 +3279,22 @@ private:
         const uint64_t fresh = freshFrames_, fb = presentFallback_;
         freshFrames_ = presentFallback_ = 0;
 
-        // Window title: compact headline (avg, plus enc p99 so spikes show).
+        // Window title: codec/mode/rate up front so every hotkey change is visible.
+        wchar_t rate[48];
+        if (applied_.mode == EncConfig::CQP) swprintf(rate, 48, L"qp%d", applied_.qp);
+        else swprintf(rate, 48, L"%dk/%dk", applied_.bitrateKbps, applied_.maxrateKbps);
+        wchar_t flags[48];
+        swprintf(flags, 48, L"%ls%ls%ls%ls",
+                 applied_.allIntra ? L" allI" : L"", applied_.intraRefresh ? L" IR" : L"",
+                 applied_.slices > 1 ? L" S" : L"", applied_.maxFrameKbits > 0 ? L" AU" : L"");
         wchar_t buf[360];
-        swprintf(buf, 360, L"CTM | %ls %ls %dx%d | fps e%.0f d%.0f s%.0f | enc %.1f dec %.1f ms | g2g %.0f ms | %.1f Mb/s",
-                 kCodecName[applied_.codec], kUsageName[applied_.usage], encW_, encH_,
+        swprintf(buf, 360, L"CTM | %ls %ls %ls %dx%d %ls%ls | fps e%.0f d%.0f s%.0f | enc %.1f dec %.1f ms | g2g %.0f ms | %.1f Mb/s",
+                 kCodecName[applied_.codec], kModeName[applied_.mode], kUsageName[applied_.usage], encW_, encH_, rate, flags,
                  txfps, decfps, dispfps,
                  enc.n ? enc.avg : -1.0, dec.n ? dec.avg : -1.0,
                  g2g.n ? g2g.avg : -1.0, mbps);
         SetWindowTextW(wndB_, buf);
+        SetWindowTextW(wndA_, buf);   // window A stays visible when decode is off
 
         // Console: full distributions. n/a (not 0) when a term had no samples --
         // e.g. dec/lat under --nopreview, where there is no local receiver (#7).
@@ -3199,8 +3304,14 @@ private:
             else     std::wcout << L" | " << nm << L" n/a";
         };
         std::wcout << L"[stat] " << kCodecName[applied_.codec] << L" " << kModeName[applied_.mode]
-                   << L" " << kUsageName[applied_.usage] << L" " << encW_ << L"x" << encH_
-                   << L" | loop " << fps << L"fps worst " << worst << L"ms";
+                   << L" " << kUsageName[applied_.usage] << L" " << encW_ << L"x" << encH_;
+        if (applied_.mode == EncConfig::CQP) std::wcout << L" qp" << applied_.qp;
+        else                                 std::wcout << L" " << applied_.bitrateKbps << L"k/" << applied_.maxrateKbps << L"k";
+        if (applied_.allIntra)        std::wcout << L" allI";
+        if (applied_.intraRefresh)    std::wcout << L" IR";
+        if (applied_.slices > 1)      std::wcout << L" S" << applied_.slices;
+        if (applied_.maxFrameKbits>0) std::wcout << L" AU" << applied_.maxFrameKbits << L"k";
+        std::wcout << L" | loop " << fps << L"fps worst " << worst << L"ms";
         dump(L"enc(ms)", enc);
         dump(L"host present->enc(ms)", host);
         dump(L"decode d1-d0(ms)", dec);                     // real per-frame decode time
@@ -3224,7 +3335,10 @@ private:
     }
 
     OutputRef ref_;
+    HWND wndA_ = nullptr;
     HWND wndB_ = nullptr;
+    bool decodeOn_ = false;   // local decode path running + window B shown (toggled by 'D')
+    std::atomic<bool> benchRunning_{false};   // a one-shot decode bench ('B') is in progress
     WinState *wsA_ = nullptr, *wsB_ = nullptr;
     HdrInfo hdr_;
     ComPtr<ID3D11Device> dev_;
@@ -3358,10 +3472,11 @@ static int run_dual(OutputRef ref)
     if (!dp->init(ref, wndA, wndB, &wsA, &wsB, &err)) { std::wcerr << L"dual init: " << err << L"\n"; return 3; }
     if (!g_noPreview) {
         ShowWindow(wndA, SW_SHOW);
-        ShowWindow(wndB, SW_SHOW);
+        ShowWindow(wndB, g_noDecode.load() ? SW_HIDE : SW_SHOW);
     }
     std::wcout << L"\nHotkeys (focus either window):  C=codec  M=rate-mode  R=resolution  U=usage"
-                  L"  I=intra/inter  V=vsync  Up/Down=bitrate(or qp)  Left/Right=maxrate  Esc=quit\n";
+                  L"  I=all-intra  F=intra-refresh  S=slices  A=frame-cap  V=vsync  D=decode-window  B=decode-bench"
+                  L"  Up/Down=bitrate(or qp)  Left/Right=maxrate  Esc=quit\n";
 
     std::thread render([dp]() {
         while (g_running.load()) {
@@ -3407,6 +3522,7 @@ int wmain(int argc, wchar_t **argv)
         auto next = [&](const wchar_t *def) -> std::wstring { return (i + 1 < argc) ? argv[++i] : def; };
         if (a == L"--single") single = true;
         else if (a == L"--nopreview") g_noPreview = true;
+        else if (a == L"--nodecode") g_noDecode = true;
         else if (a == L"--profile") g_profile = true;   // measure true HW-decode GPU time
         else if (a == L"--cpucopy") g_cpucopy = true;    // force CPU encode input (no zero-copy)
         else if (a == L"--fps") g_maxFps = _wtoi(next(L"0").c_str());   // 0/absent = uncapped
