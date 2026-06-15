@@ -886,7 +886,7 @@ struct EncConfig {
     enum Usage { ULL = 0, LL = 1, TRANSCODE = 2 } usage = ULL;
     int resIndex = 0;          // index into kResHeights; 0 == native
     int bitrateKbps = 40000;   // target
-    int maxrateKbps = 99000;   // peak / ceiling (VBR); CBR locks this to 99 Mbps
+    int maxrateKbps = 60000;   // peak / ceiling (VBR, CBR)
     int qp = 24;               // CQP qp / qvbr quality level
     bool allIntra = false;     // true = every frame an IDR (no P-frames)
     bool intraRefresh = true;  // rolling intra-refresh: no IDR spike, no VBV latency (TV-friendly)
@@ -1928,6 +1928,12 @@ private:
                 cl->q.pop_front();
                 cl->qBytes -= msg.size();
             }
+            // Stamp send-departure on video frames -> the client measures real
+            // one-way transport, not the queue-jumping PONG's control-path RTT.
+            if (msg.size() >= sizeof(CtmsHdr)) {
+                CtmsHdr *hp = reinterpret_cast<CtmsHdr *>(msg.data());
+                if (hp->type == CTMS_VIDEO_FRAME) hp->tSend = host_us();
+            }
             const char *b = reinterpret_cast<const char *>(msg.data());
             int len = (int)msg.size();
             while (len > 0) {
@@ -1966,7 +1972,7 @@ private:
     }
     void enqueue_locked(Client *cl, uint16_t type, uint16_t flags, uint64_t pts, uint64_t tEnc, uint64_t t1, const void *payload, int len)   // cl->qm held
     {
-        CtmsHdr h{CTMS_MAGIC, type, flags, pts, tEnc, t1, (uint32_t)len};
+        CtmsHdr h{CTMS_MAGIC, type, flags, pts, tEnc, t1, 0, (uint32_t)len};
         std::vector<uint8_t> msg(sizeof(h) + len);
         memcpy(msg.data(), &h, sizeof(h));
         if (len) memcpy(msg.data() + sizeof(h), payload, len);
@@ -1992,7 +1998,7 @@ private:
     }
     void enqueue_front_locked(Client *cl, uint16_t type, uint16_t flags, uint64_t pts, uint64_t tEnc, uint64_t t1, const void *payload, int len)   // cl->qm held
     {
-        CtmsHdr h{CTMS_MAGIC, type, flags, pts, tEnc, t1, (uint32_t)len};
+        CtmsHdr h{CTMS_MAGIC, type, flags, pts, tEnc, t1, 0, (uint32_t)len};
         std::vector<uint8_t> msg(sizeof(h) + len);
         memcpy(msg.data(), &h, sizeof(h));
         if (len) memcpy(msg.data() + sizeof(h), payload, len);
@@ -2530,8 +2536,7 @@ static void apply_hotkey(WPARAM key)
     EncConfig &c = g_cfgDesired;
     switch (key) {
     case 'C': c.codec = (c.codec == EncConfig::HEVC) ? EncConfig::AV1 : EncConfig::HEVC; break;
-    case 'M': c.mode  = (EncConfig::Mode)(((int)c.mode + 1) % 3);
-              if (c.mode == EncConfig::CBR) c.maxrateKbps = 99000; break;   // CBR: locked 99 Mbps peak
+    case 'M': c.mode  = (EncConfig::Mode)(((int)c.mode + 1) % 3); break;
     case 'R': c.resIndex = (c.resIndex + 1) % (int)(sizeof(kResHeights) / sizeof(int)); break;
     case 'U': c.usage = (EncConfig::Usage)(((int)c.usage + 1) % 3); break;
     case 'I': c.allIntra = !c.allIntra; break;   // inter (P-frames) <-> all-intra
@@ -2547,8 +2552,8 @@ static void apply_hotkey(WPARAM key)
         if (c.mode == EncConfig::CQP) c.qp = std::min(51, c.qp + 1);
         else c.bitrateKbps = std::max(2000, c.bitrateKbps - 5000);
         break;
-    case VK_RIGHT: if (c.mode != EncConfig::CBR) c.maxrateKbps = std::min(300000, c.maxrateKbps + 5000); break;   // locked in CBR
-    case VK_LEFT:  if (c.mode != EncConfig::CBR) c.maxrateKbps = std::max(c.bitrateKbps, c.maxrateKbps - 5000); break;
+    case VK_RIGHT: c.maxrateKbps = std::min(300000, c.maxrateKbps + 5000); break;
+    case VK_LEFT:  c.maxrateKbps = std::max(c.bitrateKbps, c.maxrateKbps - 5000); break;
     default: return;
     }
     g_cfgDirty.store(true);
@@ -3209,7 +3214,6 @@ private:
         // Tell the encoder the real framerate (display refresh) so rate-control
         // budgets per-frame correctly -- otherwise at 120Hz it doubles the rate.
         c.fps = (cIn.fps > 0) ? cIn.fps : display_refresh_hz(ref_.desc.DeviceName);
-        if (c.mode == EncConfig::CBR) c.maxrateKbps = 99000;   // CBR peak locked to 99 Mbps
         int w, h; target_res(c, &w, &h);
         conv_.resize(w, h);
         std::string e8;
@@ -3253,7 +3257,7 @@ private:
     {
         const double t = now_ms();
         const double el = t - lastStat_;
-        if (el < 1000.0) return;
+        if (el < 5000.0) return;   // log once per 5s; the distributions accumulate every sample in between
         lastStat_ = t;
         const double fps = statLoops_ * 1000.0 / el;
         statLoops_ = 0;

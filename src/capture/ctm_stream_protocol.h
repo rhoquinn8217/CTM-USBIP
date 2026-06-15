@@ -22,8 +22,9 @@ enum CtmsType : uint16_t {
 #define CTMS_FLAG_IDR   0x0001
 
 // All host timestamps are microseconds since the host's stream epoch (t0_ at
-// stream start). pts/t1 let the receiver build a present->encode->arrive
-// timeline; PING/PONG resolve the host<->client clock offset + network RTT.
+// stream start). pts/t1/tSend let the receiver build a present->encode->send->
+// arrive timeline; PING/PONG resolve the host<->client clock offset + RTT, so
+// the client can turn tSend into real one-way transport ((arrive + offset) - tSend).
 struct CtmsHdr {
     uint32_t magic;          // CTMS_MAGIC
     uint16_t type;           // CtmsType
@@ -31,6 +32,7 @@ struct CtmsHdr {
     uint64_t pts;            // video: t0 = Windows present time (us); cursor: send time
     uint64_t tEnc;           // video: encode-START time (us); enc = t1 - tEnc
     uint64_t t1;             // video: encode-done time (us); else 0
+    uint64_t tSend;          // video: send-departure time (us): frame's first byte to socket
     uint32_t payloadLen;     // bytes following this header
 };
 
