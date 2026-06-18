@@ -42,6 +42,22 @@ struct CtmsPing {
 struct CtmsPong {
     uint64_t clientUs;       // echo of CtmsPing.clientUs
     uint64_t hostUs;         // host clock (us since host stream epoch) at reply
+    uint64_t hostWallUs;     // host REAL wall clock (us since Unix epoch) at reply
+};
+
+// UDP clock-sync side-channel (host binds UDP CTMS_PORT). Off the TCP stream so the
+// exchange isn't stuck behind video frames -> prompt stamps both ends. Full 4-timestamp
+// NTP in REAL wall-clock us: offset(PC-TV) = ((t1-t0)+(t2-t3))/2, rtt = (t3-t0)-(t2-t1).
+#define CTMS_CLOCK_MAGIC 0x434C4F43u // 'CLOC'
+struct CtmsClockPing {
+    uint32_t magic;   // CTMS_CLOCK_MAGIC
+    uint64_t t0;      // TV wall us at PING send
+};
+struct CtmsClockPong {
+    uint32_t magic;   // CTMS_CLOCK_MAGIC
+    uint64_t t0;      // echoed TV send
+    uint64_t t1;      // host wall us at PING receive
+    uint64_t t2;      // host wall us at PONG send
 };
 
 struct CtmsStreamInfo {

@@ -58,6 +58,11 @@ public:
             enc_->SetProperty(AMF_VIDEO_ENCODER_AV1_FRAMESIZE, AMFConstructSize(w, h));
             enc_->SetProperty(AMF_VIDEO_ENCODER_AV1_COLOR_BIT_DEPTH, (amf_int64)AMF_COLOR_BIT_DEPTH_10);
             enc_->SetProperty(AMF_VIDEO_ENCODER_AV1_PROFILE, (amf_int64)AMF_VIDEO_ENCODER_AV1_PROFILE_MAIN);
+            // HDR VUI: converter outputs PQ BT.2020 (limited range) -> tag it (see HEVC note).
+            enc_->SetProperty(AMF_VIDEO_ENCODER_AV1_OUTPUT_COLOR_PROFILE, (amf_int64)AMF_VIDEO_CONVERTER_COLOR_PROFILE_2020);
+            enc_->SetProperty(AMF_VIDEO_ENCODER_AV1_OUTPUT_TRANSFER_CHARACTERISTIC, (amf_int64)AMF_COLOR_TRANSFER_CHARACTERISTIC_SMPTE2084);
+            enc_->SetProperty(AMF_VIDEO_ENCODER_AV1_OUTPUT_COLOR_PRIMARIES, (amf_int64)AMF_COLOR_PRIMARIES_BT2020);
+            enc_->SetProperty(AMF_VIDEO_ENCODER_AV1_INPUT_COLOR_PROFILE, (amf_int64)AMF_VIDEO_CONVERTER_COLOR_PROFILE_2020);
             enc_->SetProperty(AMF_VIDEO_ENCODER_AV1_QUALITY_PRESET,
                 cfg.usage == EncConfig::ULL ? (amf_int64)AMF_VIDEO_ENCODER_AV1_QUALITY_PRESET_SPEED
               : cfg.usage == EncConfig::LL  ? (amf_int64)AMF_VIDEO_ENCODER_AV1_QUALITY_PRESET_BALANCED
@@ -83,6 +88,14 @@ public:
             enc_->SetProperty(AMF_VIDEO_ENCODER_HEVC_COLOR_BIT_DEPTH, (amf_int64)AMF_COLOR_BIT_DEPTH_10);
             enc_->SetProperty(AMF_VIDEO_ENCODER_HEVC_PROFILE, (amf_int64)AMF_VIDEO_ENCODER_HEVC_PROFILE_MAIN_10);
             enc_->SetProperty(AMF_VIDEO_ENCODER_HEVC_TIER, (amf_int64)AMF_VIDEO_ENCODER_HEVC_TIER_MAIN);
+            // HDR VUI: the converter always outputs PQ BT.2020 (limited-range) P010, but
+            // the AMF HEVC stream is otherwise untagged -> the TV decodes it as SDR
+            // (getStatus videoInfo:null, no panel HDR). Tag colour so lxvideodec reports
+            // BT.2020 PQ. The ffmpeg encoder path already does this; the AMF path didn't.
+            enc_->SetProperty(AMF_VIDEO_ENCODER_HEVC_OUTPUT_COLOR_PROFILE, (amf_int64)AMF_VIDEO_CONVERTER_COLOR_PROFILE_2020);
+            enc_->SetProperty(AMF_VIDEO_ENCODER_HEVC_OUTPUT_TRANSFER_CHARACTERISTIC, (amf_int64)AMF_COLOR_TRANSFER_CHARACTERISTIC_SMPTE2084);
+            enc_->SetProperty(AMF_VIDEO_ENCODER_HEVC_OUTPUT_COLOR_PRIMARIES, (amf_int64)AMF_COLOR_PRIMARIES_BT2020);
+            enc_->SetProperty(AMF_VIDEO_ENCODER_HEVC_INPUT_COLOR_PROFILE, (amf_int64)AMF_VIDEO_CONVERTER_COLOR_PROFILE_2020);
             enc_->SetProperty(AMF_VIDEO_ENCODER_HEVC_QUALITY_PRESET,
                 cfg.usage == EncConfig::ULL ? (amf_int64)AMF_VIDEO_ENCODER_HEVC_QUALITY_PRESET_SPEED
               : cfg.usage == EncConfig::LL  ? (amf_int64)AMF_VIDEO_ENCODER_HEVC_QUALITY_PRESET_BALANCED
@@ -102,6 +115,24 @@ public:
                 const amf_int64 ctbs = (amf_int64)((w + 63) / 64) * ((h + 63) / 64);
                 const amf_int64 perSlot = (ctbs + fps - 1) / fps;
                 enc_->SetProperty(AMF_VIDEO_ENCODER_HEVC_INTRA_REFRESH_NUM_CTBS_PER_SLOT, perSlot > 0 ? perSlot : 1);
+            }
+        }
+        // mastering-display + content-light SEI (HDR10 statics) from the source monitor.
+        if (hdr.valid) {
+            AMFHDRMetadata md{};
+            md.redPrimary[0]   = (amf_uint16)(hdr.rx * 50000.f); md.redPrimary[1]   = (amf_uint16)(hdr.ry * 50000.f);
+            md.greenPrimary[0] = (amf_uint16)(hdr.gx * 50000.f); md.greenPrimary[1] = (amf_uint16)(hdr.gy * 50000.f);
+            md.bluePrimary[0]  = (amf_uint16)(hdr.bx * 50000.f); md.bluePrimary[1]  = (amf_uint16)(hdr.by * 50000.f);
+            md.whitePoint[0]   = (amf_uint16)(hdr.wx * 50000.f); md.whitePoint[1]   = (amf_uint16)(hdr.wy * 50000.f);
+            md.maxMasteringLuminance = (amf_uint32)(hdr.maxLum * 10000.f);   // AMF: nits x 10000
+            md.minMasteringLuminance = (amf_uint32)(hdr.minLum * 10000.f);
+            md.maxContentLightLevel      = (amf_uint16)hdr.maxLum;
+            md.maxFrameAverageLightLevel = (amf_uint16)hdr.maxFFLum;
+            amf::AMFBufferPtr hbuf;
+            if (ctx_->AllocBuffer(AMF_MEMORY_HOST, sizeof(md), &hbuf) == AMF_OK && hbuf) {
+                memcpy(hbuf->GetNative(), &md, sizeof(md));
+                enc_->SetProperty(av1_ ? AMF_VIDEO_ENCODER_AV1_INPUT_HDR_METADATA
+                                       : AMF_VIDEO_ENCODER_HEVC_INPUT_HDR_METADATA, hbuf);
             }
         }
         if (enc_->Init(AMF_SURFACE_P010, w, h) != AMF_OK) { if (err) *err = "encoder Init failed"; return false; }

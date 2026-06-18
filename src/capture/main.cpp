@@ -815,6 +815,15 @@ static double now_ms()
     return 1000.0 * (double)c.QuadPart / (double)f.QuadPart;
 }
 
+// real wall clock, microseconds since the Unix epoch -- for the on-screen latency
+// timestamp (baked into the frame on the PC, shown on the TV, compared by a camera).
+static uint64_t wall_us()
+{
+    FILETIME ft; GetSystemTimePreciseAsFileTime(&ft);
+    uint64_t t = ((uint64_t)ft.dwHighDateTime << 32) | ft.dwLowDateTime;  // 100ns since 1601
+    return (t - 116444736000000000ULL) / 10ULL;                           // -> us since 1970
+}
+
 // HDR mastering info from the source monitor (DXGI_OUTPUT_DESC1).
 struct HdrInfo {
     bool valid = false;
@@ -921,6 +930,7 @@ static std::mutex g_cfgMtx;
 static EncConfig g_cfgDesired;
 static std::atomic<bool> g_cfgDirty{false};
 static std::atomic<bool> g_vsync{false};   // V toggles; off = present without vblank wait
+static std::atomic<bool> g_imprint{false}; // T toggles; burn the capture-time latency marker into the stream
 static bool g_noPreview = false;           // --nopreview: stream only, windows hidden
 static std::atomic<bool> g_noDecode{false}; // --nodecode / 'D' hotkey: hide window B, no local decode
 static std::atomic<bool> g_decodeBench{false}; // 'B' hotkey: run the serialized decode bench once
@@ -973,6 +983,14 @@ float4 mainUV(float4 pos:SV_Position, float2 uv:TEXCOORD0) : SV_Target {
                   (896.0 * Cr + 512.0) * (64.0 / 65535.0), 0, 1);
 })";
 
+// solid-color fill (latency-digit rects): the kVSQuad VS positions a quad from cbuffer
+// rect (NDC); this PS just outputs the color. A real Draw -> works on the AMF P010 plane
+// (unlike ClearView), so the imprint lands in the encoded stream (and window B).
+static const char *kPSSolid = R"(
+cbuffer Q : register(b0) { float4 rect; float4 color; };
+float4 smain(float4 pos:SV_Position, float2 uv:TEXCOORD0) : SV_Target { return color; }
+)";
+
 class Converter {
 public:
     bool init(ID3D11Device *dev, ID3D11DeviceContext *ctx, std::wstring *err)
@@ -981,10 +999,17 @@ public:
         auto vsb = compile_shader(kVS, "main", "vs_5_0");
         auto psy = compile_shader(kPSConvert, "mainY", "ps_5_0");
         auto psc = compile_shader(kPSConvert, "mainUV", "ps_5_0");
-        if (!vsb || !psy || !psc) { if (err) *err = L"converter shader compile failed"; return false; }
+        auto vqb = compile_shader(kVSQuad, "qmain", "vs_5_0");
+        auto psol = compile_shader(kPSSolid, "smain", "ps_5_0");
+        if (!vsb || !psy || !psc || !vqb || !psol) { if (err) *err = L"converter shader compile failed"; return false; }
         dev_->CreateVertexShader(vsb->GetBufferPointer(), vsb->GetBufferSize(), nullptr, &vs_);
         dev_->CreatePixelShader(psy->GetBufferPointer(), psy->GetBufferSize(), nullptr, &psY_);
         dev_->CreatePixelShader(psc->GetBufferPointer(), psc->GetBufferSize(), nullptr, &psUV_);
+        dev_->CreateVertexShader(vqb->GetBufferPointer(), vqb->GetBufferSize(), nullptr, &vsQuad_);
+        dev_->CreatePixelShader(psol->GetBufferPointer(), psol->GetBufferSize(), nullptr, &psSolid_);
+        D3D11_BUFFER_DESC cbd{}; cbd.ByteWidth = 32; cbd.Usage = D3D11_USAGE_DEFAULT;
+        cbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+        dev_->CreateBuffer(&cbd, nullptr, &cbQuad_);
         D3D11_SAMPLER_DESC s{};
         s.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
         s.AddressU = s.AddressV = s.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
@@ -1070,6 +1095,8 @@ public:
         ctx_->PSSetShader(psUV_.Get(), nullptr, 0);
         ctx_->Draw(3, 0);
 
+        draw_ts_digits(rtvY_.Get(), rtvUV_.Get());
+
         ID3D11ShaderResourceView *nullSRV = nullptr;
         ctx_->PSSetShaderResources(0, 1, &nullSRV);
         ctx_->CopyResource(stagY_[slot].Get(), rtY_.Get());
@@ -1101,6 +1128,8 @@ public:
         ctx_->OMSetRenderTargets(1, encRtUV_.GetAddressOf(), nullptr);  // UV plane
         ctx_->PSSetShader(psUV_.Get(), nullptr, 0);
         ctx_->Draw(3, 0);
+
+        draw_ts_digits(encRtY_.Get(), encRtUV_.Get());
 
         ID3D11ShaderResourceView *nullSRV = nullptr;
         ctx_->PSSetShaderResources(0, 1, &nullSRV);
@@ -1145,8 +1174,76 @@ public:
     int width() const { return w_; }
     int height() const { return h_; }
 
+    // latency imprint: burn the capture wall-clock time (ms since Unix epoch) into the Y
+    // plane as big 7-seg digits, dead-center, so it rides encode->stream->decode->display
+    // and a camera reads it off the TV. tsMs_ = 0 disables.
+    void set_ts(uint64_t wallMs) { tsMs_ = wallMs; }
+    // fill one rect (pixels, in a vw x vh viewport) with a solid color via a quad Draw
+    // into the currently-bound RT -- works on the AMF P010 plane (ClearView does not).
+    void fill(int x0, int y0, int x1, int y1, int vw, int vh, float r, float g, float b)
+    {
+        struct { float rect[4], color[4]; } q;
+        q.rect[0] = 2.0f * x0 / vw - 1.0f; q.rect[1] = 1.0f - 2.0f * y0 / vh;
+        q.rect[2] = 2.0f * x1 / vw - 1.0f; q.rect[3] = 1.0f - 2.0f * y1 / vh;
+        q.color[0] = r; q.color[1] = g; q.color[2] = b; q.color[3] = 1.0f;
+        ctx_->UpdateSubresource(cbQuad_.Get(), 0, nullptr, &q, 0, 0);
+        ctx_->Draw(4, 0);
+    }
+    void seg_digit(int x, int yy, int W, int H, int T, int v)   // 7-seg, white, into bound Y RT
+    {
+        static const unsigned char M[10] = {0x7E,0x30,0x6D,0x79,0x33,0x5B,0x5F,0x70,0x7F,0x7B}; // a..g, bit6=a
+        if (v < 0 || v > 9) return;
+        const unsigned m = M[v]; const int hm = H / 2;
+        auto S = [&](int bbit, int x0, int y0, int x1, int y1) {
+            if ((m >> bbit) & 1) fill(x0, y0, x1, y1, w_, h_, 1, 1, 1); };
+        S(6, x+T,   yy,        x+W-T, yy+T);          // a
+        S(5, x+W-T, yy+T,      x+W,   yy+hm);         // b
+        S(4, x+W-T, yy+hm,     x+W,   yy+H-T);        // c
+        S(3, x+T,   yy+H-T,    x+W-T, yy+H);          // d
+        S(2, x,     yy+hm,     x+T,   yy+H-T);        // e
+        S(1, x,     yy+T,      x+T,   yy+hm);         // f
+        S(0, x+T,   yy+hm-T/2, x+W-T, yy+hm+T/2);     // g
+    }
+    void draw_ts_digits(ID3D11RenderTargetView *yRtv, ID3D11RenderTargetView *uvRtv)
+    {
+        if (!yRtv || tsMs_ == 0) return;
+        char num[24]; int n = 0; { char tmp[24]; int t = 0; uint64_t v = tsMs_;
+            if (v == 0) tmp[t++] = '0'; else while (v) { tmp[t++] = (char)('0' + v % 10); v /= 10; }
+            for (int i = 0; i < t; ++i) num[i] = tmp[t - 1 - i]; n = t; }
+        int dh = h_ / 18, dw = (dh * 6) / 10, gap = dw / 4, T = dh / 10; if (T < 2) T = 2;
+        int totalW = n * dw + (n - 1) * gap, maxW = (w_ * 92) / 100;
+        if (totalW > maxW) { dw = dw * maxW / totalW; gap = gap * maxW / totalW; dh = dh * maxW / totalW;
+                             T = T * maxW / totalW; if (T < 2) T = 2; totalW = n * dw + (n - 1) * gap; }
+        int x0 = (w_ - totalW) / 2, y0 = (h_ - dh) / 2, pad = dh / 4;
+        int bl = x0-pad<0?0:x0-pad, bt = y0-pad<0?0:y0-pad;
+        int br = x0+totalW+pad>w_?w_:x0+totalW+pad, bb = y0+dh+pad>h_?h_:y0+dh+pad;
+        // solid-quad pipeline
+        ctx_->IASetInputLayout(nullptr);
+        ctx_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+        ctx_->VSSetShader(vsQuad_.Get(), nullptr, 0);
+        ctx_->PSSetShader(psSolid_.Get(), nullptr, 0);
+        ctx_->VSSetConstantBuffers(0, 1, cbQuad_.GetAddressOf());
+        ctx_->PSSetConstantBuffers(0, 1, cbQuad_.GetAddressOf());
+        // Y plane: dark plate, then white digit segments
+        D3D11_VIEWPORT vpY{0, 0, (float)w_, (float)h_, 0, 1}; ctx_->RSSetViewports(1, &vpY);
+        ID3D11RenderTargetView *ry[] = {yRtv}; ctx_->OMSetRenderTargets(1, ry, nullptr);
+        fill(bl, bt, br, bb, w_, h_, 0, 0, 0);
+        int x = x0;
+        for (int i = 0; i < n; ++i) { seg_digit(x, y0, dw, dh, T, num[i] - '0'); x += dw + gap; }
+        // UV plane: neutral chroma under the plate
+        if (uvRtv) {
+            D3D11_VIEWPORT vpC{0, 0, (float)(w_ / 2), (float)(h_ / 2), 0, 1}; ctx_->RSSetViewports(1, &vpC);
+            ID3D11RenderTargetView *ru[] = {uvRtv}; ctx_->OMSetRenderTargets(1, ru, nullptr);
+            fill(bl / 2, bt / 2, br / 2, bb / 2, w_ / 2, h_ / 2, 0.5f, 0.5f, 0);
+        }
+    }
+
 private:
     ID3D11Device *dev_ = nullptr; ID3D11DeviceContext *ctx_ = nullptr;
+    ComPtr<ID3D11VertexShader> vsQuad_;
+    ComPtr<ID3D11PixelShader> psSolid_;
+    ComPtr<ID3D11Buffer> cbQuad_;
+    uint64_t tsMs_ = 0;
     ComPtr<ID3D11VertexShader> vs_;
     ComPtr<ID3D11PixelShader> psY_, psUV_;
     ComPtr<ID3D11SamplerState> samp_;
@@ -1782,13 +1879,40 @@ public:
             if (err) *err = L"bind/listen failed"; return false;
         }
         acceptThread_ = std::thread(&StreamSender::accept_loop, this);
+        // UDP clock-sync responder on the same port (off the video TCP stream so PONGs
+        // are stamped/sent promptly -> accurate offset). Optional: if UDP is blocked the
+        // video still works, the TV just won't get the precise clock diff.
+        udpSock_ = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        if (udpSock_ != INVALID_SOCKET) {
+            sockaddr_in ua{}; ua.sin_family = AF_INET; ua.sin_port = htons(port); ua.sin_addr.s_addr = htonl(INADDR_ANY);
+            if (bind(udpSock_, (sockaddr *)&ua, sizeof(ua)) == 0)
+                clockThread_ = std::thread(&StreamSender::clock_loop, this);
+            else { closesocket(udpSock_); udpSock_ = INVALID_SOCKET; }
+        }
         return true;
+    }
+
+    // Echo each PING immediately: stamp host wall-clock at receive (t1) and send (t2) so
+    // the TV can do full 4-timestamp NTP and cancel the host turnaround.
+    void clock_loop()
+    {
+        for (;;) {
+            CtmsClockPing ping; sockaddr_in from{}; int fl = sizeof(from);
+            int n = recvfrom(udpSock_, (char *)&ping, sizeof(ping), 0, (sockaddr *)&from, &fl);
+            uint64_t t1 = wall_us();
+            if (n == SOCKET_ERROR) { if (exit_.load()) break; continue; }
+            if (n < (int)sizeof(ping) || ping.magic != CTMS_CLOCK_MAGIC) continue;
+            CtmsClockPong pong{ CTMS_CLOCK_MAGIC, ping.t0, t1, wall_us() };
+            sendto(udpSock_, (const char *)&pong, sizeof(pong), 0, (sockaddr *)&from, fl);
+        }
     }
 
     void stop()
     {
         exit_.store(true);
         if (listenSock_ != INVALID_SOCKET) { closesocket(listenSock_); listenSock_ = INVALID_SOCKET; }
+        if (udpSock_ != INVALID_SOCKET) { closesocket(udpSock_); udpSock_ = INVALID_SOCKET; }
+        if (clockThread_.joinable()) clockThread_.join();
         {
             std::lock_guard<std::mutex> lk(mtx_);
             for (auto &cl : clients_) {
@@ -1899,7 +2023,7 @@ private:
             if (h.payloadLen && !recv_all(cl->sock, payload.data(), h.payloadLen)) break;
             if (h.type == CTMS_PING && h.payloadLen >= sizeof(CtmsPing)) {
                 CtmsPing ping; memcpy(&ping, payload.data(), sizeof(ping));
-                CtmsPong pong{ping.clientUs, host_us()};
+                CtmsPong pong{ping.clientUs, host_us(), wall_us()};
                 // Priority: push PONG to the FRONT so clock sync isn't skewed
                 // by sitting behind queued video (that caused negative net).
                 std::lock_guard<std::mutex> lk(cl->qm);
@@ -2024,6 +2148,8 @@ private:
     }
 
     SOCKET listenSock_ = INVALID_SOCKET;
+    SOCKET udpSock_ = INVALID_SOCKET;     // UDP clock-sync responder
+    std::thread clockThread_;
     std::vector<std::unique_ptr<Client>> clients_;
     std::thread acceptThread_;
     std::atomic<bool> exit_{false};
@@ -2530,6 +2656,7 @@ struct WinState {
 static void apply_hotkey(WPARAM key)
 {
     if (key == 'V') { g_vsync.store(!g_vsync.load()); return; }
+    if (key == 'T') { g_imprint.store(!g_imprint.load()); return; }   // latency-imprint marker
     if (key == 'D') { g_noDecode.store(!g_noDecode.load()); return; }   // hide window B / stop local decode
     if (key == 'B') { g_decodeBench.store(true); return; }              // run serialized decode bench once
     std::lock_guard<std::mutex> lk(g_cfgMtx);
@@ -2810,55 +2937,79 @@ public:
                 if (want.encoderDiffers(applied_)) { std::wstring e; reconfigure(want, &e); }
             }
 
+            // Idle-floor pacing: AcquireNextFrame returns at once on a real change, or
+            // after kIdleMs when nothing changed. On timeout we re-encode the LAST frame
+            // (a "duplicate") so the stream never goes fully idle. Without this, a static
+            // or low-fps screen leaves the TV decoder's 1-frame hold un-flushed -- the
+            // already-decoded frame sits in the decoder until the NEXT real change, so
+            // glass-to-glass latency balloons to the inter-change interval (0.5s+). The
+            // duplicate is a tiny static P-frame; on CBR it may pad slightly, accepted.
+            static const UINT kIdleMs = 33;   // ~30 fps idle floor
             DXGI_OUTDUPL_FRAME_INFO fi{};
             ComPtr<IDXGIResource> res;
-            HRESULT hr = dup_->AcquireNextFrame(100, &fi, &res);   // blocks until a frame
-            if (hr == DXGI_ERROR_WAIT_TIMEOUT) continue;           // re-check exit/reconfig
-            if (hr == DXGI_ERROR_ACCESS_LOST) { std::wstring e; reinit_dup(&e); continue; }
-            if (FAILED(hr)) { std::this_thread::sleep_for(std::chrono::milliseconds(5)); continue; }
+            HRESULT hr = dup_->AcquireNextFrame(kIdleMs, &fi, &res);
+            bool dup = false;
+            if (hr == DXGI_ERROR_WAIT_TIMEOUT) {
+                if (f1Last_ < 0) continue;    // no frame captured yet -> nothing to duplicate
+                dup = true;
+            } else if (hr == DXGI_ERROR_ACCESS_LOST) { std::wstring e; reinit_dup(&e); continue; }
+            else if (FAILED(hr)) { std::this_thread::sleep_for(std::chrono::milliseconds(5)); continue; }
 
-            ComPtr<ID3D11Texture2D> tex;
-            if (FAILED(res.As(&tex))) { dup_->ReleaseFrame(); continue; }
-            D3D11_TEXTURE2D_DESC td; tex->GetDesc(&td);
+            int w;
+            double t0;
+            if (dup) {
+                w = f1Last_;            // re-encode the last captured frame
+                t0 = now_ms();          // synthetic present time = now
+            } else {
+                ComPtr<ID3D11Texture2D> tex;
+                if (FAILED(res.As(&tex))) { dup_->ReleaseFrame(); continue; }
+                D3D11_TEXTURE2D_DESC td; tex->GetDesc(&td);
 
-            // (re)create the f1 double-buffer on size/format change
-            if (!f1Tex_[0] || f1W_ != (int)td.Width || f1H_ != (int)td.Height || f1Fmt_ != td.Format) {
-                { std::lock_guard<std::mutex> lk(f1Mtx_); f1Display_ = -1; }
-                for (int i = 0; i < 2; ++i) {
-                    f1Tex_[i].Reset(); f1SRV_[i].Reset();
-                    D3D11_TEXTURE2D_DESC d = td;
-                    d.Usage = D3D11_USAGE_DEFAULT;
-                    d.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-                    d.CPUAccessFlags = 0; d.MiscFlags = 0;
-                    if (SUCCEEDED(dev_->CreateTexture2D(&d, nullptr, &f1Tex_[i])))
-                        dev_->CreateShaderResourceView(f1Tex_[i].Get(), nullptr, &f1SRV_[i]);
+                // (re)create the f1 double-buffer on size/format change
+                if (!f1Tex_[0] || f1W_ != (int)td.Width || f1H_ != (int)td.Height || f1Fmt_ != td.Format) {
+                    { std::lock_guard<std::mutex> lk(f1Mtx_); f1Display_ = -1; }
+                    f1Last_ = -1;
+                    for (int i = 0; i < 2; ++i) {
+                        f1Tex_[i].Reset(); f1SRV_[i].Reset();
+                        D3D11_TEXTURE2D_DESC d = td;
+                        d.Usage = D3D11_USAGE_DEFAULT;
+                        d.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+                        d.CPUAccessFlags = 0; d.MiscFlags = 0;
+                        if (SUCCEEDED(dev_->CreateTexture2D(&d, nullptr, &f1Tex_[i])))
+                            dev_->CreateShaderResourceView(f1Tex_[i].Get(), nullptr, &f1SRV_[i]);
+                    }
+                    f1Write_ = 0;
+                    f1W_ = (int)td.Width; f1H_ = (int)td.Height; f1Fmt_ = td.Format;
+                    f1HDR_ = (td.Format == DXGI_FORMAT_R16G16B16A16_FLOAT);
+                    frameHDR_ = f1HDR_;   // draw_scene reads frameHDR_ for the source tonemap
+                    if (!fmtLogged_) {
+                        fmtLogged_ = true;
+                        std::wcout << L"captured surface: " << dxgi_format_name(td.Format)
+                                   << L" -> " << (f1HDR_ ? L"HDR/scRGB" : L"SDR/sRGB") << L"\n";
+                    }
                 }
-                f1Write_ = 0;
-                f1W_ = (int)td.Width; f1H_ = (int)td.Height; f1Fmt_ = td.Format;
-                f1HDR_ = (td.Format == DXGI_FORMAT_R16G16B16A16_FLOAT);
-                frameHDR_ = f1HDR_;   // draw_scene reads frameHDR_ for the source tonemap
-                if (!fmtLogged_) {
-                    fmtLogged_ = true;
-                    std::wcout << L"captured surface: " << dxgi_format_name(td.Format)
-                               << L" -> " << (f1HDR_ ? L"HDR/scRGB" : L"SDR/sRGB") << L"\n";
-                }
-            }
-            const int w = f1Write_;
-            if (!f1Tex_[w]) { dup_->ReleaseFrame(); continue; }
+                w = f1Write_;
+                if (!f1Tex_[w]) { dup_->ReleaseFrame(); continue; }
 
-            {
-                std::lock_guard<std::mutex> g(gpuMtx_);          // serialize ctx_ vs preview draws
-                ctx_->CopyResource(f1Tex_[w].Get(), tex.Get());  // f1
-                update_cursor(fi);                               // cursor metadata (sent via CTMS)
+                {
+                    std::lock_guard<std::mutex> g(gpuMtx_);          // serialize ctx_ vs preview draws
+                    ctx_->CopyResource(f1Tex_[w].Get(), tex.Get());  // f1
+                    update_cursor(fi);                               // cursor metadata (sent via CTMS)
+                }
+                LARGE_INTEGER qf; QueryPerformanceFrequency(&qf);
+                const bool havePresentTs = fi.LastPresentTime.QuadPart != 0;
+                t0 = havePresentTs                                  // t0 = present (frame ready)
+                    ? (double)fi.LastPresentTime.QuadPart * 1000.0 / qf.QuadPart : now_ms();
+                freshFrames_++; if (!havePresentTs) presentFallback_++;
+                dup_->ReleaseFrame();
             }
-            LARGE_INTEGER qf; QueryPerformanceFrequency(&qf);
-            const bool havePresentTs = fi.LastPresentTime.QuadPart != 0;
-            const double t0 = havePresentTs                     // t0 = present (frame ready)
-                ? (double)fi.LastPresentTime.QuadPart * 1000.0 / qf.QuadPart : now_ms();
-            freshFrames_++; if (!havePresentTs) presentFallback_++;
-            dup_->ReleaseFrame();
 
             const int64_t pts = (int64_t)((t0 - t0_) * 1000.0);  // us since stream epoch
+
+            // latency imprint: burn this frame's capture time (STREAM clock ms, = pts/1000)
+            // into the Y plane. Stream clock is monotonic/stable (unlike the NTP-disciplined
+            // wall clock); the TV shows its host-stream estimate, so now-baked = true latency.
+            conv_.set_ts(g_imprint.load() ? (uint64_t)(pts / 1000) : 0);
 
             // convert (f2) + encode (f3); encMs brackets the encode call only.
             std::vector<AVPacket *> pkts;
@@ -2909,9 +3060,10 @@ public:
                 hostMsA_.store(produce); hostAcc_.add(produce);
                 pts_++;
             }
-            // publish f1 for the preview thread, then flip the write buffer
+            // publish f1 for the preview thread, then flip the write buffer. A duplicate
+            // re-encodes the slot already published, so it neither advances nor re-flips.
             { std::lock_guard<std::mutex> lk(f1Mtx_); f1Display_ = w; }
-            f1Write_ = 1 - w;
+            if (!dup) { f1Last_ = w; f1Write_ = 1 - w; }
 
             size_t bytes = 0;
             if (useAmf_) {                     // ship native-AMF packets
@@ -3332,6 +3484,7 @@ private:
                    << L" present-fallback=" << fb << L"/" << fresh   // #8: anchor trust
                    << L" shown=" << (decoded_.valid() ? 1 : 0)
                    << L" vsync=" << (g_vsync.load() ? 1 : 0)
+                   << L" imprint=" << (g_imprint.load() ? 1 : 0)
                    << L" wstage=" << wstage_.load() << L" inflight=" << (jobInFlight_.load() ? 1 : 0)
                    << L" encErr=" << encErrs_.load()
                    << L" skp=" << drops_ << L" bfr=" << reorder_.load()
@@ -3423,6 +3576,7 @@ private:
     ComPtr<ID3D11Texture2D> f1Tex_[2];
     ComPtr<ID3D11ShaderResourceView> f1SRV_[2];
     int f1Write_ = 0, f1Display_ = -1;
+    int f1Last_ = -1;   // last successfully-captured slot, re-encoded by the idle-floor pacer
     int f1W_ = 0, f1H_ = 0; DXGI_FORMAT f1Fmt_ = DXGI_FORMAT_UNKNOWN; bool f1HDR_ = false;
     // Serializes immediate-context draw SEQUENCES across the capture thread
     // (copy/convert) and the preview thread (window A/B draws). The context is a
