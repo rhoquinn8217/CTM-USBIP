@@ -1,8 +1,20 @@
-# CMU single-map runtime for virtual DualSense USB over physical DualSense USB
-# (wired connection). Near-passthrough: no BT reformatting, no CRC signing,
-# no sequence-nibble tagging -- those exist in the BT map specifically to
-# satisfy Bluetooth's framing/signing requirements, which a wired USB
-# connection does not have.
+# Virtual DualSense USB over physical DualSense USB (wired).
+# Full passthrough: the virtual device IS the physical device, so input,
+# output, and feature requests are forwarded verbatim. No BT reformatting,
+# no CRC signing, no report reshaping.
+#
+# Report IDs are left at 0, which selects the runtime's passthrough paths
+# (translate_controller_input/output copy the whole report verbatim and
+# ignore the copy range). The copy = lines below are required by the map
+# loader's validation but are NOT used at runtime in passthrough mode.
+
+# Known limitation: rumble and haptic audio do not work through games that
+# drive them via the USB ISO audio path (channels 2/3 = haptics, 0/1 = speaker).
+# The runtime has no ISO passthrough primitive to forward the virtual USB ISO
+# stream back to the physical controller's USB audio interface. This requires
+# a new [path.iso.virtual_to_physical_passthrough] runtime feature.
+# Buttons, sticks, adaptive triggers, LEDs, and feature reports all work.
+
 
 [map]
 id = ds5_usb_over_ds5_usb
@@ -16,19 +28,13 @@ hid_out = 0x03
 
 [path.input.controller_to_virtual]
 trigger = physical.read
-source_report = 0x01
-destination_endpoint = 0x84
-destination_report = 0x01
 destination_length = 64
-copy = source[0..64] -> destination[0..64]
+copy = source[0..63] -> destination[0..63]
 
 [path.output.virtual_to_controller]
 trigger = usb.endpoint.hid_out
-source_endpoint = 0x03
-source_report = 0x02
-destination_report = 0x02
-destination_length = 48
-copy = source[0..48] -> destination[0..48]
+destination_length = 64
+copy = source[0..63] -> destination[0..63]
 
 [advertise]
 controller_name = DualSense (Wired)
@@ -39,6 +45,4 @@ adaptive_triggers = true
 haptics = true
 audio_output = true
 audio_input = false
-audio_redirect = false
 battery = true
-overlay_settings = latency
