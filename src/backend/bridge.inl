@@ -16,6 +16,7 @@
         MsgError = 8,
         MsgFeatureSet = 9,
         MsgEnum = 10,           // forwarded composite USB enumeration (puck)
+        MsgIsoAudio = 11,       // raw PCM audio: CTM-USBIP -> aurora-tv for wired ISO passthrough
     };
 
 #pragma pack(push, 1)
