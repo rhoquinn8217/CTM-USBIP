@@ -1,0 +1,44 @@
+# CMU single-map runtime for virtual DualSense USB over physical DualSense USB
+# (wired connection). Near-passthrough: no BT reformatting, no CRC signing,
+# no sequence-nibble tagging -- those exist in the BT map specifically to
+# satisfy Bluetooth's framing/signing requirements, which a wired USB
+# connection does not have.
+
+[map]
+id = ds5_usb_over_ds5_usb
+version = 1
+virtual_device = ds5_usb
+physical_device = ds5_usb
+
+[usb.endpoints]
+hid_in = 0x84
+hid_out = 0x03
+
+[path.input.controller_to_virtual]
+trigger = physical.read
+source_report = 0x01
+destination_endpoint = 0x84
+destination_report = 0x01
+destination_length = 64
+copy = source[0..64] -> destination[0..64]
+
+[path.output.virtual_to_controller]
+trigger = usb.endpoint.hid_out
+source_endpoint = 0x03
+source_report = 0x02
+destination_report = 0x02
+destination_length = 48
+copy = source[0..48] -> destination[0..48]
+
+[advertise]
+controller_name = DualSense (Wired)
+vendor = Sony
+rumble = true
+leds = true
+adaptive_triggers = true
+haptics = true
+audio_output = true
+audio_input = false
+audio_redirect = false
+battery = true
+overlay_settings = latency
