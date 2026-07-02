@@ -14,7 +14,7 @@ $Root = $PSScriptRoot
 function Find-VisualStudio {
     $vsWhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
     if (-not (Test-Path $vsWhere)) { return $null }
-    & $vsWhere -latest -products * -version '[17.0,18.0)' -requires Microsoft.VisualStudio.Workload.NativeDesktop -property installationPath
+    & $vsWhere -latest -products * -version '[17.0,19.0)' -requires Microsoft.VisualStudio.Workload.NativeDesktop -property installationPath
 }
 
 function Import-VsDevEnvironment([string]$VsInstall, [string]$Arch) {
@@ -61,6 +61,7 @@ New-Item -ItemType Directory -Force -Path (Join-Path $out 'profiles\descriptors'
 New-Item -ItemType Directory -Force -Path (Join-Path $out 'maps') | Out-Null
 Copy-Item -Force -Path (Join-Path $Root 'profiles\descriptors\ds5_composite.profile') -Destination (Join-Path $out 'profiles\descriptors\ds5_composite.profile')
 Copy-Item -Force -Path (Join-Path $Root 'maps\ds5_usb_over_ds5_bt.map') -Destination (Join-Path $out 'maps\ds5_usb_over_ds5_bt.map')
+Copy-Item -Force -Path (Join-Path $Root 'maps\ds5_usb_over_ds5_usb.map') -Destination (Join-Path $out 'maps\ds5_usb_over_ds5_usb.map')
 Copy-Item -Force -Path (Join-Path $Root 'profiles\descriptors\ds4_composite.profile') -Destination (Join-Path $out 'profiles\descriptors\ds4_composite.profile')
 Copy-Item -Force -Path (Join-Path $Root 'maps\ds4_usb_over_ds4_bt.map') -Destination (Join-Path $out 'maps\ds4_usb_over_ds4_bt.map')
 Copy-Item -Force -Path (Join-Path $Root 'profiles\descriptors\steam_puck.profile') -Destination (Join-Path $out 'profiles\descriptors\steam_puck.profile')
