@@ -15,6 +15,7 @@
 #include <windows.h>
 #include <mmdeviceapi.h>   // WASAPI loopback audio
 #include <audioclient.h>
+#include <opus/opus.h>     // raw libopus (vcpkg static) -- audio encode
 #include <mmreg.h>         // WAVEFORMATEXTENSIBLE, WAVE_FORMAT_*
 #include <unknwn.h>      // IStream for gdiplus under WIN32_LEAN_AND_MEAN
 #include <objidl.h>      // PROPID for gdiplus
@@ -2496,32 +2497,31 @@ private:
 };
 
 // ---- WASAPI loopback -> Opus -> CTMS audio --------------------------------
-// Captures what the PC is playing (default render endpoint, loopback), encodes
-// Opus (48k stereo, low-delay), and sends CTMS_AUDIO_FRAME stamped with host
-// time. Forces a steady ~20ms cadence (zero-fill on silence) so the TV's
-// NDL A/V pipeline never starves on audio.
+// Captures what the PC is playing (default render endpoint, loopback). The
+// loopback client is opened at 48k stereo S16 with AUTOCONVERTPCM, so the
+// audio engine converts+resamples from WHATEVER the device runs (32-bit/192k
+// included) and hands us encoder-ready samples -- no manual SRC. Raw libopus
+// (vcpkg static), int16 API, frame size cycled live with 'O' (10-60 ms),
+// steady cadence kept with zero-fill on silence so the TV's NDL A/V pipeline
+// never starves on audio.
+#ifndef AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM
+#define AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM 0x80000000u
+#endif
+#ifndef AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY
+#define AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY 0x08000000u
+#endif
+// 'O' hotkey cycles the Opus frame size live: 480/960/1920/2880 samples @48k
+// = 10/20/40/60 ms. Valid per-call sizes, so no encoder rebuild needed.
+static std::atomic<int> g_audioFrameSamples{480};
 class AudioLoopback {
 public:
     bool start(StreamSender *sender, std::wstring *err)
     {
         sender_ = sender;
-        const AVCodec *c = avcodec_find_encoder_by_name("libopus");
-        if (!c) { if (err) *err = L"libopus encoder not found"; return false; }
-        enc_ = avcodec_alloc_context3(c);
-        enc_->sample_rate = 48000;
-        av_channel_layout_default(&enc_->ch_layout, 2);
-        enc_->sample_fmt = AV_SAMPLE_FMT_S16;
-        enc_->bit_rate = 160000;
-        enc_->time_base = av_make_q(1, 48000);
-        av_opt_set(enc_->priv_data, "application", "lowdelay", 0);
-        av_opt_set(enc_->priv_data, "frame_duration", "20", 0);
-        if (avcodec_open2(enc_, c, nullptr) < 0) { if (err) *err = L"opus open failed"; avcodec_free_context(&enc_); return false; }
-        frameSamples_ = enc_->frame_size > 0 ? enc_->frame_size : 960;   // per channel
-        frame_ = av_frame_alloc();
-        frame_->format = AV_SAMPLE_FMT_S16; frame_->sample_rate = 48000; frame_->nb_samples = frameSamples_;
-        av_channel_layout_default(&frame_->ch_layout, 2);
-        av_frame_get_buffer(frame_, 0);
-        pkt_ = av_packet_alloc();
+        int oerr = 0;
+        enc_ = opus_encoder_create(48000, 2, OPUS_APPLICATION_RESTRICTED_LOWDELAY, &oerr);
+        if (!enc_ || oerr != OPUS_OK) { if (err) *err = L"opus_encoder_create failed"; enc_ = nullptr; return false; }
+        opus_encoder_ctl(enc_, OPUS_SET_BITRATE(160000));
         run_.store(true);
         thread_ = std::thread(&AudioLoopback::run, this);
         return true;
@@ -2530,9 +2530,7 @@ public:
     {
         run_.store(false);
         if (thread_.joinable()) thread_.join();
-        if (pkt_) av_packet_free(&pkt_);
-        if (frame_) av_frame_free(&frame_);
-        if (enc_) avcodec_free_context(&enc_);
+        if (enc_) { opus_encoder_destroy(enc_); enc_ = nullptr; }
     }
     ~AudioLoopback() { stop(); }
     int rate() const { return 48000; }
@@ -2547,35 +2545,40 @@ private:
         ok_.store(true);
         client_->Start();
         const int chOut = 2;
-        std::vector<int16_t> acc;             // interleaved stereo S16
+        std::vector<int16_t> acc;             // interleaved stereo S16 @48k
         double lastEmitMs = now_ms();
-        const double frameMs = 1000.0 * frameSamples_ / 48000.0;
         while (run_.load()) {
-            // drain available packets
+            const int fs = g_audioFrameSamples.load();      // live 'O' cycle
+            const double frameMs = 1000.0 * fs / 48000.0;
+            // drain available packets (already 48k stereo S16 via AUTOCONVERTPCM)
             UINT32 packet = 0;
             while (capture_->GetNextPacketSize(&packet) == S_OK && packet > 0) {
                 BYTE *data = nullptr; UINT32 nFrames = 0; DWORD flags = 0;
                 if (capture_->GetBuffer(&data, &nFrames, &flags, nullptr, nullptr) != S_OK) break;
                 const bool silent = (flags & AUDCLNT_BUFFERFLAGS_SILENT) != 0;
-                append_stereo_s16(acc, silent ? nullptr : data, nFrames);
+                const size_t base = acc.size();
+                acc.resize(base + (size_t)nFrames * chOut);
+                if (silent || !data) memset(acc.data() + base, 0, (size_t)nFrames * chOut * sizeof(int16_t));
+                else memcpy(acc.data() + base, data, (size_t)nFrames * chOut * sizeof(int16_t));
                 capture_->ReleaseBuffer(nFrames);
             }
             // emit full frames
-            while ((int)acc.size() >= frameSamples_ * chOut) {
-                encode_send(acc.data());
-                acc.erase(acc.begin(), acc.begin() + frameSamples_ * chOut);
+            size_t off = 0;
+            while (acc.size() - off >= (size_t)fs * chOut) {
+                encode_send(acc.data() + off, fs);
+                off += (size_t)fs * chOut;
                 lastEmitMs = now_ms();
             }
+            if (off) acc.erase(acc.begin(), acc.begin() + off);
             // keep cadence during silence so NDL audio doesn't underrun
             if (now_ms() - lastEmitMs >= frameMs) {
-                std::vector<int16_t> sil((size_t)frameSamples_ * chOut, 0);
-                encode_send(sil.data());
+                int16_t sil[2880 * 2] = {};                 // max frame (60 ms)
+                encode_send(sil, fs);
                 lastEmitMs = now_ms();
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(4));
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
         client_->Stop();
-        if (mix_) { CoTaskMemFree(mix_); mix_ = nullptr; }
         CoUninitialize();
     }
 
@@ -2585,50 +2588,30 @@ private:
                                     __uuidof(IMMDeviceEnumerator), (void **)&enum_))) return false;
         if (FAILED(enum_->GetDefaultAudioEndpoint(eRender, eConsole, &dev_))) return false;
         if (FAILED(dev_->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, (void **)&client_))) return false;
-        if (FAILED(client_->GetMixFormat(&mix_))) return false;
-        // shared loopback uses the device mix format; we convert to 48k stereo S16
-        if (FAILED(client_->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK,
-                                       1000000 /*100ms*/, 0, mix_, nullptr))) return false;
+        // Ask for 48k stereo S16 and let the audio engine convert+resample
+        // from the device mix format (32-bit/192k etc). Loopback supports
+        // AUTOCONVERTPCM since Win10; without it a non-48k mix broke the cadence.
+        WAVEFORMATEX fmt{};
+        fmt.wFormatTag = WAVE_FORMAT_PCM;
+        fmt.nChannels = 2;
+        fmt.nSamplesPerSec = 48000;
+        fmt.wBitsPerSample = 16;
+        fmt.nBlockAlign = (WORD)(fmt.nChannels * fmt.wBitsPerSample / 8);
+        fmt.nAvgBytesPerSec = fmt.nSamplesPerSec * fmt.nBlockAlign;
+        if (FAILED(client_->Initialize(AUDCLNT_SHAREMODE_SHARED,
+                                       AUDCLNT_STREAMFLAGS_LOOPBACK |
+                                       AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM |
+                                       AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
+                                       1000000 /*100ms*/, 0, &fmt, nullptr))) return false;
         if (FAILED(client_->GetService(__uuidof(IAudioCaptureClient), (void **)&capture_))) return false;
         return true;
     }
 
-    // Convert the device mix buffer to interleaved stereo S16 at 48k. Assumes
-    // the mix is 48k (typical); float32 or 16-bit input, >=2 channels.
-    void append_stereo_s16(std::vector<int16_t> &acc, const BYTE *data, UINT32 nFrames)
+    void encode_send(const int16_t *interleavedStereo, int frameSamples)
     {
-        const int ch = mix_->nChannels;
-        // float subtype GUID Data1 == 3 (IEEE_FLOAT), == 1 (PCM); compare Data1
-        // to avoid pulling in the ksmedia GUID symbol.
-        bool isFloat = mix_->wFormatTag == WAVE_FORMAT_IEEE_FLOAT;
-        if (mix_->wFormatTag == WAVE_FORMAT_EXTENSIBLE)
-            isFloat = ((const WAVEFORMATEXTENSIBLE *)mix_)->SubFormat.Data1 == 3;
-        for (UINT32 i = 0; i < nFrames; ++i) {
-            int16_t l = 0, r = 0;
-            if (data) {
-                if (isFloat) {
-                    const float *f = (const float *)(data + (size_t)i * ch * 4);
-                    auto cvt = [](float v) { v = v < -1 ? -1 : v > 1 ? 1 : v; return (int16_t)(v * 32767.0f); };
-                    l = cvt(f[0]); r = cvt(f[ch > 1 ? 1 : 0]);
-                } else {
-                    const int16_t *s = (const int16_t *)(data + (size_t)i * ch * 2);
-                    l = s[0]; r = s[ch > 1 ? 1 : 0];
-                }
-            }
-            acc.push_back(l); acc.push_back(r);
-        }
-    }
-
-    void encode_send(const int16_t *interleavedStereo)
-    {
-        if (av_frame_make_writable(frame_) < 0) return;
-        memcpy(frame_->data[0], interleavedStereo, (size_t)frameSamples_ * 2 * sizeof(int16_t));
-        frame_->pts = framePts_; framePts_ += frameSamples_;
-        if (avcodec_send_frame(enc_, frame_) < 0) return;
-        while (avcodec_receive_packet(enc_, pkt_) == 0) {
-            sender_->send_audio(pkt_->data, pkt_->size, (int64_t)sender_->host_us());
-            av_packet_unref(pkt_);
-        }
+        unsigned char out[4096];   // 60ms @160kbps ~ 1200B; big headroom
+        const int n = opus_encode(enc_, interleavedStereo, frameSamples, out, (opus_int32)sizeof(out));
+        if (n > 0) sender_->send_audio(out, n, (int64_t)sender_->host_us());
     }
 
     StreamSender *sender_ = nullptr;
@@ -2636,12 +2619,7 @@ private:
     ComPtr<IMMDevice> dev_;
     ComPtr<IAudioClient> client_;
     ComPtr<IAudioCaptureClient> capture_;
-    WAVEFORMATEX *mix_ = nullptr;
-    AVCodecContext *enc_ = nullptr;
-    AVFrame *frame_ = nullptr;
-    AVPacket *pkt_ = nullptr;
-    int frameSamples_ = 960;
-    int64_t framePts_ = 0;
+    OpusEncoder *enc_ = nullptr;
     std::thread thread_;
     std::atomic<bool> run_{false}, ok_{false};
 };
@@ -2659,6 +2637,13 @@ static void apply_hotkey(WPARAM key)
     if (key == 'T') { g_imprint.store(!g_imprint.load()); return; }   // latency-imprint marker
     if (key == 'D') { g_noDecode.store(!g_noDecode.load()); return; }   // hide window B / stop local decode
     if (key == 'B') { g_decodeBench.store(true); return; }              // run serialized decode bench once
+    if (key == 'O') {   // opus audio frame size: 10 -> 20 -> 40 -> 60 ms
+        int fs = g_audioFrameSamples.load();
+        fs = (fs >= 2880) ? 480 : fs * 2;
+        g_audioFrameSamples.store(fs);
+        std::wcout << L"audio: opus frame " << (fs / 48.0) << L" ms (" << fs << L" samples)\n";
+        return;
+    }
     std::lock_guard<std::mutex> lk(g_cfgMtx);
     EncConfig &c = g_cfgDesired;
     switch (key) {
@@ -2802,7 +2787,7 @@ public:
                                    : (g_noDecode.load() ? L" (decode off -- window B hidden)\n"
                                                         : L" (local receiver attached)\n"));
         { std::wstring ae; audioOn_ = audio_.start(&sender_, &ae);
-          std::wcout << (audioOn_ ? L"audio: WASAPI loopback -> Opus 48k stereo\n"
+          std::wcout << (audioOn_ ? L"audio: WASAPI loopback (autoconvert 48k s16) -> libopus stereo ('O' = frame ms)\n"
                                   : L"audio: disabled (" + ae + L")\n"); }
 
         { std::lock_guard<std::mutex> lk(g_cfgMtx); applied_ = g_cfgDesired; }
