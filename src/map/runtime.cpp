@@ -965,6 +965,20 @@ bool CtmMapRuntime::parse_map(std::wstring *error)
         ini, "path.iso.virtual_to_physical_stream", "pace_hard_min_fill_ms", paceHardMinFillMs_);
     paceHardMaxFillMs_ = get_u32(
         ini, "path.iso.virtual_to_physical_stream", "pace_hard_max_fill_ms", paceHardMaxFillMs_);
+    isoAckMinFillMs_ = get_u32(
+        ini, "path.iso.virtual_to_physical_stream", "ack_min_fill_ms", isoAckMinFillMs_);
+    // Auto-route (map-declared, e.g. DS4 jack detect): sample one bit of the
+    // physical INPUT report and pick between two bytes, exposed to byte ops
+    // as source=auto_route.
+    autoRouteInputOffset_ = get_u32(
+        ini, "path.iso.virtual_to_physical_stream", "auto_route_input_offset", autoRouteInputOffset_);
+    autoRouteInputMask_ = static_cast<uint8_t>(get_u32(
+        ini, "path.iso.virtual_to_physical_stream", "auto_route_input_mask", autoRouteInputMask_));
+    autoRouteValueSet_ = static_cast<uint8_t>(get_u32(
+        ini, "path.iso.virtual_to_physical_stream", "auto_route_value_set", autoRouteValueSet_));
+    autoRouteValueClear_ = static_cast<uint8_t>(get_u32(
+        ini, "path.iso.virtual_to_physical_stream", "auto_route_value_clear", autoRouteValueClear_));
+    autoRouteValue_ = autoRouteValueClear_;
     if (paceHardMaxFillMs_ < paceHardMinFillMs_) {
         paceHardMaxFillMs_ = paceHardMinFillMs_ + 1;
     }
@@ -1062,6 +1076,15 @@ bool CtmMapRuntime::translate_controller_input(
         (!passThrough && hasSourceReportFilter && source[0] != inputSourceReport_) ||
         (!passThrough && inputDestinationLength_ > sizeof(destination->data))) {
         return false;
+    }
+
+    // Auto-route sampling: track the map-declared jack/status bit off every
+    // matching physical input report (e.g. DS4 BT 0x11 raw offset 32, bit
+    // 0x40 = headphone connected).
+    if (autoRouteInputMask_ != 0 && sourceLength > autoRouteInputOffset_) {
+        autoRouteValue_ = (source[autoRouteInputOffset_] & autoRouteInputMask_) != 0
+            ? autoRouteValueSet_
+            : autoRouteValueClear_;
     }
 
     std::memset(destination, 0, sizeof(*destination));
@@ -2156,6 +2179,7 @@ bool CtmMapRuntime::execute_stream_op(
         else if (sourceName == "haptic_block_id") *value = hapticBlockId_;
         else if (sourceName == "audio_block_id") *value = audioBlockId_;
         else if (sourceName == "audio_sequence++") *value = audioSequence_++;
+        else if (sourceName == "auto_route") *value = autoRouteValue_;
         else return false;
         return true;
     };
@@ -2756,7 +2780,48 @@ bool CtmMapRuntime::build_feature_response_from_physical(
     response->status = CTM_USB_RESPONSE_SUCCESS;
     response->length = controlRule->responseLength;
     std::memcpy(response->data, physicalReport, controlRule->responseLength);
+    // Cross-id forward (e.g. DS4: USB 0x02 served from BT 0x05): the response
+    // must carry the REQUESTED report id in byte 0, not the physical one.
+    if (event.report_id != 0 && controlRule->physicalReport != event.report_id) {
+        response->data[0] = event.report_id;
+    }
     return true;
+}
+
+bool CtmMapRuntime::has_feature_get_rule(uint8_t reportId) const
+{
+    for (const UsbControlMapRule &rule : usbControlMapRules_) {
+        if (rule.matchEvent != CTM_USB_EVENT_FEATURE_GET) {
+            continue;
+        }
+        if (!rule.hasMatchReport || rule.matchReport == reportId) {
+            return true;
+        }
+    }
+    for (const FeaturePageRule &rule : featurePageRules_) {
+        if (rule.responseReport == reportId) {
+            return true;
+        }
+    }
+    if (featureSelectorReport_ != 0 && featureSelectorReport_ == reportId) {
+        return true;
+    }
+    return false;
+}
+
+bool CtmMapRuntime::has_feature_set_rule(uint8_t reportId) const
+{
+    for (const UsbControlMapRule &rule : usbControlMapRules_) {
+        if (rule.matchEvent != CTM_USB_EVENT_FEATURE_SET) {
+            continue;
+        }
+        if (!rule.hasMatchReport || rule.matchReport == reportId) {
+            return true;
+        }
+    }
+    // The page selector must always take the map path so lastFeatureSet_ is
+    // recorded for the paired page GET.
+    return featureSelectorReport_ != 0 && featureSelectorReport_ == reportId;
 }
 
 bool CtmMapRuntime::feature_response_expectation(

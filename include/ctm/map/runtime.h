@@ -51,6 +51,10 @@ public:
     //     as matched and pace is left alone.
     uint32_t pace_hard_min_fill_ms() const { return paceHardMinFillMs_; }
     uint32_t pace_hard_max_fill_ms() const { return paceHardMaxFillMs_; }
+    // USB-side ISO-ack low-water mark (ack_min_fill_ms, 0 = always pace):
+    // under this reservoir fill the host's ISO OUT URBs are acked immediately
+    // so the reservoir can build slack; above it the normal rate pacing runs.
+    uint32_t iso_ack_min_fill_ms() const { return isoAckMinFillMs_; }
     uint32_t pace_hard_step_multiplier() const { return paceHardStepMultiplier_; }
     uint32_t pace_velocity_deadband_ms() const { return paceVelocityDeadbandMs_; }
 
@@ -177,6 +181,14 @@ public:
         std::vector<FeaturePreloadRequest> *requests) const;
 
     bool should_cache_usb_control_response(const CTM_USB_EVENT &event) const;
+
+    // True when the map declares ANY feature-get handling for this report id
+    // (control rule, feature page, or the page selector itself). Composite
+    // devices use this to let the map win over identity interface forwarding.
+    bool has_feature_get_rule(uint8_t reportId) const;
+
+    // Feature-set twin of has_feature_get_rule (set rules + page selector).
+    bool has_feature_set_rule(uint8_t reportId) const;
 
     // Returns the selector tail that identifies which page (if any) is active
     // for this event. Empty vector means "no selector / non-gated". Callers
@@ -378,6 +390,13 @@ private:
     double paceMaxMs_ = 11.8;
     uint32_t paceHardMinFillMs_ = 5;
     uint32_t paceHardMaxFillMs_ = 40;
+    uint32_t isoAckMinFillMs_ = 0;
+    // Auto-route (source=auto_route): bit-test on the physical input report.
+    uint32_t autoRouteInputOffset_ = 0;
+    uint8_t autoRouteInputMask_ = 0;
+    uint8_t autoRouteValueSet_ = 0;
+    uint8_t autoRouteValueClear_ = 0;
+    uint8_t autoRouteValue_ = 0;
     uint32_t paceHardStepMultiplier_ = 5;
     uint32_t paceVelocityDeadbandMs_ = 1;
     uint32_t opusSampleRate_ = 48000;

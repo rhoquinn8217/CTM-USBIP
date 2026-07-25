@@ -569,7 +569,19 @@ private:
                 }
 
                 const auto paceStart = clock::now();
-                if (item.durationUs != 0) {
+                const uint32_t ackMinFillMs = device->iso_ack_min_fill_ms();
+                if (item.durationUs != 0 &&
+                    ackMinFillMs != 0 &&
+                    device->audio_reservoir_fill_ms() < ackMinFillMs) {
+                    // Reservoir-aware ack (map ack_min_fill_ms): under the
+                    // low-water fill, ack immediately so the host keeps
+                    // sending and the reservoir builds real slack — a
+                    // serialized single-URB host otherwise gets zero buffer
+                    // and every scheduling hiccup is an audible gap. Reset
+                    // the pacing baseline so the next paced ack doesn't
+                    // burst-compensate.
+                    nextIsoOutAck = clock::time_point{};
+                } else if (item.durationUs != 0) {
                     uint32_t effectiveDurationUs = item.durationUs;
                     if (item.audioFrames != 0 && item.expectedRateHz != 0 && regulatorMultiplier > 0.0) {
                         const double adjusted = static_cast<double>(item.durationUs) / regulatorMultiplier;

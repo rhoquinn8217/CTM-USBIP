@@ -2,12 +2,52 @@
 
 ## Status
 
-1. DS4 speaker audio over BT is implemented and user-tested.
-2. Audio is not mathematically perfect yet, but it is usable:
-   a. latest steady-state `audio_resampled_hz` average: `32013.86`.
-   b. latest steady-state `audio_chunks_hz` average: `125.07`.
-   c. latest steady-state `bt_audio` drops: `1` over the sampled window.
+1. **2026-07-25: Layout B (DS4Windows/VIIPER protocol) is ACTIVE and
+   user-tested — see "Layout B" section below.** Everything after this Status
+   section describes the older Layout A compound format, kept for reference;
+   the byte offsets there do NOT apply to Layout B.
+2. Layout A history: DS4 speaker audio over BT was implemented and
+   user-tested at:
+   a. steady-state `audio_resampled_hz` average: `32013.86`.
+   b. steady-state `audio_chunks_hz` average: `125.07`.
+   c. steady-state `bt_audio` drops: `1` over the sampled window.
    d. observed issue: rare clipping roughly every 20+ seconds.
+   e. later diagnosed: Layout A's route byte `0x00` at offset 80 was in the
+      "choppy" enable state (see route bitmask below); and a map drift of
+      `bt_pace_ms` 5.0→8.0 removed the writer's catch-up slack.
+
+## Layout B (ACTIVE, 2026-07-25) — DS4Windows/VIIPER production protocol
+
+Reference: github.com/hbashton/DS4Windows `DualShock4BluetoothAudioProtocol.cs`.
+
+1. Pure-audio reports: `0x12` 142 B (1 SBC frame), `0x14` 270 B (2, ACTIVE),
+   `0x17` 462 B (4). No effects payload in audio reports (byte 1 HID bit off).
+2. Header: `[0]` report id; `[1]` `0x40 | poll_rate`; `[2]` `0xA0` speaker /
+   `0xA1` speaker+mic duplex.
+3. `[3..4]` frame counter LE (step 2 with 2 frames/packet); `[5]` route byte;
+   `[6..]` SBC frames, 109 B each = joint-stereo bitpool 48, 16 blocks,
+   8 subbands, 128 samples/frame; CRC32 seed `0xA2` last 4 bytes.
+4. **Route byte @5 — user-probed bitmask (13 probes, 2026-07-25):**
+   a. enable: low nibble must contain `0x02` or `0x04`; low nibble `0`/`8`
+      alone = CHOPPY output. This was Layout A's choppiness (route `0x00`).
+   b. routing: HEADPHONES-STEREO ⇔ `0x20` set AND (`0x10` clear OR `0x40`
+      set OR `0x80` set); the only 0x20-bearing split value is high nibble 3.
+   c. otherwise SPLIT: SBC ch0 → speaker, ch1 → headphone-L. No route value
+      gives speaker-stereo; speaker playback = duplicate content into both
+      SBC channels (`pcm.select_channels channels=0,0`).
+   d. production values: `0xFF` headphones / `0xDF` split (differ only in
+      `0x20`).
+5. **Jack auto-route (ACTIVE)**: input report status byte (BT `0x11` raw
+   offset 32 = state offset `0x1D`): bits `0x0F` battery, `0x10` cable,
+   `0x20` MIC connected, `0x40` HEADPHONE connected (verified against
+   DriftGuard's parser). Map keys `auto_route_input_offset/mask/value_set/
+   value_clear` + byte-op `source=auto_route` select `0xFF`/`0xDF` live.
+6. Rumble/effects during audio (OPEN): DS4Windows keeps effects ONLY in
+   `0x11`, whose byte 2 carries the audio mode (`0xA0`) and byte 3 a validity
+   mask (`0xF3` audio-on / `0xF0` off) — our `0x11` path does not yet do
+   this; suspected cause of rumble-dead-while-audio.
+
+## Historical Layout A reference (SUPERSEDED — offsets below do not apply)
 
 ## USB Side
 

@@ -23,6 +23,12 @@ static std::unique_ptr<CtmUsbipServer> g_agent_usbip_server;
 
 static std::wstring find_relative_asset(const std::wstring &relative)
 {
+    // Live-edit override first: the agent/service resolves maps/profiles from
+    // %ProgramData%\CTM Bridge\ exactly like the local CLI does.
+    const std::wstring overridePath = programdata_override(relative);
+    if (!overridePath.empty()) {
+        return overridePath;
+    }
     const std::wstring exeDir = module_directory();
     const std::vector<std::wstring> candidates = {
         relative,

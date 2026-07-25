@@ -144,8 +144,27 @@ static std::wstring module_directory()
     return slash == std::wstring::npos ? L"." : value.substr(0, slash);
 }
 
+// %ProgramData%\CTM Bridge\<relative> overrides any installed data file
+// (maps/profiles): ONE live-editable location shared by the CLI, the agent
+// service and Ciprian's Bridge — edit + replug, no reinstall, Program Files
+// stays untouched.
+static std::wstring programdata_override(const std::wstring &relative)
+{
+    wchar_t buf[MAX_PATH] = {};
+    const DWORD len = GetEnvironmentVariableW(L"ProgramData", buf, ARRAYSIZE(buf));
+    if (len == 0 || len >= ARRAYSIZE(buf)) {
+        return {};
+    }
+    const std::wstring candidate = std::wstring(buf) + L"\\CTM Bridge\\" + relative;
+    return file_exists(candidate) ? candidate : std::wstring{};
+}
+
 static std::wstring find_ds5_descriptor_profile()
 {
+    const std::wstring overridePath = programdata_override(L"profiles\\descriptors\\ds5_composite.profile");
+    if (!overridePath.empty()) {
+        return overridePath;
+    }
     const std::wstring exeDir = module_directory();
     const std::vector<std::wstring> candidates = {
         L"profiles\\descriptors\\ds5_composite.profile",
@@ -163,6 +182,10 @@ static std::wstring find_ds5_descriptor_profile()
 
 static std::wstring find_ds5_map_file()
 {
+    const std::wstring overridePath = programdata_override(L"maps\\ds5_usb_over_ds5_bt.map");
+    if (!overridePath.empty()) {
+        return overridePath;
+    }
     const std::wstring exeDir = module_directory();
     const std::vector<std::wstring> candidates = {
         L"maps\\ds5_usb_over_ds5_bt.map",
@@ -180,6 +203,10 @@ static std::wstring find_ds5_map_file()
 
 static std::wstring find_hid_identity_map_file()
 {
+    const std::wstring overridePath = programdata_override(L"maps\\hid_identity.map");
+    if (!overridePath.empty()) {
+        return overridePath;
+    }
     const std::wstring exeDir = module_directory();
     const std::vector<std::wstring> candidates = {
         L"maps\\hid_identity.map",

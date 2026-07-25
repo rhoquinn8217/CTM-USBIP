@@ -65,9 +65,15 @@ page.3.response_prefix = 0xa4 0x0e 0x03 0x00 0x00 0x04 0xb3 0x08 0x0a 0x08 0x00 
 page.3.static = true
 
 [path.control.usb_control_map]
+# Calibration: USB feature 0x02 does not exist on the BT pad — forward to the
+# REAL calibration in BT feature 0x05 (41 bytes incl. 4-byte CRC tail; the
+# first 37 bytes carry the payload, runtime restamps byte0 0x05->0x02).
+# A zeroed static answer here breaks Steam Input's sensor math at game start.
 rule.1.match = usb.feature_get report=0x02
-rule.1.response = usb.respond length=37 prefix=0x02 static=true
+rule.1.action.1 = physical.hid.get_feature report=0x05 length=41
+rule.1.response = usb.respond physical length=37
 rule.1.cache = true
+rule.1.preload = true
 rule.2.match = usb.feature_get report=0x12
 rule.2.response = usb.respond length=16 prefix=0x12 static=true
 rule.2.cache = true
@@ -109,6 +115,16 @@ endpoint.0x82.max = 16000
 endpoint.0x82.res = 0
 
 [path.iso.virtual_to_physical_stream]
+# Auto-route from the pad's own jack state (byte model verified against
+# DriftGuard's parser): BT input report 0x11, status byte at raw offset 32
+# (= state offset 0x1D): bits 0x0F battery, 0x10 cable, 0x20 MIC connected,
+# 0x40 HEADPHONE connected. Headphones in -> route 0xFF (stereo headphones);
+# out -> 0xDF (split: SBC ch0 -> speaker). The op below consumes this via
+# source=auto_route.
+auto_route_input_offset = 32
+auto_route_input_mask = 0x40
+auto_route_value_set = 0xFF
+auto_route_value_clear = 0xDF
 trigger = usb.endpoint.iso_out
 source_endpoint = 0x01
 # USB ISO endpoint declares 32 kHz stereo to Windows. The ingest stage
@@ -126,32 +142,29 @@ frame_samples = 256
 # Windows submits 1280-byte URBs on the wired reference (10 ms aggregation);
 # the reservoir absorbs the rate mismatch via the velocity feedback below.
 expected_urb_bytes = 1024
-# DS4 BT audio report ID/length candidates. Report ID low nibble tracks
-# packet size: length = 14 + 64 * low_nibble. Keep these two active values
-# paired with op.4 below.
-# physical_report_id = 0x14
-# physical_report_length = 270
- physical_report_id = 0x15
- physical_report_length = 334
-# physical_report_id = 0x16
-# physical_report_length = 398
-# physical_report_id = 0x17
-# physical_report_length = 462
-# physical_report_id = 0x18
-# physical_report_length = 526
+# === LAYOUT B (ACTIVE 2026-07-25): DS4Windows/VIIPER production protocol ===
+# (github.com/hbashton/DS4Windows DualShock4BluetoothAudioProtocol.cs)
+# Pure-audio reports: 0x12=142B/1 SBC frame, 0x14=270B/2, 0x17=462B/4.
+# Byte1 = 0x40|poll_rate (HID bit OFF — no effects in audio reports; effects
+# stay in 0x11). Byte2 = 0xA0 speaker / 0xA1 +mic. Counter at 3..4, route at
+# 5 (0x02 speaker / 0x24 headset / 0x26 both), SBC from 6. SBC frames 109 B
+# = joint-stereo bitpool 48, 16 blocks, 8 subbands, 128 samples/frame.
+physical_report_id = 0x14
+physical_report_length = 270
 sbc_sample_rate = 32000
 sbc_frame_samples = 256
-sbc_payload_bytes = 224
-sbc_bitpool = 25
+sbc_payload_bytes = 218
+sbc_bitpool = 48
 sbc_blocks = 16
 sbc_subbands = 8
-# sbc_channel_mode is the original probed value. 'dual' (=dual_channel) gave
-# us audio flowing as speaker mono + headset L only + headset R silent.
-# 'stereo' produced the same symptom in subsequent tests. Keeping 'dual' as
-# the known-good baseline; cycle through report ids first before re-probing
-# the channel mode.
-sbc_channel_mode = dual
+sbc_channel_mode = joint
 sbc_allocation = loudness
+# --- LAYOUT A (previous empirical compound layout, rollback values) ---
+# physical_report_id = 0x15 / physical_report_length = 334
+# sbc_payload_bytes = 224 / sbc_bitpool = 25 / sbc_channel_mode = dual
+# ('dual' gave speaker mono + headset L only + headset R silent; 'stereo'
+#  same symptom.) Headers 0xC8/0xA8, effects copy at 3..33, counter at
+# 78..79, route at 80, SBC at 81 — see the Layout A op block below.
 
 # iso_out_completion_delay_us = how long we hold each ISO OUT URB before
 # completing it. The USBIP server currently derives ISO OUT completion from
@@ -178,10 +191,14 @@ intermediate_buffer_max_ms = 300
 # fast -> grow pace.
 pace_adjust_step_ms = 0.01
 pace_adjust_interval_frames = 1
-bt_pace_ms = 8.0
+# 5.0 ms is the USER-TESTED value from docs/ds4_audio.md (steady 32013 Hz,
+# 125 chunks/s, 1 drop, rare clipping only): the writer drains 8 ms of audio
+# per 5 ms tick, so it can CATCH UP after any hiccup. The 8.0 drift locked the
+# writer to exact real-time with zero slack -> chronic starvation/choppiness.
+bt_pace_ms = 5.0
 audio_builder_pace_ms = 0.0
-pace_min_ms = 8.0
-pace_max_ms = 8.0
+pace_min_ms = 5.0
+pace_max_ms = 5.0
 pace_hard_min_fill_ms = 8
 pace_hard_max_fill_ms = 80
 pace_hard_step_multiplier = 5
@@ -195,36 +212,41 @@ buffers = physical_report, speaker_pcm, sbc_payload, output_effects_payload
 
 op.1 = pcm.select_channels usb_iso_pcm channels=0,1 out=speaker_pcm
 
-# 2 SBC frames @ blocks=16 subbands=8 = 2 * 128 PCM frames/channel = 256
-# PCM frames per channel total, encoded into 2 * 112 = 224 SBC bytes.
-
-op.2 = codec.sbc_encode speaker_pcm sample_rate=32000 channels=2 frame_samples=256 bytes=224 bitpool=25 blocks=16 subbands=8 channel_mode=dual allocation=loudness out=sbc_payload
+# LAYOUT B: 2 SBC frames @ joint-stereo bitpool 48 = 2 * 109 = 218 SBC bytes
+# from 256 PCM frames (2 x 128) per chunk.
+op.2 = codec.sbc_encode speaker_pcm sample_rate=32000 channels=2 frame_samples=256 bytes=218 bitpool=48 blocks=16 subbands=8 channel_mode=joint allocation=loudness out=sbc_payload
 
 op.3 = physical_report.clear
-# Match op.4 to the active physical_report_id above.
-# op.4 = bytes.set physical_report offset=0 value=0x14
-op.4 = bytes.set physical_report offset=0 value=0x15
-# op.4 = bytes.set physical_report offset=0 value=0x16
-# op.4 = bytes.set physical_report offset=0 value=0x17
-# op.4 = bytes.set physical_report offset=0 value=0x18
-# Byte 1 = 0xC8: confirmed working header byte. DO NOT change.
-op.5 = bytes.set physical_report offset=1 value=0xC8
-# Byte 2 = 0xA8: low nibble (0x8) is the audio latency / clicking control.
-# DO NOT change without a clicking regression test.
-op.6 = bytes.set physical_report offset=2 value=0xA8
-op.7 = bytes.copy output_effects_payload src=0..30 target=physical_report dst=3
-# 2 SBC frames per packet -> frame counter advances by 2.
-op.8 = word.set_le physical_report offset=78 source=audio_frame_counter step=2
-
-# Audio target byte: 0x00 off (default), 0x02 speaker, 0x24 headset,
-# 0x26 speaker+headset probe. Win side stays blind/off; TV-side bridge
-# is the route-authority overlay. Game USB writes still propagate via
-# op.7 (USB[1..31] -> BT[3..33]).
-op.9 = bytes.set physical_report offset=80 value=0x00
-
-op.10 = bytes.copy sbc_payload src=0..223 target=physical_report dst=81
-op.11 = crc32.hid_output seed=0xa2 target=physical_report tail=last4
+op.4 = bytes.set physical_report offset=0 value=0x14
+# Byte 1 = 0x40 | BT poll rate (low nibble). HID bit (0x80) OFF: pure audio
+# report, no effects section. Probe candidates live: 0x40, 0x48.
+op.5 = bytes.set physical_report offset=1 value=0x40
+# Byte 2 = audio mode: 0xA0 speaker only, 0xA1 speaker+mic duplex.
+op.6 = bytes.set physical_report offset=2 value=0xA0
+# Frame counter (LE u16) at 3..4; 2 SBC frames per packet -> step 2.
+op.7 = word.set_le physical_report offset=3 source=audio_frame_counter step=2
+# Route byte at 5 — USER-PROBED BITMASK MODEL (2026-07-25): low nibble must
+# contain 0x02 or 0x04 (else choppy; 0x08 alone doesn't enable); high bits:
+# headphones-stereo when 0x20 set (0x10 vetoes it unless 0x40 or 0x80 also
+# set); otherwise SPLIT = SBC ch0 -> speaker, ch1 -> headphone-L. No value
+# gives speaker-stereo; speaker = duplicate content (op.1 channels=0,0).
+# AUTO mode: source=auto_route follows the jack (0xFF headphones / 0xDF
+# split, declared above). Fixed override: bytes.set ... value=0xFF etc.
+op.8 = bytes.set physical_report offset=5 source=auto_route
+op.9 = bytes.copy sbc_payload src=0..217 target=physical_report dst=6
+op.10 = crc32.hid_output seed=0xa2 target=physical_report tail=last4
 emit = physical.write physical_report
+
+# --- LAYOUT A op block (previous empirical compound layout, rollback) ---
+# op.2 = codec.sbc_encode speaker_pcm sample_rate=32000 channels=2 frame_samples=256 bytes=224 bitpool=25 blocks=16 subbands=8 channel_mode=dual allocation=loudness out=sbc_payload
+# op.4 = bytes.set physical_report offset=0 value=0x15
+# op.5 = bytes.set physical_report offset=1 value=0xC8   (confirmed working)
+# op.6 = bytes.set physical_report offset=2 value=0xA8   (low nibble 8 = latency/clicking control)
+# op.7 = bytes.copy output_effects_payload src=0..30 target=physical_report dst=3
+# op.8 = word.set_le physical_report offset=78 source=audio_frame_counter step=2
+# op.9 = bytes.set physical_report offset=80 value=0x00  (0x02 speaker / 0x24 headset / 0x26 both)
+# op.10 = bytes.copy sbc_payload src=0..223 target=physical_report dst=81
+# op.11 = crc32.hid_output seed=0xa2 target=physical_report tail=last4
 
 # === CTM Bridge advertise manifest ===
 # DS4 capabilities for the Moonlight overlay. Note: audio route options

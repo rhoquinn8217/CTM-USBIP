@@ -76,6 +76,54 @@ int wmain(int argc, wchar_t **argv)
         std::wcout << L"ctm-usbip " << widen_ascii(CTM_VERSION_DISPLAY, strlen(CTM_VERSION_DISPLAY)) << L"\n";
         return 0;
     }
+
+    if (mode == L"list-bt" || mode == L"list-hid") {
+        // JSON device inventory for GUI front-ends (Ciprian's Bridge). The GUI
+        // must never re-implement enumeration/classification — this output is
+        // the single host-side source of device knowledge.
+        const std::vector<CtmBtDevice> devices =
+            mode == L"list-bt" ? ctm_list_bluetooth_hid_devices() : ctm_list_hid_devices();
+        auto esc = [](const std::wstring &w) {
+            const std::string s = narrow_ascii(w);
+            std::string out;
+            for (const char c : s) {
+                if (c == '"' || c == '\\') { out += '\\'; out += c; }
+                else if (static_cast<unsigned char>(c) < 0x20) {
+                    char buf[8];
+                    snprintf(buf, sizeof buf, "\\u%04x", c);
+                    out += buf;
+                } else out += c;
+            }
+            return out;
+        };
+        std::cout << "[";
+        for (size_t i = 0; i < devices.size(); ++i) {
+            const CtmBtDevice &d = devices[i];
+            std::cout << (i ? ",\n " : "\n ")
+                << "{\"index\":" << i
+                << ",\"product\":\"" << esc(d.product) << "\""
+                << ",\"manufacturer\":\"" << esc(d.manufacturer) << "\""
+                << ",\"serial\":\"" << esc(d.serial) << "\""
+                << ",\"device_type\":\"" << esc(d.device_type) << "\""
+                << ",\"unavailable_reason\":\"" << esc(d.unavailable_reason) << "\""
+                << ",\"instance_id\":\"" << esc(d.instance_id) << "\""
+                << ",\"parent_instance_id\":\"" << esc(d.parent_instance_id) << "\""
+                << ",\"vendor_id\":" << d.vendor_id
+                << ",\"product_id\":" << d.product_id
+                << ",\"usage_page\":" << d.usage_page
+                << ",\"usage\":" << d.usage
+                << ",\"input_report_length\":" << d.input_report_length
+                << ",\"output_report_length\":" << d.output_report_length
+                << ",\"feature_report_length\":" << d.feature_report_length
+                << ",\"is_bluetooth\":" << (d.is_bluetooth ? "true" : "false")
+                << ",\"is_game_controller\":" << (d.is_game_controller ? "true" : "false")
+                << ",\"is_supported\":" << (d.is_supported ? "true" : "false")
+                << ",\"can_open\":" << (d.can_open_read_write ? "true" : "false")
+                << "}";
+        }
+        std::cout << "\n]" << std::endl;
+        return 0;
+    }
     bool noAttach = false;
     std::wstring profileOverride;
     std::wstring mapOverride;
@@ -217,8 +265,12 @@ int wmain(int argc, wchar_t **argv)
 
     std::wstring error;
     CtmUsbipDevice device;
+    // "auto" = build the USB profile from the backend's caps (identity
+    // pass-through): the default for bridge mode, OPT-IN for local bt mode so
+    // generic BT HID devices without a curated profile can be plugged too.
     const bool dynamicBridgeProfile =
-        mode == L"bridge" && (profileOverride.empty() || profileOverride == L"auto");
+        (mode == L"bridge" && (profileOverride.empty() || profileOverride == L"auto")) ||
+        (mode == L"bt" && profileOverride == L"auto");
     const std::wstring profilePath = dynamicBridgeProfile
         ? L"auto"
         : (profileOverride.empty() ? find_ds5_descriptor_profile() : profileOverride);

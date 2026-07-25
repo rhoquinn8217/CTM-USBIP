@@ -1,10 +1,11 @@
 # Generates app\ctm-usbip.ico (multi-resolution) from the CTM brand PNG.
-# Source of truth for the icon art is ctm-bridge-webos\icon_large.png.
+# Source of truth for the icon art is installer\brand.png (the full-bleed
+# 1024px master; no radial fade — that treatment is TV-launcher-only).
 # Re-run this if the brand art changes, then rebuild Release + the installer.
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 
-$src = Join-Path $PSScriptRoot '..\..\ctm-bridge-webos\icon_large.png'
+$src = Join-Path $PSScriptRoot 'brand.png'
 $dst = Join-Path $PSScriptRoot '..\app\ctm-usbip.ico'
 $sizes = 16, 24, 32, 48, 64, 128, 256
 

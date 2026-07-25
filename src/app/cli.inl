@@ -64,7 +64,8 @@ static void print_usage()
 {
     std::wcout
         << L"usage:\n"
-        << L"  ctm-usbip bt <index> [--no-attach] [--profile <file>] [--map <file>] [--busid <id>] [--audio-latency <byte>] [--audio-block <byte>]\n"
+        << L"  ctm-usbip bt <index> [--no-attach] [--profile auto|<file>] [--map <file>] [--busid <id>] [--audio-latency <byte>] [--audio-block <byte>] [--usbip-port <port>]\n"
+        << L"  ctm-usbip list-bt | list-hid                 (JSON device inventory for GUI front-ends)\n"
         << L"  ctm-usbip bridge <listen-port> [--enet] [--no-attach] [--profile auto|<file>] [--map <file>] [--busid <id>] [--audio-latency <byte>] [--audio-block <byte>]\n"
         << L"  ctm-usbip agent [control-port] [--enet]\n"
         << L"  ctm-usbip install [control-port] [--enet]    (register + start the Windows service)\n"

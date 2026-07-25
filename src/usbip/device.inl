@@ -179,6 +179,14 @@ public:
         return stats;
     }
 
+    // Cheap accessors for the USB/IP server's reservoir-aware ISO-ack pacing.
+    uint32_t audio_reservoir_fill_ms() { return audioReservoir_.fill_ms(); }
+    uint32_t iso_ack_min_fill_ms()
+    {
+        std::lock_guard<std::mutex> guard(mapMutex_);
+        return map_.iso_ack_min_fill_ms();
+    }
+
     void record_unknown_report(const char *kind, uint8_t reportId)
     {
         std::ostringstream key;
@@ -984,10 +992,13 @@ private:
         if (payload.empty()) {
             return kStatusOk;
         }
-        if (is_composite() && reportType == 0x03) {
-            // Composite identity: forward the feature SET verbatim to the
-            // addressed interface's hidraw (no map). Best-effort ack so a
+        if (is_composite() && reportType == 0x03 && !map_has_feature_set_rule(reportId)) {
+            // Composite identity fallback: forward the feature SET verbatim to
+            // the addressed interface's hidraw (no map). Best-effort ack so a
             // physical reject doesn't stall Windows init / Steam's config.
+            // ONLY when the map has no set rule/selector for this report —
+            // else the map path must run (e.g. record the DS4 0xa0 page
+            // selector so the paired 0xa4 GET can match).
             std::vector<uint8_t> raw;
             if (reportId != 0 && payload[0] != reportId) raw.push_back(reportId);
             raw.insert(raw.end(), payload.begin(), payload.end());
@@ -1073,6 +1084,18 @@ private:
         return kStatusOk;
     }
 
+    bool map_has_feature_get_rule(uint8_t reportId)
+    {
+        std::lock_guard<std::mutex> guard(mapMutex_);
+        return map_.has_feature_get_rule(reportId);
+    }
+
+    bool map_has_feature_set_rule(uint8_t reportId)
+    {
+        std::lock_guard<std::mutex> guard(mapMutex_);
+        return map_.has_feature_set_rule(reportId);
+    }
+
     int handle_hid_get_report(
         uint16_t value,
         const uint8_t setup[8],
@@ -1085,11 +1108,14 @@ private:
         if (reportType != 0x03) {
             return kStatusStall;
         }
-        if (is_composite()) {
-            // Composite identity: serve GET_REPORT from the addressed interface's
-            // hidraw (HIDIOCGFEATURE) at the full requested length. The request
-            // buffer is the report (id in byte 0) sized to wLength so the TV
-            // ioctl reads the whole report, not just the id byte.
+        if (is_composite() && !map_has_feature_get_rule(reportId)) {
+            // Composite identity fallback: serve GET_REPORT from the addressed
+            // interface's hidraw (HIDIOCGFEATURE) at the full requested length.
+            // The request buffer is the report (id in byte 0) sized to wLength
+            // so the TV ioctl reads the whole report, not just the id byte.
+            // ONLY when the map has no rule for this report: identity forwarding
+            // is wrong whenever USB and physical report ids differ (DS4: USB
+            // 0x02/0x12 don't exist on the BT pad) — the map always wins.
             const size_t want = requestedLength ? static_cast<size_t>(requestedLength) : 64;
             std::vector<uint8_t> req(want, 0);
             req[0] = reportId;

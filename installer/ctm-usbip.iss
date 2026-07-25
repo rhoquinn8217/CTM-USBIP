@@ -56,9 +56,16 @@ Source: "{#SrcRoot}\maps\*"; DestDir: "{app}\maps"; Flags: ignoreversion recurse
 ; when usbip-win2 is not already present; its license ships in the app folder.
 Source: "{#SrcRoot}\third_party\usbip-win2\{#UsbipInstaller}"; DestDir: "{tmp}"; Flags: deleteafterinstall
 Source: "{#SrcRoot}\third_party\usbip-win2\LICENSE.txt"; DestDir: "{app}"; DestName: "usbip-win2-LICENSE.txt"; Flags: ignoreversion
+; Ciprian's Bridge — GUI for plugging PC-Bluetooth controllers through the CTM
+; pipeline (self-contained .NET publish; run apps\CipriansBridge dotnet publish
+; before compiling this script — build-installer.ps1 does it).
+Source: "{#SrcRoot}\apps\CipriansBridge\out\publish\CipriansBridge.exe"; DestDir: "{app}"; DestName: "CipriansBridge.exe"; Flags: ignoreversion
 
 [Dirs]
 Name: "{commonappdata}\CTM Bridge"
+
+[Icons]
+Name: "{commonprograms}\Ciprian's Bridge"; Filename: "{app}\CipriansBridge.exe"; WorkingDir: "{app}"
 
 [Run]
 ; Components main,client only: no pdb/sdk (debug symbols) and no GUI tool — the
@@ -114,9 +121,60 @@ begin
   end;
 end;
 
+function DesktopRuntimeInstalled(): Boolean;
+var
+  FindRec: TFindRec;
+begin
+  { Ciprian's Bridge is a framework-dependent .NET 10 WPF app: any 10.x
+    Windows Desktop Runtime satisfies it. }
+  Result := False;
+  if FindFirst(ExpandConstant('{commonpf64}\dotnet\shared\Microsoft.WindowsDesktop.App\10.*'), FindRec) then
+  begin
+    Result := True;
+    FindClose(FindRec);
+  end;
+end;
+
+procedure EnsureDesktopRuntime();
+var
+  ResultCode: Integer;
+  RuntimeExe: String;
+begin
+  if DesktopRuntimeInstalled() then
+    Exit;
+  try
+    { Official "latest 10.0 x64 desktop runtime" alias; downloaded only when
+      the runtime is genuinely absent. }
+    DownloadTemporaryFile(
+      'https://aka.ms/dotnet/10.0/windowsdesktop-runtime-win-x64.exe',
+      'windowsdesktop-runtime.exe', '', nil);
+    RuntimeExe := ExpandConstant('{tmp}\windowsdesktop-runtime.exe');
+    Exec(RuntimeExe, '/install /quiet /norestart', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  except
+    { Offline / download blocked: continue the install — the service and CLI
+      work without .NET; only Ciprian's Bridge needs it (fails with a clear
+      OS message pointing at the runtime). }
+  end;
+end;
+
+procedure StopPreviousService();
+var
+  ResultCode: Integer;
+  ExePath: String;
+begin
+  { Fast upgrade path: just stop + deregister the service so its binary is
+    unlocked; the file copy overwrites everything in place (same AppId keeps
+    the uninstall entry current). Running the FULL previous uninstaller here
+    (service stop + file deletion + a 30 s poll) was the pre-progress hang. }
+  ExePath := ExpandConstant('{app}\ctm-usbip.exe');
+  if FileExists(ExePath) then
+    Exec(ExePath, 'uninstall', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
-  RemovePreviousVersion();
+  StopPreviousService();
+  EnsureDesktopRuntime();
   { Decide once, before the [Run] steps, whether we install the bundled
     usbip-win2 — so the flag stays valid for the post-install .pdb cleanup
     even after usbip.exe has been created. }
