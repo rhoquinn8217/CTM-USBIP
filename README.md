@@ -23,9 +23,8 @@ native USB controller**: speaker/headset audio, haptics, LEDs, and the DS4's
 headphone-jack auto-routing — one **Plug in / Plug out** click per device, with
 optional [HidHide](https://github.com/nefarius/HidHide) integration so games
 never see the double device. Generic BT mice/keyboards and other HID devices
-can be bridged the same way. Also available standalone as
-`CipriansBridge_<version>.zip` in the [releases](https://github.com/CTM-Bridge/releases/releases)
-(requires the CTM Bridge service from the setup).
+can be bridged the same way. Included in `CTM-Bridge-Setup.exe` — no separate
+download.
 
 > **Quick install:** download `CTM-Bridge-Setup.exe` from the [latest release](https://github.com/CTM-Bridge/CTM-USBIP/releases) — it installs the background service, the LAN firewall rule, and the usbip-win2 driver in one step (see [§4](#4-install-as-a-windows-service-recommended)).
 
