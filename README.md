@@ -26,7 +26,10 @@ exposes a BT-paired DS4/DS5 as a limited HID device — no audio endpoints, no
 headset, degraded rumble in many titles. Ciprian's Bridge plugs the pad through
 the same map-driven translation pipeline instead, so the PC sees the **full
 native USB controller**: speaker/headset audio, haptics, LEDs, and the DS4's
-headphone-jack auto-routing — one **Plug in / Plug out** click per device, with
+headphone-jack auto-routing (for DS4 pad-speaker audio in games, keep **Steam
+Input enabled** for now — the direct-mode path has a known chop being fixed;
+DS5 is best with Steam Input **disabled**, keeping native DualSense features
+incl. adaptive triggers) — one **Plug in / Plug out** click per device, with
 optional [HidHide](https://github.com/nefarius/HidHide) integration so games
 never see the double device. Generic BT mice/keyboards and other HID devices
 can be bridged the same way. Included in `CTM-Bridge-Setup.exe` — no separate
