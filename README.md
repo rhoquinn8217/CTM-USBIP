@@ -168,3 +168,8 @@ All controller protocol in this project is derived from its own observation (sys
 - [usbip-win2] by **vadimgrn** — the USB/IP client for Windows and its signed virtual host-controller driver, which CTM-USBIP builds on. The installer redistributes its signed setup unmodified under the BSD-2-Clause license (`usbip-win2-LICENSE.txt` is installed alongside the app).
 
 [usbip-win2]: https://github.com/vadimgrn/usbip-win2
+
+## License
+
+[GNU General Public License v3.0](LICENSE) (GPL-3.0-or-later).
+Copyright (C) 2026 Ciprian Teodor Misaila.
