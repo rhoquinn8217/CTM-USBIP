@@ -4,6 +4,14 @@
 ![language](https://img.shields.io/badge/C%2B%2B-17-00599C?logo=cplusplus&logoColor=white)
 ![transport](https://img.shields.io/badge/transport-USB%2FIP-2ea44f)
 
+## Support
+
+One person, late nights: controllers were just the start — native AMF
+streaming, a custom low-latency codec and a bigger webOS app are in the pipe.
+If CTM Bridge saved you some hassle, coffee speeds them up.
+
+[![Support me on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/ciprianteodormisaila)
+
 > Turn a controller attached to **another machine** into a **real USB device on Windows**, over the network, using USB/IP.
 
 **CTM** = *Controller Translation Mapper*. CTM-USBIP is the Windows half of the bridge: it receives a controller's raw HID transport forwarded from the **ctm-bridge-webos** TV app (companion project) and re-creates it as a virtual USB device through the [usbip-win2] virtual host-controller driver — so Windows, Steam, and games see a genuine gamepad (input, rumble, LEDs, and audio where supported).
@@ -157,11 +165,3 @@ All controller protocol in this project is derived from its own observation (sys
 - [usbip-win2] by **vadimgrn** — the USB/IP client for Windows and its signed virtual host-controller driver, which CTM-USBIP builds on. The installer redistributes its signed setup unmodified under the BSD-2-Clause license (`usbip-win2-LICENSE.txt` is installed alongside the app).
 
 [usbip-win2]: https://github.com/vadimgrn/usbip-win2
-
-## Support
-
-One person, late nights: controllers were just the start — native AMF
-streaming, a custom low-latency codec and a bigger webOS app are in the pipe.
-If CTM Bridge saved you some hassle, coffee speeds them up.
-
-[![Support me on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/ciprianteodormisaila)
