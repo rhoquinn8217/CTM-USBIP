@@ -616,9 +616,27 @@ private:
         const auto builderPace = std::chrono::duration_cast<clock::duration>(
             std::chrono::duration<double, std::milli>(builderPaceMs));
         auto nextBuild = clock::time_point{};
+        const bool underrunSilence = map_.underrun_silence();
+        const uint32_t chunkMs = (std::max<uint32_t>)(1, static_cast<uint32_t>(
+            static_cast<uint64_t>(audioFrameSamples_) * 1000ULL /
+            (audioReservoir_.sampleRate == 0 ? 32000 : audioReservoir_.sampleRate)));
+        bool streamStarted = false;
         while (audioThreadRunning_.load(std::memory_order_relaxed) && !g_stop.load()) {
-            if (!audioReservoir_.pull(audioFrameSamples_, chunk.data())) {
+            int pulled;
+            if (underrunSilence && streamStarted) {
+                pulled = audioReservoir_.pull_timed(audioFrameSamples_, chunk.data(), chunkMs);
+            } else {
+                pulled = audioReservoir_.pull(audioFrameSamples_, chunk.data()) ? 1 : -1;
+            }
+            if (pulled < 0) {
                 break;
+            }
+            if (pulled == 0) {
+                // Keep-alive: hold the pad-side stream continuous through host
+                // bursts (per-sound WASAPI open/close) — silence, not a stall.
+                std::fill(chunk.begin(), chunk.end(), static_cast<int16_t>(0));
+            } else {
+                streamStarted = true;
             }
 
             CTM_USB_EVENT event = {};

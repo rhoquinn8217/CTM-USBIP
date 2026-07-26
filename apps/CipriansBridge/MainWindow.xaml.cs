@@ -69,6 +69,10 @@ public partial class MainWindow : Window
             foreach (var d in devices)
             {
                 if (string.IsNullOrEmpty(d.InstanceId)) continue;
+                // Same rule as the TV app: paired-but-offline devices (HID
+                // interface not visible) are not listed at all. A row we hold
+                // a session for stays visible regardless.
+                if (!d.CanOpen && !_sessions.ContainsKey(d.InstanceId)) continue;
                 seen.Add(d.InstanceId);
                 if (!_byKey.TryGetValue(d.InstanceId, out var vm))
                 {

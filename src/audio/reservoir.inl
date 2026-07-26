@@ -67,6 +67,34 @@
         return true;
     }
 
+    // Timed pull for the keep-alive silence lane: 1 = data, 0 = timed out
+    // (caller emits a silence chunk so the physical stream stays continuous
+    // through bursty hosts), -1 = stopping. Warmup is NOT reset on timeout —
+    // burst restarts must be instant. Timeouts don't count as consumerWaits
+    // (they are the expected idle cadence, not starvation).
+    int pull_timed(size_t frameCount, int16_t *out, uint32_t timeoutMs)
+    {
+        if (out == nullptr || frameCount == 0) {
+            return -1;
+        }
+        const size_t need = frameCount * channels;
+        std::unique_lock<std::mutex> lock(mu);
+        const bool ready = dataCv.wait_for(lock, std::chrono::milliseconds(timeoutMs), [&]() {
+            return stopRequested.load(std::memory_order_relaxed) || (warmed && samples.size() >= need);
+        });
+        if (stopRequested.load(std::memory_order_relaxed) && samples.size() < need) {
+            return -1;
+        }
+        if (!ready) {
+            return 0;
+        }
+        for (size_t i = 0; i < need; ++i) {
+            out[i] = samples.front();
+            samples.pop_front();
+        }
+        return 1;
+    }
+
     uint32_t fill_ms() const
     {
         std::lock_guard<std::mutex> lock(mu);

@@ -55,6 +55,11 @@ public:
     // under this reservoir fill the host's ISO OUT URBs are acked immediately
     // so the reservoir can build slack; above it the normal rate pacing runs.
     uint32_t iso_ack_min_fill_ms() const { return isoAckMinFillMs_; }
+    // Keep-alive silence lane (underrun_silence = true): once audio has
+    // started, the builder emits silence chunks at cadence instead of
+    // stalling when the host stream pauses — the physical stream stays
+    // continuous through bursty clients (per-sound WASAPI open/close).
+    bool underrun_silence() const { return underrunSilence_; }
     uint32_t pace_hard_step_multiplier() const { return paceHardStepMultiplier_; }
     uint32_t pace_velocity_deadband_ms() const { return paceVelocityDeadbandMs_; }
 
@@ -397,6 +402,7 @@ private:
     uint8_t autoRouteValueSet_ = 0;
     uint8_t autoRouteValueClear_ = 0;
     uint8_t autoRouteValue_ = 0;
+    bool underrunSilence_ = false;
     uint32_t paceHardStepMultiplier_ = 5;
     uint32_t paceVelocityDeadbandMs_ = 1;
     uint32_t opusSampleRate_ = 48000;

@@ -979,6 +979,8 @@ bool CtmMapRuntime::parse_map(std::wstring *error)
     autoRouteValueClear_ = static_cast<uint8_t>(get_u32(
         ini, "path.iso.virtual_to_physical_stream", "auto_route_value_clear", autoRouteValueClear_));
     autoRouteValue_ = autoRouteValueClear_;
+    underrunSilence_ =
+        ini_get(ini, "path.iso.virtual_to_physical_stream", "underrun_silence") == "true";
     if (paceHardMaxFillMs_ < paceHardMinFillMs_) {
         paceHardMaxFillMs_ = paceHardMinFillMs_ + 1;
     }

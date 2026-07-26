@@ -84,7 +84,17 @@ rule.3.cache = true
 rule.4.match = usb.feature_get report=0x11
 rule.4.response = usb.respond length=2 prefix=0x11 0x01 static=true
 rule.4.cache = true
+# Feature 0x08 (= ff 00 0c): a real-DS4-declared 3-byte vendor feature
+# (usage 0x25). ATTRIBUTION CORRECTED 2026-07-25: sent by the WEB TESTER
+# (its 0xa0-page probe sequence), NOT by games/libScePad — a fresh HZD launch
+# sent no feature writes at all. Forward kept (best_effort, harmless): the
+# tester's write now reaches the real pad instead of being lied to.
 rule.5.match = usb.feature_set report=0x08
+rule.5.action.1 = physical.hid.set_feature report=0x08 length=4 payload=0xff 0x00 0x0c best_effort=true
+# Parser plumbing (runtime requires a get action + response on action-bearing
+# rules; SET paths never send the response). TODO runtime: allow set-only.
+rule.5.action.2 = physical.hid.get_feature report=0x08 length=4 best_effort=true
+rule.5.response = usb.respond length=4 prefix=0x08 static=true
 
 [path.control.uac1_feature_units]
 audio_control_interface = 0
@@ -125,6 +135,13 @@ auto_route_input_offset = 32
 auto_route_input_mask = 0x40
 auto_route_value_set = 0xFF
 auto_route_value_clear = 0xDF
+# Keep-alive silence lane: REVERTED after user test 2026-07-25 — with it on,
+# ALL audio died (YouTube silent, no Focus) and the controller misbehaved
+# under Steam Input. The continuous silence emission evidently breaks the
+# pad's audio/report state — do NOT re-enable without understanding why
+# (suspect: flooding 0x14s starves/roots the pad; needs a proper
+# investigation, not a hammer). Code path is inert while false.
+underrun_silence = false
 trigger = usb.endpoint.iso_out
 source_endpoint = 0x01
 # USB ISO endpoint declares 32 kHz stereo to Windows. The ingest stage
@@ -191,14 +208,16 @@ intermediate_buffer_max_ms = 300
 # fast -> grow pace.
 pace_adjust_step_ms = 0.01
 pace_adjust_interval_frames = 1
-# 5.0 ms is the USER-TESTED value from docs/ds4_audio.md (steady 32013 Hz,
-# 125 chunks/s, 1 drop, rare clipping only): the writer drains 8 ms of audio
-# per 5 ms tick, so it can CATCH UP after any hiccup. The 8.0 drift locked the
-# writer to exact real-time with zero slack -> chronic starvation/choppiness.
+# ADAPTIVE PACE ENABLED (2026-07-25 night, jitter fix): phase-split log
+# proved direct-mode games (HZD) feed ±2% clock jitter while Steam is
+# metronomic; with pace pinned 5.0/5.0 the reservoir rides empty and jitter
+# reaches the pad raw (= the direct-mode chop). The band below lets the
+# DS5-proven control law regulate drain to hold the pace_hard_min_fill_ms
+# cushion. 5.0 stays the fast bound (the tested catch-up value).
 bt_pace_ms = 5.0
 audio_builder_pace_ms = 0.0
 pace_min_ms = 5.0
-pace_max_ms = 5.0
+pace_max_ms = 20.0
 pace_hard_min_fill_ms = 8
 pace_hard_max_fill_ms = 80
 pace_hard_step_multiplier = 5
