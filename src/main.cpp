@@ -4,6 +4,7 @@
 
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <mstcpip.h>
 #include <winsvc.h>
 
 #include "ctm/hid.h"

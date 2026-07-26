@@ -21,6 +21,20 @@ static std::mutex g_agent_sessions_mutex;
 static std::vector<std::unique_ptr<AgentBridgeSession>> g_agent_sessions;
 static std::unique_ptr<CtmUsbipServer> g_agent_usbip_server;
 
+// Reap requests from bridge reader threads (client lost / idle expired). The
+// run_agent loop drains this on its own thread — the only thread that starts
+// and stops sessions — so a reap can never race a concurrent start and never
+// outlives shutdown (a detached reaper thread could UAF g_agent_sessions when
+// the service stopped mid-reap).
+static std::mutex g_agent_reap_mutex;
+static std::vector<std::wstring> g_agent_reap_requests;
+
+static void request_bridge_session_reap(const std::wstring &busId)
+{
+    std::lock_guard<std::mutex> lock(g_agent_reap_mutex);
+    g_agent_reap_requests.push_back(busId);
+}
+
 static std::wstring find_relative_asset(const std::wstring &relative)
 {
     // Live-edit override first: the agent/service resolves maps/profiles from
@@ -95,6 +109,9 @@ static void set_bridge_session_error(AgentBridgeSession *session, const std::wst
     session->lastError = error;
 }
 
+static bool stop_bridge_session(const std::wstring &busId);
+static void drain_bridge_session_reaps();
+
 static void bridge_session_worker(AgentBridgeSession *session)
 {
     std::wstring error;
@@ -134,6 +151,30 @@ static void bridge_session_worker(AgentBridgeSession *session)
     } else {
         auto backend = std::make_unique<BridgeBackend>(session->port, session->device->bt_audio_pace_ms());
         backendPtr = backend.get();
+        // Agent-only session policy (the CLI bridge mode keeps wait-forever
+        // defaults): bounded initial accept + reconnect grace, TCP keepalive
+        // probing, and the idle rule — gamepads chatter constantly so silence
+        // means gone (15 s); mice/keyboards may idle legitimately (15 min).
+        // Generic "hid" gets the long window unless its HELLO descriptor is a
+        // gamepad, which the backend detects and tightens itself.
+        backend->set_session_timeouts(30000, 15000);
+        const bool gamepadKind = session->kind == "ds4" || session->kind == "ds5" ||
+                                 session->kind == "xbox" || session->kind == "puck";
+        backend->set_idle_timeouts(gamepadKind ? 15000 : 15 * 60 * 1000, 15000);
+        // TCP path: when the TV client vanishes and the reconnect grace runs
+        // out (or the idle rule fires), unplug the virtual device and reap the
+        // session (mirrors the ENet link-down behavior; a reaped port also
+        // can't hijack the next plug's handshake). The reap is queued to the
+        // agent loop: stop() joins the reader thread that fires this callback,
+        // so reaping inline here would self-join.
+        {
+            const std::wstring busId = session->busId;
+            backend->set_closed_callback([busId]() {
+                std::wcout << L"agent bridge client lost busid=" << busId
+                           << L" -> virtual device UNPLUGGED\n";
+                request_bridge_session_reap(busId);
+            });
+        }
         std::lock_guard<std::mutex> lock(session->mutex);
         if (session->stopping.load()) {
             return;
@@ -244,6 +285,34 @@ static bool start_bridge_session(const std::string &kind, uint16_t port, const s
         return false;
     }
 
+    // Pending reaps first (same thread as the drain loop): a TV re-plug can
+    // reuse a busid whose old session just died — deduping against that dying
+    // session would leave the TV talking to nothing.
+    drain_bridge_session_reaps();
+
+    // A re-plug arrives with a fresh busid but the same port. Any older session
+    // still holding that port (dead client, wedged handshake) must go first --
+    // two listeners on one port (SO_REUSEADDR) steal each other's connections,
+    // which is how "bridge protocol header rejected" flaps happened.
+    std::wstring staleBusId;
+    {
+        std::lock_guard<std::mutex> lock(g_agent_sessions_mutex);
+        if (find_bridge_session_locked(busId)) {
+            return true;
+        }
+        for (const auto &existing : g_agent_sessions) {
+            if (existing->port == port) {
+                staleBusId = existing->busId;
+                break;
+            }
+        }
+    }
+    if (!staleBusId.empty()) {
+        std::wcout << L"agent bridge replacing stale session busid=" << staleBusId
+                   << L" (port " << port << L" requested by busid=" << busId << L")\n";
+        (void)stop_bridge_session(staleBusId);
+    }
+
     std::lock_guard<std::mutex> lock(g_agent_sessions_mutex);
     if (find_bridge_session_locked(busId)) {
         return true;
@@ -311,6 +380,21 @@ static void stop_all_bridge_sessions()
         }
     }
     for (const std::wstring &busId : busIds) {
+        (void)stop_bridge_session(busId);
+    }
+}
+
+// Drained once per run_agent loop tick (~1 s cadence). Runs on the same thread
+// that serves BRIDGE_START/STOP, so reaps serialize with every other session
+// lifecycle change.
+static void drain_bridge_session_reaps()
+{
+    std::vector<std::wstring> requests;
+    {
+        std::lock_guard<std::mutex> lock(g_agent_reap_mutex);
+        requests.swap(g_agent_reap_requests);
+    }
+    for (const std::wstring &busId : requests) {
         (void)stop_bridge_session(busId);
     }
 }
@@ -470,6 +554,7 @@ static int run_agent(uint16_t port)
 
     std::wcout << L"ctm agent listening udp/tcp port " << port << L"\n";
     while (!g_stop.load()) {
+        drain_bridge_session_reaps();
         fd_set readfds;
         FD_ZERO(&readfds);
         FD_SET(udp, &readfds);

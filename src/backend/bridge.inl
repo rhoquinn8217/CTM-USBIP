@@ -97,6 +97,34 @@ public:
     {
     }
 
+    // Invoked (once, from the reader thread) when the client is gone and the
+    // reconnect grace expired, or the idle rule fired; the owner should unplug
+    // + reap this session. Must not block on joining this backend's threads —
+    // the agent queues the reap and performs it on its own command loop.
+    void set_closed_callback(std::function<void()> cb)
+    {
+        closedCallback_ = std::move(cb);
+    }
+
+    // Bounded accept windows, OPT-IN (agent path only): 0 = wait forever, the
+    // CLI bridge mode's unchanged behavior.
+    void set_session_timeouts(int initialAcceptMs, int reconnectGraceMs)
+    {
+        initialAcceptTimeoutMs_ = initialAcceptMs;
+        reconnectGraceMs_ = reconnectGraceMs;
+    }
+
+    // Idle rule, OPT-IN: no input reports for idleMs -> session treated as
+    // dead (closed callback fires). gamepadIdleMs is the tightened window the
+    // reader applies instead when the HELLO descriptor's top-level collection
+    // is a joystick/gamepad — pads chatter constantly, so silence means gone,
+    // while a mouse/keyboard may idle legitimately for a long time.
+    void set_idle_timeouts(int idleMs, int gamepadIdleMs)
+    {
+        idleTimeoutMs_ = idleMs;
+        gamepadIdleTimeoutMs_ = gamepadIdleMs;
+    }
+
     bool start(RawInputCallback callback, std::wstring *error) override
     {
         callback_ = std::move(callback);
@@ -300,11 +328,55 @@ private:
 
     bool accept_client(bool initial, std::wstring *error)
     {
+        // Bounded wait (opt-in via set_session_timeouts; 0 = wait forever, the
+        // CLI behavior): the initial connect must arrive shortly after the TV
+        // requested this bridge; a reconnect gets a grace window and then the
+        // session declares itself dead (closed callback -> device unplug)
+        // instead of parking on the port forever. A parked listener is what
+        // produced zombie devices and stole the next plug's handshake.
+        const int timeoutMs = initial ? initialAcceptTimeoutMs_ : reconnectGraceMs_;
+        const uint64_t deadlineUs = timeoutMs > 0
+            ? monotonic_us() + static_cast<uint64_t>(timeoutMs) * 1000u
+            : 0;
         for (;;) {
             if (!initial && (!running_.load() || g_stop.load())) {
                 return false;
             }
             std::wcout << L"bridge waiting on TCP port " << port_ << L"\n";
+            SOCKET pendingOn = listenSocket_;
+            if (pendingOn == INVALID_SOCKET) {
+                return false;
+            }
+            // Slice the wait so stop()/g_stop stay responsive and the deadline
+            // is enforced even with no incoming connections.
+            bool pending = false;
+            for (;;) {
+                if (!initial && (!running_.load() || g_stop.load())) {
+                    return false;
+                }
+                if (deadlineUs != 0 && monotonic_us() >= deadlineUs) {
+                    if (initial) {
+                        if (error) *error = L"bridge initial accept timed out";
+                    } else {
+                        std::wcerr << L"bridge reconnect grace expired on port " << port_ << L"\n";
+                    }
+                    return false;
+                }
+                fd_set fds;
+                FD_ZERO(&fds);
+                FD_SET(pendingOn, &fds);
+                timeval tv = {};
+                tv.tv_usec = 500 * 1000;
+                const int sel = select(0, &fds, nullptr, nullptr, &tv);
+                if (sel == SOCKET_ERROR) {
+                    break;   // fall through to accept for a proper error path
+                }
+                if (sel > 0) {
+                    pending = true;
+                    break;
+                }
+            }
+            (void)pending;
             SOCKET client = accept(listenSocket_, nullptr, nullptr);
             if (client == INVALID_SOCKET) {
                 if (!initial && (!running_.load() || g_stop.load())) {
@@ -325,6 +397,19 @@ private:
             }
             int noDelay = 1;
             setsockopt(client, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char *>(&noDelay), sizeof(noDelay));
+            // Kernel-level "still connected?" probe: a vanished peer (TV power
+            // cut leaves the link half-open) fails recv within ~30 s instead
+            // of never. Transparent for live idle links — the peer's kernel
+            // ACKs without the app's involvement.
+            {
+                tcp_keepalive keepAlive = {};
+                keepAlive.onoff = 1;
+                keepAlive.keepalivetime = 10000;
+                keepAlive.keepaliveinterval = 2000;
+                DWORD keepAliveBytes = 0;
+                (void)WSAIoctl(client, SIO_KEEPALIVE_VALS, &keepAlive, sizeof(keepAlive),
+                               nullptr, 0, &keepAliveBytes, nullptr, nullptr);
+            }
             clientSocket_.store(client);
 
             CtmBridgeMessage hello;
@@ -481,10 +566,110 @@ private:
         return true;
     }
 
+    // Fire the closed callback exactly once (self-exit paths: grace expired,
+    // idle rule). External stop() never routes through here.
+    void fire_closed_callback()
+    {
+        if (running_.load() && !g_stop.load() && closedCallback_) {
+            std::function<void()> cb = std::move(closedCallback_);
+            closedCallback_ = nullptr;
+            cb();
+        }
+    }
+
+    // True when the HELLO report descriptor's first top-level collection is a
+    // joystick/gamepad/multi-axis controller (Generic Desktop 0x04/0x05/0x08).
+    // Used to tighten the idle window for generic "hid" sessions that are
+    // really pads. Only touched from the reader thread (HELLO parse included).
+    bool descriptor_is_gamepad() const
+    {
+        uint32_t usagePage = 0;
+        uint32_t lastUsage = 0;
+        int depth = 0;
+        const std::vector<uint8_t> &d = hidReportDescriptor_;
+        for (size_t i = 0; i < d.size();) {
+            const uint8_t prefix = d[i];
+            if (prefix == 0xFE) {   // long item: skip
+                if (i + 2 >= d.size()) break;
+                i += 3u + d[i + 1];
+                continue;
+            }
+            const uint8_t sizeCode = prefix & 0x03;
+            const size_t dataLen = sizeCode == 3 ? 4 : sizeCode;
+            if (i + 1 + dataLen > d.size()) break;
+            uint32_t value = 0;
+            for (size_t b = 0; b < dataLen; ++b) {
+                value |= static_cast<uint32_t>(d[i + 1 + b]) << (8 * b);
+            }
+            const uint8_t tagType = prefix & 0xFC;
+            if (tagType == 0x04) {                       // Global: Usage Page
+                usagePage = value;
+            } else if (tagType == 0x08 && depth == 0) {  // Local: Usage (top level)
+                lastUsage = value;
+            } else if (tagType == 0xA0) {                // Main: Collection
+                if (depth == 0 && usagePage == 0x01 &&
+                    (lastUsage == 0x04 || lastUsage == 0x05 || lastUsage == 0x08)) {
+                    return true;
+                }
+                ++depth;
+            } else if (tagType == 0xC0 && depth > 0) {   // Main: End Collection
+                --depth;
+            }
+            i += 1 + dataLen;
+        }
+        return false;
+    }
+
+    int effective_idle_timeout_ms() const
+    {
+        if (idleTimeoutMs_ <= 0) {
+            return 0;
+        }
+        if (gamepadIdleTimeoutMs_ > 0 && gamepadIdleTimeoutMs_ < idleTimeoutMs_ &&
+            descriptor_is_gamepad()) {
+            return gamepadIdleTimeoutMs_;
+        }
+        return idleTimeoutMs_;
+    }
+
     void reader_loop()
     {
         uint64_t lastInputReceiveUs = 0;
+        uint64_t idleBasisUs = monotonic_us();
         while (running_.load() && !g_stop.load()) {
+            // Idle rule (opt-in): slice the wait so silence is noticed — a
+            // plain blocking recv would never return for a live-but-mute peer.
+            const int idleMs = effective_idle_timeout_ms();
+            if (idleMs > 0) {
+                bool readable = false;
+                while (running_.load() && !g_stop.load()) {
+                    SOCKET s = clientSocket_.load();
+                    if (s == INVALID_SOCKET) {
+                        break;   // recv_message reports the closed socket
+                    }
+                    fd_set fds;
+                    FD_ZERO(&fds);
+                    FD_SET(s, &fds);
+                    timeval tv = {};
+                    tv.tv_sec = 1;
+                    const int sel = select(0, &fds, nullptr, nullptr, &tv);
+                    if (sel != 0) {
+                        readable = true;   // data or socket error: recv_message decides
+                        break;
+                    }
+                    const uint64_t basisUs = lastInputReceiveUs != 0 ? lastInputReceiveUs : idleBasisUs;
+                    if (monotonic_us() - basisUs >= static_cast<uint64_t>(idleMs) * 1000u) {
+                        std::wcerr << L"bridge idle timeout (" << idleMs
+                                   << L" ms without input) on port " << port_ << L"\n";
+                        close_client_socket();
+                        fire_closed_callback();
+                        return;
+                    }
+                }
+                if (!readable && (!running_.load() || g_stop.load())) {
+                    break;
+                }
+            }
             CtmBridgeMessage message;
             std::wstring error;
             if (!recv_message(&message, &error)) {
@@ -494,8 +679,13 @@ private:
                 close_client_socket();
                 lastInputReceiveUs = 0;
                 if (!accept_client(false, nullptr)) {
+                    // Self-exit (grace expired), not an external stop(): tell the
+                    // agent so the virtual device gets unplugged and the session
+                    // reaped instead of lingering half-dead on the port.
+                    fire_closed_callback();
                     break;
                 }
+                idleBasisUs = monotonic_us();
                 continue;
             }
             if (message.header.type == CtmBridgeProtocol::MsgInputReport) {
@@ -706,6 +896,14 @@ private:
     uint16_t port_ = 0;
     double btPaceMs_ = 10.0;
     bool wsaStarted_ = false;
+    // Bounded accept windows + idle rule (see accept_client / reader_loop).
+    // All 0 = disabled: the CLI bridge mode keeps wait-forever semantics; the
+    // agent opts in via set_session_timeouts / set_idle_timeouts.
+    int initialAcceptTimeoutMs_ = 0;
+    int reconnectGraceMs_ = 0;
+    int idleTimeoutMs_ = 0;
+    int gamepadIdleTimeoutMs_ = 0;
+    std::function<void()> closedCallback_;
     SOCKET listenSocket_ = INVALID_SOCKET;
     std::atomic<SOCKET> clientSocket_{INVALID_SOCKET};
     CtmBridgeProtocol::DeviceCaps capsRaw_ = {};
