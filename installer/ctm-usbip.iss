@@ -19,7 +19,7 @@
 ; components (debug symbols and tools the agent does not use).
 
 #define AppName "CTM Bridge"
-#define AppVersion "0.0.1"
+#define AppVersion "0.0.2"
 #define AppPublisher "CTM"
 #define ExeName "ctm-usbip.exe"
 #define UsbipInstaller "USBip-0.9.7.7-x64.exe"

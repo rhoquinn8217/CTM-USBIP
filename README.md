@@ -12,6 +12,21 @@
 
 The original use case: you stream a PC game to an LG TV (Moonlight/Sunshine) and your controller is connected to the **TV**, not the PC. CTM-USBIP makes that controller appear on the PC.
 
+## Ciprian's Bridge — local controllers, full USB features
+
+The installer also ships **Ciprian's Bridge** (Start Menu), a desktop app for
+controllers connected **to the PC itself** over Bluetooth. Windows normally
+exposes a BT-paired DS4/DS5 as a limited HID device — no audio endpoints, no
+headset, degraded rumble in many titles. Ciprian's Bridge plugs the pad through
+the same map-driven translation pipeline instead, so the PC sees the **full
+native USB controller**: speaker/headset audio, haptics, LEDs, and the DS4's
+headphone-jack auto-routing — one **Plug in / Plug out** click per device, with
+optional [HidHide](https://github.com/nefarius/HidHide) integration so games
+never see the double device. Generic BT mice/keyboards and other HID devices
+can be bridged the same way. Also available standalone as
+`CipriansBridge_<version>.zip` in the [releases](https://github.com/CTM-Bridge/releases/releases)
+(requires the CTM Bridge service from the setup).
+
 > **Quick install:** download `CTM-Bridge-Setup.exe` from the [latest release](https://github.com/CTM-Bridge/CTM-USBIP/releases) — it installs the background service, the LAN firewall rule, and the usbip-win2 driver in one step (see [§4](#4-install-as-a-windows-service-recommended)).
 
 ---
