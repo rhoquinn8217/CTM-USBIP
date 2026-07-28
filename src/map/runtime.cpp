@@ -1042,6 +1042,7 @@ bool CtmMapRuntime::parse_map(std::wstring *error)
         ini_get(ini, "path.iso.virtual_to_physical_stream", "sbc_allocation"),
         sbcAllocation_);
     logMappedInput_ = ini_get(ini, "debug", "log_mapped_input") == "true";
+    isoPassthroughEnabled_ = ini_get(ini, "path.iso.virtual_to_physical_stream", "passthrough") == "true";
     streamOps_.clear();
     for (uint32_t i = 1; i <= 128; ++i) {
         const std::string op = ini_get(ini, "path.iso.virtual_to_physical_stream", "op." + std::to_string(i));

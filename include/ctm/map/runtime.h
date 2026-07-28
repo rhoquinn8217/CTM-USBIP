@@ -31,6 +31,7 @@ public:
     uint32_t iso_out_completion_delay_us() const { return isoOutCompletionDelayUs_; }
     double iso_out_completion_delay_scale() const { return isoOutCompletionDelayScale_; }
     bool log_mapped_input() const { return logMappedInput_; }
+    bool iso_passthrough_enabled() const { return isoPassthroughEnabled_; }  // wired: skip Opus, send raw PCM via MsgIsoAudio
 
     // --- Intermediate reservoir + adaptive-pace knobs (connect-bt path) ---
     // All in ms of audio held in the reservoir (at the reservoir sample rate).
@@ -422,6 +423,7 @@ private:
     uint8_t sbcAllocation_ = 0; // SBC loudness.
     uint8_t audioLatency_ = 0x60;
     bool logMappedInput_ = false;
+    bool isoPassthroughEnabled_ = false;  // wired ISO passthrough mode
 
     uint8_t reportSequence_ = 0;
     uint8_t mapCounter_ = 1;

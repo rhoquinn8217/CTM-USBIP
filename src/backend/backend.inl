@@ -28,6 +28,10 @@ public:
         size_t *lastGetResponseLength,
         const char *reason,
         unsigned int timeoutMs) = 0;
+    virtual bool send_iso_audio(const std::vector<uint8_t> &pcm, std::wstring *error)
+    {
+        (void)pcm; (void)error; return false;  // default: no-op for non-wired backends
+    }
     virtual bool send_output_report(const std::vector<uint8_t> &report, bool paced, std::wstring *error) = 0;
 
     // Composite: forward an OUT report tagged with the physical OUT endpoint it

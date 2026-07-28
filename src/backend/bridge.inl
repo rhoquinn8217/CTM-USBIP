@@ -277,6 +277,15 @@ public:
         }
         return clientSocket_.load() == INVALID_SOCKET;
     }
+    bool send_iso_audio(const std::vector<uint8_t> &pcm, std::wstring *error) override
+    {
+        if (clientSocket_.load() == INVALID_SOCKET) { return true; }
+        return send_message(
+            CtmBridgeProtocol::MsgIsoAudio,
+            0, 0,
+            pcm.data(), pcm.size(),
+            error);
+    }
 
     // Composite: forward a SET/GET_REPORT verbatim to one interface's hidraw.
     // The interface is encoded in the high byte of request_id; the low 24 bits

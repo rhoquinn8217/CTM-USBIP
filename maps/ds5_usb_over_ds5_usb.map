@@ -46,3 +46,6 @@ haptics = true
 audio_output = true
 audio_input = false
 battery = true
+
+[path.iso.virtual_to_physical_stream]
+passthrough = true  # wired: skip Opus/BT pipeline, send raw PCM via MsgIsoAudio
