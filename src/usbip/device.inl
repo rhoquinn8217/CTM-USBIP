@@ -1114,6 +1114,12 @@ private:
         return map_.has_feature_set_rule(reportId);
     }
 
+    bool map_iso_passthrough_enabled()
+    {
+        std::lock_guard<std::mutex> guard(mapMutex_);
+        return map_.iso_passthrough_enabled();
+    }
+
     int handle_hid_get_report(
         uint16_t value,
         const uint8_t setup[8],
@@ -1266,7 +1272,9 @@ private:
         event.event_type = endpoint_is_iso(info_, endpointAddress) ? CTM_USB_EVENT_ISO_OUT : CTM_USB_EVENT_HID_OUTPUT;
         event.endpoint_address = endpointAddress;
         if (event.event_type == CTM_USB_EVENT_ISO_OUT) {
-            return process_iso_output(endpointAddress, data);
+            return map_iso_passthrough_enabled()
+                ? process_iso_output_wired(endpointAddress, data)
+                : process_iso_output(endpointAddress, data);
         }
         event.length = static_cast<uint16_t>((std::min<size_t>)(sizeof(event.data), data.size()));
         if (event.length != 0) {
@@ -1328,6 +1336,37 @@ private:
         audioIsoBytes_.fetch_add(data.size(), std::memory_order_relaxed);
         audioInputFrames_.fetch_add(frames, std::memory_order_relaxed);
         audioReservoirFrames_.fetch_add(outFrames, std::memory_order_relaxed);
+        return kStatusOk;
+    }
+
+    // Wired ISO audio: send raw PCM straight to the TV client, bypassing the
+    // Opus/reservoir pipeline. The physical controller is a USB audio device on
+    // the TV, so the client writes these samples to it directly.
+    //
+    // Deliberately does NOT touch audioReservoir_ or the audio counters -- those
+    // belong to the Bluetooth path, which uses a different audio mechanism at
+    // the hardware level.
+    //
+    // DEPENDS ON UPSTREAM DEFAULTS (verified against 08df624):
+    //   ack_min_fill_ms  = 0     -> the reservoir-fill ack gate in server.inl
+    //                              can never fire (unsigned < 0 is never true)
+    //   underrun_silence = false -> the keep-alive silence lane stays inactive
+    // Both come from the map; ds5_usb_over_ds5_usb.map sets neither. If either
+    // default changes, or either is added to the wired map, this path changes
+    // behaviour with no error and no build failure. Re-check on upstream merges.
+    int process_iso_output_wired(uint8_t endpointAddress, const std::vector<uint8_t> &data)
+    {
+        // Mirrored from process_iso_output() @ 08df624 -- endpoint filter only.
+        // Nothing else runs above the divergence point there: the counters and
+        // reservoir push all happen after resampling.
+        if (endpointAddress != audioIsoEndpoint_) {
+            return kStatusOk;
+        }
+        if (data.empty() || !backend_) {
+            return kStatusOk;
+        }
+        std::wstring err;
+        backend_->send_iso_audio(data, &err);
         return kStatusOk;
     }
 
