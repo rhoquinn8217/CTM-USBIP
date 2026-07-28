@@ -65,6 +65,7 @@ if ($LASTEXITCODE -ne 0) { throw 'ctm-usbip-tests build failed.' }
 $out = Join-Path $Root "out\$Platform\$Configuration"
 $exe = Join-Path $out 'ctm-usbip-tests.exe'
 $map = Join-Path $Root 'maps\ds5_usb_over_ds5_usb.map'
+$btMap = Join-Path $Root 'maps\ds5_usb_over_ds5_bt.map'
 
 Write-Host ''
 Write-Host '--- running tests ---'
@@ -72,7 +73,7 @@ Write-Host '--- running tests ---'
 # already-ignored build output rather than the repo root.
 Push-Location $out
 try {
-    & $exe $map
+    & $exe $map $btMap
     $testExit = $LASTEXITCODE
 } finally {
     Pop-Location

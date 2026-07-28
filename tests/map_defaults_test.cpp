@@ -24,6 +24,8 @@ int main(int argc, char **argv)
 {
     const std::string mapPath =
         (argc > 1) ? argv[1] : "maps/ds5_usb_over_ds5_usb.map";
+    const std::string btMapPath =
+        (argc > 2) ? argv[2] : "maps/ds5_usb_over_ds5_bt.map";
 
     // --- Test 1: the assumption the wired path actually relies on ----------
     section("wired map leaves reservoir settings inert");
@@ -70,6 +72,28 @@ int main(int argc, char **argv)
             CTM_CHECK_EQ(map.underrun_silence(), true);
         }
         std::remove(tmpPath.c_str());
+    }
+
+    // --- Test 3: the Bluetooth map must NOT take the wired path -----------
+    // handle_endpoint_out() dispatches on iso_passthrough_enabled(). The BT map
+    // does not set the flag, so BT must keep entering upstream's unchanged
+    // process_iso_output(). If this ever reads true, BT audio silently routes
+    // down the wired path and breaks with no error.
+    //
+    // Paired with test 1 this is also a real read-check: the same accessor
+    // returns true for one map and false for another, so neither result can be
+    // a parser that just returns a default for everything.
+    section("bt map does not enable the wired passthrough path");
+    {
+        CtmMapRuntime map;
+        std::wstring err;
+        const bool loaded = map.load(widen(btMapPath), &err);
+        CTM_CHECK(loaded);
+        if (loaded) {
+            CTM_CHECK_EQ(map.iso_passthrough_enabled(), false);
+        } else {
+            std::printf("  could not load %s\n", btMapPath.c_str());
+        }
     }
 
     return summary();
