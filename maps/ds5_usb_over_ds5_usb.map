@@ -48,4 +48,8 @@ audio_input = false
 battery = true
 
 [path.iso.virtual_to_physical_stream]
-passthrough = true  # wired: skip Opus/BT pipeline, send raw PCM via MsgIsoAudio
+# wired: skip Opus/BT pipeline, send raw PCM via MsgIsoAudio.
+# Comment MUST stay on its own line -- the INI parser does not strip
+# trailing comments, so an inline one becomes part of the value and the
+# flag silently reads false.
+passthrough = true
