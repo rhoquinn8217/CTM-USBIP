@@ -8,11 +8,17 @@
 # ignore the copy range). The copy = lines below are required by the map
 # loader's validation but are NOT used at runtime in passthrough mode.
 
-# Known limitation: rumble and haptic audio do not work through games that
-# drive them via the USB ISO audio path (channels 2/3 = haptics, 0/1 = speaker).
-# The runtime has no ISO passthrough primitive to forward the virtual USB ISO
-# stream back to the physical controller's USB audio interface. This requires
-# a new [path.iso.virtual_to_physical_passthrough] runtime feature.
+# ISO audio passthrough IS implemented -- see [path.iso.virtual_to_physical_
+# stream] passthrough at the bottom of this file. The virtual USB ISO stream is
+# forwarded to the client as raw PCM (MsgIsoAudio), bypassing the Opus/reservoir
+# pipeline that Bluetooth uses. A wired controller is a USB audio device on the
+# client side, so the client writes those samples to it directly.
+# NOTE: this requires a client that implements MsgIsoAudio and writes to the
+# controller's audio device. Against a client that does not, the flag is inert.
+# Speaker audio (channels 0/1) confirmed working end-to-end 2026-07-28.
+# NOT YET VERIFIED: haptic audio on channels 2/3. The full 4-channel chunk is
+# forwarded verbatim so it should arrive, but no test has confirmed the client
+# writes it to the haptic channels. Do not assume it works.
 # Buttons, sticks, adaptive triggers, LEDs, and feature reports all work.
 
 
