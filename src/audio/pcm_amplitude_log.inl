@@ -25,18 +25,40 @@
 
 namespace ctm_pcm_amp {
 
-// Folder holding the running executable. The pre-fork version wrote to a
-// relative path, so the log landed wherever the listener happened to be
-// started from; this pins it to one predictable place.
-inline std::filesystem::path runtime_dir()
+// Where the log and sentinel live: the repo root, found by walking up from
+// the executable until build.ps1 appears.
+//
+// Three constraints, and this is the only location that meets all three:
+//   1. Must not depend on the launch directory -- the pre-fork version used a
+//      relative path, so the log landed wherever the listener was started from.
+//   2. Must not live under out/ -- that is build output, and a clean rebuild
+//      deletes it, taking session captures with it.
+//   3. Should sit beside ctm-session.log, which start-listener-fork.bat writes
+//      to the repo root, so amplitude lines and listener lines can be read
+//      against each other without hunting across folders.
+// Falls back to the executable's folder if the walk-up finds nothing, which is
+// the pre-fork-safe behaviour rather than a lost log.
+inline std::filesystem::path log_dir()
 {
+    std::error_code ec;
     wchar_t buf[MAX_PATH];
     const DWORD n = GetModuleFileNameW(nullptr, buf, MAX_PATH);
-    if (n == 0 || n >= MAX_PATH) {
-        std::error_code ec;
-        return std::filesystem::current_path(ec);
+    const std::filesystem::path exeDir = (n == 0 || n >= MAX_PATH)
+        ? std::filesystem::current_path(ec)
+        : std::filesystem::path(buf).parent_path();
+
+    std::filesystem::path p = exeDir;
+    while (true) {
+        if (std::filesystem::exists(p / L"build.ps1", ec)) {
+            return p;
+        }
+        const std::filesystem::path up = p.parent_path();
+        if (up == p) {
+            break;
+        }
+        p = up;
     }
-    return std::filesystem::path(buf).parent_path();
+    return exeDir;
 }
 
 inline bool armed()
@@ -66,7 +88,7 @@ inline bool armed()
         nextProbeUs.store(nowUs + 250000u, std::memory_order_relaxed);
         std::error_code ec;
         const bool present =
-            std::filesystem::exists(runtime_dir() / L"pcm_amplitude_log_on", ec);
+            std::filesystem::exists(log_dir() / L"pcm_amplitude_log_on", ec);
         lastResult.store(present && !ec, std::memory_order_relaxed);
     }
     return lastResult.load(std::memory_order_relaxed);
@@ -77,7 +99,7 @@ inline void log_chunk(const std::vector<uint8_t> &data)
     static std::ofstream logFile;
     static std::once_flag initFlag;
     std::call_once(initFlag, []() {
-        logFile.open(runtime_dir() / L"ctm_pcm_amplitude.log", std::ios::app);
+        logFile.open(log_dir() / L"ctm_pcm_amplitude.log", std::ios::app);
     });
     if (!logFile.is_open()) {
         return;
