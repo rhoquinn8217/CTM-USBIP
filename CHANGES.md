@@ -18,25 +18,33 @@ carry it; upstream's own history is unchanged.
 | 2026-07-28 | Added ISO passthrough map flag and backend send path | `3bc5624`, `67d8e4d` |
 | 2026-07-28 | Route wired ISO audio through a separate path | `19f22a9` |
 | 2026-07-28 | Added map parser test project and test harness | `04754b3`, `bdb14f0` |
+| 2026-07-29 | Ported T-028 PCM amplitude logging into the wired ISO path | `e3afa55`, `841d9a2` |
 
 ## Files changed
 
 ```
- .gitignore                    |   5 +--
- app/ctm-usbip-tests.vcxproj   |  83 +++++++++++++++++++++++++++++++++++
- build-tests.ps1               |  86 ++++++++++++++++++++++++++++++++++++
- build.ps1                     |   3 +-
- include/ctm/map/runtime.h     |   2 +
- maps/ds5_usb_over_ds5_usb.map |  61 ++++++++++++++++++++++++++
- src/app/agent.inl             |   8 +++-
- src/backend/backend.inl       |   4 ++
- src/backend/bridge.inl        |  10 +++++
- src/map/runtime.cpp           |   1 +
- src/usbip/device.inl          |  41 ++++++++++++++++-
- tests/harness.h               |  55 +++++++++++++++++++++++
- tests/map_defaults_test.cpp   | 100 ++++++++++++++++++++++++++++++++++++++++++
- 13 files changed, 452 insertions(+), 7 deletions(-)
+ .gitignore                      |   9 +--
+ CHANGES.md                      |  42 ++++++++++++
+ app/ctm-usbip-tests.vcxproj     |  83 ++++++++++++++++++++++++
+ build-tests.ps1                 |  86 ++++++++++++++++++++++++
+ build.ps1                       |   3 +-
+ include/ctm/map/runtime.h       |   2 +
+ maps/ds5_usb_over_ds5_usb.map   |  61 +++++++++++++++++
+ src/app/agent.inl               |   8 ++-
+ src/audio/pcm_amplitude_log.inl | 140 ++++++++++++++++++++++++++++++++++++++++
+ src/backend/backend.inl         |   4 ++
+ src/backend/bridge.inl          |  10 +++
+ src/main.cpp                    |   4 ++
+ src/map/runtime.cpp             |   1 +
+ src/usbip/device.inl            |  42 +++++++++-
+ tests/harness.h                 |  55 ++++++++++++++
+ tests/map_defaults_test.cpp     | 100 ++++++++++++++++++++++++++++
+ 16 files changed, 643 insertions(+), 7 deletions(-)
 ```
 
 _Generated with `git diff upstream/main --stat`. Regenerate this block
 rather than editing it by hand._
+
+_`CHANGES.md`'s own line count above is a snapshot taken before this
+revision was written, so it always lags by one edit. Expected, not a
+discrepancy._
