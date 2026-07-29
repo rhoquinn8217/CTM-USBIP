@@ -1366,6 +1366,7 @@ private:
             return kStatusOk;
         }
         std::wstring err;
+        ctm_pcm_amp::maybe_log(data);
         backend_->send_iso_audio(data, &err);
         return kStatusOk;
     }

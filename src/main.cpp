@@ -20,11 +20,13 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <deque>
+#include <filesystem>
 #include <fstream>
 #include <functional>
 #include <iomanip>
@@ -34,6 +36,7 @@
 #include <mutex>
 #include <sstream>
 #include <string>
+#include <system_error>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -51,6 +54,7 @@ namespace {
 #include "backend/bt.inl"
 #include "backend/bridge.inl"
 #include "backend/bridge_enet.inl"
+#include "audio/pcm_amplitude_log.inl"  // needs monotonic_us from backend/bridge.inl; must precede its caller
 #include "usbip/device.inl"
 #include "usbip/server.inl"
 #include "app/cli.inl"
