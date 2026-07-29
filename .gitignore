@@ -19,3 +19,7 @@ out/
 # NOTE: third_party/ffmpeg prebuilt libs are intentionally vendored (build.ps1
 # needs them and there is no fetch step), so they are NOT ignored.
 third_party/vcpkg/
+ctm-session.log
+ctm_pcm_amplitude.log
+pcm_amplitude_log_on
+t028_session_amplitude.log
