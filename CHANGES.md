@@ -19,12 +19,12 @@ carry it; upstream's own history is unchanged.
 | 2026-07-28 | Route wired ISO audio through a separate path | `19f22a9` |
 | 2026-07-28 | Added map parser test project and test harness | `04754b3`, `bdb14f0` |
 | 2026-07-29 | Ported T-028 PCM amplitude logging into the wired ISO path | `e3afa55`, `841d9a2`, `cbae4b4` |
+| 2026-07-30 | Check the keepalive enable result instead of discarding it | `61302f7` |
 
 ## Files changed
-
 ```
  .gitignore                      |   9 ++-
- CHANGES.md                      |  50 +++++++++++++
+ CHANGES.md                      |  51 +++++++++++++
  app/ctm-usbip-tests.vcxproj     |  83 ++++++++++++++++++++
  build-tests.ps1                 |  86 +++++++++++++++++++++
  build.ps1                       |   3 +-
@@ -33,15 +33,14 @@ carry it; upstream's own history is unchanged.
  src/app/agent.inl               |   8 +-
  src/audio/pcm_amplitude_log.inl | 162 ++++++++++++++++++++++++++++++++++++++++
  src/backend/backend.inl         |   4 +
- src/backend/bridge.inl          |  10 +++
+ src/backend/bridge.inl          |  23 +++++-
  src/main.cpp                    |   4 +
  src/map/runtime.cpp             |   1 +
  src/usbip/device.inl            |  42 ++++++++++-
  tests/harness.h                 |  55 ++++++++++++++
  tests/map_defaults_test.cpp     | 100 +++++++++++++++++++++++++
- 16 files changed, 673 insertions(+), 7 deletions(-)
+ 16 files changed, 685 insertions(+), 9 deletions(-)
 ```
-
 _Generated with `git diff upstream/main --stat`. Regenerate this block
 rather than editing it by hand._
 
