@@ -405,6 +405,9 @@ static void drain_bridge_session_reaps()
     }
 }
 
+
+#include "agent_session_sweep.inl"
+
 static void send_text(SOCKET sock, const std::string &text)
 {
     send(sock, text.c_str(), static_cast<int>(text.size()), 0);
@@ -561,6 +564,7 @@ static int run_agent(uint16_t port)
     std::wcout << L"ctm agent listening udp/tcp port " << port << L"\n";
     while (!g_stop.load()) {
         drain_bridge_session_reaps();
+        sweep_bridge_sessions();
         fd_set readfds;
         FD_ZERO(&readfds);
         FD_SET(udp, &readfds);
