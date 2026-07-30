@@ -18,7 +18,7 @@ carry it; upstream's own history is unchanged.
 | 2026-07-28 | Added ISO passthrough map flag and backend send path | `3bc5624`, `67d8e4d` |
 | 2026-07-28 | Route wired ISO audio through a separate path | `19f22a9` |
 | 2026-07-28 | Added map parser test project and test harness | `04754b3`, `bdb14f0` |
-| 2026-07-29 | Ported T-028 PCM amplitude logging into the wired ISO path | `e3afa55`, `841d9a2`, `cbae4b4` |
+| 2026-07-29 | Added PCM amplitude logging to the wired ISO audio path | `e3afa55`, `841d9a2`, `cbae4b4` |
 | 2026-07-30 | Check the keepalive enable result instead of discarding it | `61302f7` |
 
 ## Files changed

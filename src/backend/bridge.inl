@@ -417,7 +417,7 @@ private:
                 keepAlive.keepalivetime = 10000;
                 keepAlive.keepaliveinterval = 2000;
                 DWORD keepAliveBytes = 0;
-                // T-059: upstream discarded this result with (void). A silent
+                // Upstream discarded this result with (void). A silent
                 // failure leaves the session with NO heartbeat and no indication
                 // of it -- which would make "ghosts persist despite the four
                 // nets" a false premise. Log only; behaviour is unchanged.

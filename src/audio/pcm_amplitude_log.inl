@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// PCM amplitude logging -- T-028, ported under T-056.
+// PCM amplitude logging for the wired ISO audio path.
 //
 // PORTED FROM: ctm-ds5-bridge (our pre-fork working copy of this relay; a
 // filesystem copy with no shared git history), commits 7c8091b and 19c1965,
