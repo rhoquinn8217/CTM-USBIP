@@ -417,8 +417,17 @@ private:
                 keepAlive.keepalivetime = 10000;
                 keepAlive.keepaliveinterval = 2000;
                 DWORD keepAliveBytes = 0;
-                (void)WSAIoctl(client, SIO_KEEPALIVE_VALS, &keepAlive, sizeof(keepAlive),
-                               nullptr, 0, &keepAliveBytes, nullptr, nullptr);
+                // T-059: upstream discarded this result with (void). A silent
+                // failure leaves the session with NO heartbeat and no indication
+                // of it -- which would make "ghosts persist despite the four
+                // nets" a false premise. Log only; behaviour is unchanged.
+                if (WSAIoctl(client, SIO_KEEPALIVE_VALS, &keepAlive, sizeof(keepAlive),
+                             nullptr, 0, &keepAliveBytes, nullptr, nullptr) == SOCKET_ERROR) {
+                    std::wcerr << wsa_error_message(L"bridge keepalive enable FAILED") << L"\n";
+                } else {
+                    std::wcout << L"bridge keepalive enabled time_ms=" << keepAlive.keepalivetime
+                               << L" interval_ms=" << keepAlive.keepaliveinterval << L"\n";
+                }
             }
             clientSocket_.store(client);
 
