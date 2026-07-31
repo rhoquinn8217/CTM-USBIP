@@ -1,0 +1,130 @@
+// -----------------------------------------------------------------------------
+// Device configuration store.
+//
+// Per-device settings, read from a plain text file beside the agent. Windows
+// owns these settings: the TV sends nothing and needs to know nothing about
+// them, so an unmodified client is unaffected.
+//
+// The file is read once, on first use, and cached for the life of the process.
+// A bridge session therefore picks up its values when it starts, which means
+// editing the file and re-plugging the controller applies the change. No
+// reload command and no protocol are needed.
+//
+// The format deliberately mirrors the .map files -- same [section] and
+// key = value shape -- so there is no new syntax to learn:
+//
+//   [ds5]
+//   force_echo_cancel = true
+//
+// Unknown sections and unknown keys are ignored, so a newer file still works
+// with an older build. A missing file means every setting takes its built-in
+// default, which is exactly how the agent behaved before this existed.
+//
+// NOTE: trailing comments ARE stripped here, with '#' or ';'. The .map parser
+// does not strip them, and a trailing comment there silently turns a flag off.
+// The two formats look alike but this one does not carry that trap.
+//
+// The path is relative to the agent's working directory, which is where the
+// maps folder also resolves from. If this ever needs to work for the installed
+// service as well, it should move to the same asset-finding helper the maps
+// use.
+// -----------------------------------------------------------------------------
+
+static const char *const kDeviceConfigFileName = "ctm-device-config.txt";
+
+static std::mutex g_device_config_mutex;
+static bool g_device_config_loaded = false;
+static std::map<std::string, std::map<std::string, std::string>> g_device_config;
+
+static std::string device_config_trim(const std::string &text)
+{
+    const size_t begin = text.find_first_not_of(" \t\r\n");
+    if (begin == std::string::npos) {
+        return std::string();
+    }
+    const size_t end = text.find_last_not_of(" \t\r\n");
+    return text.substr(begin, end - begin + 1);
+}
+
+static std::string device_config_lower(std::string text)
+{
+    for (size_t i = 0; i < text.size(); ++i) {
+        if (text[i] >= 'A' && text[i] <= 'Z') {
+            text[i] = static_cast<char>(text[i] - 'A' + 'a');
+        }
+    }
+    return text;
+}
+
+// Caller must hold g_device_config_mutex.
+static void device_config_load_locked()
+{
+    g_device_config_loaded = true;
+    std::ifstream file(kDeviceConfigFileName);
+    if (!file.is_open()) {
+        std::cout << "device config: no " << kDeviceConfigFileName
+                  << " found, using built-in defaults" << std::endl;
+        return;
+    }
+
+    std::string section;
+    std::string line;
+    size_t entries = 0;
+    while (std::getline(file, line)) {
+        const size_t comment = line.find_first_of("#;");
+        if (comment != std::string::npos) {
+            line.erase(comment);
+        }
+        line = device_config_trim(line);
+        if (line.empty()) {
+            continue;
+        }
+        if (line.front() == '[' && line.back() == ']') {
+            section = device_config_lower(device_config_trim(line.substr(1, line.size() - 2)));
+            continue;
+        }
+        const size_t equals = line.find('=');
+        if (equals == std::string::npos || section.empty()) {
+            continue;
+        }
+        const std::string key = device_config_lower(device_config_trim(line.substr(0, equals)));
+        if (key.empty()) {
+            continue;
+        }
+        g_device_config[section][key] = device_config_trim(line.substr(equals + 1));
+        ++entries;
+    }
+
+    std::cout << "device config: loaded " << entries << " setting(s) from "
+              << kDeviceConfigFileName << std::endl;
+}
+
+// Look up a boolean setting. Returns fallback when the file, the section, the
+// key, or a recognisable value is missing -- every failure path is "behave as
+// before", never an error.
+static bool device_config_bool(const char *section, const char *key, bool fallback)
+{
+    if (section == nullptr || key == nullptr) {
+        return fallback;
+    }
+    std::lock_guard<std::mutex> guard(g_device_config_mutex);
+    if (!g_device_config_loaded) {
+        device_config_load_locked();
+    }
+    const auto sectionIt = g_device_config.find(device_config_lower(section));
+    if (sectionIt == g_device_config.end()) {
+        return fallback;
+    }
+    const auto keyIt = sectionIt->second.find(device_config_lower(key));
+    if (keyIt == sectionIt->second.end()) {
+        return fallback;
+    }
+    const std::string value = device_config_lower(keyIt->second);
+    if (value == "true" || value == "1" || value == "yes" || value == "on") {
+        return true;
+    }
+    if (value == "false" || value == "0" || value == "no" || value == "off") {
+        return false;
+    }
+    return fallback;
+}

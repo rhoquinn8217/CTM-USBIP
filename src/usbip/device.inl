@@ -1280,6 +1280,7 @@ private:
         if (event.length != 0) {
             memcpy(event.data, data.data(), event.length);
         }
+        ds5_force_echo_cancel_on(event.data, event.length);
         std::cout << "usb endpoint out"
                   << " ep=0x" << std::hex << std::setw(2) << std::setfill('0')
                   << static_cast<unsigned int>(endpointAddress)
