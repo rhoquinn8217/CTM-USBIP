@@ -20,17 +20,19 @@ carry it; upstream's own history is unchanged.
 | 2026-07-28 | Added map parser test project and test harness | `04754b3`, `bdb14f0` |
 | 2026-07-29 | Added PCM amplitude logging to the wired ISO audio path | `e3afa55`, `841d9a2`, `cbae4b4` |
 | 2026-07-30 | Check the keepalive enable result instead of discarding it | `61302f7` |
+| 2026-07-30 | Log bridge session transitions; flush log output so teardown lines are not lost | `dbec96f`, `87d1427` |
 
 ## Files changed
 ```
  .gitignore                      |   9 ++-
- CHANGES.md                      |  51 +++++++++++++
+ CHANGES.md                      |  49 ++++++++++++
  app/ctm-usbip-tests.vcxproj     |  83 ++++++++++++++++++++
  build-tests.ps1                 |  86 +++++++++++++++++++++
  build.ps1                       |   3 +-
  include/ctm/map/runtime.h       |   2 +
  maps/ds5_usb_over_ds5_usb.map   |  61 +++++++++++++++
- src/app/agent.inl               |   8 +-
+ src/app/agent.inl               |  12 ++-
+ src/app/agent_session_sweep.inl | 153 +++++++++++++++++++++++++++++++++++++
  src/audio/pcm_amplitude_log.inl | 162 ++++++++++++++++++++++++++++++++++++++++
  src/backend/backend.inl         |   4 +
  src/backend/bridge.inl          |  23 +++++-
@@ -39,7 +41,7 @@ carry it; upstream's own history is unchanged.
  src/usbip/device.inl            |  42 ++++++++++-
  tests/harness.h                 |  55 ++++++++++++++
  tests/map_defaults_test.cpp     | 100 +++++++++++++++++++++++++
- 16 files changed, 685 insertions(+), 9 deletions(-)
+ 17 files changed, 840 insertions(+), 9 deletions(-)
 ```
 _Generated with `git diff upstream/main --stat`. Regenerate this block
 rather than editing it by hand._
