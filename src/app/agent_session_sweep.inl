@@ -143,4 +143,11 @@ static void sweep_bridge_sessions()
     }
 
     g_sweep_previous.swap(current);
+
+    // Push anything pending out to the log every pass. Console output is
+    // block-buffered when redirected to a file, and telemetry is what normally
+    // keeps it moving -- so the last lines before a teardown, when telemetry
+    // stops, are exactly the ones left sitting unwritten. Flushing here also
+    // carries out lines written elsewhere, with no edit anywhere else.
+    std::wcout.flush();
 }
