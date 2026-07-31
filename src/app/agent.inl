@@ -324,6 +324,7 @@ static bool start_bridge_session(const std::string &kind, uint16_t port, const s
         return true;
     }
 
+    device_config_invalidate();   // a reseat re-reads the settings file
     auto session = std::make_unique<AgentBridgeSession>();
     session->kind = kind;
     session->busId = busId;

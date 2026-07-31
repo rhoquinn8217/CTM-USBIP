@@ -5,10 +5,11 @@
 // owns these settings: the TV sends nothing and needs to know nothing about
 // them, so an unmodified client is unaffected.
 //
-// The file is read once, on first use, and cached for the life of the process.
-// A bridge session therefore picks up its values when it starts, which means
-// editing the file and re-plugging the controller applies the change. No
-// reload command and no protocol are needed.
+// The cache is dropped whenever a bridge session starts, and refilled on the
+// next lookup. That is what makes editing the file and re-plugging the
+// controller apply the change -- no reload command and no protocol are needed.
+// Within a session the values are stable, so a setting cannot change under a
+// running game.
 //
 // The format deliberately mirrors the .map files -- same [section] and
 // key = value shape -- so there is no new syntax to learn:
@@ -97,6 +98,17 @@ static void device_config_load_locked()
 
     std::cout << "device config: loaded " << entries << " setting(s) from "
               << kDeviceConfigFileName << std::endl;
+}
+
+// Drop the cached copy so the next lookup re-reads the file. Called when a
+// bridge session starts: that is what turns a virtual reseat into "apply my
+// edited settings", which is the model this file exists to serve.
+static void device_config_invalidate()
+{
+    std::lock_guard<std::mutex> guard(g_device_config_mutex);
+    g_device_config_loaded = false;
+    g_device_config.clear();
+    device_config_load_locked();   // reload now, so the values are warm and the load is visible
 }
 
 // Look up a boolean setting. Returns fallback when the file, the section, the
