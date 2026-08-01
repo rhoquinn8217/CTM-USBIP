@@ -33,18 +33,9 @@
 // !! cancellation on. Use that project for positions, not for audio values.
 // -----------------------------------------------------------------------------
 
-// Claim bits in the first claim byte. A CLAIMED field is applied even if it is
-// zero -- claiming something we do not intend to set is an active change, not
-// a no-op. Only ever claim what we are actually setting.
-static const uint8_t kDs5ClaimRumbleA      = 0x01;  // must stay CLEAR (see below)
-static const uint8_t kDs5ClaimRumbleB      = 0x02;  // must stay CLEAR (see below)
-static const uint8_t kDs5ClaimSpeakerVol   = 0x20;
-static const uint8_t kDs5ClaimAudioControl = 0x80;
-
-static const size_t  kDs5OutReportLen      = 48;  // every host report on the wire
-static const size_t  kDs5IdxSpeakerVolume  = 6;
-static const uint8_t kDs5RouteToSpeaker    = 0x30;
-static const uint8_t kDs5SpeakerVolumeMax  = 0x64;  // the controller's full scale
+// Report-format constants and the percentage conversion live in
+// ds5_output_overrides.inl, which is included ahead of this file. Both halves
+// share them so a configured percentage always lands on the same raw value.
 
 // Build and send one settings report. Does nothing unless the kind is wired and
 // at least one setting is configured, so an unconfigured install behaves
@@ -60,10 +51,8 @@ static void ds5_apply_initial_settings(CtmBackend *backend, const std::string &k
         return;   // not configured
     }
 
-    int clamped = volumePercent;
-    if (clamped > 100) clamped = 100;
-    const uint8_t volumeRaw =
-        static_cast<uint8_t>((clamped * kDs5SpeakerVolumeMax) / 100);
+    const int clamped = volumePercent > 100 ? 100 : volumePercent;
+    const uint8_t volumeRaw = ds5_volume_raw_from_percent(clamped);
 
     std::vector<uint8_t> report(kDs5OutReportLen, 0);
     report[0] = kDs5OutReportId;
@@ -72,7 +61,7 @@ static void ds5_apply_initial_settings(CtmBackend *backend, const std::string &k
     // claim bits are left clear on purpose: claiming them here would apply the
     // zeroed rumble fields below and silently kill rumble for the session.
     report[kDs5IdxValidFlag0] =
-        static_cast<uint8_t>(kDs5ClaimSpeakerVol | kDs5ClaimAudioControl);
+        static_cast<uint8_t>(kDs5AllowSpeakerVolume | kDs5AllowAudioControl);
     report[kDs5IdxValidFlag0] &= static_cast<uint8_t>(~(kDs5ClaimRumbleA | kDs5ClaimRumbleB));
 
     report[kDs5IdxSpeakerVolume] = volumeRaw;

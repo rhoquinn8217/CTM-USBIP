@@ -51,7 +51,7 @@ namespace {
 #include "audio/reservoir.inl"
 #include "map/diagnostics.inl"
 #include "config/device_config.inl"
-#include "audio/ds5_echo_cancel_patch.inl"
+#include "audio/ds5_output_overrides.inl"
 #include "backend/backend.inl"
 #include "backend/bt.inl"
 #include "backend/bridge.inl"
