@@ -108,7 +108,38 @@ static void device_config_invalidate()
     std::lock_guard<std::mutex> guard(g_device_config_mutex);
     g_device_config_loaded = false;
     g_device_config.clear();
-    device_config_load_locked();   // reload now, so the values are warm and the load is visible
+}
+
+// Look up a whole-number setting. Returns fallback when the file, section, key
+// or a parsable value is missing. Callers use a fallback outside the valid
+// range (e.g. -1) to mean "not configured, do nothing".
+static int device_config_int(const char *section, const char *key, int fallback)
+{
+    if (section == nullptr || key == nullptr) {
+        return fallback;
+    }
+    std::lock_guard<std::mutex> guard(g_device_config_mutex);
+    if (!g_device_config_loaded) {
+        device_config_load_locked();
+    }
+    const auto sectionIt = g_device_config.find(device_config_lower(section));
+    if (sectionIt == g_device_config.end()) {
+        return fallback;
+    }
+    const auto keyIt = sectionIt->second.find(device_config_lower(key));
+    if (keyIt == sectionIt->second.end()) {
+        return fallback;
+    }
+    try {
+        size_t consumed = 0;
+        const int parsed = std::stoi(keyIt->second, &consumed);
+        if (consumed == 0) {
+            return fallback;
+        }
+        return parsed;
+    } catch (...) {
+        return fallback;   // unparsable is "not configured", never an error
+    }
 }
 
 // Look up a boolean setting. Returns fallback when the file, the section, the

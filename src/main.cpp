@@ -60,6 +60,7 @@ namespace {
 #include "usbip/device.inl"
 #include "usbip/server.inl"
 #include "app/cli.inl"
+#include "audio/ds5_apply_settings.inl"
 #include "app/agent.inl"
 #include "app/service.inl"
 
