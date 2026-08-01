@@ -1367,6 +1367,16 @@ private:
             return kStatusOk;
         }
         std::wstring err;
+        // data is const and owned by the caller, so scaling needs a copy --
+        // made only when a gain is configured, so an unconfigured build pays
+        // nothing on this ~100/sec path.
+        if (ctm_haptic_gain::configured()) {
+            std::vector<uint8_t> scaled(data);
+            ctm_haptic_gain::apply(scaled);
+            ctm_pcm_amp::maybe_log(scaled);
+            backend_->send_iso_audio(scaled, &err);
+            return kStatusOk;
+        }
         ctm_pcm_amp::maybe_log(data);
         backend_->send_iso_audio(data, &err);
         return kStatusOk;

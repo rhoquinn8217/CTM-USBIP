@@ -139,6 +139,77 @@ static void ds5_override_speaker_volume(uint8_t *data, size_t length)
     }
 }
 
+
+
+// --- Override 3: rumble gain ---
+//
+// SCALES rather than replaces, and the distinction matters. Rumble is not a
+// setting, it is a signal: the game varies it continuously to express what is
+// happening. Replacing it with a fixed number would flatten that expression
+// into a constant buzz. So the configured value is a MULTIPLIER applied to
+// whatever the game sends -- 100 leaves it untouched, 50 halves it, 0 disables
+// rumble entirely, 200 doubles it.
+//
+// The percentage-as-multiplier approach is Ciprian's; his slider works this
+// way. NO CODE WAS COPIED.
+//
+// Deliberately a straight multiply for now. The wireless haptics path applies
+// a perceptual curve instead, because perceived strength is not linear in
+// amplitude -- but that curve was tuned for haptic audio samples, not these
+// motor bytes, and we have no measurement of how the motors respond. A
+// straight multiply is predictable and gives a later curve something to be
+// validated against.
+static const size_t  kDs5IdxRumbleRight = 3;
+static const size_t  kDs5IdxRumbleLeft  = 4;
+static const int     kDs5RumbleGainMax  = 500;   // matches the wireless clamp of 5x
+
+static std::atomic<uint64_t> g_ds5_rumble_scale_count{0};
+
+static uint8_t ds5_scale_rumble(uint8_t value, int gainPercent)
+{
+    const int scaled = (static_cast<int>(value) * gainPercent) / 100;
+    if (scaled > 255) {
+        return 255;
+    }
+    return static_cast<uint8_t>(scaled);
+}
+
+static void ds5_override_rumble(uint8_t *data, size_t length)
+{
+    if (data == nullptr || length <= kDs5IdxRumbleLeft) {
+        return;
+    }
+    if (data[0] != kDs5OutReportId) {
+        return;
+    }
+    // Both motors are governed by the two rumble claim bits. If the game is not
+    // claiming them it is not driving rumble, and the fields are not ours.
+    if ((data[kDs5IdxValidFlag0] & (kDs5ClaimRumbleA | kDs5ClaimRumbleB)) == 0) {
+        return;
+    }
+    const int gain = device_config_int("ds5", "rumble_gain", -1);
+    if (gain < 0) {
+        return;  // no key means the game's rumble stands
+    }
+    const int clampedGain = gain > kDs5RumbleGainMax ? kDs5RumbleGainMax : gain;
+
+    const uint8_t beforeRight = data[kDs5IdxRumbleRight];
+    const uint8_t beforeLeft  = data[kDs5IdxRumbleLeft];
+    data[kDs5IdxRumbleRight] = ds5_scale_rumble(beforeRight, clampedGain);
+    data[kDs5IdxRumbleLeft]  = ds5_scale_rumble(beforeLeft, clampedGain);
+
+    if (beforeRight == data[kDs5IdxRumbleRight] && beforeLeft == data[kDs5IdxRumbleLeft]) {
+        return;  // nothing changed -- usually both motors already at rest
+    }
+
+    // Rumble reports stream during play, so this is logged sparsely on purpose.
+    const uint64_t count = ++g_ds5_rumble_scale_count;
+    if (count <= 3 || (count % 1000) == 0) {
+        std::cout << "ds5 rumble: scaled to " << clampedGain
+                  << "% (scale #" << count << ")" << std::endl;
+    }
+}
+
 // Single entry point called from the outbound report path. Safe on every
 // report: each override returns immediately for anything that is not its own
 // business, before any lookup.
@@ -146,4 +217,5 @@ static void ds5_apply_output_overrides(uint8_t *data, size_t length)
 {
     ds5_override_echo_cancel(data, length);
     ds5_override_speaker_volume(data, length);
+    ds5_override_rumble(data, length);
 }

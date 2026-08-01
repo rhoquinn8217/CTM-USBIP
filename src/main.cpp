@@ -56,6 +56,7 @@ namespace {
 #include "backend/bt.inl"
 #include "backend/bridge.inl"
 #include "backend/bridge_enet.inl"
+#include "audio/haptic_gain.inl"
 #include "audio/pcm_amplitude_log.inl"  // needs monotonic_us from backend/bridge.inl; must precede its caller
 #include "usbip/device.inl"
 #include "usbip/server.inl"
