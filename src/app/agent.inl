@@ -1,4 +1,4 @@
-constexpr uint16_t kAgentDefaultPort = 48054;
+﻿constexpr uint16_t kAgentDefaultPort = 48054;
 
 struct AgentBridgeSession {
     std::string kind;
@@ -326,6 +326,7 @@ static bool start_bridge_session(const std::string &kind, uint16_t port, const s
     }
 
     device_config_invalidate();   // a reseat re-reads the settings file
+    ctm_haptic_gain::refresh();   // and picks up a changed rumble gain
     auto session = std::make_unique<AgentBridgeSession>();
     session->kind = kind;
     session->busId = busId;

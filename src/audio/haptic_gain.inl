@@ -23,11 +23,17 @@
 // design; NO CODE WAS COPIED.
 //
 // PERFORMANCE: this runs on every audio chunk, ~100x/sec, inside the send
-// path. The config lookup is therefore read ONCE and cached for the life of
-// the process -- a per-chunk lookup here is exactly the kind of cost that
-// resurfaces later as dropouts blamed on something else. The consequence is
-// that CHANGING rumble_gain NEEDS A LISTENER RESTART, unlike the other
-// settings, which a reseat picks up. Deliberate trade; revisit if it annoys.
+// path. The config is therefore never looked up here -- the value is cached in
+// an atomic and read with one relaxed load per chunk. A per-chunk config
+// lookup is exactly the kind of cost that resurfaces later as dropouts blamed
+// on something else.
+//
+// THE RULE: A RESEAT APPLIES EVERY SETTING; NOTHING NEEDS A LISTENER RESTART.
+// refresh() is called at session start, alongside the config reload, so the
+// cached value follows the file. Any future setting living on a hot path must
+// do the same -- cache for speed, refresh at session start. Caching without a
+// refresh is what made rumble_gain the odd one out, and "reseat to apply,
+// except this one" is a rule nobody remembers under test.
 //
 // BACKWARD COMPATIBILITY: nothing on the wire. No message type, no enum, no
 // map key, no default, no change to what is transmitted -- only the amplitude
@@ -45,25 +51,41 @@ constexpr size_t kBytesPerFrame = kChannels * sizeof(int16_t);
 constexpr size_t kHapticChannelFirst = 2;   // 0,1 = speaker/headset; 2,3 = haptics
 constexpr int    kGainMax       = 500;      // matches the wireless clamp of 5x
 
-// Read once. -1 means "not configured", and every later call returns
-// immediately on it.
+// The cached gain. -1 means "not configured". Read on the audio path, written
+// only by refresh() at session start.
+inline std::atomic<int> &cached_gain()
+{
+    static std::atomic<int> value{-1};
+    return value;
+}
+
+// Re-read the configured gain. Called at session start, so a reseat applies a
+// changed value -- see THE RULE above.
+inline void refresh()
+{
+    const int configured = device_config_int("ds5", "rumble_gain", -1);
+    const int clamped = (configured < 0 || configured <= kGainMax)
+        ? configured
+        : kGainMax;
+    const int previous = cached_gain().exchange(clamped, std::memory_order_relaxed);
+    if (clamped != previous) {
+        if (clamped < 0) {
+            std::cout << "haptic gain: not configured, leaving haptics untouched"
+                      << std::endl;
+        } else {
+            std::cout << "haptic gain: scaling audio-based haptics to " << clamped
+                      << "%" << std::endl;
+        }
+    }
+}
+
 inline int gain_percent()
 {
-    static const int cached = []() {
-        const int configured = device_config_int("ds5", "rumble_gain", -1);
-        if (configured < 0) {
-            return -1;
-        }
-        const int clamped = configured > kGainMax ? kGainMax : configured;
-        std::cout << "haptic gain: scaling audio-based haptics to " << clamped
-                  << "%" << std::endl;
-        return clamped;
-    }();
-    return cached;
+    return cached_gain().load(std::memory_order_relaxed);
 }
 
 // Cheap gate for the call site: lets the caller skip copying the buffer at all
-// when no gain is configured.
+// when there is nothing to do. One relaxed atomic load, no config lookup.
 inline bool configured()
 {
     const int gain = gain_percent();
