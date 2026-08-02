@@ -137,3 +137,57 @@ static void sweep_bridge_sessions()
     // !! as evidence of a silent teardown.
     std::wcout.flush();
 }
+
+// ---------------------------------------------------------------------------
+// Push changed settings to every live session.
+//
+// Called from the agent loop, next to the sweep, so a config edit reaches a
+// RUNNING controller without a reseat. The gains already apply on save by
+// themselves -- they are read live off the audio path. This is for settings
+// that are SENT to the controller, like speaker_volume, which otherwise sit
+// unchanged until something happens to write that field.
+//
+// !! WHY THE POINTERS ARE COPIED AND THE LOCK RELEASED BEFORE SENDING.
+// !! Sending is network I/O on a socket with no send timeout, so a wedged TV
+// !! can stall it. Holding the session list lock across that would block a
+// !! starting session's worker, which takes the same lock. Copying and
+// !! releasing avoids it.
+// !!
+// !! THAT IS ONLY SAFE BECAUSE SESSION TEARDOWN HAPPENS ON THIS THREAD.
+// !! stop_bridge_session() and the reap drain both run on the agent loop, so
+// !! no backend can be freed while this function is running. If teardown ever
+// !! moves to another thread, this becomes a use-after-free and must be
+// !! revisited -- copying a raw pointer out from under a lock is only correct
+// !! under that guarantee.
+//
+// A stall here delays the agent loop -- no new sessions, no reaps -- until the
+// send returns. That is the least-bad place for it: one thread waiting rather
+// than every thread queued behind a lock.
+static void apply_pending_config_to_sessions()
+{
+    if (!ctm_config_watcher::change_pending().exchange(false, std::memory_order_relaxed)) {
+        return;
+    }
+
+    struct Target {
+        CtmBackend *backend;
+        std::string kind;
+        std::string busIdAscii;
+    };
+    std::vector<Target> targets;
+    {
+        std::lock_guard<std::mutex> lock(g_agent_sessions_mutex);
+        for (const auto &session : g_agent_sessions) {
+            if (!session->backend || !session->ready.load() || session->stopping.load()) {
+                continue;
+            }
+            targets.push_back(Target{session->backend.get(), session->kind, session->busIdAscii});
+        }
+    }
+
+    for (const Target &target : targets) {
+        device_log::config(device_log::msg()
+            << "pushing settings to live session busid=" << target.busIdAscii);
+        ds5_apply_initial_settings(target.backend, target.kind);
+    }
+}

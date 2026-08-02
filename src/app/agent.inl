@@ -569,6 +569,7 @@ static int run_agent(uint16_t port)
     while (!g_stop.load()) {
         drain_bridge_session_reaps();
         sweep_bridge_sessions();
+        apply_pending_config_to_sessions();   // push a config edit to live sessions
         fd_set readfds;
         FD_ZERO(&readfds);
         FD_SET(udp, &readfds);

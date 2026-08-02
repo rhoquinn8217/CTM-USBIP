@@ -22,7 +22,10 @@
 //     means reaching into a LIVE session to send -- see the note below. Left
 //     out on purpose.
 //
-// WHY THERE IS NO SEND HERE. Sending would mean holding the global session
+// WHY THERE IS NO SEND HERE, AND WHERE THE SEND ACTUALLY HAPPENS.
+// This file only raises a flag. The agent loop notices it on its next pass and
+// does the sending -- see apply_pending_config_to_sessions() in
+// agent_session_sweep.inl. Reason: Sending would mean holding the global session
 // lock while doing network I/O. The client socket has no send timeout, so a
 // wedged TV would stall that send for minutes, and every other user of that
 // lock -- sessions starting, sessions stopping, the sweep -- would queue up
@@ -46,6 +49,15 @@ namespace ctm_config_watcher {
 // Editors write a file as several operations, so one save fires the watcher
 // two or three times. Wait this long after the last event before acting.
 constexpr DWORD kDebounceMs = 300;
+
+// Raised when the config file changes; cleared by the agent loop once it has
+// pushed the new settings to every live session. Cross-thread on purpose: the
+// watcher must not touch a session itself.
+inline std::atomic<bool> &change_pending()
+{
+    static std::atomic<bool> value{false};
+    return value;
+}
 
 inline std::filesystem::file_time_type &last_seen_write()
 {
@@ -73,6 +85,7 @@ inline void apply_change()
 {
     device_config_invalidate();      // drop and reload the file
     ctm_audio_gain::refresh();       // pick up changed speaker/rumble gains
+    change_pending().store(true, std::memory_order_relaxed);
     device_log::config(device_log::msg()
         << "applied a change to " << kDeviceConfigFileName);
 }
