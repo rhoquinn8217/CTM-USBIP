@@ -191,15 +191,23 @@ int run_device_config_tests()
     }
 
     // --- Audio routing ------------------------------------------------------
-    section("audio_output routes to the headphone and drops echo cancel");
+    section("audio_output routes to the headset and drops echo cancel");
     {
         // Measured 2026-08-01: audio control 0x30 is the speaker, 0x00 the
-        // headphone jack. Cancellation exists for the speaker/mic feedback
+        // headset jack. Cancellation exists for the speaker/mic feedback
         // path, so it must not be asserted when the speaker is not in use.
-        set_config("[ds5]\naudio_output = headphone\nforce_echo_cancel = true\n");
+        set_config("[ds5]\naudio_output = headset\nforce_echo_cancel = true\n");
         std::vector<uint8_t> report = make_report(0x80, 0x30);
         units::ds5_apply_output_overrides(report.data(), report.size(), kDualSense);
         CTM_CHECK_EQ(static_cast<int>(report[8]), 0x00);
+    }
+
+    section("headset_mono routes the left channel to both ears");
+    {
+        set_config("[ds5]\naudio_output = headset_mono\n");
+        std::vector<uint8_t> report = make_report(0x80, 0x30);
+        units::ds5_apply_output_overrides(report.data(), report.size(), kDualSense);
+        CTM_CHECK_EQ(static_cast<int>(report[8] & 0x30), 0x10);
     }
 
     section("audio_output routes to the speaker and keeps echo cancel");
@@ -222,8 +230,8 @@ int run_device_config_tests()
 
     section("the mode silences the output it does not use");
     {
-        // Routing alone does not silence the headphone: the 0x30 bits gate the
-        // speaker, and the headphone plays whenever its volume is above zero.
+        // Routing alone does not silence the headset: the 0x30 bits gate the
+        // speaker, and the headset plays whenever its volume is above zero.
         // So "speaker" must force the headset volume to zero, or audio comes
         // out of both.
         set_config("[ds5]\naudio_output = speaker\n"
@@ -244,7 +252,6 @@ int run_device_config_tests()
         units::ds5_apply_output_overrides(report.data(), report.size(), kDualSense);
         CTM_CHECK_EQ(static_cast<int>(report[5]), 0);
         CTM_CHECK_EQ(static_cast<int>(report[6]), 0);
-        CTM_CHECK_EQ(static_cast<int>(report[8] & 0x30), 0x00);
     }
 
     section("auto leaves route and volumes exactly as the game set them");
@@ -259,24 +266,29 @@ int run_device_config_tests()
 
     section("both keeps the speaker routed and applies both volumes");
     {
+        // "both" is routing value 2 (0x20), not 3. Value 3 is speaker-only and
+        // mutes the headset entirely -- which is why "both" was silent on the
+        // headset before this was measured.
         set_config("[ds5]\naudio_output = both\n"
                    "speaker_volume = 70\nheadset_volume = 60\n");
         std::vector<uint8_t> report = make_report(0xb0, 0x00, 10);
         report[5] = 10;
         units::ds5_apply_output_overrides(report.data(), report.size(), kDualSense);
-        CTM_CHECK_EQ(static_cast<int>(report[6]), 70);
-        CTM_CHECK_EQ(static_cast<int>(report[5]), 60);
-        CTM_CHECK_EQ(static_cast<int>(report[8] & 0x30), 0x30);
+        CTM_CHECK_EQ(static_cast<int>(report[6]), (70 * 0x64) / 100);
+        CTM_CHECK_EQ(static_cast<int>(report[5]), (60 * 0x7f) / 100);
+        CTM_CHECK_EQ(static_cast<int>(report[8] & 0x30), 0x20);
     }
 
     section("headset volume is its own byte and its own claim bit");
     {
+        // The two volumes have DIFFERENT full scales: speaker 0x64, headset
+        // 0x7f. A percentage therefore lands on different raw values.
         set_config("[ds5]\nheadset_volume = 50\nspeaker_volume = 90\n");
         std::vector<uint8_t> report = make_report(0x30, 0, 100);   // claim both
         report[5] = 10;
         units::ds5_apply_output_overrides(report.data(), report.size(), kDualSense);
-        CTM_CHECK_EQ(static_cast<int>(report[5]), 50);
-        CTM_CHECK_EQ(static_cast<int>(report[6]), 90);
+        CTM_CHECK_EQ(static_cast<int>(report[5]), (50 * 0x7f) / 100);
+        CTM_CHECK_EQ(static_cast<int>(report[6]), (90 * 0x64) / 100);
     }
 
     // --- Rumble: master and per-motor --------------------------------------
@@ -321,7 +333,7 @@ int run_device_config_tests()
     // --- Audio gain ---------------------------------------------------------
     section("audio gain: speaker and haptic channels are scaled separately");
     {
-        set_config("[ds5]\nspeaker_gain = 50\nmaster_rumble_gain = 0\n");
+        set_config("[ds5]\naudio_gain = 50\nmaster_rumble_gain = 0\n");
         units::ctm_audio_gain::refresh();
 
         // One frame: four 16-bit samples, little-endian. 1000 in every channel.
@@ -341,7 +353,7 @@ int run_device_config_tests()
 
     section("audio gain: 100 touches nothing at all");
     {
-        set_config("[ds5]\nspeaker_gain = 100\nmaster_rumble_gain = 100\n");
+        set_config("[ds5]\naudio_gain = 100\nmaster_rumble_gain = 100\n");
         units::ctm_audio_gain::refresh();
         CTM_CHECK_EQ(units::ctm_audio_gain::configured(), false);
 

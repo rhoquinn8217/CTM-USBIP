@@ -3,7 +3,10 @@
 //
 // The DualSense's wired audio stream carries four channels in one buffer:
 //
-//   channels 0,1 -- speaker / headset audio
+//   channels 0,1 -- the audio output. NOT "the speaker": measured 2026-08-01,
+//                   these channels feed whichever destination the routing byte
+//                   selects, so with audio_output = headphone they are the
+//                   headset. Hence `audio_gain`, not `speaker_gain`.
 //   channels 2,3 -- audio-based haptics, the fine-grained waveform PS5-native
 //                   titles actually use for rumble
 //
@@ -12,7 +15,7 @@
 // GAIN IS NOT VOLUME, AND THE DISTINCTION IS THE AUDIO CONVENTION:
 //
 //   * GAIN scales a SIGNAL on its way through. 100 means UNCHANGED.
-//     `speaker_gain` and `rumble_gain` are gains and live here.
+//     `audio_gain` and `rumble_gain` are gains and live here.
 //   * VOLUME sets the DEVICE's output level at the end of the chain. 100 means
 //     MAXIMUM. `speaker_volume` is a volume and lives in the output-report
 //     overrides, not here.
@@ -74,7 +77,7 @@ inline std::atomic<int> &cached_rumble_gain()
     return value;
 }
 
-inline std::atomic<int> &cached_speaker_gain()
+inline std::atomic<int> &cached_output_gain()
 {
     static std::atomic<int> value{-1};
     return value;
@@ -91,7 +94,7 @@ inline bool gain_is_active(int gain)
 inline void refresh()
 {
     const int rumble = device_config_int("ds5", "master_rumble_gain", -1);
-    const int speaker = device_config_int("ds5", "speaker_gain", -1);
+    const int speaker = device_config_int("ds5", "audio_gain", -1);   // see the section note below
 
     const int rumbleClamped = (rumble < 0 || rumble <= kRumbleGainMax)
         ? rumble : kRumbleGainMax;
@@ -107,13 +110,13 @@ inline void refresh()
             device_log::audio("haptics left untouched");
         }
     }
-    if (cached_speaker_gain().exchange(speakerClamped, std::memory_order_relaxed)
+    if (cached_output_gain().exchange(speakerClamped, std::memory_order_relaxed)
             != speakerClamped) {
         if (gain_is_active(speakerClamped)) {
             device_log::audio(device_log::msg()
-                << "speaker scaled to " << speakerClamped << "%");
+                << "output scaled to " << speakerClamped << "%");
         } else {
-            device_log::audio("speaker left untouched");
+            device_log::audio("output left untouched");
         }
     }
 }
@@ -123,7 +126,7 @@ inline void refresh()
 inline bool configured()
 {
     return gain_is_active(cached_rumble_gain().load(std::memory_order_relaxed)) ||
-           gain_is_active(cached_speaker_gain().load(std::memory_order_relaxed));
+           gain_is_active(cached_output_gain().load(std::memory_order_relaxed));
 }
 
 inline void scale_sample(uint8_t *at, int gain)
@@ -148,7 +151,7 @@ inline void scale_sample(uint8_t *at, int gain)
 inline void apply(std::vector<uint8_t> &data)
 {
     const int rumble = cached_rumble_gain().load(std::memory_order_relaxed);
-    const int speaker = cached_speaker_gain().load(std::memory_order_relaxed);
+    const int speaker = cached_output_gain().load(std::memory_order_relaxed);
     const bool doRumble = gain_is_active(rumble);
     const bool doSpeaker = gain_is_active(speaker);
     if (!doRumble && !doSpeaker) {

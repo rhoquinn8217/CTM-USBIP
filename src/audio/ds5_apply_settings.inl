@@ -74,11 +74,11 @@ static void ds5_apply_initial_settings(CtmBackend *backend)
     uint8_t claim = kDs5AllowAudioControl;
     if (speakerPercent >= 0) {
         claim = static_cast<uint8_t>(claim | kDs5AllowSpeakerVolume);
-        report[kDs5IdxSpeakerVolume] = ds5_volume_raw_from_percent(speakerPercent);
+        report[kDs5IdxSpeakerVolume] = ds5_volume_raw_from_percent(speakerPercent, kDs5SpeakerVolumeMax);
     }
     if (headsetPercent >= 0) {
         claim = static_cast<uint8_t>(claim | kDs5AllowHeadsetVolume);
-        report[kDs5IdxHeadsetVolume] = ds5_volume_raw_from_percent(headsetPercent);
+        report[kDs5IdxHeadsetVolume] = ds5_volume_raw_from_percent(headsetPercent, kDs5HeadsetVolumeMax);
     }
     claim = static_cast<uint8_t>(claim & ~(kDs5ClaimRumbleA | kDs5ClaimRumbleB));
     report[kDs5IdxValidFlag0] = claim;
@@ -89,7 +89,9 @@ static void ds5_apply_initial_settings(CtmBackend *backend)
     const bool speakerActive = (output == Ds5AudioOutput::Auto)
         ? true
         : ds5_speaker_is_active(output);
-    uint8_t audioControl = speakerActive ? kDs5RouteToSpeaker : 0;
+    uint8_t audioControl = (output == Ds5AudioOutput::Auto)
+        ? kDs5RouteToSpeaker
+        : ds5_route_bits_for(output);
     if (speakerActive && device_config_bool(section, "force_echo_cancel", false)) {
         audioControl = static_cast<uint8_t>(audioControl | kDs5EchoNoiseCancel);
     }
@@ -104,7 +106,7 @@ static void ds5_apply_initial_settings(CtmBackend *backend)
     }
     device_log::report(device_log::msg()
         << section << ": settings: sent audio to "
-        << (speakerActive ? "speaker" : "headphone")
+        << (speakerActive ? "speaker" : "headset")
         << ", speaker volume " << speakerPercent
         << "%, headset volume " << headsetPercent << "%");
 }

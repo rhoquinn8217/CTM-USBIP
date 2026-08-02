@@ -75,77 +75,105 @@ static const uint8_t kDs5AllowAudioControl  = 0x80;
 static const uint8_t kDs5EchoNoiseCancel    = 0x0c;  // echo + noise cancellation ON
 static const uint8_t kDs5RouteToSpeaker     = 0x30;
 static const uint8_t kDs5RouteMask          = 0x30;
-static const uint8_t kDs5SpeakerVolumeMax   = 0x64;  // the controller's full scale
+static const uint8_t kDs5SpeakerVolumeMax   = 0x64;  // speaker full scale
+static const uint8_t kDs5HeadsetVolumeMax   = 0x7f;  // headset full scale -- NOT the same
 static const size_t  kDs5OutReportLen       = 48;    // every host report on the wire
 static const uint8_t kDs5ClaimRumbleA       = 0x01;
 static const uint8_t kDs5ClaimRumbleB       = 0x02;
 
 // Shared by both halves so a configured percentage always lands on the same
 // raw value, whether it is being SET or DEFENDED.
-static uint8_t ds5_volume_raw_from_percent(int percent)
+static uint8_t ds5_volume_raw_from_percent(int percent, uint8_t fullScale)
 {
     if (percent < 0) percent = 0;
     if (percent > 100) percent = 100;
-    return static_cast<uint8_t>((percent * kDs5SpeakerVolumeMax) / 100);
+    return static_cast<uint8_t>((percent * fullScale) / 100);
 }
 
 // Which output the config asks for.
 //
-// Measured on the wired path 2026-08-01 by watching the DualSense Tester play a
-// tone to each destination: audio control 0x30 sends audio to the SPEAKER, 0x00
-// sends it to the HEADPHONE jack. The same byte carries echo cancellation.
+// !! THE AUDIO-CONTROL FIELD IS THREE SINKS, NOT A LIST OF DESTINATIONS.
+// !! Bits 4-5 select one of four routings, and each decides what feeds the
+// !! headset's two ears and the mono speaker. From the Linux hid-playstation
+// !! patch series (Cristian Ciocaltea, Collabora, May 2025) and confirmed by
+// !! ear on the wired path 2026-08-01:
 //
-// !! ROUTING ALONE DOES NOT SILENCE THE HEADPHONE. The 0x30 bits gate the
-// !! speaker; the headphone plays whenever it is plugged in and its volume is
-// !! above zero. So the MODE decides which volumes apply, and the unused output
-// !! is forced to zero -- exactly what both this project's and Ciprian's
-// !! Bluetooth code do. Without that, "speaker" with a headset volume set would
-// !! play out of both.
+//     value   headset L   headset R   speaker
+//       0       Left        Right      muted     <- stereo headset
+//       1       Left        Left       muted     <- mono headset
+//       2       Left        Left       Right     <- mono headset + speaker
+//       3       muted       muted      Right     <- speaker only
+//
+// !! SO THERE IS NO STEREO-HEADSET-PLUS-SPEAKER MODE. The speaker is mono and
+// !! is fed the RIGHT channel, so anything using the speaker costs the headset
+// !! its right channel. "both" is mono in the ears, unavoidably.
 //
 //   auto / absent -- touch nothing. Route and volumes stay as the game set them.
-//   speaker       -- route to speaker, speaker volume applies, headset forced 0
-//   headphone     -- route off speaker, headset volume applies, speaker forced 0
-//   both          -- route to speaker, both volumes apply
-//   off           -- route off speaker, both volumes forced 0
+//   headset       -- stereo headset, speaker muted
+//   headset_mono  -- headset with the left channel in both ears
+//   speaker       -- speaker only, headset muted
+//   both          -- speaker plus mono headset
+//   off           -- everything muted
 //
 // Names rather than numbers on purpose: this is a choice between named things,
 // not a quantity. "audio_output = 0" needs a lookup table to read and fails
-// silently when someone writes 2.
-enum class Ds5AudioOutput { Auto, Speaker, Headphone, Both, Off };
+// silently when someone writes 9.
+enum class Ds5AudioOutput { Auto, Headset, HeadsetMono, Speaker, Both, Off };
 
 static Ds5AudioOutput ds5_audio_output_for(const char *section)
 {
     const std::string value = device_config_str(section, "audio_output");
-    if (value == "speaker")   return Ds5AudioOutput::Speaker;
-    if (value == "headphone") return Ds5AudioOutput::Headphone;
-    if (value == "headset")   return Ds5AudioOutput::Headphone;   // common alias
-    if (value == "both")      return Ds5AudioOutput::Both;
-    if (value == "off")       return Ds5AudioOutput::Off;
+    if (value == "headset")      return Ds5AudioOutput::Headset;
+    if (value == "headset_mono") return Ds5AudioOutput::HeadsetMono;
+    if (value == "speaker")      return Ds5AudioOutput::Speaker;
+    if (value == "both")         return Ds5AudioOutput::Both;
+    if (value == "off")          return Ds5AudioOutput::Off;
     return Ds5AudioOutput::Auto;   // absent, or anything unrecognised
 }
 
+// The routing bits a mode asks for, shifted into place at bits 4-5.
+static uint8_t ds5_route_bits_for(Ds5AudioOutput output)
+{
+    switch (output) {
+        case Ds5AudioOutput::Headset:     return 0x00;
+        case Ds5AudioOutput::HeadsetMono: return 0x10;
+        case Ds5AudioOutput::Both:        return 0x20;
+        case Ds5AudioOutput::Speaker:     return 0x30;
+        case Ds5AudioOutput::Off:
+        default:                          return 0x30;   // see the note below
+    }
+}
+
+// "off" routes to speaker-only and then silences the speaker volume. Routing
+// alone cannot mute everything -- value 0 still feeds the headset -- so the
+// silence comes from the volumes, and this picks the routing that leaves the
+// headset out of the picture.
 static bool ds5_speaker_is_active(Ds5AudioOutput output)
 {
     return output == Ds5AudioOutput::Speaker || output == Ds5AudioOutput::Both;
 }
 
-static bool ds5_headphone_is_active(Ds5AudioOutput output)
+static bool ds5_headset_is_active(Ds5AudioOutput output)
 {
-    return output == Ds5AudioOutput::Headphone || output == Ds5AudioOutput::Both;
+    return output == Ds5AudioOutput::Headset ||
+           output == Ds5AudioOutput::HeadsetMono ||
+           output == Ds5AudioOutput::Both;
 }
 
 // The level an output should carry under a given mode. -1 means "leave it
 // alone"; 0 means "actively silence it because this mode does not use it".
 static int ds5_level_for(Ds5AudioOutput output, bool speaker, const char *section)
 {
+    const char *key = speaker ? "speaker_volume" : "headset_volume";
     if (output == Ds5AudioOutput::Auto) {
-        return device_config_int(section, speaker ? "speaker_volume" : "headset_volume", -1);
+        return device_config_int(section, key, -1);
     }
-    const bool active = speaker ? ds5_speaker_is_active(output) : ds5_headphone_is_active(output);
+    const bool active = speaker ? ds5_speaker_is_active(output)
+                                : ds5_headset_is_active(output);
     if (!active) {
         return 0;
     }
-    return device_config_int(section, speaker ? "speaker_volume" : "headset_volume", -1);
+    return device_config_int(section, key, -1);
 }
 
 static std::atomic<uint64_t> g_ds5_echo_patch_count{0};
@@ -157,7 +185,7 @@ static std::atomic<uint64_t> g_ds5_echo_patch_count{0};
 // !! ECHO CANCELLATION IS CONDITIONAL ON THE SPEAKER BEING ACTIVE, and that is
 // !! not a nicety. The controller mutes its own speaker when cancellation is
 // !! off because the microphone sits beside it -- but with audio going to the
-// !! headphone there is no speaker output and nothing to cancel. Both this
+// !! headset there is no speaker output and nothing to cancel. Both this
 // !! project's and Ciprian's Bluetooth code set the audio flags to zero for
 // !! headset mode, cancellation included. Forcing it on regardless would be
 // !! asserting a setting for a path that is not in use.
@@ -182,9 +210,7 @@ static void ds5_override_audio_control(uint8_t *data, size_t length, const char 
 
     if (output != Ds5AudioOutput::Auto) {
         value = static_cast<uint8_t>(value & ~kDs5RouteMask);
-        if (ds5_speaker_is_active(output)) {
-            value = static_cast<uint8_t>(value | kDs5RouteToSpeaker);
-        }
+        value = static_cast<uint8_t>(value | ds5_route_bits_for(output));
     }
 
     // Under auto, the speaker is active if the game routed it there.
@@ -237,7 +263,7 @@ static void ds5_override_speaker_volume(uint8_t *data, size_t length, const char
         return;  // no key and no mode forcing it: the game's value stands
     }
 
-    const uint8_t wanted = ds5_volume_raw_from_percent(configured);
+    const uint8_t wanted = ds5_volume_raw_from_percent(configured, kDs5SpeakerVolumeMax);
     if (data[kDs5IdxSpeakerVolume] == wanted) {
         return;
     }
@@ -338,7 +364,7 @@ static void ds5_override_rumble(uint8_t *data, size_t length, const char *sectio
 // --- Override 4: headset volume ---
 //
 // Byte 5, its own claim bit -- separate from the speaker's volume at byte 6.
-// Confirmed 2026-08-01 from a captured tester report claiming 0x90 (headphone
+// Confirmed 2026-08-01 from a captured tester report claiming 0x90 (headset
 // volume plus audio control) where the speaker case claims 0xa0.
 static std::atomic<uint64_t> g_ds5_headset_volume_count{0};
 
@@ -357,7 +383,7 @@ static void ds5_override_headset_volume(uint8_t *data, size_t length, const char
     if (configured < 0) {
         return;
     }
-    const uint8_t wanted = ds5_volume_raw_from_percent(configured);
+    const uint8_t wanted = ds5_volume_raw_from_percent(configured, kDs5HeadsetVolumeMax);
     if (data[kDs5IdxHeadsetVolume] == wanted) {
         return;
     }
