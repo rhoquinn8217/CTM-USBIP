@@ -13,6 +13,51 @@
 // This file also owns the shared DualSense report-format constants, because it
 // is included before the sender and both need them.
 //
+// --- Which config section belongs to this device ---
+//
+// Each device type gets its own section and NOTHING is inherited. A DualSense
+// Edge does not fall back to [ds5]: it is a different product, an owner will
+// look for its own heading, and a config that inherits is a config you cannot
+// read -- every value becomes "probably this, unless", and you have to hold two
+// sections in your head to know what one controller is doing.
+//
+// The cost is duplicating a few lines to make an Edge behave like a DualSense.
+// That is a small, obvious, one-time chore; the alternative is permanent
+// uncertainty every time anyone reads the file.
+//
+// !! A DEVICE WITH NO SECTION IS LEFT COMPLETELY UNTOUCHED. Same rule the
+// !! config already runs on -- absent means not our business -- one level up.
+//
+// !! IDS ARE ONLY LISTED ONCE THEY CAN BE TESTED. DS4 and Xbox are absent on
+// !! purpose: their product ids would be filled in from memory, and a wrong id
+// !! silently matches nothing, which is an evening wasted. Add a line when
+// !! there is a controller in hand to check it against.
+static const uint16_t kVendorSony = 0x054c;
+
+// Reads the vendor and product id straight out of the USB device descriptor
+// (bytes 8-11, little-endian). Taken by reference on purpose: this runs on
+// every outbound report, and asking the backend for its caps would copy
+// several strings and a vector each time.
+static const char *device_section_for(const std::vector<unsigned char> &descriptor)
+{
+    if (descriptor.size() < 12) {
+        return nullptr;
+    }
+    const uint16_t vendor = static_cast<uint16_t>(
+        descriptor[8] | (static_cast<uint16_t>(descriptor[9]) << 8));
+    const uint16_t product = static_cast<uint16_t>(
+        descriptor[10] | (static_cast<uint16_t>(descriptor[11]) << 8));
+
+    if (vendor != kVendorSony) {
+        return nullptr;
+    }
+    switch (product) {
+        case 0x0ce6: return "ds5";
+        case 0x0df2: return "ds5_edge";
+        default:     return nullptr;
+    }
+}
+
 // --- Override 1: echo + noise cancellation ---
 //
 // The controller mutes its own speaker whenever echo cancellation is off. The
@@ -67,7 +112,7 @@ static std::atomic<uint64_t> g_ds5_echo_patch_count{0};
 
 // Patches in place. Safe to call on every outbound report: everything that is
 // not a DualSense audio-control write returns immediately, before any lookup.
-static void ds5_override_echo_cancel(uint8_t *data, size_t length)
+static void ds5_override_echo_cancel(uint8_t *data, size_t length, const char *section)
 {
     if (data == nullptr || length <= kDs5IdxAudioControl) {
         return;
@@ -80,7 +125,7 @@ static void ds5_override_echo_cancel(uint8_t *data, size_t length)
     }
     // Checked only for reports that reach this point, so the shared lookup does
     // not sit on the hot path of ordinary input and rumble traffic.
-    if (!device_config_bool("ds5", "force_echo_cancel", false)) {
+    if (!device_config_bool(section, "force_echo_cancel", false)) {
         return;
     }
 
@@ -111,7 +156,7 @@ static void ds5_override_echo_cancel(uint8_t *data, size_t length)
 // other fields without a deliberate decision about who should win.
 static std::atomic<uint64_t> g_ds5_volume_override_count{0};
 
-static void ds5_override_speaker_volume(uint8_t *data, size_t length)
+static void ds5_override_speaker_volume(uint8_t *data, size_t length, const char *section)
 {
     if (data == nullptr || length <= kDs5IdxSpeakerVolume) {
         return;
@@ -122,7 +167,7 @@ static void ds5_override_speaker_volume(uint8_t *data, size_t length)
     if ((data[kDs5IdxValidFlag0] & kDs5AllowSpeakerVolume) == 0) {
         return;  // nothing is setting the volume; leave it alone
     }
-    const int configured = device_config_int("ds5", "speaker_volume", -1);
+    const int configured = device_config_int(section, "speaker_volume", -1);
     if (configured < 0) {
         return;  // no key means the game's value stands
     }
@@ -176,7 +221,7 @@ static uint8_t ds5_scale_rumble(uint8_t value, int gainPercent)
     return static_cast<uint8_t>(scaled);
 }
 
-static void ds5_override_rumble(uint8_t *data, size_t length)
+static void ds5_override_rumble(uint8_t *data, size_t length, const char *section)
 {
     if (data == nullptr || length <= kDs5IdxRumbleLeft) {
         return;
@@ -193,9 +238,9 @@ static void ds5_override_rumble(uint8_t *data, size_t length)
     // a mixing desk -- master 50 with heavy 50 gives the big weight 25%.
     // Confirmed from the DualSense Tester source 2026-08-01: LEFT is the heavy
     // motor (the big weight), RIGHT is the soft one.
-    const int master = device_config_int("ds5", "master_rumble_gain", -1);
-    const int heavy  = device_config_int("ds5", "rumble_gain_heavy", -1);
-    const int soft   = device_config_int("ds5", "rumble_gain_soft", -1);
+    const int master = device_config_int(section, "master_rumble_gain", -1);
+    const int heavy  = device_config_int(section, "rumble_gain_heavy", -1);
+    const int soft   = device_config_int(section, "rumble_gain_soft", -1);
     if (master < 0 && heavy < 0 && soft < 0) {
         return;  // no keys means the game's rumble stands
     }
@@ -228,9 +273,18 @@ static void ds5_override_rumble(uint8_t *data, size_t length)
 // Single entry point called from the outbound report path. Safe on every
 // report: each override returns immediately for anything that is not its own
 // business, before any lookup.
-static void ds5_apply_output_overrides(uint8_t *data, size_t length)
+static void ds5_apply_output_overrides(uint8_t *data, size_t length,
+                                      const std::vector<unsigned char> &descriptor)
 {
-    ds5_override_echo_cancel(data, length);
-    ds5_override_speaker_volume(data, length);
-    ds5_override_rumble(data, length);
+    // Resolved once per report, before anything else: an unrecognised device
+    // costs two comparisons and is then left entirely alone. The per-report
+    // format checks stay inside each override, since report ids differ by
+    // device -- a DualSense uses 0x02 and others do not.
+    const char *section = device_section_for(descriptor);
+    if (section == nullptr) {
+        return;
+    }
+    ds5_override_echo_cancel(data, length, section);
+    ds5_override_speaker_volume(data, length, section);
+    ds5_override_rumble(data, length, section);
 }

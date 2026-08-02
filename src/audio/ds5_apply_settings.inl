@@ -40,13 +40,25 @@
 // Build and send one settings report. Does nothing unless the kind is wired and
 // at least one setting is configured, so an unconfigured install behaves
 // exactly as it did before this existed.
-static void ds5_apply_initial_settings(CtmBackend *backend, const std::string &kind)
+static void ds5_apply_initial_settings(CtmBackend *backend)
 {
-    if (backend == nullptr || kind != "ds5_usb") {
+    if (backend == nullptr) {
         return;
     }
+    // Runs once per session, so asking the backend for its caps is fine here --
+    // unlike the per-report override path, which reads the descriptor instead.
+    const BackendCaps caps = backend->caps();
+    std::vector<unsigned char> descriptor(12, 0);
+    descriptor[8]  = static_cast<unsigned char>(caps.vendorId & 0xff);
+    descriptor[9]  = static_cast<unsigned char>((caps.vendorId >> 8) & 0xff);
+    descriptor[10] = static_cast<unsigned char>(caps.productId & 0xff);
+    descriptor[11] = static_cast<unsigned char>((caps.productId >> 8) & 0xff);
+    const char *section = device_section_for(descriptor);
+    if (section == nullptr) {
+        return;   // not a device we have settings for
+    }
 
-    const int volumePercent = device_config_int("ds5", "speaker_volume", -1);
+    const int volumePercent = device_config_int(section, "speaker_volume", -1);
     if (volumePercent < 0) {
         return;   // not configured
     }

@@ -25,6 +25,22 @@ void set_config(const std::string &body)
     units::device_config_invalidate();
 }
 
+// A USB device descriptor carrying just the vendor and product id, which is
+// all device_section_for() reads.
+std::vector<unsigned char> make_descriptor(uint16_t vendor, uint16_t product)
+{
+    std::vector<unsigned char> d(18, 0);
+    d[8]  = static_cast<unsigned char>(vendor & 0xff);
+    d[9]  = static_cast<unsigned char>((vendor >> 8) & 0xff);
+    d[10] = static_cast<unsigned char>(product & 0xff);
+    d[11] = static_cast<unsigned char>((product >> 8) & 0xff);
+    return d;
+}
+
+const std::vector<unsigned char> kDualSense = make_descriptor(0x054c, 0x0ce6);
+const std::vector<unsigned char> kEdge      = make_descriptor(0x054c, 0x0df2);
+const std::vector<unsigned char> kUnknown   = make_descriptor(0x045e, 0x02ea);
+
 // A minimal DualSense output report: report id, then claim bytes, then values.
 std::vector<uint8_t> make_report(uint8_t claim0, uint8_t audioControl = 0,
                                  uint8_t speakerVolume = 0,
@@ -53,7 +69,7 @@ int run_device_config_tests()
         // Every claim bit set, so nothing is skipped for want of a claim.
         std::vector<uint8_t> report = make_report(0xff, 0x30, 55, 77, 99);
         const std::vector<uint8_t> before = report;
-        units::ds5_apply_output_overrides(report.data(), report.size());
+        units::ds5_apply_output_overrides(report.data(), report.size(), kDualSense);
         CTM_CHECK_EQ(report == before, true);
     }
 
@@ -64,7 +80,7 @@ int run_device_config_tests()
         // No claim bits at all: the host is setting nothing.
         std::vector<uint8_t> report = make_report(0x00, 0x30, 55, 77, 99);
         const std::vector<uint8_t> before = report;
-        units::ds5_apply_output_overrides(report.data(), report.size());
+        units::ds5_apply_output_overrides(report.data(), report.size(), kDualSense);
         CTM_CHECK_EQ(report == before, true);
     }
 
@@ -74,8 +90,42 @@ int run_device_config_tests()
         // broken and did nothing at all.
         set_config("[ds5]\nspeaker_volume = 40\n");
         std::vector<uint8_t> report = make_report(0x20, 0, 100);   // claim volume
-        units::ds5_apply_output_overrides(report.data(), report.size());
+        units::ds5_apply_output_overrides(report.data(), report.size(), kDualSense);
         CTM_CHECK_EQ(static_cast<int>(report[6]), 40);
+    }
+
+    // --- Per-device sections ------------------------------------------------
+    section("an unrecognised device is left completely untouched");
+    {
+        // Settings exist for the DualSense, and an Xbox pad must not get them.
+        set_config("[ds5]\nspeaker_volume = 40\nforce_echo_cancel = true\n");
+        std::vector<uint8_t> report = make_report(0xff, 0x30, 100, 50, 50);
+        const std::vector<uint8_t> before = report;
+        units::ds5_apply_output_overrides(report.data(), report.size(), kUnknown);
+        CTM_CHECK_EQ(report == before, true);
+    }
+
+    section("the Edge reads its own section and does NOT inherit from ds5");
+    {
+        // No fallback on purpose: a config that inherits is a config you cannot
+        // read. [ds5] settings must not reach a device with its own heading.
+        set_config("[ds5]\nspeaker_volume = 40\n[ds5_edge]\nspeaker_volume = 70\n");
+        std::vector<uint8_t> edge = make_report(0x20, 0, 100);
+        units::ds5_apply_output_overrides(edge.data(), edge.size(), kEdge);
+        CTM_CHECK_EQ(static_cast<int>(edge[6]), 70);
+
+        std::vector<uint8_t> plain = make_report(0x20, 0, 100);
+        units::ds5_apply_output_overrides(plain.data(), plain.size(), kDualSense);
+        CTM_CHECK_EQ(static_cast<int>(plain[6]), 40);
+    }
+
+    section("an Edge with no section of its own gets nothing from ds5");
+    {
+        set_config("[ds5]\nspeaker_volume = 40\n");
+        std::vector<uint8_t> edge = make_report(0x20, 0, 100);
+        const std::vector<uint8_t> before = edge;
+        units::ds5_apply_output_overrides(edge.data(), edge.size(), kEdge);
+        CTM_CHECK_EQ(edge == before, true);
     }
 
     // --- Parser -------------------------------------------------------------
@@ -127,7 +177,7 @@ int run_device_config_tests()
         // Claim audio control, routing to the speaker with cancellation OFF --
         // the exact report captured from a game on exit.
         std::vector<uint8_t> report = make_report(0x80, 0x30);
-        units::ds5_apply_output_overrides(report.data(), report.size());
+        units::ds5_apply_output_overrides(report.data(), report.size(), kDualSense);
         CTM_CHECK_EQ(static_cast<int>(report[8] & 0x0c), 0x0c);
         CTM_CHECK_EQ(static_cast<int>(report[8] & 0x30), 0x30);   // routing kept
     }
@@ -136,7 +186,7 @@ int run_device_config_tests()
     {
         set_config("[ds5]\nforce_echo_cancel = false\n");
         std::vector<uint8_t> report = make_report(0x80, 0x30);
-        units::ds5_apply_output_overrides(report.data(), report.size());
+        units::ds5_apply_output_overrides(report.data(), report.size(), kDualSense);
         CTM_CHECK_EQ(static_cast<int>(report[8]), 0x30);
     }
 
@@ -147,7 +197,7 @@ int run_device_config_tests()
     {
         set_config("[ds5]\nmaster_rumble_gain = 50\n");
         std::vector<uint8_t> report = make_report(0x03, 0, 0, 100, 200);
-        units::ds5_apply_output_overrides(report.data(), report.size());
+        units::ds5_apply_output_overrides(report.data(), report.size(), kDualSense);
         CTM_CHECK_EQ(static_cast<int>(report[3]), 50);
         CTM_CHECK_EQ(static_cast<int>(report[4]), 100);
     }
@@ -159,7 +209,7 @@ int run_device_config_tests()
         set_config("[ds5]\nmaster_rumble_gain = 50\n"
                    "rumble_gain_heavy = 50\nrumble_gain_soft = 100\n");
         std::vector<uint8_t> report = make_report(0x03, 0, 0, 200, 200);
-        units::ds5_apply_output_overrides(report.data(), report.size());
+        units::ds5_apply_output_overrides(report.data(), report.size(), kDualSense);
         CTM_CHECK_EQ(static_cast<int>(report[4]), 50);    // heavy: 200 * 25%
         CTM_CHECK_EQ(static_cast<int>(report[3]), 100);   // soft:  200 * 50%
     }
@@ -168,13 +218,13 @@ int run_device_config_tests()
     {
         set_config("[ds5]\nmaster_rumble_gain = 0\n");
         std::vector<uint8_t> off = make_report(0x03, 0, 0, 255, 255);
-        units::ds5_apply_output_overrides(off.data(), off.size());
+        units::ds5_apply_output_overrides(off.data(), off.size(), kDualSense);
         CTM_CHECK_EQ(static_cast<int>(off[3]), 0);
         CTM_CHECK_EQ(static_cast<int>(off[4]), 0);
 
         set_config("[ds5]\nmaster_rumble_gain = 500\n");
         std::vector<uint8_t> loud = make_report(0x03, 0, 0, 200, 200);
-        units::ds5_apply_output_overrides(loud.data(), loud.size());
+        units::ds5_apply_output_overrides(loud.data(), loud.size(), kDualSense);
         CTM_CHECK_EQ(static_cast<int>(loud[3]), 255);   // clipped, not wrapped
         CTM_CHECK_EQ(static_cast<int>(loud[4]), 255);
     }

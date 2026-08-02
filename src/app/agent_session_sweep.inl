@@ -188,6 +188,6 @@ static void apply_pending_config_to_sessions()
     for (const Target &target : targets) {
         device_log::config(device_log::msg()
             << "pushing settings to live session busid=" << target.busIdAscii);
-        ds5_apply_initial_settings(target.backend, target.kind);
+        ds5_apply_initial_settings(target.backend);
     }
 }

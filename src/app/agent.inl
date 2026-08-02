@@ -278,7 +278,7 @@ static void bridge_session_worker(AgentBridgeSession *session)
     session->ready.store(true);
     std::wcout << L"agent bridge ready kind=" << widen_ascii(session->kind.c_str(), session->kind.size())
                << L" port=" << session->port << L" busid=" << session->busId << L"\n";
-    ds5_apply_initial_settings(backendPtr, session->kind);
+    ds5_apply_initial_settings(backendPtr);
     if (!run_usbip_attach(session->busId, kDefaultUsbipPort)) {
         std::wcerr << L"agent local attach failed busid=" << session->busId << L"\n";
     }
