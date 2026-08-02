@@ -130,11 +130,16 @@ static int device_config_int(const char *section, const char *key, int fallback)
     if (keyIt == sectionIt->second.end()) {
         return fallback;
     }
+    // The WHOLE value must be a number. Checking only that parsing got
+    // started is not enough: std::stoi reads as far as it can, so the typo
+    // "5O" (five, letter O) parses as 5 and looks like a deliberate setting.
+    // Caught by device_config_test.cpp on its first run, 2026-08-01.
+    const std::string &text = keyIt->second;
     try {
         size_t consumed = 0;
-        const int parsed = std::stoi(keyIt->second, &consumed);
-        if (consumed == 0) {
-            return fallback;
+        const int parsed = std::stoi(text, &consumed);
+        if (consumed != text.size()) {
+            return fallback;   // trailing junk means a typo, not a value
         }
         return parsed;
     } catch (...) {

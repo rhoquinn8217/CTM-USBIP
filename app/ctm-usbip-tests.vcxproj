@@ -45,7 +45,7 @@
       <WarningLevel>Level4</WarningLevel>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
-      <AdditionalIncludeDirectories>..\include;..\tests;..\third_party\vcpkg\installed\x64-windows-static\include;..\third_party\ffmpeg\x64\release\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\include;..\tests;..\src;..\third_party\vcpkg\installed\x64-windows-static\include;..\third_party\ffmpeg\x64\release\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>UNICODE;_UNICODE;NOMINMAX;_WINSOCK_DEPRECATED_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
@@ -59,7 +59,7 @@
       <WarningLevel>Level4</WarningLevel>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
-      <AdditionalIncludeDirectories>..\include;..\tests;..\third_party\vcpkg\installed\x64-windows-static\include;..\third_party\ffmpeg\x64\release\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\include;..\tests;..\src;..\third_party\vcpkg\installed\x64-windows-static\include;..\third_party\ffmpeg\x64\release\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>UNICODE;_UNICODE;NOMINMAX;NDEBUG;_WINSOCK_DEPRECATED_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
@@ -74,9 +74,12 @@
   <ItemGroup>
     <ClCompile Include="..\src\map\runtime.cpp" />
     <ClCompile Include="..\tests\map_defaults_test.cpp" />
+    <ClCompile Include="..\tests\device_config_test.cpp" />
+    <ClCompile Include="..\tests\tests_main.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\tests\harness.h" />
+    <ClInclude Include="..\tests\units.h" />
     <ClInclude Include="..\include\ctm\map\runtime.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

@@ -20,7 +20,7 @@ using namespace ctmtest;
 
 static std::wstring widen(const std::string &s) { return std::wstring(s.begin(), s.end()); }
 
-int main(int argc, char **argv)
+int run_map_defaults_tests(int argc, char **argv)
 {
     const std::string mapPath =
         (argc > 1) ? argv[1] : "maps/ds5_usb_over_ds5_usb.map";
@@ -96,5 +96,5 @@ int main(int argc, char **argv)
         }
     }
 
-    return summary();
+    return 0;   // main() in tests_main.cpp reports the combined summary
 }
