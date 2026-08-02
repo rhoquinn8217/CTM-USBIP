@@ -58,38 +58,53 @@ static void ds5_apply_initial_settings(CtmBackend *backend)
         return;   // not a device we have settings for
     }
 
-    const int volumePercent = device_config_int(section, "speaker_volume", -1);
-    if (volumePercent < 0) {
-        return;   // not configured
+    const Ds5AudioOutput output = ds5_audio_output_for(section);
+    const int speakerPercent = ds5_level_for(output, true, section);
+    const int headsetPercent = ds5_level_for(output, false, section);
+    if (output == Ds5AudioOutput::Auto && speakerPercent < 0 && headsetPercent < 0) {
+        return;   // nothing configured
     }
-
-    const int clamped = volumePercent > 100 ? 100 : volumePercent;
-    const uint8_t volumeRaw = ds5_volume_raw_from_percent(clamped);
 
     std::vector<uint8_t> report(kDs5OutReportLen, 0);
     report[0] = kDs5OutReportId;
 
-    // Claim ONLY the speaker volume and the audio-control byte. The two rumble
-    // claim bits are left clear on purpose: claiming them here would apply the
-    // zeroed rumble fields below and silently kill rumble for the session.
-    report[kDs5IdxValidFlag0] =
-        static_cast<uint8_t>(kDs5AllowSpeakerVolume | kDs5AllowAudioControl);
-    report[kDs5IdxValidFlag0] &= static_cast<uint8_t>(~(kDs5ClaimRumbleA | kDs5ClaimRumbleB));
+    // Claim ONLY what we are setting. The two rumble claim bits are left clear
+    // on purpose: claiming them would apply the zeroed rumble fields below and
+    // silently kill rumble for the session.
+    uint8_t claim = kDs5AllowAudioControl;
+    if (speakerPercent >= 0) {
+        claim = static_cast<uint8_t>(claim | kDs5AllowSpeakerVolume);
+        report[kDs5IdxSpeakerVolume] = ds5_volume_raw_from_percent(speakerPercent);
+    }
+    if (headsetPercent >= 0) {
+        claim = static_cast<uint8_t>(claim | kDs5AllowHeadsetVolume);
+        report[kDs5IdxHeadsetVolume] = ds5_volume_raw_from_percent(headsetPercent);
+    }
+    claim = static_cast<uint8_t>(claim & ~(kDs5ClaimRumbleA | kDs5ClaimRumbleB));
+    report[kDs5IdxValidFlag0] = claim;
 
-    report[kDs5IdxSpeakerVolume] = volumeRaw;
-
-    // Route to the speaker AND keep echo cancellation on -- see the header note
-    // about why the second half is not optional.
-    report[kDs5IdxAudioControl] =
-        static_cast<uint8_t>(kDs5RouteToSpeaker | kDs5EchoNoiseCancel);
+    // Routing, defaulting to the speaker when nothing is configured -- that is
+    // the behaviour this had before routing existed.
+    // Under auto, default to the speaker -- the behaviour before routing existed.
+    const bool speakerActive = (output == Ds5AudioOutput::Auto)
+        ? true
+        : ds5_speaker_is_active(output);
+    uint8_t audioControl = speakerActive ? kDs5RouteToSpeaker : 0;
+    if (speakerActive && device_config_bool(section, "force_echo_cancel", false)) {
+        audioControl = static_cast<uint8_t>(audioControl | kDs5EchoNoiseCancel);
+    }
+    report[kDs5IdxAudioControl] = audioControl;
 
     std::wstring error;
     if (!backend->send_output_report(report, false, &error)) {
         device_log::report(device_log::msg()
-            << "settings: send FAILED -- "
+            << section << ": settings: send FAILED -- "
             << std::string(error.begin(), error.end()));
         return;
     }
     device_log::report(device_log::msg()
-        << "settings: sent speaker volume " << clamped << "% with echo cancel on");
+        << section << ": settings: sent audio to "
+        << (speakerActive ? "speaker" : "headphone")
+        << ", speaker volume " << speakerPercent
+        << "%, headset volume " << headsetPercent << "%");
 }

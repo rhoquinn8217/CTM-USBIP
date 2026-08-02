@@ -190,6 +190,95 @@ int run_device_config_tests()
         CTM_CHECK_EQ(static_cast<int>(report[8]), 0x30);
     }
 
+    // --- Audio routing ------------------------------------------------------
+    section("audio_output routes to the headphone and drops echo cancel");
+    {
+        // Measured 2026-08-01: audio control 0x30 is the speaker, 0x00 the
+        // headphone jack. Cancellation exists for the speaker/mic feedback
+        // path, so it must not be asserted when the speaker is not in use.
+        set_config("[ds5]\naudio_output = headphone\nforce_echo_cancel = true\n");
+        std::vector<uint8_t> report = make_report(0x80, 0x30);
+        units::ds5_apply_output_overrides(report.data(), report.size(), kDualSense);
+        CTM_CHECK_EQ(static_cast<int>(report[8]), 0x00);
+    }
+
+    section("audio_output routes to the speaker and keeps echo cancel");
+    {
+        set_config("[ds5]\naudio_output = speaker\nforce_echo_cancel = true\n");
+        std::vector<uint8_t> report = make_report(0x80, 0x00);
+        units::ds5_apply_output_overrides(report.data(), report.size(), kDualSense);
+        CTM_CHECK_EQ(static_cast<int>(report[8] & 0x30), 0x30);
+        CTM_CHECK_EQ(static_cast<int>(report[8] & 0x0c), 0x0c);
+    }
+
+    section("no audio_output leaves the game's routing alone");
+    {
+        set_config("[ds5]\nforce_echo_cancel = true\n");
+        std::vector<uint8_t> report = make_report(0x80, 0x00);
+        units::ds5_apply_output_overrides(report.data(), report.size(), kDualSense);
+        CTM_CHECK_EQ(static_cast<int>(report[8] & 0x30), 0x00);   // untouched
+        CTM_CHECK_EQ(static_cast<int>(report[8] & 0x0c), 0x00);   // no speaker, no cancel
+    }
+
+    section("the mode silences the output it does not use");
+    {
+        // Routing alone does not silence the headphone: the 0x30 bits gate the
+        // speaker, and the headphone plays whenever its volume is above zero.
+        // So "speaker" must force the headset volume to zero, or audio comes
+        // out of both.
+        set_config("[ds5]\naudio_output = speaker\n"
+                   "speaker_volume = 80\nheadset_volume = 90\n");
+        std::vector<uint8_t> report = make_report(0x30, 0, 10);
+        report[5] = 10;
+        units::ds5_apply_output_overrides(report.data(), report.size(), kDualSense);
+        CTM_CHECK_EQ(static_cast<int>(report[6]), 80);   // speaker: from the key
+        CTM_CHECK_EQ(static_cast<int>(report[5]), 0);    // headset: forced silent
+    }
+
+    section("off silences both outputs");
+    {
+        set_config("[ds5]\naudio_output = off\n"
+                   "speaker_volume = 80\nheadset_volume = 90\n");
+        std::vector<uint8_t> report = make_report(0xb0, 0x30, 100);
+        report[5] = 100;
+        units::ds5_apply_output_overrides(report.data(), report.size(), kDualSense);
+        CTM_CHECK_EQ(static_cast<int>(report[5]), 0);
+        CTM_CHECK_EQ(static_cast<int>(report[6]), 0);
+        CTM_CHECK_EQ(static_cast<int>(report[8] & 0x30), 0x00);
+    }
+
+    section("auto leaves route and volumes exactly as the game set them");
+    {
+        set_config("[ds5]\naudio_output = auto\n");
+        std::vector<uint8_t> report = make_report(0xb0, 0x30, 55);
+        report[5] = 66;
+        const std::vector<uint8_t> before = report;
+        units::ds5_apply_output_overrides(report.data(), report.size(), kDualSense);
+        CTM_CHECK_EQ(report == before, true);
+    }
+
+    section("both keeps the speaker routed and applies both volumes");
+    {
+        set_config("[ds5]\naudio_output = both\n"
+                   "speaker_volume = 70\nheadset_volume = 60\n");
+        std::vector<uint8_t> report = make_report(0xb0, 0x00, 10);
+        report[5] = 10;
+        units::ds5_apply_output_overrides(report.data(), report.size(), kDualSense);
+        CTM_CHECK_EQ(static_cast<int>(report[6]), 70);
+        CTM_CHECK_EQ(static_cast<int>(report[5]), 60);
+        CTM_CHECK_EQ(static_cast<int>(report[8] & 0x30), 0x30);
+    }
+
+    section("headset volume is its own byte and its own claim bit");
+    {
+        set_config("[ds5]\nheadset_volume = 50\nspeaker_volume = 90\n");
+        std::vector<uint8_t> report = make_report(0x30, 0, 100);   // claim both
+        report[5] = 10;
+        units::ds5_apply_output_overrides(report.data(), report.size(), kDualSense);
+        CTM_CHECK_EQ(static_cast<int>(report[5]), 50);
+        CTM_CHECK_EQ(static_cast<int>(report[6]), 90);
+    }
+
     // --- Rumble: master and per-motor --------------------------------------
     // The per-motor gains cannot be tested on hardware -- no game available
     // drives the spinning weights at all -- so this is their only verification.

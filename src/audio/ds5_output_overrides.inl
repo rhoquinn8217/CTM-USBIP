@@ -58,46 +58,27 @@ static const char *device_section_for(const std::vector<unsigned char> &descript
     }
 }
 
-// --- Override 1: echo + noise cancellation ---
-//
-// The controller mutes its own speaker whenever echo cancellation is off. The
-// microphone sits centimetres from the speaker, so that is feedback protection
-// rather than a fault -- but it means any host that clears the setting silences
-// the speaker until something turns it back on. This corrects such a write
-// while it is in flight, on its way to the controller.
-//
-// It CORRECTS, it does not INITIALISE. It only touches a report in which the
-// host has explicitly claimed control of the audio settings; a report that
-// leaves those settings alone passes through untouched. Setting a good value
-// when nothing is being written is a different job and is not done here.
-//
-// Off unless the config file turns it on, so an unmodified client sees no
-// change in behaviour.
-//
-// Ported from ctm_force_echo_cancel_on() in
-// src/app/hid_passthrough/ctm/controllers/controller_common.c of
-// rhoquinn8217/ds5-aurora at commit a91daef. Kept as a copy rather than shared
-// code so the TV-side and Windows-side versions can drift independently.
-// -----------------------------------------------------------------------------
-
 // DualSense USB output report layout. Positions and claim bits are ours, from
 // on-wire capture, independently cross-checked against daidr/dualsense-tester
 // (MIT) -- every one agreed. NO CODE WAS COPIED.
 //
 // A CLAIMED field is applied even when it is zero, so claiming something we do
 // not intend to set is an active change, not a no-op.
-static const uint8_t kDs5OutReportId       = 0x02;
-static const size_t  kDs5IdxValidFlag0     = 1;
-static const size_t  kDs5IdxAudioControl   = 8;
-static const uint8_t kDs5AllowAudioControl = 0x80;  // host claims the audio-control byte
-static const uint8_t kDs5EchoNoiseCancel   = 0x0c;  // echo + noise cancellation ON
-static const size_t  kDs5IdxSpeakerVolume  = 6;
+static const uint8_t kDs5OutReportId        = 0x02;
+static const size_t  kDs5IdxValidFlag0      = 1;
+static const size_t  kDs5IdxHeadsetVolume   = 5;
+static const size_t  kDs5IdxSpeakerVolume   = 6;
+static const size_t  kDs5IdxAudioControl    = 8;
+static const uint8_t kDs5AllowHeadsetVolume = 0x10;
 static const uint8_t kDs5AllowSpeakerVolume = 0x20;
-static const uint8_t kDs5SpeakerVolumeMax  = 0x64;  // the controller's full scale
-static const size_t  kDs5OutReportLen      = 48;    // every host report on the wire
-static const uint8_t kDs5ClaimRumbleA      = 0x01;
-static const uint8_t kDs5ClaimRumbleB      = 0x02;
-static const uint8_t kDs5RouteToSpeaker    = 0x30;
+static const uint8_t kDs5AllowAudioControl  = 0x80;
+static const uint8_t kDs5EchoNoiseCancel    = 0x0c;  // echo + noise cancellation ON
+static const uint8_t kDs5RouteToSpeaker     = 0x30;
+static const uint8_t kDs5RouteMask          = 0x30;
+static const uint8_t kDs5SpeakerVolumeMax   = 0x64;  // the controller's full scale
+static const size_t  kDs5OutReportLen       = 48;    // every host report on the wire
+static const uint8_t kDs5ClaimRumbleA       = 0x01;
+static const uint8_t kDs5ClaimRumbleB       = 0x02;
 
 // Shared by both halves so a configured percentage always lands on the same
 // raw value, whether it is being SET or DEFENDED.
@@ -108,11 +89,82 @@ static uint8_t ds5_volume_raw_from_percent(int percent)
     return static_cast<uint8_t>((percent * kDs5SpeakerVolumeMax) / 100);
 }
 
+// Which output the config asks for.
+//
+// Measured on the wired path 2026-08-01 by watching the DualSense Tester play a
+// tone to each destination: audio control 0x30 sends audio to the SPEAKER, 0x00
+// sends it to the HEADPHONE jack. The same byte carries echo cancellation.
+//
+// !! ROUTING ALONE DOES NOT SILENCE THE HEADPHONE. The 0x30 bits gate the
+// !! speaker; the headphone plays whenever it is plugged in and its volume is
+// !! above zero. So the MODE decides which volumes apply, and the unused output
+// !! is forced to zero -- exactly what both this project's and Ciprian's
+// !! Bluetooth code do. Without that, "speaker" with a headset volume set would
+// !! play out of both.
+//
+//   auto / absent -- touch nothing. Route and volumes stay as the game set them.
+//   speaker       -- route to speaker, speaker volume applies, headset forced 0
+//   headphone     -- route off speaker, headset volume applies, speaker forced 0
+//   both          -- route to speaker, both volumes apply
+//   off           -- route off speaker, both volumes forced 0
+//
+// Names rather than numbers on purpose: this is a choice between named things,
+// not a quantity. "audio_output = 0" needs a lookup table to read and fails
+// silently when someone writes 2.
+enum class Ds5AudioOutput { Auto, Speaker, Headphone, Both, Off };
+
+static Ds5AudioOutput ds5_audio_output_for(const char *section)
+{
+    const std::string value = device_config_str(section, "audio_output");
+    if (value == "speaker")   return Ds5AudioOutput::Speaker;
+    if (value == "headphone") return Ds5AudioOutput::Headphone;
+    if (value == "headset")   return Ds5AudioOutput::Headphone;   // common alias
+    if (value == "both")      return Ds5AudioOutput::Both;
+    if (value == "off")       return Ds5AudioOutput::Off;
+    return Ds5AudioOutput::Auto;   // absent, or anything unrecognised
+}
+
+static bool ds5_speaker_is_active(Ds5AudioOutput output)
+{
+    return output == Ds5AudioOutput::Speaker || output == Ds5AudioOutput::Both;
+}
+
+static bool ds5_headphone_is_active(Ds5AudioOutput output)
+{
+    return output == Ds5AudioOutput::Headphone || output == Ds5AudioOutput::Both;
+}
+
+// The level an output should carry under a given mode. -1 means "leave it
+// alone"; 0 means "actively silence it because this mode does not use it".
+static int ds5_level_for(Ds5AudioOutput output, bool speaker, const char *section)
+{
+    if (output == Ds5AudioOutput::Auto) {
+        return device_config_int(section, speaker ? "speaker_volume" : "headset_volume", -1);
+    }
+    const bool active = speaker ? ds5_speaker_is_active(output) : ds5_headphone_is_active(output);
+    if (!active) {
+        return 0;
+    }
+    return device_config_int(section, speaker ? "speaker_volume" : "headset_volume", -1);
+}
+
 static std::atomic<uint64_t> g_ds5_echo_patch_count{0};
 
-// Patches in place. Safe to call on every outbound report: everything that is
-// not a DualSense audio-control write returns immediately, before any lookup.
-static void ds5_override_echo_cancel(uint8_t *data, size_t length, const char *section)
+// --- Override 1: the audio-control byte (routing + echo cancellation) ---
+//
+// Routing and echo cancellation share one byte, so one function owns it.
+//
+// !! ECHO CANCELLATION IS CONDITIONAL ON THE SPEAKER BEING ACTIVE, and that is
+// !! not a nicety. The controller mutes its own speaker when cancellation is
+// !! off because the microphone sits beside it -- but with audio going to the
+// !! headphone there is no speaker output and nothing to cancel. Both this
+// !! project's and Ciprian's Bluetooth code set the audio flags to zero for
+// !! headset mode, cancellation included. Forcing it on regardless would be
+// !! asserting a setting for a path that is not in use.
+//
+// When audio_output is absent, routing is left exactly as the game set it and
+// only the echo-cancel force applies -- the behaviour before routing existed.
+static void ds5_override_audio_control(uint8_t *data, size_t length, const char *section)
 {
     if (data == nullptr || length <= kDs5IdxAudioControl) {
         return;
@@ -123,26 +175,39 @@ static void ds5_override_echo_cancel(uint8_t *data, size_t length, const char *s
     if ((data[kDs5IdxValidFlag0] & kDs5AllowAudioControl) == 0) {
         return;  // the host is not setting audio control; nothing to correct
     }
-    // Checked only for reports that reach this point, so the shared lookup does
-    // not sit on the hot path of ordinary input and rumble traffic.
-    if (!device_config_bool(section, "force_echo_cancel", false)) {
-        return;
+
+    const Ds5AudioOutput output = ds5_audio_output_for(section);
+    const uint8_t before = data[kDs5IdxAudioControl];
+    uint8_t value = before;
+
+    if (output != Ds5AudioOutput::Auto) {
+        value = static_cast<uint8_t>(value & ~kDs5RouteMask);
+        if (ds5_speaker_is_active(output)) {
+            value = static_cast<uint8_t>(value | kDs5RouteToSpeaker);
+        }
     }
 
-    const uint8_t before = data[kDs5IdxAudioControl];
-    data[kDs5IdxAudioControl] |= kDs5EchoNoiseCancel;
-    if (before == data[kDs5IdxAudioControl]) {
-        return;  // already on; nothing was changed
+    // Under auto, the speaker is active if the game routed it there.
+    const bool speakerActive = (output == Ds5AudioOutput::Auto)
+        ? ((value & kDs5RouteMask) != 0)
+        : ds5_speaker_is_active(output);
+
+    if (speakerActive && device_config_bool(section, "force_echo_cancel", false)) {
+        value = static_cast<uint8_t>(value | kDs5EchoNoiseCancel);
     }
+
+    if (value == before) {
+        return;
+    }
+    data[kDs5IdxAudioControl] = value;
 
     const uint64_t count = ++g_ds5_echo_patch_count;
     if (count <= 5 || (count % 100) == 0) {
         device_log::report(device_log::msg()
-            << "echo cancel: corrected an audio-control write"
-            << " (correction #" << count << ")");
+            << section << ": audio control: rewrote an audio-control write"
+            << " (change #" << count << ")");
     }
 }
-
 
 // --- Override 2: speaker volume ---
 //
@@ -167,9 +232,9 @@ static void ds5_override_speaker_volume(uint8_t *data, size_t length, const char
     if ((data[kDs5IdxValidFlag0] & kDs5AllowSpeakerVolume) == 0) {
         return;  // nothing is setting the volume; leave it alone
     }
-    const int configured = device_config_int(section, "speaker_volume", -1);
+    const int configured = ds5_level_for(ds5_audio_output_for(section), true, section);
     if (configured < 0) {
-        return;  // no key means the game's value stands
+        return;  // no key and no mode forcing it: the game's value stands
     }
 
     const uint8_t wanted = ds5_volume_raw_from_percent(configured);
@@ -181,7 +246,7 @@ static void ds5_override_speaker_volume(uint8_t *data, size_t length, const char
     const uint64_t count = ++g_ds5_volume_override_count;
     if (count <= 5 || (count % 100) == 0) {
         device_log::report(device_log::msg()
-            << "speaker volume: overrode a write to " << configured
+            << section << ": speaker volume: overrode a write to " << configured
             << "% (override #" << count << ")");
     }
 }
@@ -264,9 +329,45 @@ static void ds5_override_rumble(uint8_t *data, size_t length, const char *sectio
     const uint64_t count = ++g_ds5_rumble_scale_count;
     if (count <= 3 || (count % 1000) == 0) {
         device_log::report(device_log::msg()
-            << "rumble: scaled heavy to " << (masterGain * heavyGain) / 100
+            << section << ": rumble: scaled heavy to " << (masterGain * heavyGain) / 100
             << "% soft to " << (masterGain * softGain) / 100
             << "% (scale #" << count << ")");
+    }
+}
+
+// --- Override 4: headset volume ---
+//
+// Byte 5, its own claim bit -- separate from the speaker's volume at byte 6.
+// Confirmed 2026-08-01 from a captured tester report claiming 0x90 (headphone
+// volume plus audio control) where the speaker case claims 0xa0.
+static std::atomic<uint64_t> g_ds5_headset_volume_count{0};
+
+static void ds5_override_headset_volume(uint8_t *data, size_t length, const char *section)
+{
+    if (data == nullptr || length <= kDs5IdxHeadsetVolume) {
+        return;
+    }
+    if (data[0] != kDs5OutReportId) {
+        return;
+    }
+    if ((data[kDs5IdxValidFlag0] & kDs5AllowHeadsetVolume) == 0) {
+        return;
+    }
+    const int configured = ds5_level_for(ds5_audio_output_for(section), false, section);
+    if (configured < 0) {
+        return;
+    }
+    const uint8_t wanted = ds5_volume_raw_from_percent(configured);
+    if (data[kDs5IdxHeadsetVolume] == wanted) {
+        return;
+    }
+    data[kDs5IdxHeadsetVolume] = wanted;
+
+    const uint64_t count = ++g_ds5_headset_volume_count;
+    if (count <= 5 || (count % 100) == 0) {
+        device_log::report(device_log::msg()
+            << section << ": headset volume: overrode a write to " << configured
+            << "% (override #" << count << ")");
     }
 }
 
@@ -284,7 +385,8 @@ static void ds5_apply_output_overrides(uint8_t *data, size_t length,
     if (section == nullptr) {
         return;
     }
-    ds5_override_echo_cancel(data, length, section);
+    ds5_override_audio_control(data, length, section);
     ds5_override_speaker_volume(data, length, section);
+    ds5_override_headset_volume(data, length, section);
     ds5_override_rumble(data, length, section);
 }

@@ -110,6 +110,28 @@ static void device_config_invalidate()
     g_device_config.clear();
 }
 
+// Look up a text setting. Returns an empty string when the file, section, key
+// or value is missing, so callers can treat empty as "not configured".
+static std::string device_config_str(const char *section, const char *key)
+{
+    if (section == nullptr || key == nullptr) {
+        return std::string();
+    }
+    std::lock_guard<std::mutex> guard(g_device_config_mutex);
+    if (!g_device_config_loaded) {
+        device_config_load_locked();
+    }
+    const auto sectionIt = g_device_config.find(device_config_lower(section));
+    if (sectionIt == g_device_config.end()) {
+        return std::string();
+    }
+    const auto keyIt = sectionIt->second.find(device_config_lower(key));
+    if (keyIt == sectionIt->second.end()) {
+        return std::string();
+    }
+    return device_config_lower(keyIt->second);
+}
+
 // Look up a whole-number setting. Returns fallback when the file, section, key
 // or a parsable value is missing. Callers use a fallback outside the valid
 // range (e.g. -1) to mean "not configured, do nothing".
