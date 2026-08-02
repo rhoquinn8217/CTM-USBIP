@@ -91,7 +91,7 @@ int run_device_config_tests()
         set_config("[ds5]\nspeaker_volume = 40\n");
         std::vector<uint8_t> report = make_report(0x20, 0, 100);   // claim volume
         units::ds5_apply_output_overrides(report.data(), report.size(), kDualSense);
-        CTM_CHECK_EQ(static_cast<int>(report[6]), 40);
+        CTM_CHECK_EQ(static_cast<int>(report[6]), 0x3d + (40 * (0x64 - 0x3d)) / 100);
     }
 
     // --- Per-device sections ------------------------------------------------
@@ -112,11 +112,11 @@ int run_device_config_tests()
         set_config("[ds5]\nspeaker_volume = 40\n[ds5_edge]\nspeaker_volume = 70\n");
         std::vector<uint8_t> edge = make_report(0x20, 0, 100);
         units::ds5_apply_output_overrides(edge.data(), edge.size(), kEdge);
-        CTM_CHECK_EQ(static_cast<int>(edge[6]), 70);
+        CTM_CHECK_EQ(static_cast<int>(edge[6]), 0x3d + (70 * (0x64 - 0x3d)) / 100);
 
         std::vector<uint8_t> plain = make_report(0x20, 0, 100);
         units::ds5_apply_output_overrides(plain.data(), plain.size(), kDualSense);
-        CTM_CHECK_EQ(static_cast<int>(plain[6]), 40);
+        CTM_CHECK_EQ(static_cast<int>(plain[6]), 0x3d + (40 * (0x64 - 0x3d)) / 100);
     }
 
     section("an Edge with no section of its own gets nothing from ds5");
@@ -239,7 +239,7 @@ int run_device_config_tests()
         std::vector<uint8_t> report = make_report(0x30, 0, 10);
         report[5] = 10;
         units::ds5_apply_output_overrides(report.data(), report.size(), kDualSense);
-        CTM_CHECK_EQ(static_cast<int>(report[6]), 80);   // speaker: from the key
+        CTM_CHECK_EQ(static_cast<int>(report[6]), 0x3d + (80 * (0x64 - 0x3d)) / 100);   // speaker: from the key
         CTM_CHECK_EQ(static_cast<int>(report[5]), 0);    // headset: forced silent
     }
 
@@ -274,8 +274,8 @@ int run_device_config_tests()
         std::vector<uint8_t> report = make_report(0xb0, 0x00, 10);
         report[5] = 10;
         units::ds5_apply_output_overrides(report.data(), report.size(), kDualSense);
-        CTM_CHECK_EQ(static_cast<int>(report[6]), (70 * 0x64) / 100);
-        CTM_CHECK_EQ(static_cast<int>(report[5]), (60 * 0x7f) / 100);
+        CTM_CHECK_EQ(static_cast<int>(report[6]), 0x3d + (70 * (0x64 - 0x3d)) / 100);
+        CTM_CHECK_EQ(static_cast<int>(report[5]), 0x4d + (60 * (0x7f - 0x4d)) / 100);
         CTM_CHECK_EQ(static_cast<int>(report[8] & 0x30), 0x20);
     }
 
@@ -287,8 +287,8 @@ int run_device_config_tests()
         std::vector<uint8_t> report = make_report(0x30, 0, 100);   // claim both
         report[5] = 10;
         units::ds5_apply_output_overrides(report.data(), report.size(), kDualSense);
-        CTM_CHECK_EQ(static_cast<int>(report[5]), (50 * 0x7f) / 100);
-        CTM_CHECK_EQ(static_cast<int>(report[6]), (90 * 0x64) / 100);
+        CTM_CHECK_EQ(static_cast<int>(report[5]), 0x4d + (50 * (0x7f - 0x4d)) / 100);
+        CTM_CHECK_EQ(static_cast<int>(report[6]), 0x3d + (90 * (0x64 - 0x3d)) / 100);
     }
 
     // --- Rumble: master and per-motor --------------------------------------

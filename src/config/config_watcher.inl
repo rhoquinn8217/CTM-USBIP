@@ -48,7 +48,11 @@ namespace ctm_config_watcher {
 
 // Editors write a file as several operations, so one save fires the watcher
 // two or three times. Wait this long after the last event before acting.
-constexpr DWORD kDebounceMs = 300;
+//
+// Kept short on purpose: the control panel writes as a slider is dragged, and
+// this delay is felt directly. Long enough to coalesce one save's worth of
+// events and to guarantee the file is never read half-written.
+constexpr DWORD kDebounceMs = 120;
 
 // Raised when the config file changes; cleared by the agent loop once it has
 // pushed the new settings to every live session. Cross-thread on purpose: the

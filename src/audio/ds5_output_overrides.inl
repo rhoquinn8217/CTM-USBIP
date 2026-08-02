@@ -77,17 +77,37 @@ static const uint8_t kDs5RouteToSpeaker     = 0x30;
 static const uint8_t kDs5RouteMask          = 0x30;
 static const uint8_t kDs5SpeakerVolumeMax   = 0x64;  // speaker full scale
 static const uint8_t kDs5HeadsetVolumeMax   = 0x7f;  // headset full scale -- NOT the same
+
+// !! THE OUTPUTS HAVE A FLOOR, AND IT IS HIGH. The Linux hid-playstation patch
+// !! series records the speaker's accepted range as 0x3d..0x64 -- so roughly
+// !! the bottom 60% of a naive 0..max mapping is BELOW THE HARDWARE FLOOR and
+// !! simply silent. Measured independently 2026-08-01: 35% was the edge of
+// !! audibility and 40% was very faint, which is that floor showing through.
+// !!
+// !! So a percentage maps onto the USABLE range, not onto 0..max: 0 is silence,
+// !! and 1..100 spans floor..full. Without this a slider wastes most of its
+// !! travel on values that do nothing.
+static const uint8_t kDs5SpeakerVolumeFloor = 0x3d;   // documented by the kernel
+
+// !! The headset's floor has NOT been measured. This is the speaker's floor
+// !! scaled to the headset's larger range -- a reasonable guess, nothing more.
+// !! Replace it the moment someone measures where the headset stops being
+// !! audible.
+static const uint8_t kDs5HeadsetVolumeFloor = 0x4d;
 static const size_t  kDs5OutReportLen       = 48;    // every host report on the wire
 static const uint8_t kDs5ClaimRumbleA       = 0x01;
 static const uint8_t kDs5ClaimRumbleB       = 0x02;
 
 // Shared by both halves so a configured percentage always lands on the same
 // raw value, whether it is being SET or DEFENDED.
-static uint8_t ds5_volume_raw_from_percent(int percent, uint8_t fullScale)
+static uint8_t ds5_volume_raw_from_percent(int percent, uint8_t fullScale, uint8_t floor)
 {
-    if (percent < 0) percent = 0;
+    if (percent <= 0) {
+        return 0;            // genuinely off, below the floor on purpose
+    }
     if (percent > 100) percent = 100;
-    return static_cast<uint8_t>((percent * fullScale) / 100);
+    const int span = static_cast<int>(fullScale) - static_cast<int>(floor);
+    return static_cast<uint8_t>(floor + (percent * span) / 100);
 }
 
 // Which output the config asks for.
@@ -263,7 +283,7 @@ static void ds5_override_speaker_volume(uint8_t *data, size_t length, const char
         return;  // no key and no mode forcing it: the game's value stands
     }
 
-    const uint8_t wanted = ds5_volume_raw_from_percent(configured, kDs5SpeakerVolumeMax);
+    const uint8_t wanted = ds5_volume_raw_from_percent(configured, kDs5SpeakerVolumeMax, kDs5SpeakerVolumeFloor);
     if (data[kDs5IdxSpeakerVolume] == wanted) {
         return;
     }
@@ -383,7 +403,7 @@ static void ds5_override_headset_volume(uint8_t *data, size_t length, const char
     if (configured < 0) {
         return;
     }
-    const uint8_t wanted = ds5_volume_raw_from_percent(configured, kDs5HeadsetVolumeMax);
+    const uint8_t wanted = ds5_volume_raw_from_percent(configured, kDs5HeadsetVolumeMax, kDs5HeadsetVolumeFloor);
     if (data[kDs5IdxHeadsetVolume] == wanted) {
         return;
     }

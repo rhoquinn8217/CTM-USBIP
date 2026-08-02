@@ -105,8 +105,14 @@ the Linux `hid-playstation` audio jack patch series.
 bytes, with **different full scales**: the speaker's raw maximum is `0x64` and
 the headset's is `0x7f`. The percentage hides that.
 
-Measured against a game's parry effect: **35 is the floor of audibility**, 60
-sounds clearly attenuated, 100 is nominal.
+⭐ **The percentage maps onto the usable range, not onto zero-to-maximum.** The
+outputs have a high hardware floor — the Linux driver records the speaker's
+accepted range as `0x3d`–`0x64`, so roughly the bottom 60% of a naive mapping is
+below the floor and simply silent. `0` is off; `1`–`100` spans floor to full.
+
+⚠️ **The headset's floor has not been measured.** The value in use is the
+speaker's floor scaled to the headset's larger range — a reasonable guess,
+nothing more.
 
 ### `audio_gain`
 

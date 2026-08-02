@@ -74,11 +74,11 @@ static void ds5_apply_initial_settings(CtmBackend *backend)
     uint8_t claim = kDs5AllowAudioControl;
     if (speakerPercent >= 0) {
         claim = static_cast<uint8_t>(claim | kDs5AllowSpeakerVolume);
-        report[kDs5IdxSpeakerVolume] = ds5_volume_raw_from_percent(speakerPercent, kDs5SpeakerVolumeMax);
+        report[kDs5IdxSpeakerVolume] = ds5_volume_raw_from_percent(speakerPercent, kDs5SpeakerVolumeMax, kDs5SpeakerVolumeFloor);
     }
     if (headsetPercent >= 0) {
         claim = static_cast<uint8_t>(claim | kDs5AllowHeadsetVolume);
-        report[kDs5IdxHeadsetVolume] = ds5_volume_raw_from_percent(headsetPercent, kDs5HeadsetVolumeMax);
+        report[kDs5IdxHeadsetVolume] = ds5_volume_raw_from_percent(headsetPercent, kDs5HeadsetVolumeMax, kDs5HeadsetVolumeFloor);
     }
     claim = static_cast<uint8_t>(claim & ~(kDs5ClaimRumbleA | kDs5ClaimRumbleB));
     report[kDs5IdxValidFlag0] = claim;
