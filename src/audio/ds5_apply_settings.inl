@@ -73,9 +73,11 @@ static void ds5_apply_initial_settings(CtmBackend *backend, const std::string &k
 
     std::wstring error;
     if (!backend->send_output_report(report, false, &error)) {
-        std::wcout << L"ds5 settings: send failed: " << error << L"\n";
+        device_log::report(device_log::msg()
+            << "settings: send FAILED -- "
+            << std::string(error.begin(), error.end()));
         return;
     }
-    std::cout << "ds5 settings: sent speaker volume " << clamped
-              << "% with echo cancel on" << std::endl;
+    device_log::report(device_log::msg()
+        << "settings: sent speaker volume " << clamped << "% with echo cancel on");
 }

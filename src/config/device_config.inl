@@ -63,8 +63,8 @@ static void device_config_load_locked()
     g_device_config_loaded = true;
     std::ifstream file(kDeviceConfigFileName);
     if (!file.is_open()) {
-        std::cout << "device config: no " << kDeviceConfigFileName
-                  << " found, using built-in defaults" << std::endl;
+        device_log::config(device_log::msg()
+            << "no " << kDeviceConfigFileName << " found, using built-in defaults");
         return;
     }
 
@@ -96,8 +96,8 @@ static void device_config_load_locked()
         ++entries;
     }
 
-    std::cout << "device config: loaded " << entries << " setting(s) from "
-              << kDeviceConfigFileName << std::endl;
+    device_log::config(device_log::msg()
+        << "loaded " << entries << " setting(s) from " << kDeviceConfigFileName);
 }
 
 // Drop the cached copy so the next lookup re-reads the file. Called when a

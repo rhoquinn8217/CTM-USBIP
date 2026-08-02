@@ -326,7 +326,8 @@ static bool start_bridge_session(const std::string &kind, uint16_t port, const s
     }
 
     device_config_invalidate();   // a reseat re-reads the settings file
-    ctm_haptic_gain::refresh();   // and picks up a changed rumble gain
+    ctm_audio_gain::refresh();   // and picks up a changed rumble gain
+    ctm_config_watcher::ensure_started();   // live config changes, no reseat
     auto session = std::make_unique<AgentBridgeSession>();
     session->kind = kind;
     session->busId = busId;

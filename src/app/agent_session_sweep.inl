@@ -34,17 +34,6 @@ struct SweepObservation {
 static std::vector<SweepObservation> g_sweep_previous;
 static bool g_sweep_armed = false;
 
-static std::wstring sweep_timestamp()
-{
-    SYSTEMTIME now = {};
-    GetLocalTime(&now);
-    wchar_t buffer[32] = {};
-    swprintf(buffer, 32, L"%02u:%02u:%02u.%03u",
-             static_cast<unsigned>(now.wHour), static_cast<unsigned>(now.wMinute),
-             static_cast<unsigned>(now.wSecond), static_cast<unsigned>(now.wMilliseconds));
-    return std::wstring(buffer);
-}
-
 static const SweepObservation *sweep_find(const std::vector<SweepObservation> &list,
                                           const std::string &busIdAscii)
 {
@@ -54,11 +43,6 @@ static const SweepObservation *sweep_find(const std::vector<SweepObservation> &l
         }
     }
     return nullptr;
-}
-
-static std::wstring sweep_wide(const std::string &text)
-{
-    return widen_ascii(text.c_str(), text.size());
 }
 
 static void sweep_bridge_sessions()
@@ -94,22 +78,22 @@ static void sweep_bridge_sessions()
     for (SweepObservation &entry : current) {
         const SweepObservation *previous = sweep_find(g_sweep_previous, entry.busIdAscii);
         if (!previous) {
-            std::wcout << L"agent sweep " << sweep_timestamp()
-                       << L" session added busid=" << sweep_wide(entry.busIdAscii)
-                       << L" kind=" << sweep_wide(entry.kind)
-                       << L" port=" << entry.port
-                       << L" ready=" << (entry.ready ? 1 : 0) << L"\n";
+            device_log::session(device_log::msg()
+                << "session added busid=" << entry.busIdAscii
+                << " kind=" << entry.kind
+                << " port=" << entry.port
+                << " ready=" << (entry.ready ? 1 : 0));
             continue;
         }
         entry.firstSeenTick = previous->firstSeenTick;
         entry.suspectPasses = previous->suspectPasses;
         if (entry.ready != previous->ready || entry.stopping != previous->stopping) {
-            std::wcout << L"agent sweep " << sweep_timestamp()
-                       << L" session state busid=" << sweep_wide(entry.busIdAscii)
-                       << L" port=" << entry.port
-                       << L" ready=" << (entry.ready ? 1 : 0)
-                       << L" stopping=" << (entry.stopping ? 1 : 0)
-                       << L" age_ms=" << (nowTick - entry.firstSeenTick) << L"\n";
+            device_log::session(device_log::msg()
+                << "session state busid=" << entry.busIdAscii
+                << " port=" << entry.port
+                << " ready=" << (entry.ready ? 1 : 0)
+                << " stopping=" << (entry.stopping ? 1 : 0)
+                << " age_ms=" << (nowTick - entry.firstSeenTick));
         }
     }
 
@@ -117,13 +101,13 @@ static void sweep_bridge_sessions()
         if (sweep_find(current, previous.busIdAscii)) {
             continue;
         }
-        std::wcout << L"agent sweep " << sweep_timestamp()
-                   << L" session gone busid=" << sweep_wide(previous.busIdAscii)
-                   << L" kind=" << sweep_wide(previous.kind)
-                   << L" port=" << previous.port
-                   << L" lived_ms=" << (nowTick - previous.firstSeenTick)
-                   << L" ready=" << (previous.ready ? 1 : 0)
-                   << L" stopping=" << (previous.stopping ? 1 : 0) << L"\n";
+        device_log::session(device_log::msg()
+            << "session gone busid=" << previous.busIdAscii
+            << " kind=" << previous.kind
+            << " port=" << previous.port
+            << " lived_ms=" << (nowTick - previous.firstSeenTick)
+            << " ready=" << (previous.ready ? 1 : 0)
+            << " stopping=" << (previous.stopping ? 1 : 0));
         // Port takeover signature: a session leaves and another arrives on the
         // same port within one pass. A plug-in request stops the stale session
         // so the new one can take the port, both in the same operation -- while
@@ -135,19 +119,21 @@ static void sweep_bridge_sessions()
             if (sweep_find(g_sweep_previous, entry.busIdAscii)) {
                 continue;
             }
-            std::wcout << L"agent sweep " << sweep_timestamp()
-                       << L" port reuse port=" << previous.port
-                       << L" gone_busid=" << sweep_wide(previous.busIdAscii)
-                       << L" added_busid=" << sweep_wide(entry.busIdAscii) << L"\n";
+            device_log::session(device_log::msg()
+                << "port reuse port=" << previous.port
+                << " gone_busid=" << previous.busIdAscii
+                << " added_busid=" << entry.busIdAscii);
         }
     }
 
     g_sweep_previous.swap(current);
 
-    // Push anything pending out to the log every pass. Console output is
-    // block-buffered when redirected to a file, and telemetry is what normally
-    // keeps it moving -- so the last lines before a teardown, when telemetry
-    // stops, are exactly the ones left sitting unwritten. Flushing here also
-    // carries out lines written elsewhere, with no edit anywhere else.
+    // !! DO NOT DELETE THIS FLUSH. Nothing in this file writes to wcout any
+    // !! more -- the sweep's own lines go to device.log now -- so this looks
+    // !! like dead code and is not. Console output is block-buffered when
+    // !! redirected to a file, and this flush is what carries out UPSTREAM's
+    // !! lines written elsewhere. Removing it reintroduces the bug where every
+    // !! log before 2026-07-30 lost its teardown lines, and their absence read
+    // !! as evidence of a silent teardown.
     std::wcout.flush();
 }

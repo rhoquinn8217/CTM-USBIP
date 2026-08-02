@@ -92,8 +92,9 @@ static void ds5_override_echo_cancel(uint8_t *data, size_t length)
 
     const uint64_t count = ++g_ds5_echo_patch_count;
     if (count <= 5 || (count % 100) == 0) {
-        std::cout << "ds5 echo cancel: corrected an audio-control write"
-                  << " (correction #" << count << ")" << std::endl;
+        device_log::report(device_log::msg()
+            << "echo cancel: corrected an audio-control write"
+            << " (correction #" << count << ")");
     }
 }
 
@@ -134,8 +135,9 @@ static void ds5_override_speaker_volume(uint8_t *data, size_t length)
 
     const uint64_t count = ++g_ds5_volume_override_count;
     if (count <= 5 || (count % 100) == 0) {
-        std::cout << "ds5 speaker volume: overrode a write to " << configured
-                  << "% (override #" << count << ")" << std::endl;
+        device_log::report(device_log::msg()
+            << "speaker volume: overrode a write to " << configured
+            << "% (override #" << count << ")");
     }
 }
 
@@ -187,16 +189,27 @@ static void ds5_override_rumble(uint8_t *data, size_t length)
     if ((data[kDs5IdxValidFlag0] & (kDs5ClaimRumbleA | kDs5ClaimRumbleB)) == 0) {
         return;
     }
-    const int gain = device_config_int("ds5", "rumble_gain", -1);
-    if (gain < 0) {
-        return;  // no key means the game's rumble stands
+    // Master applies to both motors; the per-motor gains multiply on top, like
+    // a mixing desk -- master 50 with heavy 50 gives the big weight 25%.
+    // Confirmed from the DualSense Tester source 2026-08-01: LEFT is the heavy
+    // motor (the big weight), RIGHT is the soft one.
+    const int master = device_config_int("ds5", "master_rumble_gain", -1);
+    const int heavy  = device_config_int("ds5", "rumble_gain_heavy", -1);
+    const int soft   = device_config_int("ds5", "rumble_gain_soft", -1);
+    if (master < 0 && heavy < 0 && soft < 0) {
+        return;  // no keys means the game's rumble stands
     }
-    const int clampedGain = gain > kDs5RumbleGainMax ? kDs5RumbleGainMax : gain;
+    const int masterGain = master < 0 ? 100
+        : (master > kDs5RumbleGainMax ? kDs5RumbleGainMax : master);
+    const int heavyGain = heavy < 0 ? 100
+        : (heavy > kDs5RumbleGainMax ? kDs5RumbleGainMax : heavy);
+    const int softGain = soft < 0 ? 100
+        : (soft > kDs5RumbleGainMax ? kDs5RumbleGainMax : soft);
 
     const uint8_t beforeRight = data[kDs5IdxRumbleRight];
     const uint8_t beforeLeft  = data[kDs5IdxRumbleLeft];
-    data[kDs5IdxRumbleRight] = ds5_scale_rumble(beforeRight, clampedGain);
-    data[kDs5IdxRumbleLeft]  = ds5_scale_rumble(beforeLeft, clampedGain);
+    data[kDs5IdxRumbleRight] = ds5_scale_rumble(beforeRight, (masterGain * softGain) / 100);
+    data[kDs5IdxRumbleLeft]  = ds5_scale_rumble(beforeLeft, (masterGain * heavyGain) / 100);
 
     if (beforeRight == data[kDs5IdxRumbleRight] && beforeLeft == data[kDs5IdxRumbleLeft]) {
         return;  // nothing changed -- usually both motors already at rest
@@ -205,8 +218,10 @@ static void ds5_override_rumble(uint8_t *data, size_t length)
     // Rumble reports stream during play, so this is logged sparsely on purpose.
     const uint64_t count = ++g_ds5_rumble_scale_count;
     if (count <= 3 || (count % 1000) == 0) {
-        std::cout << "ds5 rumble: scaled to " << clampedGain
-                  << "% (scale #" << count << ")" << std::endl;
+        device_log::report(device_log::msg()
+            << "rumble: scaled heavy to " << (masterGain * heavyGain) / 100
+            << "% soft to " << (masterGain * softGain) / 100
+            << "% (scale #" << count << ")");
     }
 }
 
