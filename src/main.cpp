@@ -59,6 +59,7 @@ namespace {
 #include "backend/bridge_enet.inl"
 #include "audio/audio_gain.inl"
 #include "audio/pcm_amplitude_log.inl"  // needs monotonic_us from backend/bridge.inl; must precede its caller
+#include "audio/iso_in_test_tone.inl"
 #include "usbip/device.inl"
 #include "audio/iso_in_pacing.inl"
 #include "usbip/server.inl"

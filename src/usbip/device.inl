@@ -1448,7 +1448,12 @@ private:
             if (submitInfo != nullptr) {
                 submitInfo->endpointIso = true;
             }
-            inData->assign(transferLength, 0);
+            // Diagnostic tone, OFF unless CTM_MIC_TEST_TONE is set. Returns
+            // false when disarmed, leaving the zero-fill below untouched.
+            // See src/audio/iso_in_test_tone.inl.
+            if (!iso_in_fill_test_tone(inData, transferLength)) {
+                inData->assign(transferLength, 0);
+            }
             return kStatusOk;
         }
 
