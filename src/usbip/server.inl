@@ -472,6 +472,12 @@ private:
             inputWaitUsMax = (std::max<uint32_t>)(inputWaitUsMax, submitInfo.inputWaitUs);
         };
 
+        // Pace inbound audio (microphone) completions to real
+        // time. Answering them inline lets Windows free-run the endpoint at
+        // ~28k requests/second. See src/audio/iso_in_pacing.inl.
+        IsoInPacer isoInPacer;
+        isoInPacer.start(send_submit, close_session);
+
         auto record_iso_ack_wait = [&](uint32_t waitedUs) {
             std::lock_guard<std::mutex> lock(statsMutex);
             isoOutAckWaitUsTotal += waitedUs;
@@ -901,6 +907,9 @@ private:
                               << " audio_build_fails=" << (audioStats.buildFails - lastAudioStats.buildFails)
                               << " audio_send_fails=" << (audioStats.sendFails - lastAudioStats.sendFails)
                               << " audio_tail_bytes=" << (audioStats.trailingBytes - lastAudioStats.trailingBytes)
+                              << " isoin_paced=" << isoInPacer.paced()
+                              << " isoin_depth=" << isoInPacer.depth()
+                              << " isoin_refused=" << isoInPacer.refused()
                               << " errors=" << errorDelta
                               << std::defaultfloat
                               << std::endl;
@@ -961,6 +970,24 @@ private:
                 isoOutAckCv.notify_one();
                 continue;
             }
+            // Hold inbound audio completions for the duration
+            // of the audio they carry instead of answering instantly.
+            // submit() returns false if the pacer is stopped or its queue is
+            // full; then fall through and send now. Never drop a URB.
+            if (isIso && direction == kUsbipDirIn && status == kStatusOk) {
+                IsoInPending pacedItem;
+                pacedItem.seqnum = seqnum;
+                pacedItem.status = status;
+                pacedItem.actualLength = actualLength;
+                pacedItem.startFrame = startFrame;
+                pacedItem.payload = payload;
+                pacedItem.packets = packets;
+                pacedItem.isoDescriptors = isoDescriptors;
+                pacedItem.durationUs = IsoInPacer::duration_us_for_bytes(actualLength);
+                if (isoInPacer.submit(std::move(pacedItem))) {
+                    continue;
+                }
+            }
             if (!send_submit(
                     seqnum,
                     status,
@@ -985,6 +1012,7 @@ private:
                 kv.second->thread.join();
             }
         }
+        isoInPacer.stop();   // join the inbound pacing thread
         if (isoOutAckWorker.joinable()) {
             isoOutAckWorker.join();
         }

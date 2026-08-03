@@ -60,6 +60,7 @@ namespace {
 #include "audio/audio_gain.inl"
 #include "audio/pcm_amplitude_log.inl"  // needs monotonic_us from backend/bridge.inl; must precede its caller
 #include "usbip/device.inl"
+#include "audio/iso_in_pacing.inl"
 #include "usbip/server.inl"
 #include "app/cli.inl"
 #include "audio/ds5_apply_settings.inl"
