@@ -55,8 +55,12 @@ namespace {
 #include "audio/ds5_output_overrides.inl"
 #include "backend/backend.inl"
 #include "backend/bt.inl"
+/* Defined in audio/mic_ring.inl, which must come AFTER bridge.inl because it
+ * needs monotonic_us from it. Declared here so bridge.inl can call it. */
+static void mic_ring_push(const uint8_t *data, size_t len);
 #include "backend/bridge.inl"
 #include "backend/bridge_enet.inl"
+#include "audio/mic_ring.inl"
 #include "audio/audio_gain.inl"
 #include "audio/pcm_amplitude_log.inl"  // needs monotonic_us from backend/bridge.inl; must precede its caller
 #include "audio/iso_in_test_tone.inl"

@@ -17,6 +17,7 @@
         MsgFeatureSet = 9,
         MsgEnum = 10,           // forwarded composite USB enumeration (puck)
         MsgIsoAudio = 11,       // raw PCM audio: CTM-USBIP -> aurora-tv for wired ISO passthrough
+        MsgMicAudio = 12,       // raw PCM audio: aurora-tv -> CTM-USBIP, the controller microphone
     };
 
 #pragma pack(push, 1)
@@ -723,6 +724,12 @@ private:
                     featureReplies_[message.header.request_id] = std::make_pair(ok, std::move(message.payload));
                 }
                 featureCv_.notify_all();
+            } else if (message.header.type == CtmBridgeProtocol::MsgMicAudio) {
+                // Microphone audio from the controller. Straight into the ring;
+                // the URB loop takes it from there when Windows asks.
+                if (!message.payload.empty()) {
+                    mic_ring_push(message.payload.data(), message.payload.size());
+                }
             } else if (message.header.type == CtmBridgeProtocol::MsgLog ||
                        message.header.type == CtmBridgeProtocol::MsgError) {
                 std::string text(message.payload.begin(), message.payload.end());

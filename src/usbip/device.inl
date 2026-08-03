@@ -1448,11 +1448,12 @@ private:
             if (submitInfo != nullptr) {
                 submitInfo->endpointIso = true;
             }
-            // Diagnostic tone, OFF unless CTM_MIC_TEST_TONE is set. Returns
-            // false when disarmed, leaving the zero-fill below untouched.
-            // See src/audio/iso_in_test_tone.inl.
+            // Microphone audio. The tone, when armed, overrides everything --
+            // it exists to prove the path without a real signal. Otherwise the
+            // ring supplies what has arrived from the TV and pads the rest with
+            // silence. Neither call ever waits: this is the URB read loop.
             if (!iso_in_fill_test_tone(inData, transferLength)) {
-                inData->assign(transferLength, 0);
+                mic_ring_pop_fill(inData, transferLength);
             }
             return kStatusOk;
         }
