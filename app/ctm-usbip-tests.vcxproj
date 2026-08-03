@@ -75,6 +75,7 @@
     <ClCompile Include="..\src\map\runtime.cpp" />
     <ClCompile Include="..\tests\map_defaults_test.cpp" />
     <ClCompile Include="..\tests\device_config_test.cpp" />
+    <ClCompile Include="..\tests\iso_in_pacing_test.cpp" />
     <ClCompile Include="..\tests\tests_main.cpp" />
   </ItemGroup>
   <ItemGroup>
