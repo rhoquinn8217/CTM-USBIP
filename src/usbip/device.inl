@@ -1453,7 +1453,7 @@ private:
             // ring supplies what has arrived from the TV and pads the rest with
             // silence. Neither call ever waits: this is the URB read loop.
             if (!iso_in_fill_test_tone(inData, transferLength)) {
-                mic_ring_pop_fill(inData, transferLength);
+                mic_ring_pop_fill(backend_, inData, transferLength);
             }
             return kStatusOk;
         }

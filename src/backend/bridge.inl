@@ -702,7 +702,7 @@ private:
                 // session from opening with the tail of the old one -- seen as
                 // ~109 MB dropped in one second at start-up while the ring
                 // spilled stale audio nothing was reading.
-                mic_ring_reset();
+                mic_ring_reset(this);
                 lastInputReceiveUs = 0;
                 if (!accept_client(false, nullptr)) {
                     // Self-exit (grace expired), not an external stop(): tell the
@@ -734,7 +734,7 @@ private:
                 // Microphone audio from the controller. Straight into the ring;
                 // the URB loop takes it from there when Windows asks.
                 if (!message.payload.empty()) {
-                    mic_ring_push(message.payload.data(), message.payload.size());
+                    mic_ring_push(this, message.payload.data(), message.payload.size());
                 }
             } else if (message.header.type == CtmBridgeProtocol::MsgLog ||
                        message.header.type == CtmBridgeProtocol::MsgError) {

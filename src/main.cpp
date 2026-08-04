@@ -57,8 +57,8 @@ namespace {
 #include "backend/bt.inl"
 /* Defined in audio/mic_ring.inl, which must come AFTER bridge.inl because it
  * needs monotonic_us from it. Declared here so bridge.inl can call it. */
-static void mic_ring_push(const uint8_t *data, size_t len);
-static void mic_ring_reset();
+static void mic_ring_push(const CtmBackend *owner, const uint8_t *data, size_t len);
+static void mic_ring_reset(const CtmBackend *owner);
 #include "backend/bridge.inl"
 #include "backend/bridge_enet.inl"
 #include "audio/mic_ring.inl"

@@ -1,32 +1,39 @@
 // mic_ring.inl -- FORK-ONLY (rhoquinn8217/CTM-USBIP).
 //
 // Holds microphone audio arriving from the TV until the Windows audio driver
-// asks for it.
+// asks for it. ONE RING PER SESSION, keyed by the backend that owns it.
+//
+// WHY PER SESSION
+//   There used to be a single ring for the whole process. With two
+//   controllers bridged at once, both TVs pushed into it and both Windows
+//   microphone entries drew from it, so each entry received a mixture of both
+//   voices. Measured 2026-08-03: in_bytes 384,000/sec (both controllers
+//   sending correctly), out_bytes matching, nothing dropped or short -- the
+//   plumbing was right and only the ROUTING was wrong.
+//
+//   The owner is the backend pointer. The bridge reader knows its own `this`
+//   when audio arrives; the virtual device knows its backend_ when Windows
+//   asks. Same object, so the two ends agree without any new plumbing.
 //
 // WHY A BUFFER IS NEEDED AT ALL
 //   Two clocks that nobody keeps in step. The TV reads the controller's
-//   microphone in 10 ms chunks and sends each one as it lands; Windows asks
-//   for audio on its own schedule. Without something in between, a chunk
-//   arriving a millisecond late means the host gets nothing, and a chunk
-//   arriving early has nowhere to go.
+//   microphone in periods and sends each as it lands; Windows asks on its own
+//   schedule. Without something in between, a chunk arriving a millisecond
+//   late means the host gets nothing.
 //
 // THE RULES, MIRRORED FROM THE OUTBOUND DESIGN
-//   The outbound jitter design (iso-audio-jitter-buffer.md) settled these for
-//   audio going the other way. They hold inbound with the roles swapped:
+//   From iso-audio-jitter-buffer.md, which settled these for audio going the
+//   other way. They hold inbound with the roles swapped:
 //     - shallow buffer, so added delay stays in the low milliseconds
-//     - SILENCE-FILL ON UNDERFLOW: never make the host wait
-//     - DROP-OLDEST ON OVERFLOW: never make the receiver wait
-//     - neither side ever blocks on the other
+//     - SHORT REPLY ON UNDERFLOW: hand over what exists and no more. An
+//       asynchronous capture endpoint signals its true rate by varying how
+//       much it hands over; padding with silence claims a rate we do not
+//       have. NEVER make the host wait.
+//     - DROP OLDEST ON OVERFLOW: never make the receiver wait.
 //
-//   The no-blocking rule matters more here than it looks. The pop happens on
-//   the URB read loop, which also carries button input at 250 Hz. Anything
-//   that waits there stalls the controller itself -- the same reason the
-//   inbound pacing had to be moved off that thread.
-//
-// LIMITATION: one ring for the whole process. With two controllers bridged at
-// once their microphones would share it and both would be wrong. Acceptable
-// while the feature is being brought up; NOT acceptable for release. Fixing it
-// means keying the ring by session, which is a bigger change than this file.
+//   The no-blocking rule matters more than it looks. The pop happens on the
+//   URB read loop, which also carries button input at 250 Hz. Anything that
+//   waits there stalls the controller itself.
 //
 // REQUIRED HEADERS (pulled in by main.cpp before this file):
 //   <atomic> <chrono> <cstdint> <cstring> <mutex> <vector>
@@ -40,117 +47,130 @@ static constexpr size_t kMicRingBytesPerSecond = 192000u;
 // the delay between speaking and being heard stays unnoticeable.
 static constexpr size_t kMicRingCapacity = kMicRingBytesPerSecond / 5u;
 
+// A fixed table rather than a map, so this file needs no extra headers and
+// cannot allocate on the URB read loop. Four bridged controllers at once is
+// already well past anything tested.
+static constexpr size_t kMicRingMaxSessions = 4;
+
+struct MicRingSlot {
+    const CtmBackend *owner = nullptr;
+    std::vector<uint8_t> data;
+    uint64_t pushed = 0;        // bytes arrived from the TV
+    uint64_t popped = 0;        // bytes handed to Windows
+    uint64_t dropped = 0;       // bytes discarded on overflow
+    uint64_t shortfall = 0;     // bytes asked for and not supplied
+    uint64_t requests = 0;
+    uint64_t lastLogUs = 0;
+};
+
 static std::mutex g_micRingMutex;
-static std::vector<uint8_t> g_micRing;      // FIFO of raw PCM bytes
-static uint64_t g_micRingPushed = 0;        // bytes arrived from the TV
-static uint64_t g_micRingPopped = 0;        // bytes handed to Windows
-static uint64_t g_micRingDropped = 0;       // bytes discarded on overflow
-static uint64_t g_micRingUnderfilled = 0;   // bytes of silence used to make up a short read
-static uint64_t g_micRingRequests = 0;
-static uint64_t g_micRingLastLogUs = 0;
+static MicRingSlot g_micRings[kMicRingMaxSessions];
+
+// Caller must hold g_micRingMutex. Returns nullptr only if every slot is
+// taken by a different owner.
+static MicRingSlot *mic_ring_slot(const CtmBackend *owner, bool create)
+{
+    for (size_t i = 0; i < kMicRingMaxSessions; ++i) {
+        if (g_micRings[i].owner == owner) {
+            return &g_micRings[i];
+        }
+    }
+    if (!create) {
+        return nullptr;
+    }
+    for (size_t i = 0; i < kMicRingMaxSessions; ++i) {
+        if (g_micRings[i].owner == nullptr) {
+            g_micRings[i].owner = owner;
+            return &g_micRings[i];
+        }
+    }
+    return nullptr;
+}
 
 // Called from the bridge reader thread when a microphone message arrives.
-static void mic_ring_push(const uint8_t *data, size_t len)
+static void mic_ring_push(const CtmBackend *owner, const uint8_t *data, size_t len)
 {
-    if (data == nullptr || len == 0) {
+    if (owner == nullptr || data == nullptr || len == 0) {
         return;
     }
     std::lock_guard<std::mutex> lock(g_micRingMutex);
-    g_micRing.insert(g_micRing.end(), data, data + len);
-    g_micRingPushed += len;
-    if (g_micRing.size() > kMicRingCapacity) {
-        // Drop from the FRONT: the newest audio is the audio someone is
-        // waiting to hear. Keeping stale samples would grow the delay
-        // permanently, which is worse than a brief gap.
-        const size_t excess = g_micRing.size() - kMicRingCapacity;
-        g_micRing.erase(g_micRing.begin(), g_micRing.begin() + excess);
-        g_micRingDropped += excess;
+    MicRingSlot *slot = mic_ring_slot(owner, true);
+    if (slot == nullptr) {
+        return;             // more sessions than slots; drop rather than mix
+    }
+    slot->data.insert(slot->data.end(), data, data + len);
+    slot->pushed += len;
+    if (slot->data.size() > kMicRingCapacity) {
+        // Drop from the FRONT: the newest audio is what someone is waiting to
+        // hear. Keeping stale samples would grow the delay permanently, which
+        // is worse than a brief gap.
+        const size_t excess = slot->data.size() - kMicRingCapacity;
+        slot->data.erase(slot->data.begin(), slot->data.begin() + excess);
+        slot->dropped += excess;
     }
 }
 
-// Called from the URB read loop. Hands over as much as the ring holds, up to
-// `want`, and NO MORE -- a short reply is how an asynchronous capture endpoint
-// tells the host its real rate. NEVER WAITS.
-//
-// WHY IT NO LONGER PADS WITH SILENCE
-//   The controller's microphone runs on its own clock, independent of the
-//   host's. The endpoint says so itself: the device reports it as
-//   "2 IN (ASYNC)". The USB audio class defines asynchronous endpoints as
-//   producing data at a rate locked to a clock outside USB, which cannot be
-//   synchronised to the host's frame clock -- so the two rates never match
-//   exactly, and the device signals its true rate by VARYING HOW MUCH IT
-//   HANDS OVER.
-//
-//   Padding to the requested size claimed a rate we did not have. The ring
-//   covered the difference until it ran out: measured 2026-08-02 at ~80
-//   bytes/second, emptying a 200 ms buffer in about three and a half minutes,
-//   after which the audio would start breaking up.
-//
-//   Handing over only what exists cannot drain, because output can never
-//   exceed input. The host's audio driver is built for this; the USB/IP layer
-//   already reports partial fills correctly per isochronous packet
-//   (append_iso_response_descriptors in server.inl).
-//
-// ⚠️ PACING MUST NOT BE TIMED ON WHAT THIS RETURNS. A short reply would mean
-//    a short hold, and an empty ring would mean no hold at all -- which brings
-//    back the ~28,000 requests/second busy loop this whole path exists to fix.
-//    server.inl times the pacer on the REQUESTED size instead.
-static void mic_ring_pop_fill(std::vector<uint8_t> *out, uint32_t want)
+// Called from the URB read loop. Hands over as much as this session's ring
+// holds, up to `want`, and NO MORE. NEVER WAITS.
+static void mic_ring_pop_fill(const CtmBackend *owner, std::vector<uint8_t> *out, uint32_t want)
 {
     if (out == nullptr) {
         return;
     }
     out->clear();
-    if (want == 0) {
+    if (want == 0 || owner == nullptr) {
         return;
     }
-    size_t taken = 0;
+
+    bool report = false;
+    uint64_t pushed = 0, popped = 0, dropped = 0, shortfall = 0, requests = 0;
     size_t remaining = 0;
+    size_t slotIndex = 0;
     {
         std::lock_guard<std::mutex> lock(g_micRingMutex);
-        taken = g_micRing.size() < want ? g_micRing.size() : want;
-        if (taken != 0) {
-            out->assign(g_micRing.begin(), g_micRing.begin() + taken);
-            g_micRing.erase(g_micRing.begin(), g_micRing.begin() + taken);
+        MicRingSlot *slot = mic_ring_slot(owner, false);
+        if (slot == nullptr) {
+            return;         // nothing has ever arrived for this session
         }
-        g_micRingPopped += taken;
-        g_micRingUnderfilled += (want - taken);
-        ++g_micRingRequests;
-        remaining = g_micRing.size();
+        slotIndex = static_cast<size_t>(slot - &g_micRings[0]);
+        const size_t taken = slot->data.size() < want ? slot->data.size() : want;
+        if (taken != 0) {
+            out->assign(slot->data.begin(), slot->data.begin() + taken);
+            slot->data.erase(slot->data.begin(), slot->data.begin() + taken);
+        }
+        slot->popped += taken;
+        slot->shortfall += (want - taken);
+        ++slot->requests;
+        remaining = slot->data.size();
+
+        const uint64_t nowUs = monotonic_us();
+        if (slot->lastLogUs == 0) {
+            slot->lastLogUs = nowUs;
+        } else if (nowUs - slot->lastLogUs >= 1000000ULL) {
+            slot->lastLogUs = nowUs;
+            report = true;
+            pushed = slot->pushed;
+            popped = slot->popped;
+            dropped = slot->dropped;
+            shortfall = slot->shortfall;
+            requests = slot->requests;
+            slot->pushed = 0;
+            slot->popped = 0;
+            slot->dropped = 0;
+            slot->shortfall = 0;
+            slot->requests = 0;
+        }
     }
 
-    // One line a second, so a session can be read without arming anything.
-    // Reported: bytes in and out per second, how much the host asked for and
-    // did not get (short_bytes -- no longer silence, simply not supplied),
-    // how much was thrown away, and how full the ring is sitting.
-    // ⭐ short_bytes near zero with a steady fill_bytes is a healthy stream.
-    const uint64_t nowUs = monotonic_us();
-    bool report = false;
-    uint64_t pushed = 0, popped = 0, dropped = 0, underfilled = 0, requests = 0;
-    {
-        std::lock_guard<std::mutex> lock(g_micRingMutex);
-        if (g_micRingLastLogUs == 0) {
-            g_micRingLastLogUs = nowUs;
-        } else if (nowUs - g_micRingLastLogUs >= 1000000ULL) {
-            g_micRingLastLogUs = nowUs;
-            report = true;
-            pushed = g_micRingPushed;
-            popped = g_micRingPopped;
-            dropped = g_micRingDropped;
-            underfilled = g_micRingUnderfilled;
-            requests = g_micRingRequests;
-            g_micRingPushed = 0;
-            g_micRingPopped = 0;
-            g_micRingDropped = 0;
-            g_micRingUnderfilled = 0;
-            g_micRingRequests = 0;
-        }
-    }
+    // One line a second PER SESSION, so a two-controller session can be read
+    // without arming anything. ⭐ short_bytes near zero with a steady
+    // fill_bytes is a healthy stream.
     if (report) {
         std::cout << "mic ring"
+                  << " session=" << slotIndex
                   << " in_bytes=" << pushed
                   << " out_bytes=" << popped
-                  << " short_bytes=" << underfilled
+                  << " short_bytes=" << shortfall
                   << " dropped_bytes=" << dropped
                   << " requests=" << requests
                   << " fill_bytes=" << remaining
@@ -158,16 +178,25 @@ static void mic_ring_pop_fill(std::vector<uint8_t> *out, uint32_t want)
     }
 }
 
-// Clear on session teardown so a new session does not start by playing the
-// tail of the old one.
-static void mic_ring_reset()
+// Clear and release this session's slot on teardown, so a new session does
+// not start by playing the tail of the old one and the slot can be reused.
+static void mic_ring_reset(const CtmBackend *owner)
 {
+    if (owner == nullptr) {
+        return;
+    }
     std::lock_guard<std::mutex> lock(g_micRingMutex);
-    g_micRing.clear();
-    g_micRingPushed = 0;
-    g_micRingPopped = 0;
-    g_micRingDropped = 0;
-    g_micRingUnderfilled = 0;
-    g_micRingRequests = 0;
-    g_micRingLastLogUs = 0;
+    MicRingSlot *slot = mic_ring_slot(owner, false);
+    if (slot == nullptr) {
+        return;
+    }
+    slot->data.clear();
+    slot->data.shrink_to_fit();
+    slot->owner = nullptr;
+    slot->pushed = 0;
+    slot->popped = 0;
+    slot->dropped = 0;
+    slot->shortfall = 0;
+    slot->requests = 0;
+    slot->lastLogUs = 0;
 }
