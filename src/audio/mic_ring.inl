@@ -68,14 +68,39 @@ static void mic_ring_push(const uint8_t *data, size_t len)
     }
 }
 
-// Called from the URB read loop. Fills `out` with exactly `want` bytes, using
-// silence for whatever the ring cannot supply. NEVER WAITS.
+// Called from the URB read loop. Hands over as much as the ring holds, up to
+// `want`, and NO MORE -- a short reply is how an asynchronous capture endpoint
+// tells the host its real rate. NEVER WAITS.
+//
+// WHY IT NO LONGER PADS WITH SILENCE
+//   The controller's microphone runs on its own clock, independent of the
+//   host's. The endpoint says so itself: the device reports it as
+//   "2 IN (ASYNC)". The USB audio class defines asynchronous endpoints as
+//   producing data at a rate locked to a clock outside USB, which cannot be
+//   synchronised to the host's frame clock -- so the two rates never match
+//   exactly, and the device signals its true rate by VARYING HOW MUCH IT
+//   HANDS OVER.
+//
+//   Padding to the requested size claimed a rate we did not have. The ring
+//   covered the difference until it ran out: measured 2026-08-02 at ~80
+//   bytes/second, emptying a 200 ms buffer in about three and a half minutes,
+//   after which the audio would start breaking up.
+//
+//   Handing over only what exists cannot drain, because output can never
+//   exceed input. The host's audio driver is built for this; the USB/IP layer
+//   already reports partial fills correctly per isochronous packet
+//   (append_iso_response_descriptors in server.inl).
+//
+// ⚠️ PACING MUST NOT BE TIMED ON WHAT THIS RETURNS. A short reply would mean
+//    a short hold, and an empty ring would mean no hold at all -- which brings
+//    back the ~28,000 requests/second busy loop this whole path exists to fix.
+//    server.inl times the pacer on the REQUESTED size instead.
 static void mic_ring_pop_fill(std::vector<uint8_t> *out, uint32_t want)
 {
     if (out == nullptr) {
         return;
     }
-    out->assign(want, 0);
+    out->clear();
     if (want == 0) {
         return;
     }
@@ -85,7 +110,7 @@ static void mic_ring_pop_fill(std::vector<uint8_t> *out, uint32_t want)
         std::lock_guard<std::mutex> lock(g_micRingMutex);
         taken = g_micRing.size() < want ? g_micRing.size() : want;
         if (taken != 0) {
-            std::memcpy(out->data(), g_micRing.data(), taken);
+            out->assign(g_micRing.begin(), g_micRing.begin() + taken);
             g_micRing.erase(g_micRing.begin(), g_micRing.begin() + taken);
         }
         g_micRingPopped += taken;
@@ -95,8 +120,10 @@ static void mic_ring_pop_fill(std::vector<uint8_t> *out, uint32_t want)
     }
 
     // One line a second, so a session can be read without arming anything.
-    // Reported: bytes in and out per second, how much silence had to be
-    // invented, how much was thrown away, and how full the ring is sitting.
+    // Reported: bytes in and out per second, how much the host asked for and
+    // did not get (short_bytes -- no longer silence, simply not supplied),
+    // how much was thrown away, and how full the ring is sitting.
+    // ⭐ short_bytes near zero with a steady fill_bytes is a healthy stream.
     const uint64_t nowUs = monotonic_us();
     bool report = false;
     uint64_t pushed = 0, popped = 0, dropped = 0, underfilled = 0, requests = 0;
@@ -123,7 +150,7 @@ static void mic_ring_pop_fill(std::vector<uint8_t> *out, uint32_t want)
         std::cout << "mic ring"
                   << " in_bytes=" << pushed
                   << " out_bytes=" << popped
-                  << " silence_bytes=" << underfilled
+                  << " short_bytes=" << underfilled
                   << " dropped_bytes=" << dropped
                   << " requests=" << requests
                   << " fill_bytes=" << remaining

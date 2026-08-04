@@ -983,7 +983,11 @@ private:
                 pacedItem.payload = payload;
                 pacedItem.packets = packets;
                 pacedItem.isoDescriptors = isoDescriptors;
-                pacedItem.durationUs = IsoInPacer::duration_us_for_bytes(actualLength);
+                // Timed on what the host ASKED for, not what we supplied. The
+                // ring hands back only what it holds, so a short reply is normal;
+                // timing on it would mean no hold at all when the ring is empty,
+                // and the free-running endpoint would come straight back.
+                pacedItem.durationUs = IsoInPacer::duration_us_for_bytes(transferLength);
                 if (isoInPacer.submit(std::move(pacedItem))) {
                     continue;
                 }

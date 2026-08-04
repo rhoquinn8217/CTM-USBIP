@@ -697,6 +697,12 @@ private:
                     std::wcerr << L"bridge client disconnected: " << error << L"\n";
                 }
                 close_client_socket();
+                // The TV is gone, so whatever microphone audio it sent is from a
+                // session that no longer exists. Clearing here stops the next
+                // session from opening with the tail of the old one -- seen as
+                // ~109 MB dropped in one second at start-up while the ring
+                // spilled stale audio nothing was reading.
+                mic_ring_reset();
                 lastInputReceiveUs = 0;
                 if (!accept_client(false, nullptr)) {
                     // Self-exit (grace expired), not an external stop(): tell the
