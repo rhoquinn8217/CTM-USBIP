@@ -61,7 +61,21 @@ static void ds5_apply_initial_settings(CtmBackend *backend)
     const Ds5AudioOutput output = ds5_audio_output_for(section);
     const int speakerPercent = ds5_level_for(output, true, section);
     const int headsetPercent = ds5_level_for(output, false, section);
-    if (output == Ds5AudioOutput::Auto && speakerPercent < 0 && headsetPercent < 0) {
+
+    // Microphone mute, off unless asked for. Muting AT THE CONTROLLER is the
+    // only mute that cannot be defeated by proximity: a muted microphone hears
+    // nothing regardless of how close it sits to another controller. That is
+    // what makes it the isolation instrument for two-controller testing --
+    // every attempt so far has foundered on both microphones genuinely
+    // hearing the same room.
+    //
+    // ⛔ This is the FIRST HALF of the mute work. The agreed default is
+    // hold-to-talk, which means starting muted -- but nothing yet handles the
+    // button that would unmute, so defaulting to muted here would ship a
+    // microphone that never works. Default stays false until the button lands.
+    const bool micMuted = device_config_bool(section, "mic_muted", false);
+
+    if (output == Ds5AudioOutput::Auto && speakerPercent < 0 && headsetPercent < 0 && !micMuted) {
         return;   // nothing configured
     }
 
@@ -83,6 +97,21 @@ static void ds5_apply_initial_settings(CtmBackend *backend)
     claim = static_cast<uint8_t>(claim & ~(kDs5ClaimRumbleA | kDs5ClaimRumbleB));
     report[kDs5IdxValidFlag0] = claim;
 
+    // Mute lives in the OTHER flag panel, so it is claimed separately. Panel 2
+    // is left at zero when nothing here is configured, which claims nothing.
+    if (micMuted) {
+        report[kDs5IdxValidFlag1] =
+            static_cast<uint8_t>(kDs5AllowPowerSaveMute | kDs5AllowMuteLed);
+        // Only bit 4. The rest of this byte is the speaker mute, the headphone
+        // mute, the haptic mute and the power-save switches; zero is the
+        // everything-on state and must stay that way.
+        report[kDs5IdxPowerSaveMute] = kDs5MicMute;
+        // The light is the whole point of a mute that works. A microphone that
+        // is off with no indication is the same fault as one that is on with
+        // no indication -- the user cannot tell either way.
+        report[kDs5IdxMuteLed] = kDs5MuteLedOn;
+    }
+
     // Routing, defaulting to the speaker when nothing is configured -- that is
     // the behaviour this had before routing existed.
     // Under auto, default to the speaker -- the behaviour before routing existed.
@@ -103,6 +132,10 @@ static void ds5_apply_initial_settings(CtmBackend *backend)
             << section << ": settings: send FAILED -- "
             << std::string(error.begin(), error.end()));
         return;
+    }
+    if (micMuted) {
+        device_log::report(device_log::msg()
+            << section << ": settings: microphone MUTED at the controller, light on");
     }
     device_log::report(device_log::msg()
         << section << ": settings: sent audio to "

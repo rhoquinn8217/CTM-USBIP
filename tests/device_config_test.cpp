@@ -94,6 +94,54 @@ int run_device_config_tests()
         CTM_CHECK_EQ(static_cast<int>(report[6]), 0x3d + (40 * (0x64 - 0x3d)) / 100);
     }
 
+    // --- Microphone mute constants ------------------------------------------
+    //
+    // The SEND path (ds5_apply_settings.inl) cannot be tested here -- it needs
+    // the backend type, see units.h. But the constants ARE testable, and the
+    // constants are where the risk lives: the one mistake made while writing
+    // this feature was putting the permission bit in the wrong flag byte, and
+    // the one way it could break something that works today is by disturbing
+    // a bit that is not the microphone's.
+
+    section("mic mute claims permission in flag panel 2, NOT panel 1");
+    {
+        // Panel 1 (byte 1) carries volume and audio-control permissions.
+        // Panel 2 (byte 2) carries the mute-control permissions. Claiming mute
+        // in panel 1 does nothing at all -- and that mistake was made and
+        // caught on 2026-08-04 before it reached hardware.
+        CTM_CHECK_EQ(static_cast<int>(units::kDs5IdxValidFlag0), 1);
+        CTM_CHECK_EQ(static_cast<int>(units::kDs5IdxValidFlag1), 2);
+        CTM_CHECK_EQ(static_cast<int>(units::kDs5AllowPowerSaveMute), 0x02);
+        CTM_CHECK_EQ(static_cast<int>(units::kDs5AllowMuteLed), 0x01);
+    }
+
+    section("the mic mute bit does not overlap any other switch in its byte");
+    {
+        // !! THE SAFETY CHECK. Byte 10 carries the speaker mute, the headphone
+        // !! mute, the haptic mute and four power-save switches alongside the
+        // !! microphone mute. Setting the wrong bit -- or the whole byte --
+        // !! silences the controller speaker, which is a feature that works
+        // !! today and would be a regression nobody would connect to this.
+        CTM_CHECK_EQ(static_cast<int>(units::kDs5IdxPowerSaveMute), 10);
+        CTM_CHECK_EQ(static_cast<int>(units::kDs5MicMute), 0x10);
+
+        // Exactly one bit, and it is bit 4.
+        const unsigned bits = static_cast<unsigned>(units::kDs5MicMute);
+        CTM_CHECK_EQ(bits & (bits - 1u), 0u);
+        CTM_CHECK_EQ(bits, 1u << 4);
+    }
+
+    section("the mute light is a separate byte from the mute itself");
+    {
+        // Two independent controls with two independent permissions. A mute
+        // that works with no light is as bad as a light with no mute: either
+        // way the user cannot tell what is true.
+        CTM_CHECK_EQ(static_cast<int>(units::kDs5IdxMuteLed), 9);
+        CTM_CHECK_EQ(units::kDs5IdxMuteLed != units::kDs5IdxPowerSaveMute, true);
+        CTM_CHECK_EQ(static_cast<int>(units::kDs5MuteLedOn), 0x01);
+        CTM_CHECK_EQ(static_cast<int>(units::kDs5MuteLedOff), 0x00);
+    }
+
     // --- Per-device sections ------------------------------------------------
     section("an unrecognised device is left completely untouched");
     {

@@ -78,6 +78,31 @@ static const uint8_t kDs5RouteMask          = 0x30;
 static const uint8_t kDs5SpeakerVolumeMax   = 0x64;  // speaker full scale
 static const uint8_t kDs5HeadsetVolumeMax   = 0x7f;  // headset full scale -- NOT the same
 
+// Microphone mute. ⭐ THE PERMISSION LIVES IN A DIFFERENT FLAG BYTE from every
+// setting above: byte 1 is flag panel 1 (volumes, audio control), byte 2 is
+// flag panel 2 (mute LED, audio-mute controls). Claiming mute in panel 1 does
+// nothing at all.
+//
+// Positions and bits corroborated 2026-08-04 against TWO independent sources
+// that agree exactly: the Linux kernel's hid-playstation driver and
+// nowrep/dualsensectl. Both set the same permission bit and the same mute bit.
+// NO CODE WAS COPIED -- these are hardware register positions, read and
+// re-expressed.
+//
+// ⚠️ The mute byte is SHARED with the speaker mute, the headphone mute, the
+// haptic mute and four power-save switches. Writing the whole byte to mute a
+// microphone would silence the speaker as a side effect. Only bit 4 is ever
+// set here, and the rest of the byte is left at zero, which is the
+// everything-on state.
+static const size_t  kDs5IdxValidFlag1      = 2;     // flag panel 2
+static const size_t  kDs5IdxMuteLed         = 9;     // mute button's light
+static const size_t  kDs5IdxPowerSaveMute   = 10;    // mutes + power-save switches
+static const uint8_t kDs5AllowMuteLed       = 0x01;  // panel 2, bit 0
+static const uint8_t kDs5AllowPowerSaveMute = 0x02;  // panel 2, bit 1
+static const uint8_t kDs5MicMute            = 0x10;  // byte 10, bit 4
+static const uint8_t kDs5MuteLedOn          = 0x01;  // light solid on
+static const uint8_t kDs5MuteLedOff         = 0x00;
+
 // !! THE OUTPUTS HAVE A FLOOR, AND IT IS HIGH. The Linux hid-playstation patch
 // !! series records the speaker's accepted range as 0x3d..0x64 -- so roughly
 // !! the bottom 60% of a naive 0..max mapping is BELOW THE HARDWARE FLOOR and
