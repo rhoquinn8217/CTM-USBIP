@@ -68,10 +68,7 @@ static std::wstring bridge_profile_for_kind(const std::string &kind)
         return find_relative_asset(L"profiles\\descriptors\\ds5_composite.profile");
     }
     if (kind == "ds5e_usb") {
-        // The Edge is presented with the base DualSense's descriptor for now, so
-        // it works as a DualSense. Its extra buttons stay invisible to the host
-        // until an Edge descriptor is captured and added here.
-        return find_relative_asset(L"profiles\\descriptors\\ds5_composite.profile");
+        return find_relative_asset(L"profiles\\descriptors\\ds5e_composite.profile");
     }
     if (kind == "puck") {
         return find_relative_asset(L"profiles\\descriptors\\steam_puck.profile");

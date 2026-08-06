@@ -60,6 +60,7 @@ $out = Join-Path $Root "out\$Platform\$Configuration"
 New-Item -ItemType Directory -Force -Path (Join-Path $out 'profiles\descriptors') | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $out 'maps') | Out-Null
 Copy-Item -Force -Path (Join-Path $Root 'profiles\descriptors\ds5_composite.profile') -Destination (Join-Path $out 'profiles\descriptors\ds5_composite.profile')
+Copy-Item -Force -Path (Join-Path $Root 'profiles\descriptors\ds5e_composite.profile') -Destination (Join-Path $out 'profiles\descriptors\ds5e_composite.profile')
 Copy-Item -Force -Path (Join-Path $Root 'maps\ds5_usb_over_ds5_bt.map') -Destination (Join-Path $out 'maps\ds5_usb_over_ds5_bt.map')
 Copy-Item -Force -Path (Join-Path $Root 'maps\ds5_usb_over_ds5_usb.map') -Destination (Join-Path $out 'maps\ds5_usb_over_ds5_usb.map')
 Copy-Item -Force -Path (Join-Path $Root 'profiles\descriptors\ds4_composite.profile') -Destination (Join-Path $out 'profiles\descriptors\ds4_composite.profile')
