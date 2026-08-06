@@ -67,6 +67,12 @@ static std::wstring bridge_profile_for_kind(const std::string &kind)
     if (kind == "ds5_usb") {
         return find_relative_asset(L"profiles\\descriptors\\ds5_composite.profile");
     }
+    if (kind == "ds5e_usb") {
+        // The Edge is presented with the base DualSense's descriptor for now, so
+        // it works as a DualSense. Its extra buttons stay invisible to the host
+        // until an Edge descriptor is captured and added here.
+        return find_relative_asset(L"profiles\\descriptors\\ds5_composite.profile");
+    }
     if (kind == "puck") {
         return find_relative_asset(L"profiles\\descriptors\\steam_puck.profile");
     }
@@ -85,6 +91,9 @@ static std::wstring bridge_map_for_kind(const std::string &kind)
         return find_ds5_map_file();
     }
     if (kind == "ds5_usb") {
+        return find_relative_asset(L"maps\\ds5_usb_over_ds5_usb.map");
+    }
+    if (kind == "ds5e_usb") {
         return find_relative_asset(L"maps\\ds5_usb_over_ds5_usb.map");
     }
     if (kind == "puck") {
@@ -458,7 +467,8 @@ static void handle_agent_client(SOCKET client, const sockaddr_in &peer)
         unsigned long port = 0;
         std::string busIdAscii;
         input >> kind >> port >> busIdAscii;
-        if ((kind != "ds4" && kind != "ds5" && kind != "ds5_usb" && kind != "hid" && kind != "puck" && kind != "xbox") ||
+        if ((kind != "ds4" && kind != "ds5" && kind != "ds5_usb" && kind != "ds5e_usb" &&
+             kind != "hid" && kind != "puck" && kind != "xbox") ||
             port < 1024 || port > 65535 ||
             busIdAscii.empty() || busIdAscii.size() > 31) {
             send_text(client, "ERR bad bridge args\n");
