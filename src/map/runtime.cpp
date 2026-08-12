@@ -430,6 +430,14 @@ bool CtmMapRuntime::load(const std::wstring &path, std::wstring *error)
     timingBlock_.assign(9, 0);
     audioBlock_.assign(2 + opusPayloadBytes_, 0);
     hapticBlock_.assign(66, 0);
+    // A map is loaded once per device, and a device exists because a
+    // controller was just bridged -- so this is the moment the TV wants to
+    // announce. Harmless for maps that never ask for the hold.
+    if (audioHoldMs_ > 0) {
+        hold_audio_block(audioHoldMs_);
+        std::cout << "[audio-hold] armed for " << audioHoldMs_
+                  << " ms at map load" << std::endl;
+    }
     return true;
 }
 
@@ -905,6 +913,9 @@ bool CtmMapRuntime::parse_map(std::wstring *error)
     isoChannels_ = static_cast<uint8_t>(get_u32(ini, "path.iso.virtual_to_physical_stream", "channels", isoChannels_));
     isoFrameSamples_ = static_cast<uint16_t>(get_u32(ini, "path.iso.virtual_to_physical_stream", "frame_samples", isoFrameSamples_));
     hapticOutputRate_ = static_cast<uint16_t>(get_u32(ini, "path.iso.virtual_to_physical_stream", "haptic_output_rate", hapticOutputRate_));
+    // 0 = off, which is every map but the Bluetooth DS5. See the note on
+    // audioHoldUntil_ for what it buys.
+    audioHoldMs_ = get_u32(ini, "path.iso.virtual_to_physical_stream", "audio_hold_ms", 0);
     streamReportId_ = static_cast<uint8_t>(get_u32(ini, "path.iso.virtual_to_physical_stream", "physical_report_id", streamReportId_));
     streamReportLength_ = static_cast<uint16_t>(get_u32(ini, "path.iso.virtual_to_physical_stream", "physical_report_length", streamReportLength_));
     {
@@ -2465,7 +2476,29 @@ bool CtmMapRuntime::execute_stream_op(
         else if (name == "audio_block") block = &audioBlock_;
         else if (name == "haptic_block") block = &hapticBlock_;
         else return false;
-        if (ifPresent) {
+        // hold=audio_block: append even while the payload is silent, for as
+        // long as a hold is running. Set at session start so a freshly
+        // bridged controller has reports the TV can put a confirmation tone
+        // into -- without it the block is absent and the tone is inaudible.
+        const bool wantsHold = (get("hold") == "audio_block");
+        const bool held = wantsHold && audio_block_held();
+        // One line the first time a held append actually happens, and one the
+        // first time a hold was asked for and had already expired. Without
+        // these there is no way to tell "the hold never armed" from "the hold
+        // armed and the block was skipped anyway" -- which is exactly the
+        // ambiguity that cost a test round on 2026-08-11.
+        if (wantsHold) {
+            static bool loggedHeld = false;
+            static bool loggedExpired = false;
+            if (held && !loggedHeld) {
+                loggedHeld = true;
+                std::cout << "[audio-hold] appending audio block while held" << std::endl;
+            } else if (!held && !loggedExpired) {
+                loggedExpired = true;
+                std::cout << "[audio-hold] hold requested but not active" << std::endl;
+            }
+        }
+        if (ifPresent && !held) {
             // payload=A..B narrows the zero-check to a specific window so a
             // block whose header bytes are non-zero can still be skipped when
             // its data payload is silent. Without payload= we check the whole

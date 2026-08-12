@@ -2,6 +2,7 @@
 
 #include "ctm/protocol.h"
 
+#include <chrono>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -75,6 +76,18 @@ public:
 
     void set_audio_latency(uint8_t latency) { audioLatency_ = latency; }
     void set_audio_block_id(uint8_t blockId) { audioBlockId_ = blockId; }
+
+    // Keep the audio block in the outgoing report for a while, even while its
+    // payload is silent. See audioHoldUntil_ for why.
+    void hold_audio_block(uint32_t ms)
+    {
+        audioHoldUntil_ = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds(ms);
+    }
+    bool audio_block_held() const
+    {
+        return std::chrono::steady_clock::now() < audioHoldUntil_;
+    }
 
     enum class PhysicalFeatureOperation {
         GetFeature,
@@ -415,6 +428,25 @@ private:
     uint8_t hapticBlockId_ = 0x92;
     uint8_t audioBlockId_ = 0x95;
     uint16_t opusPayloadBytes_ = 200;
+
+    /* HOLD THE AUDIO BLOCK OPEN FOR A WHILE AFTER A CONTROLLER IS BRIDGED.
+     *
+     * `block.append_if_present` skips a block whose payload is all zeros, and
+     * the audio block stays zeroed until Windows sends PCM. So a controller
+     * that has just been bridged, with nothing playing, emits reports with NO
+     * audio block at all -- and the TV's confirmation tone has nothing to
+     * write into. Measured on a monitor over Bluetooth 2026-08-11: the tone
+     * was audible only while a browser was already routed to the controller.
+     *
+     * Holding the block open for a few seconds at session start gives the TV
+     * a window of reports to fill. It costs one silent Opus frame per report
+     * for the duration and nothing at all afterwards.
+     *
+     * Only reachable from a map that asks for it -- see `hold=` on the
+     * append op -- and only one map does: the Bluetooth DS5. The wired path
+     * carries audio on an isochronous endpoint and never touches this. */
+    std::chrono::steady_clock::time_point audioHoldUntil_{};
+    uint32_t audioHoldMs_ = 0;   /* 0 = off; set per map via audio_hold_ms */
     uint16_t sbcPayloadBytes_ = 448;
     uint8_t sbcBitpool_ = 25;
     uint8_t sbcBlocks_ = 16;

@@ -623,7 +623,21 @@ private:
         bool streamStarted = false;
         while (audioThreadRunning_.load(std::memory_order_relaxed) && !g_stop.load()) {
             int pulled;
-            if (underrunSilence && streamStarted) {
+            // A CONTROLLER THAT HAS JUST BEEN BRIDGED HAS NEVER PLAYED
+            // ANYTHING, so streamStarted is false and the pull below blocks
+            // until real audio arrives -- which means NO stream report is
+            // emitted at all, not merely one without an audio block.
+            //
+            // That is why a confirmation tone from the TV was inaudible on a
+            // freshly bridged controller and audible the moment a browser was
+            // routed to it: the TV had nothing to write into.
+            //
+            // During the hold, take the timed path instead. It already fills
+            // with silence on timeout and keeps emitting, which is exactly
+            // what is wanted -- the keepalive existed, it was just gated
+            // behind having started.
+            const bool holdActive = map_.audio_block_held();
+            if ((underrunSilence && streamStarted) || holdActive) {
                 pulled = audioReservoir_.pull_timed(audioFrameSamples_, chunk.data(), chunkMs);
             } else {
                 pulled = audioReservoir_.pull(audioFrameSamples_, chunk.data()) ? 1 : -1;
