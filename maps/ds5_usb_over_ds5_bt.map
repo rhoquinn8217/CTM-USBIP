@@ -366,10 +366,13 @@ opus_frame_samples = 480
 state_block_id = 0x90
 timing_block_id = 0x91
 audio_block_id = 0x95
-# Keep emitting stream reports for this long after a controller is bridged,
-# even with nothing playing. Without it the audio thread blocks until the host
-# sends real audio, no report is emitted at all, and the TV's confirmation tone
-# has nothing to write into. 0 (the default) leaves every other map untouched.
+# The longest the TV may ask us to keep emitting stream reports with nothing
+# playing, and the switch for the feature: 0 (the default) means this device
+# does not do holds at all, which is every other map.
+#
+# Without a hold the audio thread waits for real audio, no report is emitted,
+# and a confirmation tone from the TV has nothing to write into. The TV asks
+# for one before each tone rather than us guessing when it wants it.
 audio_hold_ms = 3000
 haptic_block_id = 0x92
 opus_payload_bytes = 200

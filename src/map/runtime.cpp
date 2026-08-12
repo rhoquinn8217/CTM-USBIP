@@ -433,11 +433,13 @@ bool CtmMapRuntime::load(const std::wstring &path, std::wstring *error)
     // A map is loaded once per device, and a device exists because a
     // controller was just bridged -- so this is the moment the TV wants to
     // announce. Harmless for maps that never ask for the hold.
-    if (audioHoldMs_ > 0) {
-        hold_audio_block(audioHoldMs_);
-        std::cout << "[audio-hold] armed for " << audioHoldMs_
-                  << " ms at map load" << std::endl;
-    }
+    // NOT ARMED HERE ANY MORE. This used to hold the stream open for a few
+    // seconds whenever a map loaded, which is once per bridged controller --
+    // enough for the connect tone and no use at all for the unplug one, since
+    // this side cannot see an unplug coming.
+    //
+    // The TV asks instead, on every confirmation, which is one mechanism
+    // rather than two and works at both ends of a session.
     return true;
 }
 

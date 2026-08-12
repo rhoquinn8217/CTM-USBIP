@@ -18,6 +18,7 @@
         MsgEnum = 10,           // forwarded composite USB enumeration (puck)
         MsgIsoAudio = 11,       // raw PCM audio: CTM-USBIP -> aurora-tv for wired ISO passthrough
         MsgMicAudio = 12,       // raw PCM audio: aurora-tv -> CTM-USBIP, the controller microphone
+        MsgAudioHold = 13,      // aurora-tv -> CTM-USBIP: keep emitting audio for N ms
     };
 
 #pragma pack(push, 1)
@@ -103,6 +104,14 @@ public:
     // reconnect grace expired, or the idle rule fired; the owner should unplug
     // + reap this session. Must not block on joining this backend's threads —
     // the agent queues the reap and performs it on its own command loop.
+    // Called when the TV asks for the audio stream to be kept alive. Set by
+    // the device, which owns the map runtime where the hold actually lives.
+    // Same shape as the closed callback below.
+    void set_audio_hold_callback(std::function<void(uint32_t)> cb)
+    {
+        audioHoldCallback_ = std::move(cb);
+    }
+
     void set_closed_callback(std::function<void()> cb)
     {
         closedCallback_ = std::move(cb);
@@ -588,6 +597,8 @@ private:
 
     // Fire the closed callback exactly once (self-exit paths: grace expired,
     // idle rule). External stop() never routes through here.
+    std::function<void(uint32_t)> audioHoldCallback_;
+
     void fire_closed_callback()
     {
         if (running_.load() && !g_stop.load() && closedCallback_) {
@@ -735,6 +746,25 @@ private:
                 // the URB loop takes it from there when Windows asks.
                 if (!message.payload.empty()) {
                     mic_ring_push(this, message.payload.data(), message.payload.size());
+                }
+            } else if (message.header.type == CtmBridgeProtocol::MsgAudioHold) {
+                // "Keep the audio block in your outgoing reports for this
+                // long." Payload is a little-endian uint16 of milliseconds.
+                //
+                // The TV asks before it plays a confirmation tone. It has to:
+                // on Bluetooth the speaker rides inside the output report, and
+                // this side only emits those while it has real audio to send.
+                // At the moment a controller is bridged -- or released -- there
+                // is none, so without the hold there is no report for the tone
+                // to be written into.
+                //
+                // Clamped rather than trusted: a bad or hostile value should
+                // not be able to pin the audio stream open indefinitely.
+                if (message.payload.size() >= 2) {
+                    uint32_t ms = static_cast<uint32_t>(message.payload[0]) |
+                                  (static_cast<uint32_t>(message.payload[1]) << 8);
+                    if (ms > 5000) ms = 5000;
+                    if (audioHoldCallback_) audioHoldCallback_(ms);
                 }
             } else if (message.header.type == CtmBridgeProtocol::MsgLog ||
                        message.header.type == CtmBridgeProtocol::MsgError) {

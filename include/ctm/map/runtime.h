@@ -3,6 +3,7 @@
 #include "ctm/protocol.h"
 
 #include <chrono>
+#include <iostream>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -79,11 +80,24 @@ public:
 
     // Keep the audio block in the outgoing report for a while, even while its
     // payload is silent. See audioHoldUntil_ for why.
+    // audio_hold_ms in the map is both the switch and the ceiling: 0 means
+    // this device does not do holds at all, which is every map but the
+    // Bluetooth DualSense. Structural rather than incidental -- a wired
+    // device cannot be held open even if something asks.
     void hold_audio_block(uint32_t ms)
     {
+        if (audioHoldMs_ == 0) return;
+        if (ms > audioHoldMs_) ms = audioHoldMs_;
         audioHoldUntil_ = std::chrono::steady_clock::now() +
                           std::chrono::milliseconds(ms);
+        std::cout << "[audio-hold] holding the audio stream for " << ms
+                  << " ms at the TV's request" << std::endl;
     }
+    // Does this map do holds at all? Asked by the audio loop so it can stay
+    // awake enough to notice one arriving -- a blocking pull parks the thread
+    // and a parked thread never sees the next hold.
+    bool audio_holds_enabled() const { return audioHoldMs_ > 0; }
+
     bool audio_block_held() const
     {
         return std::chrono::steady_clock::now() < audioHoldUntil_;
