@@ -295,6 +295,16 @@ public:
         input31LastLog_ = now;
     }
 
+    // Keep the audio stream alive for a moment, at the TV's request. It asks
+    // before playing a confirmation tone: on Bluetooth the speaker rides
+    // inside the output report, and this side only emits those while it has
+    // real audio -- which at a bridge or an unplug it does not.
+    void hold_audio_block(uint32_t ms)
+    {
+        std::lock_guard<std::mutex> guard(mapMutex_);
+        map_.hold_audio_block(ms);
+    }
+
     void on_physical_input(const uint8_t *data, size_t length, uint8_t endpoint)
     {
         if (data == nullptr || length == 0) {
@@ -308,6 +318,41 @@ public:
                       << " head=" << hex_span(data, (std::min<size_t>)(length, 12)) << std::endl;
         }
         log_input31_research(data, length);
+
+        // --- MICROPHONE SURVEY, temporary ------------------------------------
+        //
+        // Does a Bluetooth DualSense ever send microphone audio to us, and what
+        // does such a report look like?
+        //
+        // DS5Dongle finds the mic in report 0x31 with bit 1 of byte 2 set, and
+        // the opus frame starting at byte 4. ⚠️ ITS OFFSETS ARE ONE HIGHER THAN
+        // OURS: it reads raw L2CAP frames where byte 0 is a transaction header
+        // and byte 1 is the report id. We receive what the TV read from
+        // /dev/hidrawN, where byte 0 IS the report id. So this prints bytes
+        // rather than assuming which one carries the flag.
+        //
+        // One line per distinct second byte, capped, so a 400 Hz stream cannot
+        // bury the log. If the flag never changes, nothing is arming the mic
+        // and that is the finding.
+        //
+        // ⛔ DELETE THIS once the question is answered. It is a survey, not a
+        // feature.
+        if (length >= 6 && data[0] == 0x31) {
+            static uint8_t seenFlag[256] = {0};
+            static int seenCount = 0;
+            if (!seenFlag[data[1]] && seenCount < 12) {
+                seenFlag[data[1]] = 1;
+                ++seenCount;
+                std::cout << "[mic-survey] report 0x31 len=" << length
+                          << " head=" << hex_span(data, 6)
+                          << "  byte1=0x" << std::hex << std::setw(2)
+                          << std::setfill('0') << static_cast<unsigned>(data[1])
+                          << std::dec << std::setfill(' ')
+                          << "  bit1=" << ((data[1] >> 1) & 1)
+                          << std::endl;
+            }
+        }
+        // --- end microphone survey -------------------------------------------
 
         // Composite (puck): each interface's HID report is forwarded verbatim,
         // tagged with its physical IN endpoint (carried in the bridge INPUT
@@ -637,7 +682,21 @@ private:
             // what is wanted -- the keepalive existed, it was just gated
             // behind having started.
             const bool holdActive = map_.audio_block_held();
-            if ((underrunSilence && streamStarted) || holdActive) {
+            // NEVER PARK IN A BLOCKING PULL ON A MAP THAT DOES HOLDS.
+            //
+            // pull() waits on a condition variable until real audio arrives.
+            // Once the first hold expired, this loop took that branch and sat
+            // there -- and the hold check at the top of the loop is never
+            // reached again, so a LATER hold could do nothing at all.
+            //
+            // Measured on the 32SR50F 2026-08-11: the connect tone worked and
+            // the unplug tone never did, however long the TV waited.
+            //
+            // The timed pull wakes every chunk, so a hold arriving later is
+            // seen. When nothing is held and nothing is playing the loop just
+            // goes back to sleep below -- no report is built.
+            const bool stayAwake = map_.audio_holds_enabled();
+            if ((underrunSilence && streamStarted) || holdActive || stayAwake) {
                 pulled = audioReservoir_.pull_timed(audioFrameSamples_, chunk.data(), chunkMs);
             } else {
                 pulled = audioReservoir_.pull(audioFrameSamples_, chunk.data()) ? 1 : -1;
@@ -646,6 +705,12 @@ private:
                 break;
             }
             if (pulled == 0) {
+                // Awake only to watch for a hold, with nothing to send and
+                // nothing held: go back round rather than emit a report
+                // nobody asked for.
+                if (stayAwake && !holdActive && !(underrunSilence && streamStarted)) {
+                    continue;
+                }
                 // Keep-alive: hold the pad-side stream continuous through host
                 // bursts (per-sound WASAPI open/close) — silence, not a stall.
                 std::fill(chunk.begin(), chunk.end(), static_cast<int16_t>(0));
