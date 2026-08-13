@@ -366,14 +366,6 @@ opus_frame_samples = 480
 state_block_id = 0x90
 timing_block_id = 0x91
 audio_block_id = 0x95
-# The longest the TV may ask us to keep emitting stream reports with nothing
-# playing, and the switch for the feature: 0 (the default) means this device
-# does not do holds at all, which is every other map.
-#
-# Without a hold the audio thread waits for real audio, no report is emitted,
-# and a confirmation tone from the TV has nothing to write into. The TV asks
-# for one before each tone rather than us guessing when it wants it.
-audio_hold_ms = 3000
 haptic_block_id = 0x92
 opus_payload_bytes = 200
 # Haptic chain output rate. Was 3200 (when input was 48 kHz, ratio 15:1);
@@ -419,11 +411,7 @@ op.28 = physical_report.clear
 op.29 = physical_report.header report=0x36 seq=high_nibble
 op.30 = block.append state_block
 op.31 = block.append timing_block
-# hold=audio_block keeps this block in the report for a few seconds after the
-# controller is bridged, even while the payload is silent. Without it a freshly
-# bridged controller emits no audio block at all until Windows sends PCM, and
-# the TV's confirmation tone has nothing to write into.
-op.32 = block.append_if_present audio_block payload=2..201 hold=audio_block
+op.32 = block.append_if_present audio_block payload=2..201
 # Channels 2/3 are a real stream lane; silence is still valid payload data.
 op.33 = block.append haptic_block
 op.34 = crc32.hid_output seed=0xa2 target=physical_report tail=last4

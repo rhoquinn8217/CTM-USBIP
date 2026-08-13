@@ -179,15 +179,6 @@ static void bridge_session_worker(AgentBridgeSession *session)
         // can't hijack the next plug's handshake). The reap is queued to the
         // agent loop: stop() joins the reader thread that fires this callback,
         // so reaping inline here would self-join.
-        // The TV asks for the audio stream to be kept alive before it plays a
-        // confirmation tone; the hold itself lives in the device's map
-        // runtime, so route it there.
-        {
-            auto device = session->device;
-            backend->set_audio_hold_callback([device](uint32_t ms) {
-                if (device) device->hold_audio_block(ms);
-            });
-        }
         {
             const std::wstring busId = session->busId;
             backend->set_closed_callback([busId]() {
