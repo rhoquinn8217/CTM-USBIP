@@ -313,34 +313,12 @@ public:
         //
         // A Bluetooth DualSense says what a report holds in the low nibble of
         // byte 1: bit 0 that controller state is present, bit 1 that audio is.
-        // With the microphone streaming it sends audio-only reports -- bit 1
-        // set, bit 0 CLEAR -- carrying encoded sound where the sticks and
-        // buttons would be.
+        // Everything below reads a report as sticks and buttons, and encoded
+        // sound read that way drove a mouse across a desktop.
         //
-        // Everything below hands the bytes to the map runtime, which reads
-        // them as pad state. Measured 2026-08-13: letting these through drove
-        // the mouse across the desktop continuously and made the machine
-        // unusable until the controller was switched off. ⭐ That is upstream's
-        // documented reason for deferring microphone support, reproduced.
-        //
-        // ⚠️ NOTHING IN THIS PROJECT TURNS THE MICROPHONE ON. This guard is
-        // here because something else might -- a leftover state from another
-        // program, or someone experimenting with the controller directly. It
-        // costs nothing when nothing is streaming, and it is the difference
-        // between a stray click and an unusable desktop when something is.
-        //
-        // ⓘ This is also the branch a decoder would live in, if the feature
-        // is ever built: the frame starts at byte 3, runs to the end of the
-        // report, and is stereo CELT at 10 ms. See bt-microphone-findings.md.
-        if (length >= 2 && data[0] >= 0x31 && (data[1] & 0x02)) {
-            static unsigned long micDropped = 0;
-            ++micDropped;
-            if (micDropped == 1 || (micDropped % 500) == 0) {
-                std::cout << "[mic] dropped " << micDropped
-                          << " audio report(s) -- the controller's microphone is"
-                          << " streaming and nothing here asked it to"
-                          << std::endl;
-            }
+        // ⭐ THE DECODE HAPPENS HERE because the ring is keyed by the exact
+        // backend pointer, and this is where the one the reader uses lives.
+        if (mic_decode_report(backend_, data, length)) {
             return;
         }
 
@@ -1526,6 +1504,24 @@ private:
             // silence. Neither call ever waits: this is the URB read loop.
             if (!iso_in_fill_test_tone(inData, transferLength)) {
                 mic_ring_pop_fill(backend_, inData, transferLength);
+
+                // ⛔ PAD TO THE FULL PACKET. The comment above has always said
+                // this happened; the code never did it.
+                //
+                // pop_fill hands back only what the ring holds. A short packet
+                // means the host receives less audio than the elapsed time
+                // says it should, so the stream falls behind real time and the
+                // player stretches what it has -- which sounds like the
+                // speaker is underwater. Measured over Bluetooth 2026-08-13:
+                // speech recognisable, badly slowed, with short_bytes climbing
+                // at very nearly the full stream rate.
+                //
+                // Silence in the gap keeps the clock honest: a dropout is
+                // heard as a brief nothing, which is what it is, instead of
+                // distorting everything after it.
+                if (inData->size() < transferLength) {
+                    inData->resize(transferLength, 0);
+                }
             }
             return kStatusOk;
         }

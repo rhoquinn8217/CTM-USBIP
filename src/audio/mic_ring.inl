@@ -129,6 +129,21 @@ static void mic_ring_pop_fill(const CtmBackend *owner, std::vector<uint8_t> *out
     {
         std::lock_guard<std::mutex> lock(g_micRingMutex);
         MicRingSlot *slot = mic_ring_slot(owner, false);
+
+        // ⚠️ WHICH POINTER THE READER USES, once. Compare against the one the
+        // decode prints: if they differ, the frames are filling a different
+        // slot and this side drains an empty one forever.
+        {
+            static bool announced = false;
+            if (!announced) {
+                announced = true;
+                std::cout << "[mic-ring] reader wants audio for owner="
+                          << (const void *)owner
+                          << (slot ? " (slot exists)" : " (NO SLOT -- nothing pushed here)")
+                          << std::endl;
+            }
+        }
+
         if (slot == nullptr) {
             return;         // nothing has ever arrived for this session
         }

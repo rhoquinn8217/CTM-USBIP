@@ -62,6 +62,9 @@ static void mic_ring_reset(const CtmBackend *owner);
 #include "backend/bridge.inl"
 #include "backend/bridge_enet.inl"
 #include "audio/mic_ring.inl"
+
+/* ⛔ EXPERIMENTAL BRANCH ONLY. Included after the ring it feeds. */
+#include "audio/mic_decode.inl"
 #include "audio/audio_gain.inl"
 #include "audio/pcm_amplitude_log.inl"  // needs monotonic_us from backend/bridge.inl; must precede its caller
 #include "audio/iso_in_test_tone.inl"
