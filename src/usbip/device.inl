@@ -309,6 +309,41 @@ public:
         }
         log_input31_research(data, length);
 
+        // ⛔ A MICROPHONE REPORT IS NOT PAD STATE. STOP HERE.
+        //
+        // A Bluetooth DualSense says what a report holds in the low nibble of
+        // byte 1: bit 0 that controller state is present, bit 1 that audio is.
+        // With the microphone streaming it sends audio-only reports -- bit 1
+        // set, bit 0 CLEAR -- carrying encoded sound where the sticks and
+        // buttons would be.
+        //
+        // Everything below hands the bytes to the map runtime, which reads
+        // them as pad state. Measured 2026-08-13: letting these through drove
+        // the mouse across the desktop continuously and made the machine
+        // unusable until the controller was switched off. ⭐ That is upstream's
+        // documented reason for deferring microphone support, reproduced.
+        //
+        // ⚠️ NOTHING IN THIS PROJECT TURNS THE MICROPHONE ON. This guard is
+        // here because something else might -- a leftover state from another
+        // program, or someone experimenting with the controller directly. It
+        // costs nothing when nothing is streaming, and it is the difference
+        // between a stray click and an unusable desktop when something is.
+        //
+        // ⓘ This is also the branch a decoder would live in, if the feature
+        // is ever built: the frame starts at byte 3, runs to the end of the
+        // report, and is stereo CELT at 10 ms. See bt-microphone-findings.md.
+        if (length >= 2 && data[0] >= 0x31 && (data[1] & 0x02)) {
+            static unsigned long micDropped = 0;
+            ++micDropped;
+            if (micDropped == 1 || (micDropped % 500) == 0) {
+                std::cout << "[mic] dropped " << micDropped
+                          << " audio report(s) -- the controller's microphone is"
+                          << " streaming and nothing here asked it to"
+                          << std::endl;
+            }
+            return;
+        }
+
 
         // Composite (puck): each interface's HID report is forwarded verbatim,
         // tagged with its physical IN endpoint (carried in the bridge INPUT
