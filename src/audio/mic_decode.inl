@@ -22,7 +22,30 @@
 // ⛔ The earlier plan said mono, 71 bytes, starting at byte 4. All three were
 // wrong. libopus reports two channels from the packet itself.
 
+#define MICDEC_REPORT_LEN    78
 #define MICDEC_FRAME_AT      3
+#define MICDEC_CRC_LEN       4
+/* ⛔⛔ 71 BYTES, NOT 75. The report is 78: three bytes of header, the Opus
+ * packet, then the CRC32 that every Bluetooth report carries.
+ *
+ * This used to pass `length - MICDEC_FRAME_AT`, handing Opus the packet PLUS
+ * the four checksum bytes -- and opus_decode ACCEPTED it, returned 480 samples
+ * and OPUS_OK, and produced the wrong audio.
+ *
+ * ⚠️ IT CANNOT FAIL LOUDLY, BECAUSE OF HOW OPUS WORKS. The range decoder reads
+ * raw bits forward from the head and entropy-coded symbols BACKWARD from the
+ * tail, so four foreign bytes at the end are consumed as coder state. The
+ * packet stays structurally valid and the frame count is right; only the
+ * contents are wrong.
+ *
+ * ⭐ MEASURED 2026-08-15 against a capture decoded both ways: 5.5% of samples
+ * identical, and the difference 3 dB LOUDER than the signal itself.
+ *
+ * ⓘ The guard below stays at `length < 4` deliberately. Raising it to require
+ * a full 78-byte report was tried on 2026-08-15 and killed capture entirely --
+ * reports arrive shorter than that, every one was rejected, and the recording
+ * ran its timer holding pure silence. */
+#define MICDEC_FRAME_LEN     (MICDEC_REPORT_LEN - MICDEC_FRAME_AT - MICDEC_CRC_LEN)
 #define MICDEC_RATE          48000
 #define MICDEC_CHANNELS      2
 #define MICDEC_MAX_SAMPLES   (48 * 20 * MICDEC_CHANNELS)   // 20 ms of headroom
@@ -74,7 +97,9 @@ static bool mic_decode_report(const CtmBackend *owner,
     int16_t pcm[MICDEC_MAX_SAMPLES];
     const int n = opus_decode(dec,
                               data + MICDEC_FRAME_AT,
-                              (opus_int32)(length - MICDEC_FRAME_AT),
+                              (opus_int32)((length - MICDEC_FRAME_AT) < MICDEC_FRAME_LEN
+                                           ? (length - MICDEC_FRAME_AT)
+                                           : MICDEC_FRAME_LEN),
                               pcm,
                               MICDEC_MAX_SAMPLES / MICDEC_CHANNELS,
                               0);
