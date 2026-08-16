@@ -53,6 +53,7 @@ namespace {
 #include "log/device_log.inl"
 #include "config/device_config.inl"
 #include "audio/ds5_output_overrides.inl"
+#include "input/gyro_mouse.inl"          // needs device_config_* and device_section_for
 #include "backend/backend.inl"
 #include "backend/bt.inl"
 /* Defined in audio/mic_ring.inl, which must come AFTER bridge.inl because it
@@ -71,7 +72,13 @@ static void mic_ring_reset(const CtmBackend *owner);
 #include "app/cli.inl"
 #include "audio/ds5_apply_settings.inl"
 #include "config/config_watcher.inl"
+// Forward declaration: agent.inl calls this on a DS5 session becoming ready to
+// bring up the synthetic mouse; mouse_device.inl (included just after) defines
+// it. Breaks the include cycle -- the mouse device needs agent.inl's server and
+// asset helpers, while agent.inl only needs this one symbol.
+void ctm_gyro_mouse_ensure_mouse_started();
 #include "app/agent.inl"
+#include "input/mouse_device.inl"        // needs g_agent_usbip_server, find_relative_asset, run_usbip_attach
 #include "app/service.inl"
 
 } // namespace

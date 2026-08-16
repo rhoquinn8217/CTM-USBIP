@@ -1,0 +1,368 @@
+// Gyro-to-mouse for DualSense / DualSense Edge.
+//
+// WHAT THIS IS. A DS5 input report carries the gyroscope and accelerometer.
+// This turns the gyro's angular velocity into relative mouse movement, so a
+// TV -- which has no mouse -- gains one driven by tilting the controller. The
+// motion maths (calibration, drift removal, player-space) is Jibb Smart's
+// GamepadMotionHelpers (MIT), the same method Steam Input is built on; we only
+// read the bytes, gate, scale, and carry the sub-pixel remainder.
+//
+// WHERE IT SITS. device.inl calls ctm_gyro_mouse::on_ds5_input() once per
+// mapped DS5 input report, just before enqueue_input_report(). It never
+// modifies the report -- the controller passes through untouched, exactly as
+// today -- it only pushes a mouse delta into a queue. A separate synthetic
+// mouse device (see ds5_input_overrides / the mouse profile) drains that queue.
+//
+// WHAT IS OURS vs BORROWED. The byte offsets, the gate logic, and the config
+// keys are ours, ported from the on-hardware DS5Dongle reference (which paid
+// for the byte-17-not-19 yaw correction). The float maths is the library's.
+//
+// UNITS. The DualSense reports gyro at 1024 raw units per degree/second and
+// accel at 8192 raw units per g. The library wants degrees/second and g.
+//
+// OFFSETS ARE OURS (report id at index 0). The DS5Dongle reference omits the
+// report id, so every one of its offsets is ours - 1. Cross-checked against
+// the mapped report this function receives (id 0x01 at [0]).
+//   gyro  pitch int16 LE at [16], yaw at [18], roll at [20]
+//   accel x int16 LE at [22], y at [24], z at [26]
+//   L2 analog [5], R2 analog [6]; buttons byte [9] (L1 bit0, R1 bit1)
+//   touchpad finger-1-down = !(byte[33] & 0x80)
+//
+// GATE VALUES (config, per §6 of the design doc). Naming the gate turns the
+// feature on; blank/absent = off. always | L2 | R2 | L1 | R1 | touchpad |
+// !touchpad.
+
+#pragma once
+
+// GamepadMotion.hpp is a standalone MIT header. main.cpp includes this file
+// inside an anonymous namespace; the library's own headers (<math.h>,
+// <algorithm>) are pulled in at the top of main.cpp already, so including the
+// hpp here lands its class inside the same anonymous namespace, which is fine
+// -- it is self-contained and needs no external linkage.
+#include "gamepadmotion/GamepadMotion.hpp"
+
+namespace ctm_gyro_mouse {
+
+// A pending relative mouse movement, in whole pixels, produced by the gyro.
+struct MouseDelta {
+    int32_t dx = 0;
+    int32_t dy = 0;
+};
+
+// ---- Gate ------------------------------------------------------------------
+
+enum class Gate {
+    Off,
+    Always,
+    L2,
+    R2,
+    L1,
+    R1,
+    Touchpad,
+    NotTouchpad,
+};
+
+inline Gate parse_gate(const std::string &raw)
+{
+    // device_config already trims and lowercases callers as needed; match on a
+    // lowered copy so "L2" and "l2" both work.
+    std::string v;
+    v.reserve(raw.size());
+    for (char c : raw) {
+        v.push_back(static_cast<char>((c >= 'A' && c <= 'Z') ? c - 'A' + 'a' : c));
+    }
+    if (v.empty()) return Gate::Off;
+    if (v == "always") return Gate::Always;
+    if (v == "l2") return Gate::L2;
+    if (v == "r2") return Gate::R2;
+    if (v == "l1") return Gate::L1;
+    if (v == "r1") return Gate::R1;
+    if (v == "touchpad") return Gate::Touchpad;
+    if (v == "!touchpad" || v == "not_touchpad") return Gate::NotTouchpad;
+    // Unknown value is OFF, never an error -- a typo silently disables the
+    // feature, it never breaks a session. Same rule as every config lookup.
+    return Gate::Off;
+}
+
+// True when the gate condition says gyro should be producing movement right
+// now. `d` is the mapped DS5 report (id at [0]); `len` must cover the gate
+// byte the chosen gate reads.
+inline bool gate_open(Gate gate, const uint8_t *d, size_t len)
+{
+    switch (gate) {
+        case Gate::Off:
+            return false;
+        case Gate::Always:
+            return true;
+        case Gate::L2:
+            return len > 5 && d[5] >= 30;               // analog, ~12% travel
+        case Gate::R2:
+            return len > 6 && d[6] >= 30;
+        case Gate::L1:
+            return len > 9 && (d[9] & 0x01);
+        case Gate::R1:
+            return len > 9 && (d[9] & 0x02);
+        case Gate::Touchpad:
+            return len > 33 && !(d[33] & 0x80);          // finger 1 down
+        case Gate::NotTouchpad:
+            return len > 33 && (d[33] & 0x80);           // ratchet: touch pauses
+    }
+    return false;
+}
+
+// ---- Config (read live per report; the watcher applies changes instantly) --
+
+struct Config {
+    Gate gate = Gate::Off;
+    int sens = 50;             // 1..100
+    bool invert_x = false;
+    bool invert_y = false;
+    bool player_space = true;  // library player-space vs raw calibrated yaw/pitch
+};
+
+// The section is "ds5" or "ds5_edge" -- same keys under each so an Edge can be
+// tuned independently once config gains per-section values. Reads through the
+// same device_config_* accessors the audio overrides use.
+inline Config load_config(const char *section)
+{
+    Config c;
+    c.gate = parse_gate(device_config_str(section, "gyro_to_mouse_gate"));
+    c.sens = device_config_int(section, "gyro_mouse_sens", 50);
+    if (c.sens < 1) c.sens = 1;
+    if (c.sens > 100) c.sens = 100;
+    const int inv = device_config_int(section, "gyro_mouse_invert", 0);
+    c.invert_x = (inv & 1) != 0;
+    c.invert_y = (inv & 2) != 0;
+    c.player_space = device_config_bool(section, "gyro_mouse_player_space", true);
+    return c;
+}
+
+// ---- Per-device state ------------------------------------------------------
+//
+// One instance per bridged DS5 session. Holds the motion filter (calibration
+// state lives here) and the sub-pixel remainder that MUST persist between
+// reports -- without it a slow turn producing <1px per report rounds to zero
+// forever and the cursor never moves.
+
+class GyroMouse {
+public:
+    GyroMouse()
+    {
+        // Stillness auto-calibration: the filter watches for the controller
+        // being held still (low variance, not low value) and learns the resting
+        // bias on its own. This is what keeps the deadzone tiny, which is what
+        // makes slow aiming survive. No "put it down for 2 seconds" prompt.
+        motion_.SetCalibrationMode(GamepadMotionHelpers::CalibrationMode::Stillness);
+    }
+
+    // Feed one mapped DS5 report. Returns true and fills `out` when there is a
+    // non-zero mouse movement to emit; returns false when the gate is closed,
+    // the config is off, or the movement rounded to zero this tick.
+    bool on_report(const uint8_t *d, size_t len, const char *section, MouseDelta *out)
+    {
+        if (d == nullptr || len < 28 || out == nullptr) {
+            return false;                       // need through the accel block
+        }
+
+        const Config cfg = load_config(section);
+        if (cfg.gate == Gate::Off) {
+            reset_remainder();
+            return false;
+        }
+
+        // deltaTime from the report cadence. First report seeds the clock.
+        const auto now = std::chrono::steady_clock::now();
+        float dt = 0.0f;
+        if (haveClock_) {
+            dt = std::chrono::duration<float>(now - lastReport_).count();
+        }
+        lastReport_ = now;
+        haveClock_ = true;
+        // Guard against a stalled session resuming with a huge dt (which would
+        // fling the cursor). Clamp to a sane window; 0 dt is fine (library
+        // treats it as a still-sample tick).
+        if (dt < 0.0f || dt > 0.1f) dt = 0.0f;
+
+        // Raw signed 16-bit little-endian reads at our offsets.
+        auto rd16 = [&](size_t off) -> int32_t {
+            return static_cast<int16_t>(
+                static_cast<uint16_t>(d[off]) |
+                (static_cast<uint16_t>(d[off + 1]) << 8));
+        };
+
+        // Convert to the library's units.
+        //  gyro : 1024 raw units per deg/s
+        //  accel: 8192 raw units per g
+        const float gyroPitch = rd16(16) / 1024.0f;
+        const float gyroYaw   = rd16(18) / 1024.0f;
+        const float gyroRoll  = rd16(20) / 1024.0f;
+        const float accelX    = rd16(22) / 8192.0f;
+        const float accelY    = rd16(24) / 8192.0f;
+        const float accelZ    = rd16(26) / 8192.0f;
+
+        // The library ALWAYS runs -- its calibration must keep observing even
+        // when the gate is shut, or it never learns the bias. Axis order is the
+        // library's Y-up convention: (pitch=X, yaw=Y, roll=Z) matches how it
+        // derives player-space from a PlayStation pad.
+        motion_.ProcessMotion(gyroPitch, gyroYaw, gyroRoll,
+                              accelX, accelY, accelZ, dt);
+
+        // Gate AFTER processing, so calibration is continuous but movement only
+        // emits when the player is actually aiming.
+        if (!gate_open(cfg.gate, d, len)) {
+            reset_remainder();
+            return false;
+        }
+
+        float mx = 0.0f, my = 0.0f;
+        if (cfg.player_space) {
+            motion_.GetPlayerSpaceGyro(mx, my);
+        } else {
+            float gz;
+            motion_.GetCalibratedGyro(mx, my, gz);
+            // Calibrated gyro is (pitch, yaw, roll) = (x, y, z). For a plain
+            // yaw/pitch mouse, horizontal is yaw (y), vertical is pitch (x).
+            std::swap(mx, my);
+        }
+
+        // Scale. player/calibrated output is in degrees/second-ish; sens maps
+        // 1..100 onto a usable pixels-per-degree. Divisor chosen so mid-slider
+        // (50) is a comfortable default; tune on hardware.
+        const float scale = static_cast<float>(cfg.sens) / 40.0f;
+        float dx = mx * scale;
+        float dy = -my * scale;             // screen Y is down; tilt up = up
+        if (cfg.invert_x) dx = -dx;
+        if (cfg.invert_y) dy = -dy;
+
+        // Carry the sub-pixel remainder between reports.
+        remX_ += dx;
+        remY_ += dy;
+        const int32_t outX = static_cast<int32_t>(remX_);   // trunc toward zero
+        const int32_t outY = static_cast<int32_t>(remY_);
+        remX_ -= static_cast<float>(outX);
+        remY_ -= static_cast<float>(outY);
+
+        if (outX == 0 && outY == 0) {
+            return false;
+        }
+        out->dx = outX;
+        out->dy = outY;
+        return true;
+    }
+
+private:
+    void reset_remainder()
+    {
+        // When the gate closes, drop the fractional carry so a re-open starts
+        // clean rather than releasing a stored fraction as a tiny jump.
+        remX_ = 0.0f;
+        remY_ = 0.0f;
+    }
+
+    GamepadMotion motion_;
+    float remX_ = 0.0f;
+    float remY_ = 0.0f;
+    std::chrono::steady_clock::time_point lastReport_{};
+    bool haveClock_ = false;
+};
+
+// ---- Cross-session mailbox -------------------------------------------------
+//
+// The DS5 session produces deltas; the synthetic mouse device consumes them.
+// They are separate CtmUsbipDevice objects with separate endpoints, so a
+// simple mutex-guarded accumulator couples them without sharing lifetimes.
+// The mouse device drains this on each interrupt-IN poll.
+
+class MouseMailbox {
+public:
+    void push(const MouseDelta &delta)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        // Accumulate rather than queue: many gyro reports arrive between mouse
+        // polls, and the cursor only cares about the sum since the last poll.
+        // Clamp to the HID mouse report's signed-byte range on drain, not here,
+        // so fast flicks are not silently truncated mid-accumulation.
+        pendingX_ += delta.dx;
+        pendingY_ += delta.dy;
+        hasPending_ = true;
+    }
+
+    // Returns true and fills a clamped [-127,127] delta if movement is pending.
+    // Leaves any overflow beyond one report in the accumulator for the next
+    // poll, so a large flick spreads across a couple of reports rather than
+    // being clipped.
+    bool drain(int8_t *dx, int8_t *dy)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!hasPending_ || (pendingX_ == 0 && pendingY_ == 0)) {
+            hasPending_ = false;
+            return false;
+        }
+        const int32_t cx = clamp8(pendingX_);
+        const int32_t cy = clamp8(pendingY_);
+        pendingX_ -= cx;
+        pendingY_ -= cy;
+        hasPending_ = (pendingX_ != 0 || pendingY_ != 0);
+        *dx = static_cast<int8_t>(cx);
+        *dy = static_cast<int8_t>(cy);
+        return true;
+    }
+
+private:
+    static int32_t clamp8(int32_t v)
+    {
+        if (v > 127) return 127;
+        if (v < -127) return -127;
+        return v;
+    }
+
+    std::mutex mutex_;
+    int32_t pendingX_ = 0;
+    int32_t pendingY_ = 0;
+    bool hasPending_ = false;
+};
+
+// ---- Entry point called from device.inl ------------------------------------
+//
+// One GyroMouse and one mailbox per process is the simplest correct thing for
+// the single-DS5 case. Two DualSenses bridged at once would share these, which
+// is acceptable for a first cut (both feed one cursor, which is how Windows
+// merges mice anyway) and is called out as a known limitation. If per-device
+// separation is wanted later, key these by device pointer.
+
+inline GyroMouse &shared_gyro()
+{
+    static GyroMouse g;
+    return g;
+}
+
+inline MouseMailbox &shared_mailbox()
+{
+    static MouseMailbox m;
+    return m;
+}
+
+// Diagnostic: raw |yaw| magnitude, pre-scale, exposed for tuning the way the
+// DS5Dongle portal exposes its own gyro magnitude.
+inline std::atomic<uint32_t> g_diag_last_dx{0};
+inline std::atomic<uint32_t> g_diag_last_dy{0};
+
+// Called once per mapped DS5 input report. `descriptor` is the device
+// descriptor (for vendor/product section matching); `d`/`len` is the report.
+// Never modifies the report.
+inline void on_ds5_input(const std::vector<unsigned char> &descriptor,
+                         const uint8_t *d, size_t len)
+{
+    const char *section = device_section_for(descriptor);
+    if (section == nullptr) {
+        return;                                 // not a DualSense; ignore
+    }
+    MouseDelta delta;
+    if (shared_gyro().on_report(d, len, section, &delta)) {
+        shared_mailbox().push(delta);
+        g_diag_last_dx.store(static_cast<uint32_t>(delta.dx < 0 ? -delta.dx : delta.dx));
+        g_diag_last_dy.store(static_cast<uint32_t>(delta.dy < 0 ? -delta.dy : delta.dy));
+    }
+}
+
+} // namespace ctm_gyro_mouse

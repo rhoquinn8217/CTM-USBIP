@@ -1,0 +1,32 @@
+# Map for the synthetic CTM gyro mouse.
+#
+# This device has NO physical backing and NO bridge. Its input reports are
+# generated on the Windows side from DualSense gyro data and enqueued directly
+# onto its interrupt-IN endpoint (0x81) by the mouse pump. There is therefore
+# no controller_to_virtual translation to do and no output/feature path -- a
+# boot mouse takes no host output reports. The map exists only to name the IN
+# endpoint and satisfy the loader.
+
+[map]
+id = virtual_mouse
+version = 1
+virtual_device = virtual_mouse_usb
+physical_device = none
+
+[usb.endpoints]
+hid_in  = 0x81
+
+# No [path.input.controller_to_virtual]: reports are pushed by the pump, not
+# translated from a physical source.
+# No [path.output.*] and no [path.control.*]: a boot mouse is input-only.
+
+[advertise]
+controller_name = CTM Gyro Mouse
+vendor = ctm
+rumble = false
+leds = false
+adaptive_triggers = false
+haptics = false
+audio_output = false
+audio_input = false
+battery = false
