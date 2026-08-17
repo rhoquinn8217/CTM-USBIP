@@ -703,6 +703,7 @@ private:
                 // ~109 MB dropped in one second at start-up while the ring
                 // spilled stale audio nothing was reading.
                 mic_ring_reset(this);
+                mic_decode_forget(this);
                 lastInputReceiveUs = 0;
                 if (!accept_client(false, nullptr)) {
                     // Self-exit (grace expired), not an external stop(): tell the

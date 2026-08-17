@@ -59,6 +59,10 @@ namespace {
  * needs monotonic_us from it. Declared here so bridge.inl can call it. */
 static void mic_ring_push(const CtmBackend *owner, const uint8_t *data, size_t len);
 static void mic_ring_reset(const CtmBackend *owner);
+/* Defined in audio/mic_decode.inl -- released alongside the ring, so a
+ * recycled backend pointer can never inherit a previous controller's decoder
+ * state. */
+static void mic_decode_forget(const CtmBackend *owner);
 #include "backend/bridge.inl"
 #include "backend/bridge_enet.inl"
 #include "audio/mic_ring.inl"

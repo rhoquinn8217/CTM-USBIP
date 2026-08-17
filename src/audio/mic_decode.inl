@@ -80,6 +80,34 @@ static OpusDecoder *mic_decoder_for(const CtmBackend *owner)
     return dec;
 }
 
+// Drop a controller's decoder. Called when its session ends.
+//
+// ⛔ WITHOUT THIS THE LIST ONLY EVER GROWS, and that is worse than a leak.
+// Entries are keyed by the backend POINTER, and the allocator reuses
+// addresses -- so a new session can land on the address a dead one had, match
+// a stale entry, and be handed a decoder still carrying the PREVIOUS
+// controller's Opus state. Opus is stateful across frames; a decoder resumed
+// from someone else's history produces garbage until it resynchronises.
+//
+// ⚠️ Measured 2026-08-17 on a C3: 25 decoders created in one session of
+// repeated bridging, none ever released.
+//
+// ⓘ Called beside mic_ring_reset(), which already runs on teardown for the
+// same reason -- one owner, one place, both cleaned together.
+static void mic_decode_forget(const CtmBackend *owner)
+{
+    if (owner == nullptr) return;
+    std::lock_guard<std::mutex> lock(g_micDecMutex);
+    for (auto it = g_micDecoders.begin(); it != g_micDecoders.end(); ++it) {
+        if (it->owner != owner) continue;
+        if (it->dec != nullptr) opus_decoder_destroy(it->dec);
+        std::cout << "[mic-decode] decoder released after " << it->frames
+                  << " frame(s), " << it->failed << " failed" << std::endl;
+        g_micDecoders.erase(it);
+        return;
+    }
+}
+
 // Returns true if the report was microphone audio and has been dealt with.
 // ⚠️ The caller must NOT pass it on when this returns true -- everything
 // downstream reads reports as sticks and buttons.
