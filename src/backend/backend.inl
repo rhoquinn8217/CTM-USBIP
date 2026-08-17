@@ -32,6 +32,18 @@ public:
     {
         (void)pcm; (void)error; return false;  // default: no-op for non-wired backends
     }
+    // Push a new Bluetooth audio-buffer setting to a LIVE session.
+    //
+    // The TV accepts a host config at any point in a session, and its output
+    // patch reads the live settings on every report -- so this takes effect on
+    // the next report rather than on the next bridge. That matters because the
+    // symptom it exists for is audio going choppy mid-game.
+    //
+    // Default no-op: only the bridge backends carry a host config at all.
+    virtual bool send_audio_latency(uint16_t latencyMs, std::wstring *error)
+    {
+        (void)latencyMs; (void)error; return false;
+    }
     virtual bool send_output_report(const std::vector<uint8_t> &report, bool paced, std::wstring *error) = 0;
 
     // Composite: forward an OUT report tagged with the physical OUT endpoint it

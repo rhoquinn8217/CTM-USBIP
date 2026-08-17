@@ -189,5 +189,19 @@ static void apply_pending_config_to_sessions()
         device_log::config(device_log::msg()
             << "pushing settings to live session busid=" << target.busIdAscii);
         ds5_apply_initial_settings(target.backend);
+
+        // The audio buffer is not part of the settings report -- it lives in
+        // the host config, which the TV accepts at any point in a session. Sent
+        // separately for that reason, and only when the file names it: absent
+        // must leave the TV's own value alone.
+        const int latency = device_config_int("ds5", "audio_latency_ms", -1);
+        if (latency >= 0 && latency <= 255) {
+            std::wstring latencyError;
+            if (target.backend->send_audio_latency(static_cast<uint16_t>(latency), &latencyError)) {
+                device_log::config(device_log::msg()
+                    << "audio latency set to " << latency << " ms on busid="
+                    << target.busIdAscii);
+            }
+        }
     }
 }

@@ -59,8 +59,19 @@
         uint16_t feature_report_len;
         uint8_t paced_report_count;
         uint8_t paced_report_ids[16];
-        uint8_t reserved[31];
+        // The DualSense's Bluetooth audio buffer. Higher is smoother, lower is
+        // choppier -- measured on hardware. kLatencyUnset leaves the TV's own
+        // value alone, so a client that never sets it behaves as before.
+        //
+        // 0 is a REAL VALUE and deliberately reachable: the point of host
+        // control is to find where the audio stops being recoverable, and a
+        // sentinel of 0 would put the interesting end of the range out of
+        // reach. Taken from the reserved block, so the struct size is
+        // unchanged and an older TV simply ignores it.
+        uint16_t latency_ms;
+        uint8_t reserved[29];
     };
+    static constexpr uint16_t kLatencyUnset = 0xFFFFu;
 
     // CTMB_MSG_ENUM payload (puck composite): the device's own enumeration,
     // forwarded verbatim by the TV and replayed here. Layout:
@@ -243,6 +254,39 @@ public:
             }
         }
         return *lastGetResponse != nullptr || !actions.empty();
+    }
+
+    // Read the configured audio buffer, or the sentinel when the file says
+    // nothing. -1 from device_config_int is "absent", which is the case that
+    // must leave the TV's own value alone -- NOT a value of zero, which is a
+    // legitimate setting we deliberately allow.
+    static uint16_t configured_audio_latency()
+    {
+        const int value = device_config_int("ds5", "audio_latency_ms", -1);
+        if (value < 0 || value > 255) {
+            return CtmBridgeProtocol::kLatencyUnset;
+        }
+        return static_cast<uint16_t>(value);
+    }
+
+    // Re-send the whole host config with a new latency. Cheap -- it is 58 bytes
+    // -- and re-sending the lot avoids a second message type that could drift
+    // out of step with the first.
+    bool send_audio_latency(uint16_t latencyMs, std::wstring *error) override
+    {
+        CtmBridgeProtocol::HostConfig hostConfig = lastHostConfig_;
+        hostConfig.latency_ms = latencyMs;
+        if (!send_message(
+                CtmBridgeProtocol::MsgHostConfig,
+                CtmBridgeProtocol::kFlagOk,
+                0,
+                reinterpret_cast<const uint8_t *>(&hostConfig),
+                sizeof(hostConfig),
+                error)) {
+            return false;
+        }
+        lastHostConfig_ = hostConfig;
+        return true;
     }
 
     bool send_output_report(const std::vector<uint8_t> &report, bool paced, std::wstring *error) override
@@ -492,6 +536,7 @@ private:
             hostConfig.paced_report_count = 2;
             hostConfig.paced_report_ids[0] = 0x36;
             hostConfig.paced_report_ids[1] = 0x15;
+            hostConfig.latency_ms = configured_audio_latency();
             std::wstring sendError;
             if (!send_message(
                     CtmBridgeProtocol::MsgHostConfig,
@@ -508,6 +553,7 @@ private:
                 std::wcerr << L"bridge host config failed: " << sendError << L"\n";
                 continue;
             }
+            lastHostConfig_ = hostConfig;
 
             std::wcout << L"bridge backend"
                        << (initial ? L"" : L" reconnected")
@@ -927,6 +973,10 @@ private:
 
     uint16_t port_ = 0;
     double btPaceMs_ = 10.0;
+    // The last host config sent, kept so a live latency change can re-send the
+    // whole thing rather than reconstruct it from scratch and risk drifting
+    // from the handshake's version.
+    CtmBridgeProtocol::HostConfig lastHostConfig_ = {};
     bool wsaStarted_ = false;
     // Bounded accept windows + idle rule (see accept_client / reader_loop).
     // All 0 = disabled: the CLI bridge mode keeps wait-forever semantics; the
