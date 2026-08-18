@@ -72,6 +72,10 @@
         uint8_t reserved[29];
     };
     static constexpr uint16_t kLatencyUnset = 0xFFFFu;
+    // Below this the controller has less than one 10ms Opus frame buffered and
+    // plays nothing at all. Measured, not assumed. Not enforced -- see
+    // configured_audio_latency().
+    static constexpr int kLatencySilentBelow = 8;
 
     // CTMB_MSG_ENUM payload (puck composite): the device's own enumeration,
     // forwarded verbatim by the TV and replayed here. Layout:
@@ -265,6 +269,29 @@ public:
         const int value = device_config_int("ds5", "audio_latency_ms", -1);
         if (value < 0 || value > 255) {
             return CtmBridgeProtocol::kLatencyUnset;
+        }
+        // Say so when the value is in the silent range, rather than clamping.
+        //
+        // Measured on hardware 2026-08-16, walking the whole range with game
+        // audio playing: 0 to 7 is SILENT, 8 is white noise with the voice
+        // barely there, and it improves steadily from there. 20 is choppy but
+        // usable; 60 and 100 are smooth.
+        //
+        // It is a buffer in milliseconds and an Opus frame is 10ms, so below
+        // about 8 there is less than one frame to play.
+        //
+        // A clamp was considered and rejected. The range was deliberately
+        // opened -- the TV's own floor of 20 was removed -- so that the edge
+        // could be found at all, and a clamp here would put it back out of
+        // reach. Nothing is unrecoverable either: any value recovers by setting
+        // a higher one. The failure is confusing, not dangerous, so the answer
+        // is to explain it rather than prevent it.
+        if (value < CtmBridgeProtocol::kLatencySilentBelow) {
+            device_log::config(device_log::msg()
+                << "audio_latency_ms=" << value << " is below "
+                << CtmBridgeProtocol::kLatencySilentBelow
+                << " -- the controller's speaker will be SILENT."
+                << " Raise it to recover; 60 is the usual value");
         }
         return static_cast<uint16_t>(value);
     }

@@ -195,6 +195,15 @@ static void apply_pending_config_to_sessions()
         // separately for that reason, and only when the file names it: absent
         // must leave the TV's own value alone.
         const int latency = device_config_int("ds5", "audio_latency_ms", -1);
+        // Warn on the live path as well as at handshake. This is the one a
+        // person actually meets: they edit the file mid-session, the audio goes
+        // quiet, and without this there is nothing to explain why.
+        if (latency >= 0 && latency < 8) {
+            device_log::config(device_log::msg()
+                << "audio_latency_ms=" << latency
+                << " is below 8 -- the controller's speaker will be SILENT."
+                << " Raise it to recover; 60 is the usual value");
+        }
         if (latency >= 0 && latency <= 255) {
             std::wstring latencyError;
             if (target.backend->send_audio_latency(static_cast<uint16_t>(latency), &latencyError)) {
