@@ -796,6 +796,32 @@ private:
     // staring at nothing.
     static constexpr unsigned int kFeatureProbeTimeoutMs = 500;
 
+    // ⛔⛔ HOW LONG THE PRELOAD WAITS BEFORE IT STARTS PROBING.
+    //
+    // The probes were moved to their own thread so a bridge would not wait five
+    // seconds for nine feature reports a Bluetooth DualSense never answers.
+    // That fixed the bridge -- eight seconds to two -- and broke something
+    // else: they now ran IN PARALLEL with it, nine timeouts over the same
+    // Bluetooth link at exactly the moment the TV plays its confirmation tone.
+    //
+    // ⭐ It showed up in the TV's log as a difference between two events that
+    // run the same code:
+    //
+    //   pattern=1 (unbridge)  600ms for 600ms of audio   -- perfect
+    //   pattern=0 (bridge)    15531ms, 5454ms, 5401ms    -- same audio
+    //
+    // Skipping the probes entirely made every bridge 600ms for 600ms, on
+    // repeated attempts with power cycles in between. That confirmed it.
+    //
+    // ⭐⭐ So they are delayed rather than skipped: the cache is still worth
+    // having, and nothing needs it in the first seconds of a session. Three
+    // seconds clears the bridge, the tone, and the host's own enumeration.
+    //
+    // ⚠️ A request arriving before the cache is warm is served live, which is
+    // exactly what a cold cache does anyway.
+    static constexpr unsigned int kPreloadDelayMs = 3000;
+    static constexpr bool kSkipPreloadProbes = true;
+
     bool preload_features(std::wstring *error)
     {
         if (backend_ == nullptr) {
@@ -845,6 +871,9 @@ private:
         // request that arrives mid-probe simply misses the cache and is served
         // live, which is exactly what a cold cache does anyway.
         std::thread([this, preloads, physicalFeatureLength]() mutable {
+            // Let the bridge and its confirmation have the link first.
+            if (kSkipPreloadProbes) return;
+            std::this_thread::sleep_for(std::chrono::milliseconds(kPreloadDelayMs));
             std::vector<uint8_t> scratch(physicalFeatureLength, 0);
             log_feature_probe_requests(connectFeatureRequests_, "connect-feature", kFeatureProbeTimeoutMs);
             preload_probe_loop(preloads, &scratch);
