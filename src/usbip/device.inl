@@ -796,7 +796,10 @@ private:
     // staring at nothing.
     static constexpr unsigned int kFeatureProbeTimeoutMs = 500;
 
-    // ⛔⛔ HOW LONG THE PRELOAD WAITS BEFORE IT STARTS PROBING.
+    // ⓘ UNUSED WHILE kSkipPreloadProbes IS TRUE. Kept because the number is
+    // the thing to revisit if the cache is ever wanted back -- three seconds
+    // was measured as too short.
+    // ⛔⛔ HOW LONG THE PRELOAD WOULD WAIT BEFORE PROBING.
     //
     // The probes were moved to their own thread so a bridge would not wait five
     // seconds for nine feature reports a Bluetooth DualSense never answers.
@@ -862,16 +865,29 @@ private:
         // one live fetch on first use. Waiting for it costs five seconds on
         // EVERY bridge, to learn the same thing every time.
         //
-        // ⚠️ Deliberately not skipped for Bluetooth: a device that DOES answer
-        // still gets its cache, just slightly later. Skipping would be guessing
-        // which devices answer; this does not have to guess.
+    // ⛔⛔ SKIPPED OUTRIGHT, 2026-08-19. The switch below is off and stays off.
+    //
+    // Running them on a thread was not enough: they then timed out over the
+    // Bluetooth link at the moment the TV was playing its confirmation tone,
+    // which broke the tone and took the controller offline.
+    //
+    // ⚠️ DELAYING THEM WAS TRIED AND FAILED. Three seconds put them in the
+    // TAIL of the tone -- a bridge completes around two seconds and the tone
+    // runs about 1.2 s after that -- so it was close to the worst number
+    // available. A longer head start would probably work, and is not worth
+    // finding: a cold cache costs one live fetch on first use, which is what a
+    // cache miss costs anyway.
+    //
+    // ⓘ The early return is INSIDE the thread, so the thread is still created
+    // and returns at once. That is deliberate and it is measured: thread
+    // creation is not the cost, the probes are.
         //
         // ⓘ Safe on this thread: every write below is under mapMutex_, and
         // featureCache_ is read under the same lock on the serving path. A
         // request that arrives mid-probe simply misses the cache and is served
         // live, which is exactly what a cold cache does anyway.
         std::thread([this, preloads, physicalFeatureLength]() mutable {
-            // Let the bridge and its confirmation have the link first.
+            // Nothing below this runs today -- see kSkipPreloadProbes above.
             if (kSkipPreloadProbes) return;
             std::this_thread::sleep_for(std::chrono::milliseconds(kPreloadDelayMs));
             std::vector<uint8_t> scratch(physicalFeatureLength, 0);
