@@ -150,10 +150,24 @@ public:
         }
         info_ = parse_usb_info(profile_);
         std::wcout << L"virtual USB serial: " << virtualSerial << L"\n";
+        // ⏱️ TIMED. A Bluetooth bridge takes seven seconds against a cable's
+        // one, and the TV finishes its whole side in 1.2s -- so the rest is
+        // here. Nine feature reports time out on Bluetooth and none on a cable,
+        // but shortening the timeout from 2000ms to 500ms did not move the
+        // number at all, which means the timeouts are not the bound. These two
+        // lines say which part actually is.
+        const auto attachT0 = std::chrono::steady_clock::now();
         if (!preload_features(error)) {
             return false;
         }
+        const auto attachT1 = std::chrono::steady_clock::now();
         start_audio_stream();
+        const auto attachT2 = std::chrono::steady_clock::now();
+        std::wcout << L"attach timing: preload="
+                   << std::chrono::duration_cast<std::chrono::milliseconds>(attachT1 - attachT0).count()
+                   << L"ms audio_start="
+                   << std::chrono::duration_cast<std::chrono::milliseconds>(attachT2 - attachT1).count()
+                   << L"ms\n";
         return true;
     }
 
@@ -760,6 +774,28 @@ private:
         }
     }
 
+    // ⛔⛔ HOW LONG TO WAIT FOR A FEATURE REPORT THE DEVICE MAY NEVER ANSWER.
+    //
+    // Was 2000ms. Measured on the host 2026-08-18: a Bluetooth DualSense bridge
+    // took ~8 seconds against ~2 on a cable, and the log named it twice --
+    //
+    //   bridge feature issue reason=feature-preload op=get-timeout report=0x0b
+    //   bridge feature issue reason=feature-preload op=get-timeout report=0x20
+    //
+    // -- between "agent bridge starting" and "agent bridge ready". The TV
+    // finishes its whole side in 1.2 seconds; the rest was this, waiting twice
+    // for answers that were not coming.
+    //
+    // ⭐ A device that answers, answers fast: this is a HID feature read, and
+    // the only thing between us and it is a LAN or an internet round trip.
+    // 500ms is comfortably above either and four times shorter than before.
+    //
+    // ⚠️ Timing out is not a failure. The preload is a CACHE -- it exists so
+    // Windows can be served without a round trip later. A miss costs one live
+    // fetch on first use; a two-second wait costs everyone eight seconds of
+    // staring at nothing.
+    static constexpr unsigned int kFeatureProbeTimeoutMs = 500;
+
     bool preload_features(std::wstring *error)
     {
         if (backend_ == nullptr) {
@@ -777,23 +813,58 @@ private:
             return false;
         }
         connectFeatureRequests_ = connectRequests;
-        log_feature_probe_requests(connectFeatureRequests_, "connect-feature", 2000);
 
         std::vector<CtmMapRuntime::FeaturePreloadRequest> preloads;
         if (!map_.build_preload_feature_requests(physicalFeatureLength, &preloads)) {
             if (error) *error = L"map preload feature request build failed";
             return false;
         }
+
+        // ⛔⛔ RUN THE PROBES ON A THREAD. THIS IS THE BLUETOOTH BRIDGE DELAY.
+        //
+        // Measured 2026-08-18: preload=5415ms on a Bluetooth DualSense against
+        // ~0 on a cable, and it is nearly all of the seven seconds between
+        // pressing bridge and the controller appearing in Windows. The TV
+        // finishes its whole side in 1.2 seconds.
+        //
+        // Nine feature reports time out, every time, on every Bluetooth bridge:
+        // 0x20 0x22 0x82 0x83 0xf0 0xf1 0xf2 0xf4 and a set on 0x80. The device
+        // does not answer them and will not start.
+        //
+        // ⭐ THE PRELOAD IS A CACHE, NOT A REQUIREMENT. It exists so Windows can
+        // be served a feature report without a round trip. A cold cache costs
+        // one live fetch on first use. Waiting for it costs five seconds on
+        // EVERY bridge, to learn the same thing every time.
+        //
+        // ⚠️ Deliberately not skipped for Bluetooth: a device that DOES answer
+        // still gets its cache, just slightly later. Skipping would be guessing
+        // which devices answer; this does not have to guess.
+        //
+        // ⓘ Safe on this thread: every write below is under mapMutex_, and
+        // featureCache_ is read under the same lock on the serving path. A
+        // request that arrives mid-probe simply misses the cache and is served
+        // live, which is exactly what a cold cache does anyway.
+        std::thread([this, preloads, physicalFeatureLength]() mutable {
+            std::vector<uint8_t> scratch(physicalFeatureLength, 0);
+            log_feature_probe_requests(connectFeatureRequests_, "connect-feature", kFeatureProbeTimeoutMs);
+            preload_probe_loop(preloads, &scratch);
+        }).detach();
+        return true;
+    }
+
+    void preload_probe_loop(std::vector<CtmMapRuntime::FeaturePreloadRequest> &preloads,
+                            std::vector<uint8_t> *scratch)
+    {
         for (CtmMapRuntime::FeaturePreloadRequest &preload : preloads) {
             const uint8_t *physicalResponse = nullptr;
             size_t physicalResponseLength = 0;
             if (!backend_->execute_feature_actions(
                     preload.actions,
-                    &physicalFeatureScratch_,
+                    scratch,
                     &physicalResponse,
                     &physicalResponseLength,
                     "feature-preload",
-                    2000)) {
+                    kFeatureProbeTimeoutMs)) {
                 continue;
             }
             CTM_USB_EVENT fakeEvent = {};
@@ -812,7 +883,6 @@ private:
                 featureCache_[FeatureCacheKey(preload.usbReport, preload.cacheSelector)] = cachedResponse;
             }
         }
-        return true;
     }
 
     void log_feature_probe_requests(
