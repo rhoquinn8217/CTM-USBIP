@@ -25,3 +25,4 @@ pcm_amplitude_log_on
 t028_session_amplitude.log
 ctm-device-config.txt
 device.log
+configs/
