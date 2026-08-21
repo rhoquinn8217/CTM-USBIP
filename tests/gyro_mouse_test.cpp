@@ -18,6 +18,11 @@
 #include <thread>
 #include <vector>
 
+// gyro_mouse.inl's cursor-recentre helper calls Win32 (GetSystemMetrics,
+// SetCursorPos). main.cpp already has windows.h in scope; the test binary
+// needs it explicitly.
+#include <windows.h>
+
 using namespace ctmtest;
 
 namespace {
@@ -25,9 +30,10 @@ namespace {
 // Config stubs standing in for device_config_*. The real accessors read a file;
 // here the tests set the values directly.
 std::string g_gate;
-int g_sens = 50;
+int g_sens = 0;          // legacy multiplier; 0 = unset
 int g_invert = 0;
 bool g_player = true;
+int g_px360 = 1920;
 
 } // namespace
 
@@ -37,6 +43,7 @@ bool g_player = true;
 static std::string device_config_str(const char *, const char *key)
 {
     if (std::string(key) == "gyro_to_mouse_gate") return g_gate;
+    if (std::string(key) == "gyro_mouse_recenter_button") return "";
     return "";
 }
 static int device_config_int(const char *, const char *key, int fallback)
@@ -44,6 +51,7 @@ static int device_config_int(const char *, const char *key, int fallback)
     const std::string k(key);
     if (k == "gyro_mouse_sens") return g_sens;
     if (k == "gyro_mouse_invert") return g_invert;
+    if (k == "gyro_mouse_px_per_360") return g_px360;
     return fallback;
 }
 static bool device_config_bool(const char *, const char *key, bool fallback)
@@ -92,6 +100,8 @@ int run_gyro_mouse_tests()
     CTM_CHECK(parse_gate("l2") == Gate::L2);
     CTM_CHECK(parse_gate("always") == Gate::Always);
     CTM_CHECK(parse_gate("!touchpad") == Gate::NotTouchpad);
+    CTM_CHECK(parse_gate("touchpad_click") == Gate::TouchpadClick);
+    CTM_CHECK(parse_gate("PS") == Gate::PS);
     CTM_CHECK(parse_gate("garbage") == Gate::Off);   // unknown -> off, never error
     CTM_CHECK(parse_gate("") == Gate::Off);
 
@@ -117,7 +127,7 @@ int run_gyro_mouse_tests()
     section("gyro-mouse: always-on motion eventually moves");
     {
         g_gate = "always";
-        g_sens = 80;
+        g_sens = 0;                                   // use the shipped defaults
         g_player = false;                             // simpler calibrated path
         GyroMouse gm;
         MouseDelta out{};
@@ -130,6 +140,30 @@ int run_gyro_mouse_tests()
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
         CTM_CHECK(moved);
+    }
+
+    section("gyro-mouse: calibration defaults produce sane cursor speed");
+    {
+        // Protects the Real World Calibration maths, not the feel. A steady
+        // fast turn must move the cursor a plausible distance -- not zero
+        // (the pre-2026-08-16 bug, where deltaTime was omitted and the result
+        // was both wrong and report-rate dependent) and not absurdly far.
+        g_gate = "always";
+        g_sens = 0;
+        g_px360 = 1920;
+        g_player = false;
+        GyroMouse gm;
+        MouseDelta out{};
+        long total = 0;
+        for (int i = 0; i < 400; ++i) {
+            auto r = make_report(6000, 0);            // ~5.9 deg/sec steady yaw
+            if (gm.on_report(r.data(), r.size(), "ds5", &out)) {
+                total += (out.dx < 0 ? -out.dx : out.dx);
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        CTM_CHECK(total > 0);                          // moved at all
+        CTM_CHECK(total < 100000);                     // did not fly off
     }
 
     section("gyro-mouse: mailbox clamps and keeps the remainder");

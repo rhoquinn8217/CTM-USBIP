@@ -60,6 +60,8 @@ enum class Gate {
     R1,
     Touchpad,
     NotTouchpad,
+    TouchpadClick,
+    PS,
 };
 
 inline Gate parse_gate(const std::string &raw)
@@ -79,6 +81,8 @@ inline Gate parse_gate(const std::string &raw)
     if (v == "r1") return Gate::R1;
     if (v == "touchpad") return Gate::Touchpad;
     if (v == "!touchpad" || v == "not_touchpad") return Gate::NotTouchpad;
+    if (v == "touchpad_click" || v == "click") return Gate::TouchpadClick;
+    if (v == "ps") return Gate::PS;
     // Unknown value is OFF, never an error -- a typo silently disables the
     // feature, it never breaks a session. Same rule as every config lookup.
     return Gate::Off;
@@ -106,6 +110,10 @@ inline bool gate_open(Gate gate, const uint8_t *d, size_t len)
             return len > 33 && !(d[33] & 0x80);          // finger 1 down
         case Gate::NotTouchpad:
             return len > 33 && (d[33] & 0x80);           // ratchet: touch pauses
+        case Gate::TouchpadClick:
+            return len > 10 && (d[10] & 0x02);           // pad pressed in
+        case Gate::PS:
+            return len > 10 && (d[10] & 0x01);
     }
     return false;
 }
@@ -114,27 +122,82 @@ inline bool gate_open(Gate gate, const uint8_t *d, size_t len)
 
 struct Config {
     Gate gate = Gate::Off;
-    int sens = 50;             // 1..100
+    // ⭐ Calibration, Steam/JSM style. "Pixels per 360 degrees": turn the
+    // controller a full circle and the cursor travels this many pixels at
+    // sensitivity 1. 1920 makes one full turn sweep a 1080p screen, which is
+    // JoyShockMapper's documented 2D-cursor calibration (1920/360 = 5.333
+    // pixels per degree).
+    int px_per_360 = 1920;
+    // Two-tier sensitivity, JSM's shipped 2D defaults. Slow movement uses
+    // min_sens for precision, fast movement ramps to max_sens for big turns,
+    // interpolated by rotation speed between the two thresholds.
+    int min_sens = 8;
+    int max_sens = 16;
+    int min_threshold = 5;      // deg/sec: below this, min_sens applies
+    int max_threshold = 75;     // deg/sec: above this, max_sens applies
     bool invert_x = false;
     bool invert_y = false;
-    bool player_space = true;  // library player-space vs raw calibrated yaw/pitch
+    bool player_space = true;   // matches Steam's default for a standalone pad
+    // ⭐ Recenter. Names a button that warps the real Windows cursor back to
+    // the middle of the primary screen. Blank = off.
+    //
+    // ⚠️ THIS IS A DESKTOP FEATURE, NOT AN AIMING ONE. Fullscreen games hide
+    // the cursor and read raw relative movement, so they never look at cursor
+    // POSITION -- warping it does nothing there. It exists because navigating
+    // Windows from a couch has no desk to lift a mouse off, so running the
+    // cursor into a screen edge is otherwise a dead end.
+    Gate recenter = Gate::Off;
 };
 
 // The section is "ds5" or "ds5_edge" -- same keys under each so an Edge can be
-// tuned independently once config gains per-section values. Reads through the
-// same device_config_* accessors the audio overrides use.
+// tuned independently. Reads through the same device_config_* accessors the
+// audio overrides use.
 inline Config load_config(const char *section)
 {
     Config c;
     c.gate = parse_gate(device_config_str(section, "gyro_to_mouse_gate"));
-    c.sens = device_config_int(section, "gyro_mouse_sens", 50);
-    if (c.sens < 1) c.sens = 1;
-    if (c.sens > 100) c.sens = 100;
+    c.px_per_360 = device_config_int(section, "gyro_mouse_px_per_360", 1920);
+    if (c.px_per_360 < 1) c.px_per_360 = 1920;
+    c.min_sens = device_config_int(section, "gyro_mouse_min_sens", 8);
+    c.max_sens = device_config_int(section, "gyro_mouse_max_sens", 16);
+    if (c.min_sens < 0) c.min_sens = 0;
+    if (c.max_sens < 0) c.max_sens = 0;
+    c.min_threshold = device_config_int(section, "gyro_mouse_min_threshold", 5);
+    c.max_threshold = device_config_int(section, "gyro_mouse_max_threshold", 75);
+    if (c.max_threshold <= c.min_threshold) c.max_threshold = c.min_threshold + 1;
     const int inv = device_config_int(section, "gyro_mouse_invert", 0);
     c.invert_x = (inv & 1) != 0;
     c.invert_y = (inv & 2) != 0;
     c.player_space = device_config_bool(section, "gyro_mouse_player_space", true);
+    c.recenter = parse_gate(device_config_str(section, "gyro_mouse_recenter_button"));
+
+    // ⓘ Back-compat: a single `gyro_mouse_sens` still works and scales both
+    // tiers, so an existing config keeps meaning something. 50 = the defaults
+    // above; 100 = double; 25 = half.
+    const int legacy = device_config_int(section, "gyro_mouse_sens", 0);
+    if (legacy > 0) {
+        c.min_sens = (c.min_sens * legacy) / 50;
+        c.max_sens = (c.max_sens * legacy) / 50;
+    }
     return c;
+}
+
+// ---- Cursor recentre -------------------------------------------------------
+//
+// Warps the REAL Windows cursor to the middle of the primary screen. This is
+// deliberately NOT routed through the synthetic mouse: that device sends
+// relative movement and has no idea where the cursor is, so it cannot target a
+// position. SetCursorPos can, and this is a desktop-navigation feature.
+//
+// ⚠️ Does nothing visible in a fullscreen game -- games hide the cursor and
+// read raw relative movement, never cursor position. That is expected.
+inline void warp_cursor_to_centre()
+{
+    const int w = GetSystemMetrics(SM_CXSCREEN);
+    const int h = GetSystemMetrics(SM_CYSCREEN);
+    if (w > 0 && h > 0) {
+        SetCursorPos(w / 2, h / 2);
+    }
 }
 
 // ---- Per-device state ------------------------------------------------------
@@ -165,6 +228,42 @@ public:
         }
 
         const Config cfg = load_config(section);
+
+        // ⓘ Gate diagnostic. Off unless gyro_mouse_debug_gate is set, and rate
+        // limited to twice a second -- this path runs 250x/sec. Prints the raw
+        // bytes every gate reads so a gate that never opens can be diagnosed by
+        // measurement rather than by guessing at offsets.
+        if (device_config_bool(section, "gyro_mouse_debug_gate", false)) {
+            static auto lastPrint = std::chrono::steady_clock::now();
+            const auto nowDbg = std::chrono::steady_clock::now();
+            if (std::chrono::duration_cast<std::chrono::milliseconds>(nowDbg - lastPrint).count() >= 500) {
+                lastPrint = nowDbg;
+                std::cout << "[gyro] len=" << len
+                          << " L2[5]=" << (len > 5 ? (int)d[5] : -1)
+                          << " R2[6]=" << (len > 6 ? (int)d[6] : -1)
+                          << " btn[9]=0x" << std::hex << (len > 9 ? (int)d[9] : 0)
+                          << " btn[10]=0x" << (len > 10 ? (int)d[10] : 0) << std::dec
+                          << " touch[33]=0x" << std::hex << (len > 33 ? (int)d[33] : 0) << std::dec
+                          << " gateOpen=" << (gate_open(cfg.gate, d, len) ? 1 : 0)
+                          << std::endl;
+            }
+        }
+
+        // ⭐ Recenter runs BEFORE the gate check, and regardless of whether
+        // gyro is producing movement -- it is a navigation aid, useful exactly
+        // when the cursor is stranded and gyro may well be off.
+        //
+        // Edge-triggered: fires once on press, not repeatedly while held.
+        if (cfg.recenter != Gate::Off) {
+            const bool down = gate_open(cfg.recenter, d, len);
+            if (down && !recenterWasDown_) {
+                warp_cursor_to_centre();
+            }
+            recenterWasDown_ = down;
+        } else {
+            recenterWasDown_ = false;
+        }
+
         if (cfg.gate == Gate::Off) {
             reset_remainder();
             return false;
@@ -214,23 +313,59 @@ public:
             return false;
         }
 
-        float mx = 0.0f, my = 0.0f;
+        // ⭐⭐ AXIS MAPPING. Both of the library's two-axis outputs return
+        // x = VERTICAL (pitch) and y = HORIZONTAL (yaw) -- they stay in the
+        // controller's own axes rather than screen order. From the library's
+        // README: "Y is the horizontal part of the rotation, and X is the
+        // vertical part ... treat the Y as the horizontal or yaw input and X
+        // as the vertical or pitch input."
+        //
+        // ⛔ An earlier version fed these straight through as (horizontal,
+        // vertical), which is why the axes came out swapped on hardware. Both
+        // branches now swap identically -- this is also exactly what
+        // JoyShockMapper does (MOUSE_X_FROM_GYRO_AXIS = Y, MOUSE_Y = X).
+        float vertical = 0.0f;      // pitch, deg/sec
+        float horizontal = 0.0f;    // yaw, deg/sec
         if (cfg.player_space) {
-            motion_.GetPlayerSpaceGyro(mx, my);
+            motion_.GetPlayerSpaceGyro(vertical, horizontal);
         } else {
-            float gz;
-            motion_.GetCalibratedGyro(mx, my, gz);
-            // Calibrated gyro is (pitch, yaw, roll) = (x, y, z). For a plain
-            // yaw/pitch mouse, horizontal is yaw (y), vertical is pitch (x).
-            std::swap(mx, my);
+            float roll;
+            motion_.GetCalibratedGyro(vertical, horizontal, roll);
         }
 
-        // Scale. player/calibrated output is in degrees/second-ish; sens maps
-        // 1..100 onto a usable pixels-per-degree. Divisor chosen so mid-slider
-        // (50) is a comfortable default; tune on hardware.
-        const float scale = static_cast<float>(cfg.sens) / 40.0f;
-        float dx = mx * scale;
-        float dy = -my * scale;             // screen Y is down; tilt up = up
+        // ⚠️ SIGNS ARE EMPIRICAL, NOT DERIVED. The DualSense's physical
+        // positive-rotation directions are not authoritatively documented, and
+        // screen Y grows downward while the library's frame is Y-up. These two
+        // constants were set by turning a real controller and watching the
+        // cursor. If a future controller or library version disagrees, flip
+        // them here -- or, without rebuilding, use gyro_mouse_invert.
+        constexpr float kSignH = -1.0f;   // turn left -> cursor left
+        constexpr float kSignV = -1.0f;   // tilt up   -> cursor up
+
+        // ⭐ Speed-based sensitivity, JSM's shaped-sensitivity approach: slow
+        // movement stays precise, fast movement ramps up for big turns.
+        const float speed = std::sqrt(horizontal * horizontal + vertical * vertical);
+        const float loT = static_cast<float>(cfg.min_threshold);
+        const float hiT = static_cast<float>(cfg.max_threshold);
+        float t = (speed - loT) / (hiT - loT);
+        if (t < 0.0f) t = 0.0f;
+        if (t > 1.0f) t = 1.0f;
+        const float sens = static_cast<float>(cfg.min_sens) +
+                           t * static_cast<float>(cfg.max_sens - cfg.min_sens);
+
+        // ⭐⭐ THE SCALE, with the step that was missing before.
+        //
+        // The gyro reports degrees per SECOND. Movement for this report is
+        // therefore rate * dt -- degrees actually turned since the last one.
+        // ⛔ An earlier version omitted dt entirely and treated deg/sec as
+        // pixels, which made the result both wrong and dependent on report
+        // rate. Real World Calibration then converts degrees to pixels:
+        // px_per_360 / 360 pixels for every degree turned.
+        const float pxPerDegree = static_cast<float>(cfg.px_per_360) / 360.0f;
+        const float step = dt * pxPerDegree * sens;
+
+        float dx = horizontal * step * kSignH;
+        float dy = vertical * step * kSignV;
         if (cfg.invert_x) dx = -dx;
         if (cfg.invert_y) dy = -dy;
 
@@ -264,6 +399,7 @@ private:
     float remY_ = 0.0f;
     std::chrono::steady_clock::time_point lastReport_{};
     bool haveClock_ = false;
+    bool recenterWasDown_ = false;      // edge detection for the recentre button
 };
 
 // ---- Cross-session mailbox -------------------------------------------------
