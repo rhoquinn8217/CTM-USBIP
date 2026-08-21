@@ -121,30 +121,6 @@ static void set_bridge_session_error(AgentBridgeSession *session, const std::wst
     session->lastError = error;
 }
 
-// Read-only view for the REST API (GET /status, /sessions). Called on the
-// agent loop thread. Lock order sessions-mutex -> session-mutex is new but
-// safe: no existing path acquires g_agent_sessions_mutex while holding a
-// session mutex.
-static std::vector<CtmRestSessionSnapshot> collect_bridge_session_snapshots()
-{
-    std::vector<CtmRestSessionSnapshot> out;
-    std::lock_guard<std::mutex> lock(g_agent_sessions_mutex);
-    out.reserve(g_agent_sessions.size());
-    for (const auto &session : g_agent_sessions) {
-        CtmRestSessionSnapshot snap;
-        snap.busid = session->busIdAscii;
-        snap.kind = session->kind;
-        snap.port = session->port;
-        snap.ready = session->ready.load();
-        {
-            std::lock_guard<std::mutex> sessionLock(session->mutex);
-            snap.lastError = narrow_ascii(session->lastError);
-        }
-        out.push_back(std::move(snap));
-    }
-    return out;
-}
-
 static bool stop_bridge_session(const std::wstring &busId);
 static void drain_bridge_session_reaps();
 

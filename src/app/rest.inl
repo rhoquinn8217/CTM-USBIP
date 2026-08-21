@@ -19,14 +19,14 @@
 //
 // The parser half of this file is host-testable: tests/rest_parser_test.cpp
 // (a suite in the build-tests.ps1 harness) compiles it with
-// CTM_REST_PARSER_ONLY; everything that touches winsock or agent state stays
+// REST_PARSER_ONLY; everything that touches winsock or agent state stays
 // behind that guard at the bottom.
 
 // ---------------------------------------------------------------------------
 // Pure helpers (no winsock, no agent state) — covered by the host-side tests.
 // ---------------------------------------------------------------------------
 
-struct CtmRestRequest {
+struct RestRequest {
     std::string method;
     std::string path;   // percent-decoded, query stripped
     std::string query;  // raw, without '?'
@@ -37,7 +37,7 @@ struct CtmRestRequest {
 // Flat JSON object: string / integer / bool members only. Nested objects,
 // arrays and floats are rejected with an error message — every body this API
 // accepts is flat, and refusing the rest keeps the parser small and auditable.
-struct CtmRestJson {
+struct RestJson {
     std::map<std::string, std::string> strings;
     std::map<std::string, long long> numbers;
     std::map<std::string, bool> bools;
@@ -158,7 +158,7 @@ static bool rest_parse_json_string(const std::string &s, size_t *i, std::string 
 
 // Empty / whitespace-only body parses as an empty object (POST /restart with
 // no body is legal).
-static bool rest_parse_flat_json(const std::string &body, CtmRestJson *out, std::string *error)
+static bool rest_parse_flat_json(const std::string &body, RestJson *out, std::string *error)
 {
     size_t i = 0;
     rest_skip_ws(body, &i);
@@ -275,7 +275,7 @@ static bool rest_percent_decode(const std::string &in, std::string *out)
 }
 
 // Parses the head (request line + headers), i.e. everything before CRLFCRLF.
-static bool rest_parse_head(const std::string &head, CtmRestRequest *req, std::string *error)
+static bool rest_parse_head(const std::string &head, RestRequest *req, std::string *error)
 {
     size_t lineEnd = head.find("\r\n");
     if (lineEnd == std::string::npos) lineEnd = head.size();
@@ -411,7 +411,7 @@ static std::string rest_error_response(int status, const std::string &message,
     return rest_http_response(status, "{\"error\":\"" + rest_json_escape(message) + "\"}", extraHeaders);
 }
 
-#if !defined(CTM_REST_PARSER_ONLY)
+#if !defined(REST_PARSER_ONLY)
 
 // ---------------------------------------------------------------------------
 // Agent glue + winsock transport (excluded from the host-side parser tests).
@@ -424,7 +424,7 @@ static std::string g_rest_token;          // empty = no auth
 
 static std::chrono::steady_clock::time_point g_rest_agent_start;
 
-struct CtmRestSessionSnapshot {
+struct RestSessionSnapshot {
     std::string busid;
     std::string kind;
     uint16_t port = 0;
@@ -433,12 +433,18 @@ struct CtmRestSessionSnapshot {
 };
 
 // Defined in agent.inl (included after this file).
-static std::vector<CtmRestSessionSnapshot> collect_bridge_session_snapshots();
+// Read-only view of the bridge sessions, for GET /status and GET /sessions.
+//
+// ⓘ DECLARED here, DEFINED in rest_sessions.inl. It reads g_agent_sessions,
+// which agent.inl owns, and agent.inl calls into this file -- so the two
+// cannot both be included first. Splitting the definition into its own file
+// after agent.inl keeps the code OURS without fighting that cycle.
+static std::vector<RestSessionSnapshot> collect_bridge_session_snapshots();
 static bool start_bridge_session(const std::string &kind, uint16_t port, const std::wstring &busId, std::wstring *error);
 static bool stop_bridge_session(const std::wstring &busId);
 static void stop_all_bridge_sessions();
 
-static std::string rest_session_json(const CtmRestSessionSnapshot &snap)
+static std::string rest_session_json(const RestSessionSnapshot &snap)
 {
     std::string out = "{\"busid\":\"" + rest_json_escape(snap.busid) + "\"";
     out += ",\"kind\":\"" + rest_json_escape(snap.kind) + "\"";
@@ -452,7 +458,7 @@ static std::string rest_handle_status(uint16_t agentPort)
 {
     const auto uptime = std::chrono::duration_cast<std::chrono::seconds>(
         std::chrono::steady_clock::now() - g_rest_agent_start).count();
-    const std::vector<CtmRestSessionSnapshot> sessions = collect_bridge_session_snapshots();
+    const std::vector<RestSessionSnapshot> sessions = collect_bridge_session_snapshots();
     std::string body = "{\"version\":\"" + rest_json_escape(CTM_VERSION_DISPLAY) + "\"";
     body += ",\"transport\":\"" + std::string(g_use_enet.load() ? "enet" : "tcp") + "\"";
     body += ",\"control_port\":" + std::to_string(agentPort);
@@ -462,9 +468,9 @@ static std::string rest_handle_status(uint16_t agentPort)
     return rest_http_response(200, body);
 }
 
-static std::string rest_handle_sessions_post(const CtmRestRequest &req)
+static std::string rest_handle_sessions_post(const RestRequest &req)
 {
-    CtmRestJson json;
+    RestJson json;
     std::string jsonError;
     if (!rest_parse_flat_json(req.body, &json, &jsonError)) {
         return rest_error_response(400, jsonError);
@@ -501,9 +507,9 @@ static std::string rest_handle_sessions_post(const CtmRestRequest &req)
     return rest_http_response(202, body);
 }
 
-static std::string rest_handle_restart(const CtmRestRequest &req)
+static std::string rest_handle_restart(const RestRequest &req)
 {
-    CtmRestJson json;
+    RestJson json;
     std::string jsonError;
     if (!rest_parse_flat_json(req.body, &json, &jsonError)) {
         return rest_error_response(400, jsonError);
@@ -524,7 +530,7 @@ static std::string rest_handle_restart(const CtmRestRequest &req)
     return rest_http_response(200, "{\"status\":\"bridges reset\"}");
 }
 
-static std::string rest_route(const CtmRestRequest &req, uint16_t agentPort)
+static std::string rest_route(const RestRequest &req, uint16_t agentPort)
 {
     if (!g_rest_token.empty()) {
         const auto authIt = req.headers.find("authorization");
@@ -546,7 +552,7 @@ static std::string rest_route(const CtmRestRequest &req, uint16_t agentPort)
 
     if (req.path == "/api/v1/sessions") {
         if (req.method == "GET") {
-            const std::vector<CtmRestSessionSnapshot> sessions = collect_bridge_session_snapshots();
+            const std::vector<RestSessionSnapshot> sessions = collect_bridge_session_snapshots();
             std::string body = "[";
             for (size_t i = 0; i < sessions.size(); ++i) {
                 if (i) body += ",";
@@ -568,8 +574,8 @@ static std::string rest_route(const CtmRestRequest &req, uint16_t agentPort)
             return rest_error_response(404, "unknown path");
         }
         if (req.method == "GET") {
-            const std::vector<CtmRestSessionSnapshot> sessions = collect_bridge_session_snapshots();
-            for (const CtmRestSessionSnapshot &snap : sessions) {
+            const std::vector<RestSessionSnapshot> sessions = collect_bridge_session_snapshots();
+            for (const RestSessionSnapshot &snap : sessions) {
                 if (snap.busid == busid) {
                     return rest_http_response(200, rest_session_json(snap));
                 }
@@ -667,7 +673,7 @@ static void rest_handle_client(SOCKET client, uint16_t agentPort)
         return;
     }
 
-    CtmRestRequest req;
+    RestRequest req;
     std::string parseError;
     if (!rest_parse_head(raw.substr(0, headEnd), &req, &parseError)) {
         rest_send_all(client, rest_error_response(400, parseError));
@@ -709,4 +715,4 @@ static void rest_handle_client(SOCKET client, uint16_t agentPort)
     rest_send_all(client, rest_route(req, agentPort));
 }
 
-#endif // !CTM_REST_PARSER_ONLY
+#endif // !REST_PARSER_ONLY

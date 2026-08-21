@@ -134,6 +134,6 @@ run all suites with:
 .\build-tests.ps1
 ```
 
-The `CTM_REST_PARSER_ONLY` guard keeps winsock and agent state out of that
+The `REST_PARSER_ONLY` guard keeps winsock and agent state out of that
 suite, so unlike the device-config tests it has no Windows dependency of its
 own.

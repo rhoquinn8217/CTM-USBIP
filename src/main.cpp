@@ -75,6 +75,7 @@ static void mic_ring_reset(const CtmBackend *owner);
 #include "config/config_watcher.inl"
 #include "app/rest.inl"
 #include "app/agent.inl"
+#include "app/rest_sessions.inl"   // defines what rest.inl declares; needs agent.inl's session list
 #include "app/service.inl"
 
 } // namespace

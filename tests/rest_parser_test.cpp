@@ -3,11 +3,11 @@
 // matching and response formatting. No winsock, no agent state.
 //
 // rest.inl is included here directly rather than through units.h because its
-// CTM_REST_PARSER_ONLY guard makes the parser half self-contained -- it needs
+// REST_PARSER_ONLY guard makes the parser half self-contained -- it needs
 // none of the device_log/device_config chain, and pulling the unguarded half
 // in would drag winsock and the agent's session list into the test binary.
 
-#define CTM_REST_PARSER_ONLY 1
+#define REST_PARSER_ONLY 1
 
 #include "harness.h"
 
@@ -38,13 +38,13 @@ static void test_json_escape()
 static void test_flat_json_valid()
 {
     ctmtest::section("rest: flat json (valid)");
-    CtmRestJson json;
+    RestJson json;
     std::string error;
     CTM_CHECK(rest_parse_flat_json("", &json, &error));
     CTM_CHECK(rest_parse_flat_json("   \r\n ", &json, &error));
     CTM_CHECK(rest_parse_flat_json("{}", &json, &error));
 
-    json = CtmRestJson();
+    json = RestJson();
     CTM_CHECK(rest_parse_flat_json(
         "{\"kind\":\"ds5\", \"port\": 48100,\n \"busid\":\"ctm-1\", \"flag\":true, \"x\":null}",
         &json, &error));
@@ -54,15 +54,15 @@ static void test_flat_json_valid()
     CTM_CHECK_EQ(json.bools["flag"], true);
     CTM_CHECK(json.strings.count("x") == 0 && json.numbers.count("x") == 0);
 
-    json = CtmRestJson();
+    json = RestJson();
     CTM_CHECK(rest_parse_flat_json("{\"n\":-7}", &json, &error));
     CTM_CHECK_EQ(json.numbers["n"], -7);
 
-    json = CtmRestJson();
+    json = RestJson();
     CTM_CHECK(rest_parse_flat_json("{\"s\":\"a\\u0041\\t\"}", &json, &error));
     CTM_CHECK_EQ(json.strings["s"], "aA\t");
 
-    json = CtmRestJson();
+    json = RestJson();
     CTM_CHECK(rest_parse_flat_json("{\"s\":\"\\u00e9\"}", &json, &error)); // é -> 2-byte UTF-8
     CTM_CHECK_EQ(json.strings["s"], "\xc3\xa9");
 }
@@ -70,7 +70,7 @@ static void test_flat_json_valid()
 static void test_flat_json_invalid()
 {
     ctmtest::section("rest: flat json (invalid)");
-    CtmRestJson json;
+    RestJson json;
     std::string error;
     CTM_CHECK(!rest_parse_flat_json("[1,2]", &json, &error));
     CTM_CHECK(!rest_parse_flat_json("{\"a\":{\"b\":1}}", &json, &error));
@@ -100,7 +100,7 @@ static void test_percent_decode()
 static void test_head_parse()
 {
     ctmtest::section("rest: http head parse");
-    CtmRestRequest req;
+    RestRequest req;
     std::string error;
     const std::string head =
         "POST /api/v1/sessions?verbose=1 HTTP/1.1\r\n"
@@ -116,11 +116,11 @@ static void test_head_parse()
     CTM_CHECK_EQ(req.headers["content-length"], "42");
     CTM_CHECK_EQ(req.headers["authorization"], "Bearer sekrit");
 
-    req = CtmRestRequest();
+    req = RestRequest();
     CTM_CHECK(rest_parse_head("GET /api/v1/status HTTP/1.1", &req, &error));
     CTM_CHECK(req.method == "GET" && req.path == "/api/v1/status" && req.query.empty());
 
-    req = CtmRestRequest();
+    req = RestRequest();
     CTM_CHECK(!rest_parse_head("GARBAGE", &req, &error));
     CTM_CHECK(!rest_parse_head("GET  HTTP/1.1", &req, &error));
     CTM_CHECK(!rest_parse_head("GET /x SPDY/3", &req, &error));
