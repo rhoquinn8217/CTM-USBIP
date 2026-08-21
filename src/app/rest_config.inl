@@ -31,12 +31,21 @@ static bool rest_link_device(const std::string &ordinal, const std::string &conf
                              std::string *error);
 static bool rest_find_device(const std::string &ordinal, RestDeviceView *out);
 
+// The name the shared section answers to in the API. Reserved, so a real config
+// cannot take it -- see config_store::valid_name().
+static const char *kSharedName = "shared";
+
 static std::string rest_device_json(const RestDeviceView &d)
 {
     std::string out = "{\"ordinal\":\"" + rest_json_escape(d.ordinal) + "\"";
     out += ",\"kind\":\"" + rest_json_escape(d.kind) + "\"";
     out += ",\"serial\":\"" + rest_json_escape(d.serial) + "\"";
     out += ",\"linked_config\":\"" + rest_json_escape(d.linkedConfig) + "\"";
+    // ⚠️ linked_config is "" for an unlinked device, which reads as "nothing
+    // applies" and is wrong: it is reading the shared section. `reads` says so.
+    out += ",\"reads\":\"" +
+           rest_json_escape(d.linkedConfig.empty() ? std::string(kSharedName) : d.linkedConfig) +
+           "\"";
     out += ",\"ready\":" + std::string(d.ready ? "true" : "false");
     out += ",\"supports_config\":" +
            std::string(config_store::kind_supports_config(d.kind) ? "true" : "false") + "}";
@@ -78,11 +87,59 @@ static std::string rest_config_json(const config_store::ConfigFile &cfg,
     return out + "]}";
 }
 
+// ⭐ THE SHARED SECTION, EXPOSED AS A CONFIG BUT READ-ONLY.
+//
+// Every device with no link reads ctm-device-config.txt's [ds5] block. That is
+// long-standing behaviour and stays -- for a single-controller setup it is the
+// whole feature, and create-and-link is a lot of ceremony to change one volume.
+//
+// ⚠️ But it applies to EVERYTHING, silently. A stale value there attenuated
+// every controller in this project for an evening while the API cheerfully
+// reported "linked_config": "" -- which reads as "nothing applies" and actually
+// means "reading whatever is in that file".
+//
+// So it is listed like any other config and its settings are readable, but the
+// API refuses to WRITE it: a change that affects every device should be a
+// deliberate hand edit, not something a UI can do by accident.
+static std::string rest_shared_json(const std::vector<RestDeviceView> &devices)
+{
+    std::string out = "{\"name\":\"shared\",\"kind\":\"ds5\",\"read_only\":true";
+    out += ",\"note\":\"Applies to every device with no config linked. "
+           "Edit ctm-device-config.txt by hand.\"";
+    out += ",\"auto_link\":[],\"linked_by\":[";
+    bool first = true;
+    for (const RestDeviceView &d : devices) {
+        if (!d.linkedConfig.empty()) continue;          // linked devices do not read it
+        if (!first) out += ",";
+        first = false;
+        out += "\"" + rest_json_escape(d.ordinal) + "\"";
+    }
+    out += "],\"settings\":{";
+    {
+        std::lock_guard<std::mutex> lock(g_device_config_mutex);
+        if (!g_device_config_loaded) {
+            device_config_load_locked();
+        }
+        auto it = g_device_config.find("ds5");
+        bool firstKey = true;
+        if (it != g_device_config.end()) {
+            for (const auto &entry : it->second) {
+                if (!firstKey) out += ",";
+                firstKey = false;
+                out += "\"" + rest_json_escape(entry.first) + "\":\"" +
+                       rest_json_escape(entry.second) + "\"";
+            }
+        }
+    }
+    return out + "}}";
+}
+
 static std::string rest_configs_json()
 {
     const std::vector<RestDeviceView> devices = rest_collect_devices();
     std::string out = "{\"configs\":[";
-    bool first = true;
+    bool first = false;
+    out += rest_shared_json(devices);              // always first, always present
     for (const config_store::ConfigFile &cfg : config_store::list_configs()) {
         if (!first) out += ",";
         first = false;
@@ -270,6 +327,23 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
         const size_t slash = rest.find('/');
         const std::string name = rest.substr(0, slash);
         const std::string action = slash == std::string::npos ? std::string() : rest.substr(slash + 1);
+
+        // The shared section is readable like any other config and writable by
+        // no one. A UI must be able to SHOW what an unlinked device is reading
+        // -- that invisibility is what made a stale value so hard to find --
+        // without being able to change something that affects every device.
+        if (config_store::lower(name) == kSharedName) {
+            if (req.method == "GET" && action.empty()) {
+                *out = rest_http_response(200, rest_shared_json(rest_collect_devices()));
+            } else {
+                *out = rest_error_response(403,
+                    "the shared section is read-only here -- edit ctm-device-config.txt "
+                    "by hand. It applies to every device with no config linked, so a "
+                    "change to it should be deliberate rather than something a UI does.");
+            }
+            return true;
+        }
+
         if (!config_store::valid_name(name)) {
             *out = rest_error_response(404, "unknown path");
             return true;
@@ -362,7 +436,7 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
                     *out = rest_error_response(400, deviceIt->second + " is not connected");
                     return true;
                 }
-                if (view.kind != cfg.kind) {
+                if (config_store::settings_kind_for(view.kind) != cfg.kind) {
                     *out = rest_error_response(400,
                         "kind mismatch: device is " + view.kind + ", config is " + cfg.kind);
                     return true;

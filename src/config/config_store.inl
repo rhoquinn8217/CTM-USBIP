@@ -43,7 +43,7 @@ inline const char *kArchiveDir = "configs\\archive";
 
 struct ConfigFile {
     std::string name;                       // filename stem
-    std::string kind;                       // "ds5" | "ds5_edge"
+    std::string kind;                       // SETTINGS kind: "ds5" or "ds5_edge"
     std::vector<std::string> autoLink;      // normalised serials
     std::string path;
 };
@@ -73,6 +73,9 @@ inline bool valid_name(const std::string &name)
     // would sit beside a directory of the same stem, which is legal on NTFS
     // and confusing to everyone.
     if (name == "archive" || name == "Archive" || name == "ARCHIVE") return false;
+    // ⛔ "shared" is what the API calls ctm-device-config.txt's own section. A
+    // config file of that name would shadow it in every listing.
+    if (lower(name) == "shared") return false;
     for (char c : name) {
         const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
                         (c >= '0' && c <= '9') || c == '_' || c == '-';
@@ -88,9 +91,40 @@ inline bool valid_name(const std::string &name)
 // controllers while looking like they were configured separately -- worse than
 // not offering the feature. Manual linking could open up later, after
 // measurement rather than assumption.
+// ⭐⭐ TWO NAMING SYSTEMS, AND CONFIG FILES USE THE SECOND.
+//
+// A SESSION kind comes from the TV: "ds5", "ds5_usb", "ds5e_usb" -- it says how
+// the controller is attached as much as what it is. A SETTINGS section comes
+// from the USB product id via device_section_for(): "ds5" or "ds5_edge".
+//
+// A config file must be named for the SETTINGS section, because that is what
+// resolves a setting at read time -- and it is the same name the shared
+// ctm-device-config.txt already uses, so the two files stay the same shape.
+//
+// ⚠️ Without this, a config created for a "ds5_usb" device stored kind
+// "ds5_usb", loaded into "cfg:name/ds5_usb", and was read from "cfg:name/ds5".
+// The link would report success and silently change nothing -- the worst
+// failure available, because everything looks correct.
+inline std::string settings_kind_for(const std::string &sessionKind)
+{
+    if (sessionKind == "ds5" || sessionKind == "ds5_usb") return "ds5";
+    if (sessionKind == "ds5e_usb" || sessionKind == "ds5_edge") return "ds5_edge";
+    return std::string();                    // not a kind we carry configs for
+}
+
 inline bool kind_supports_config(const std::string &kind)
 {
-    return kind == "ds5" || kind == "ds5_edge";
+    // ⚠️ THESE MUST MATCH THE KINDS agent.inl ACTUALLY USES. An earlier version
+    // listed "ds5_edge", which the agent has never used -- so a real DualSense
+    // arriving as "ds5_usb" reported supports_config=false and every link was
+    // refused as a kind mismatch. Checked against bridge_profile_for_kind():
+    // ds5, ds5_usb, ds5e_usb.
+    //
+    // DS5 family only, and not because other devices cannot have settings:
+    // auto_link needs a trustworthy per-unit serial, and these are the ones
+    // established to have one (measured 2026-08-21: 7c:66:ef:82:10:ed).
+    // Accepts either form, so callers need not know which they hold.
+    return !settings_kind_for(kind).empty();
 }
 
 // ⭐ The namespaced section name -- the whole mechanism.
@@ -213,6 +247,21 @@ inline bool load_one_locked(const std::string &name, ConfigFile *out)
 }
 
 // Rebuilds the registry from disk. Cheap -- these files are tiny.
+// ⭐ Set by config_watcher once it is defined, and called after any change to a
+// config file. Without it, a write reached the FILE but nothing told a live
+// controller -- the setting was correct and only applied on the next bridge,
+// which is exactly the "why did nothing happen" the shared file does not have.
+//
+// A hook rather than a direct call because config_watcher.inl is included after
+// this file: the dependency has to point one way, and this way round means
+// config_store stays usable in the test binary, which has no watcher.
+inline std::function<void()> g_on_change;
+
+inline void notify_changed()
+{
+    if (g_on_change) g_on_change();
+}
+
 inline void reload_all()
 {
     // ⚠️ LOCK ORDER: g_mutex, then g_device_config_mutex. Never the reverse.
@@ -276,9 +325,12 @@ inline std::string auto_link_for(const std::string &serial, const std::string &k
 {
     const std::string s = normalise_serial(serial);
     if (s.empty()) return std::string();
+    // Callers pass a SESSION kind; configs are stored by settings kind.
+    const std::string wanted = settings_kind_for(kind);
+    if (wanted.empty()) return std::string();
     std::lock_guard<std::mutex> lock(g_mutex);
     for (const auto &entry : g_files) {
-        if (entry.second.kind != kind) continue;
+        if (entry.second.kind != wanted) continue;
         for (const std::string &claim : entry.second.autoLink) {
             if (claim == s) return entry.second.name;
         }
@@ -302,7 +354,8 @@ inline std::string claimed_by(const std::string &serial, const std::string &exce
 inline bool create_config(const std::string &name, const std::string &kind, std::string *error)
 {
     if (!valid_name(name)) { *error = "name must be letters, digits, _ or - (max 48)"; return false; }
-    if (!kind_supports_config(kind)) { *error = "config unsupported for kind " + kind; return false; }
+    const std::string settingsKind = settings_kind_for(kind);
+    if (settingsKind.empty()) { *error = "config unsupported for kind " + kind; return false; }
     {
         std::lock_guard<std::mutex> lock(g_mutex);
         if (g_files.count(lower(name))) { *error = name + " already exists"; return false; }
@@ -319,18 +372,19 @@ inline bool create_config(const std::string &name, const std::string &kind, std:
     // and would go stale the moment someone adds a key and forgets to register
     // it.
     file << "# " << name << "\r\n#\r\n"
-         << "# Settings for one or more " << kind << " controllers.\r\n"
+         << "# Settings for one or more " << settingsKind << " controllers.\r\n"
          << "#\r\n"
          << "# A key that is ABSENT is left alone -- it is not defaulted. So an\r\n"
          << "# empty block below behaves exactly as no config at all, and every\r\n"
          << "# line added is a deliberate override.\r\n\r\n"
          << "[config]\r\n"
-         << "kind = " << kind << "\r\n"
+         << "kind = " << settingsKind << "\r\n"
          << "# Serials linked to this config automatically at bridge time.\r\n"
          << "auto_link =\r\n\r\n"
-         << "[" << kind << "]\r\n";
+         << "[" << settingsKind << "]\r\n";
     file.close();
     reload_all();
+    notify_changed();
     return true;
 }
 
@@ -363,6 +417,7 @@ inline bool archive_config(const std::string &name, std::string *error, std::str
     }
     *movedTo = target;
     reload_all();
+    notify_changed();
     return true;
 }
 
@@ -418,6 +473,7 @@ inline bool set_setting(const std::string &name, const std::string &key,
         for (const std::string &l : lines) out << l << "\r\n";
         out.close();
         reload_all();
+        notify_changed();
         return true;
     }
 
@@ -435,6 +491,7 @@ inline bool set_setting(const std::string &name, const std::string &key,
     for (const std::string &l : lines) out << l << "\r\n";
     out.close();
     reload_all();
+    notify_changed();
     return true;
 }
 
@@ -464,6 +521,7 @@ inline bool set_auto_link_line(const ConfigFile &cfg, const std::string &joined,
     for (const std::string &l : lines) out << l << "\r\n";
     out.close();
     reload_all();
+    notify_changed();
     return true;
 }
 

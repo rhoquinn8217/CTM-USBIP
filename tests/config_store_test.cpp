@@ -74,6 +74,8 @@ int run_config_store_tests()
     CTM_CHECK(!cs::valid_name("dots.bad"));
     CTM_CHECK(!cs::valid_name("../escape"));          // must not reach outside configs/
     CTM_CHECK(!cs::valid_name("archive"));            // reserved: the archive folder
+    CTM_CHECK(!cs::valid_name("shared"));             // reserved: the shared section
+    CTM_CHECK(!cs::valid_name("SHARED"));
     CTM_CHECK(!cs::valid_name(std::string(49, 'a')));
 
     section("config store: a key or value cannot forge a line");
@@ -99,10 +101,36 @@ int run_config_store_tests()
     CTM_CHECK_EQ(cs::section_for("couch", "ds5_edge"), std::string("cfg:couch/ds5_edge"));
 
     section("config store: only the DS5 family may carry a config");
+    // ⚠️ These are the SESSION kinds the agent actually uses. An earlier version
+    // listed "ds5_edge", which the agent has never used, so a real DualSense
+    // arriving as "ds5_usb" was refused a config entirely.
     CTM_CHECK(cs::kind_supports_config("ds5"));
-    CTM_CHECK(cs::kind_supports_config("ds5_edge"));
+    CTM_CHECK(cs::kind_supports_config("ds5_usb"));
+    CTM_CHECK(cs::kind_supports_config("ds5e_usb"));
     CTM_CHECK(!cs::kind_supports_config("ds4"));
     CTM_CHECK(!cs::kind_supports_config("puck"));
+
+    section("config store: ⭐ a session kind maps to the settings section name");
+    // The section a setting is READ from comes from the USB product id, not the
+    // session kind. A config stored under the session kind would load into a
+    // section nothing ever reads -- a link that reports success and does
+    // nothing.
+    CTM_CHECK_EQ(cs::settings_kind_for("ds5"), std::string("ds5"));
+    CTM_CHECK_EQ(cs::settings_kind_for("ds5_usb"), std::string("ds5"));
+    CTM_CHECK_EQ(cs::settings_kind_for("ds5e_usb"), std::string("ds5_edge"));
+    CTM_CHECK_EQ(cs::settings_kind_for("ds4"), std::string(""));
+
+    section("config store: a config created for a ds5_usb device stores ds5");
+    {
+        std::string error;
+        CTM_CHECK(cs::create_config("usbcfg", "ds5_usb", &error));
+        cs::ConfigFile made;
+        CTM_CHECK(cs::find_config("usbcfg", &made));
+        CTM_CHECK_EQ(made.kind, std::string("ds5"));      // not "ds5_usb"
+        // and its settings therefore land where a reader will look for them
+        CTM_CHECK(cs::set_setting("usbcfg", "speaker_volume", "42", &error));
+        CTM_CHECK_EQ(units::device_config_int("cfg:usbcfg/ds5", "speaker_volume", -1), 42);
+    }
 
     wipe_configs();
 
@@ -217,7 +245,7 @@ int run_config_store_tests()
         CTM_CHECK(contains(error, "already claimed"));
 
         // a kind that does not match does not match
-        CTM_CHECK_EQ(cs::auto_link_for("aabbccddeeff", "ds5_edge"), std::string(""));
+        CTM_CHECK_EQ(cs::auto_link_for("aabbccddeeff", "ds5e_usb"), std::string(""));
         // an empty serial never auto-links
         CTM_CHECK_EQ(cs::auto_link_for("", "ds5"), std::string(""));
 

@@ -126,7 +126,22 @@ static void ds5_apply_initial_settings(CtmBackend *backend,
     uint8_t audioControl = (output == Ds5AudioOutput::Auto)
         ? kDs5RouteToSpeaker
         : ds5_route_bits_for(output);
-    if (speakerActive && device_config_bool(section, "force_echo_cancel", false)) {
+    // ⭐ DEFAULTS TO TRUE, and that is not a preference. The DualSense mutes its
+    // own speaker when echo cancel is off -- feedback protection, because the
+    // mic sits centimetres from it. Measured on C1 2026-07-22: echo cancel off
+    // gave 80 dB, on gave 94 dB, identical to the level a game produces.
+    //
+    // A configuration where the controller speaker is active but cancellation
+    // is unwanted does not meaningfully exist here, and the controller itself
+    // agrees -- it responds to that combination by silencing itself. Someone
+    // who genuinely wants it off can still set force_echo_cancel = false.
+    //
+    // ⚠️ ds5_output_overrides.inl defaults this to FALSE, and that difference is
+    // deliberate. This function builds OUR report and must not send one that
+    // silences the controller. That one intercepts a GAME'S report, where an
+    // absent key must leave the report untouched -- a rule the test suite
+    // enforces directly.
+    if (speakerActive && device_config_bool(section, "force_echo_cancel", true)) {
         audioControl = static_cast<uint8_t>(audioControl | kDs5EchoNoiseCancel);
     }
     report[kDs5IdxAudioControl] = audioControl;

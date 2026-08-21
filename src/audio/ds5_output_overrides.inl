@@ -285,6 +285,19 @@ static void ds5_override_audio_control(uint8_t *data, size_t length, const char 
         ? ((value & kDs5RouteMask) != 0)
         : ds5_speaker_is_active(output);
 
+    // ⛔ DEFAULTS TO FALSE HERE, unlike ds5_apply_settings.inl -- and the two
+    // are RIGHT to differ.
+    //
+    // That file constructs OUR OWN report at bridge time, so echo cancel must
+    // be on or we reproduce the attenuation bug: the controller mutes itself
+    // when it is off. This function intercepts a GAME'S report, where the rule
+    // is that an absent key leaves the report untouched.
+    //
+    // ⚠️ Defaulting to true here was tried on 2026-08-21 and immediately broke
+    // "absent config keys leave a report completely untouched" -- an empty
+    // config rewrote the audio-control byte on every device. Games already send
+    // echo cancel on; correcting a write nobody configured is the same class of
+    // fault as the stale speaker_volume that attenuated the fleet.
     if (speakerActive && device_config_bool(section, "force_echo_cancel", false)) {
         value = static_cast<uint8_t>(value | kDs5EchoNoiseCancel);
     }

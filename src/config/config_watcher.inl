@@ -147,6 +147,18 @@ inline void watch_loop()
 }
 
 // Start once, on the first bridge session. Cheap to call repeatedly.
+// Wires config_store's change hook to the same flag a shared-file save raises,
+// so a per-controller config write reaches a live controller by the path that
+// already exists rather than a second one.
+inline void adopt_config_store()
+{
+    config_store::g_on_change = []() {
+        change_pending().store(true, std::memory_order_relaxed);
+        device_log::config(device_log::msg()
+            << "a controller config changed, pushing to live sessions");
+    };
+}
+
 inline void ensure_started()
 {
     static std::once_flag started;

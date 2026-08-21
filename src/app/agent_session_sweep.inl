@@ -171,6 +171,10 @@ static void apply_pending_config_to_sessions()
 
     struct Target {
         CtmBackend *backend;
+        // ⚠️ The linked config travels with the target. Without it this sweep
+        // pushed SHARED-section values over a linked device's settings, quietly
+        // undoing its config every time the shared file changed.
+        std::string linkedConfig;
         std::string kind;
         std::string busIdAscii;
     };
@@ -181,14 +185,20 @@ static void apply_pending_config_to_sessions()
             if (!session->backend || !session->ready.load() || session->stopping.load()) {
                 continue;
             }
-            targets.push_back(Target{session->backend.get(), session->kind, session->busIdAscii});
+            std::string linked;
+            {
+                std::lock_guard<std::mutex> sessionLock(session->mutex);
+                linked = session->linkedConfig;
+            }
+            targets.push_back(Target{session->backend.get(), linked, session->kind,
+                                     session->busIdAscii});
         }
     }
 
     for (const Target &target : targets) {
         device_log::config(device_log::msg()
             << "pushing settings to live session busid=" << target.busIdAscii);
-        ds5_apply_initial_settings(target.backend);
+        ds5_apply_initial_settings(target.backend, target.linkedConfig);
 
         // The audio buffer is not part of the settings report -- it lives in
         // the host config, which the TV accepts at any point in a session. Sent

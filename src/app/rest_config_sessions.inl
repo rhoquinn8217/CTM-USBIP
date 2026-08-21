@@ -65,8 +65,13 @@ static bool rest_link_device(const std::string &ordinal, const std::string &conf
     std::lock_guard<std::mutex> lock(g_agent_sessions_mutex);
     for (const auto &session : g_agent_sessions) {
         if (session->ordinal != ordinal) continue;
-        if (!configName.empty() && session->kind != kind) {
-            *error = "kind mismatch: " + ordinal + " is " + session->kind +
+        // ⚠️ Compare SETTINGS kinds, not session kinds. A "ds5_usb" device and a
+        // "ds5" config are the same controller family -- comparing the raw
+        // session kind refused every link a real DualSense ever attempted.
+        const std::string deviceKind = config_store::settings_kind_for(session->kind);
+        if (!configName.empty() && deviceKind != kind) {
+            *error = "kind mismatch: " + ordinal + " is " +
+                     (deviceKind.empty() ? session->kind : deviceKind) +
                      ", config is " + kind;
             return false;
         }
