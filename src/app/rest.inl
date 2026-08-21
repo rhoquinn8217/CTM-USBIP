@@ -394,6 +394,25 @@ static std::string rest_http_response(int status, const std::string &jsonBody,
 {
     std::string out = "HTTP/1.1 " + std::to_string(status) + " " + rest_reason_phrase(status) + "\r\n";
     out += "Connection: close\r\n";
+    // ⭐ CORS, on every response including errors.
+    //
+    // A browser is the intended caller -- that is the whole point of serving
+    // HTTP rather than only the line protocol. Without these headers a page
+    // makes the request, receives the response, and DISCARDS it, surfacing as
+    // an opaque "Failed to fetch" with the real reason invisible. The
+    // connection succeeds, so it looks like the agent is unreachable when it
+    // is answering perfectly.
+    //
+    // "*" rather than a specific origin because a page opened from disk sends
+    // Origin: null, and the useful callers here are local files and LAN pages.
+    //
+    // !! This is NOT an authentication decision. The API is already
+    // !! unauthenticated unless --rest-token is passed, and CORS never
+    // !! protected anything: curl and every non-browser client ignore it
+    // !! entirely. Loopback-unless---rest-lan is what limits exposure.
+    out += "Access-Control-Allow-Origin: *\r\n";
+    out += "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n";
+    out += "Access-Control-Allow-Headers: Content-Type, Authorization\r\n";
     out += extraHeaders;
     if (status == 204) {
         out += "Content-Length: 0\r\n\r\n";
@@ -535,6 +554,14 @@ static bool rest_route_config(const RestRequest &req, std::string *out);
 
 static std::string rest_route(const RestRequest &req, uint16_t agentPort)
 {
+    // ⚠️ ANSWER PREFLIGHT BEFORE THE AUTH CHECK. A CORS preflight is sent by
+    // the browser, not by the page, and never carries an Authorization header
+    // -- so with --rest-token set it would 401 and the browser would abandon
+    // the real request before making it. It carries no data and reveals
+    // nothing, so answering it unauthenticated costs nothing.
+    if (req.method == "OPTIONS") {
+        return rest_http_response(204, "", "Allow: GET, POST, DELETE, OPTIONS\r\n");
+    }
     if (!g_rest_token.empty()) {
         const auto authIt = req.headers.find("authorization");
         if (authIt == req.headers.end() || !rest_bearer_matches(authIt->second, g_rest_token)) {
@@ -542,10 +569,6 @@ static std::string rest_route(const RestRequest &req, uint16_t agentPort)
                                        "WWW-Authenticate: Bearer\r\n");
         }
     }
-    if (req.method == "OPTIONS") {
-        return rest_http_response(204, "", "Allow: GET, POST, DELETE, OPTIONS\r\n");
-    }
-
     // Per-controller config routes. Returns true when it recognised and
     // answered the request; everything else falls through to the routes below.
     // DEFINED in rest_config.inl, which follows this file because it uses the
