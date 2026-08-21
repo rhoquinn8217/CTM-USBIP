@@ -77,6 +77,7 @@
     <ClCompile Include="..\tests\device_config_test.cpp" />
     <ClCompile Include="..\tests\iso_in_pacing_test.cpp" />
     <ClCompile Include="..\tests\rest_parser_test.cpp" />
+    <ClCompile Include="..\tests\config_store_test.cpp" />
     <ClCompile Include="..\tests\tests_main.cpp" />
   </ItemGroup>
   <ItemGroup>

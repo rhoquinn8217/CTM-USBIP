@@ -212,7 +212,14 @@ public:
         caps.inputReportLength = capsRaw_.input_report_len ? capsRaw_.input_report_len : 64;
         caps.outputReportLength = capsRaw_.output_report_len ? capsRaw_.output_report_len : 64;
         caps.featureReportLength = capsRaw_.feature_report_len ? capsRaw_.feature_report_len : 64;
-        caps.serial = widen_ascii(capsRaw_.serial, sizeof(capsRaw_.serial));
+        // ⚠️ Guarded: unlike every other field here, the serial is now rewritten
+        // on RECONNECT (a different controller can arrive in the same session),
+        // so a reader on another thread can meet a write in progress. The rest
+        // of capsRaw_ is still written once, before any reader exists.
+        {
+            std::lock_guard<std::mutex> lock(serialMutex_);
+            caps.serial = widen_ascii(capsRaw_.serial, sizeof(capsRaw_.serial));
+        }
         caps.product = widen_ascii(capsRaw_.product, sizeof(capsRaw_.product));
         caps.path = widen_ascii(capsRaw_.path, sizeof(capsRaw_.path));
         caps.hidReportDescriptor = hidReportDescriptor_;
@@ -541,7 +548,10 @@ private:
             // and within the reconnect grace a different one can arrive: unplug
             // A, plug in B, and B lands in A's session. Before this, B kept A's
             // serial and therefore A's per-controller config.
-            memcpy(capsRaw_.serial, peerCaps.serial, sizeof(capsRaw_.serial));
+            {
+                std::lock_guard<std::mutex> lock(serialMutex_);
+                memcpy(capsRaw_.serial, peerCaps.serial, sizeof(capsRaw_.serial));
+            }
             if (initial) {
                 capsRaw_ = peerCaps;
                 hidReportDescriptor_.clear();
@@ -1024,6 +1034,8 @@ private:
     SOCKET listenSocket_ = INVALID_SOCKET;
     std::atomic<SOCKET> clientSocket_{INVALID_SOCKET};
     CtmBridgeProtocol::DeviceCaps capsRaw_ = {};
+    // Guards capsRaw_.serial only -- see caps(). Mutable so caps() can stay const.
+    mutable std::mutex serialMutex_;
     std::vector<uint8_t> hidReportDescriptor_;
     std::vector<uint8_t> enumPayload_;   // forwarded composite enumeration (CTMB_MSG_ENUM)
     RawInputCallback callback_;

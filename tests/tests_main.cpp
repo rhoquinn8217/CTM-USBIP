@@ -7,6 +7,7 @@ int run_map_defaults_tests(int argc, char **argv);
 int run_device_config_tests();
 int run_iso_in_pacing_tests(int argc, char **argv);
 int run_rest_parser_tests();
+int run_config_store_tests();
 
 int main(int argc, char **argv)
 {
@@ -14,5 +15,6 @@ int main(int argc, char **argv)
     run_device_config_tests();
     run_iso_in_pacing_tests(argc, argv);
     run_rest_parser_tests();
+    run_config_store_tests();
     return ctmtest::summary();
 }

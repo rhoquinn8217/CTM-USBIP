@@ -94,7 +94,10 @@ public:
         caps.inputReportLength = capsRaw_.input_report_len ? capsRaw_.input_report_len : 64;
         caps.outputReportLength = capsRaw_.output_report_len ? capsRaw_.output_report_len : 64;
         caps.featureReportLength = capsRaw_.feature_report_len ? capsRaw_.feature_report_len : 64;
-        caps.serial = widen_ascii(capsRaw_.serial, sizeof(capsRaw_.serial));
+        {
+            std::lock_guard<std::mutex> lock(serialMutex_);
+            caps.serial = widen_ascii(capsRaw_.serial, sizeof(capsRaw_.serial));
+        }
         caps.product = widen_ascii(capsRaw_.product, sizeof(capsRaw_.product));
         caps.path = widen_ascii(capsRaw_.path, sizeof(capsRaw_.path));
         caps.hidReportDescriptor = hidReportDescriptor_;
@@ -396,6 +399,17 @@ private:
 
             CtmBridgeProtocol::DeviceCaps peerCaps = {};
             memcpy(&peerCaps, hello.payload.data(), sizeof(peerCaps));
+            // ⚠️ The SERIAL is refreshed on every connect, not just the first,
+            // and guarded because a reader can meet the write. Everything else
+            // stays initial-only: descriptors describe the device type and do
+            // not change, but the serial says WHICH physical controller is on
+            // the other end -- and within the reconnect grace a different one
+            // can arrive. Mirrors the TCP path in bridge.inl; leaving the two
+            // transports different is how a fix ends up half-applied.
+            {
+                std::lock_guard<std::mutex> lock(serialMutex_);
+                memcpy(capsRaw_.serial, peerCaps.serial, sizeof(capsRaw_.serial));
+            }
             if (initial) {
                 capsRaw_ = peerCaps;
                 hidReportDescriptor_.clear();
@@ -765,6 +779,8 @@ private:
     std::atomic_bool connected_{false};
     bool handshakeDone_ = false;
     CtmBridgeProtocol::DeviceCaps capsRaw_ = {};
+    // Guards capsRaw_.serial only -- see caps(). Mutable so caps() stays const.
+    mutable std::mutex serialMutex_;
     std::vector<uint8_t> hidReportDescriptor_;
     RawInputCallback callback_;
     std::function<void()> disconnectCallback_;
