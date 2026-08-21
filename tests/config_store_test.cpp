@@ -313,6 +313,27 @@ int run_config_store_tests()
         CTM_CHECK_EQ(units::device_config_int("cfg:alive/ds5", "speaker_volume", -1), 99);
     }
 
+    section("config store: ⭐ a deleted key really disappears on reload");
+    {
+        // ⛔ device_config_load_locked() only INSERTS -- it never clears -- so a
+        // reload alone keeps a key that was deleted from the file. That is how
+        // an emptied ctm-device-config.txt kept reporting speaker_volume=33
+        // while the file on disk was bare. Anything that rereads must erase
+        // first; this guards the config-file side of that rule.
+        write_config("vanish",
+            "[config]\r\nkind = ds5\r\nauto_link =\r\n\r\n"
+            "[ds5]\r\nspeaker_volume = 55\r\nheadset_volume = 44\r\n");
+        CTM_CHECK_EQ(units::device_config_int("cfg:vanish/ds5", "speaker_volume", -1), 55);
+        CTM_CHECK_EQ(units::device_config_int("cfg:vanish/ds5", "headset_volume", -1), 44);
+
+        // rewrite with one key removed
+        write_config("vanish",
+            "[config]\r\nkind = ds5\r\nauto_link =\r\n\r\n"
+            "[ds5]\r\nspeaker_volume = 55\r\n");
+        CTM_CHECK_EQ(units::device_config_int("cfg:vanish/ds5", "speaker_volume", -1), 55);
+        CTM_CHECK_EQ(units::device_config_int("cfg:vanish/ds5", "headset_volume", -1), -1);
+    }
+
     wipe_configs();
     return 0;
 }

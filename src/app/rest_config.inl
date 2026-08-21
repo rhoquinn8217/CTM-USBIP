@@ -116,10 +116,37 @@ static std::string rest_shared_json(const std::vector<RestDeviceView> &devices)
     }
     out += "],\"settings\":{";
     {
+        // ⭐ RELOAD, do not trust the cache.
+        //
+        // Everything else reads settings through the cached table, which the
+        // file watcher refreshes on save -- correct, and fast enough for a path
+        // that runs 250 times a second.
+        //
+        // ⛔ This endpoint must not. Its entire job is answering "what is
+        // actually in effect right now", and it was caught on 2026-08-21
+        // reporting speaker_volume=33 from a file that had already been
+        // emptied: the watcher's debounce had not yet fired. A diagnostic that
+        // can itself be stale is worse than no diagnostic, because it is
+        // believed. This is a human-paced call -- rereading a small file costs
+        // nothing next to being wrong.
         std::lock_guard<std::mutex> lock(g_device_config_mutex);
-        if (!g_device_config_loaded) {
-            device_config_load_locked();
+
+        // ⚠️ ERASE FIRST. device_config_load_locked() only INSERTS -- it never
+        // clears -- so reloading alone would keep a key that had been DELETED
+        // from the file. That is precisely the case this fix exists for: an
+        // emptied file still reporting speaker_volume=33.
+        //
+        // Only the sections this file owns are dropped. The "cfg:" sections
+        // belong to config_store and are not reloaded here; clearing them
+        // would blank every linked controller's settings until something
+        // reloaded them.
+        for (auto it = g_device_config.begin(); it != g_device_config.end(); ) {
+            if (it->first.rfind("cfg:", 0) == 0) ++it;
+            else it = g_device_config.erase(it);
         }
+        g_device_config_loaded = false;
+        device_config_load_locked();
+
         auto it = g_device_config.find("ds5");
         bool firstKey = true;
         if (it != g_device_config.end()) {
@@ -155,9 +182,12 @@ static std::string rest_config_detail_json(const config_store::ConfigFile &cfg)
     std::string out = rest_config_json(cfg, rest_collect_devices());
     out.pop_back();                                   // drop the closing brace
     out += ",\"settings\":{";
+    // ⭐ Reload from disk first, for the same reason as the shared endpoint:
+    // this answers "what is in this config right now", and a hand edit that
+    // the watcher has not yet noticed would otherwise be invisible. Cheap --
+    // these files are tiny and this is a human-paced call.
+    config_store::reload_all();
     {
-        // Same lazy-load guard the accessors use -- the settings table may not
-        // have been read yet if nothing has asked for a setting.
         std::lock_guard<std::mutex> lock(g_device_config_mutex);
         if (!g_device_config_loaded) {
             device_config_load_locked();
