@@ -32,44 +32,54 @@ carry it; upstream's own history is unchanged.
 | 2026-08-13 | Drop microphone reports before anything reads them as pad state. A controller told to stream its microphone sends audio in the same report id and length it uses for buttons, one flag apart. Anything that does not check the flag reads audio as thousands of button presses a second | `9bdbf81` |
 | 2026-08-16 | The host owns the controller's Bluetooth audio buffer. Set `audio_latency_ms` in the device config: it travels in the host configuration at handshake and again whenever the file changes, and the TV applies it to a live session, so a change is audible within a second or two without reconnecting the controller. Measured across its range, the value is a buffer in milliseconds -- below eight the controller has less than one Opus frame to play and falls silent, which the log now says plainly rather than leaving unexplained | `c3e2496`, `1b12d9e` |
 | 2026-08-19 | Stop preloading the feature reports a Bluetooth DualSense never answers. Nine requests, each waited out, ran over the same Bluetooth link as the TV's confirmation tone and took the controller offline mid-bridge. The TV's log separated cause from symptom because two events run the same code: an unbridge delivered 600 ms of audio in 600 ms, while a bridge took 15,531, 5,454 and 5,401 ms for the same audio. Moving the probes to a background thread was not enough, and delaying them three seconds was worse because that lands in the tail of the tone. They are a cache, so a cold cache costs one live fetch instead. Improved rather than fixed: one bad call in seventeen remained, and every write still succeeded, so it is contention for the link rather than rejection. Seen on one television only, a C3, which is also the only set showing a slow device enumeration | `366b0de`, `08dabcd` |
+| 2026-08-20 | Optional HTTP/JSON control API on the agent (`--rest <port>`). Serves status, session list, bridge start/stop and soft/hard restart on a second port, loopback-only unless `--rest-lan`, with optional bearer auth. Requests are handled on the agent loop thread, same as the text channel, so the one-thread-owns-sessions rule holds. Off by default; the TV's channel is untouched | `4875cb3` |
 
 ## Files changed
 ```
- .gitignore                         |  11 +-
- CHANGES.md                         |  57 +++++
- app/ctm-usbip-tests.vcxproj        |  87 ++++++++
- build-tests.ps1                    |  86 ++++++++
- build.ps1                          |   3 +-
- device-config.md                   | 195 +++++++++++++++++
- include/ctm/map/runtime.h          |   2 +
- maps/ds5_usb_over_ds5_usb.map      |  61 ++++++
- src/app/agent.inl                  |  19 +-
- src/app/agent_session_sweep.inl    | 193 ++++++++++++++++
- src/audio/audio_gain.inl           | 178 +++++++++++++++
- src/audio/ds5_apply_settings.inl   | 112 ++++++++++
- src/audio/ds5_output_overrides.inl | 438 +++++++++++++++++++++++++++++++++++++
- src/audio/iso_in_pacing.inl        | 221 +++++++++++++++++++
- src/audio/iso_in_test_tone.inl     |  95 ++++++++
- src/audio/mic_ring.inl             | 146 +++++++++++++
- src/audio/pcm_amplitude_log.inl    | 162 ++++++++++++++
- src/backend/backend.inl            |   4 +
- src/backend/bridge.inl             |  30 ++-
- src/config/config_watcher.inl      | 153 +++++++++++++
- src/config/device_config.inl       | 200 +++++++++++++++++
- src/log/device_log.inl             | 126 +++++++++++
- src/main.cpp                       |  16 ++
- src/map/runtime.cpp                |   1 +
- src/usbip/device.inl               |  61 +++++-
- src/usbip/server.inl               |  28 +++
- tests/device_config_test.cpp       | 415 +++++++++++++++++++++++++++++++++++
- tests/harness.h                    |  55 +++++
- tests/iso_in_pacing_test.cpp       | 118 ++++++++++
- tests/map_defaults_test.cpp        | 100 +++++++++
- tests/tests_main.cpp               |  16 ++
- tests/units.h                      |  47 ++++
- tools/device-config-panel.bat      |   4 +
- tools/device-config-panel.ps1      | 303 +++++++++++++++++++++++++
- 34 files changed, 3732 insertions(+), 11 deletions(-)
+ .gitignore                                  |  11 +-
+ CHANGES.md                                  |  80 ++++
+ README.md                                   |  18 +
+ app/ctm-usbip-tests.vcxproj                 |  88 ++++
+ build-tests.ps1                             |  86 ++++
+ build.ps1                                   |   4 +-
+ device-config.md                            | 195 ++++++++
+ docs/rest_api.md                            | 139 ++++++
+ include/ctm/map/runtime.h                   |   5 +
+ maps/ds5_usb_over_ds5_usb.map               |  61 +++
+ profiles/descriptors/ds5e_composite.profile |  30 ++
+ src/app/agent.inl                           |  88 +++-
+ src/app/agent_session_sweep.inl             | 216 +++++++++
+ src/app/cli.inl                             |  11 +-
+ src/app/rest.inl                            | 712 ++++++++++++++++++++++++++++
+ src/app/service.inl                         |  25 +-
+ src/audio/audio_gain.inl                    | 178 +++++++
+ src/audio/ds5_apply_settings.inl            | 145 ++++++
+ src/audio/ds5_output_overrides.inl          | 463 ++++++++++++++++++
+ src/audio/iso_in_pacing.inl                 | 221 +++++++++
+ src/audio/iso_in_test_tone.inl              |  95 ++++
+ src/audio/mic_ring.inl                      | 202 ++++++++
+ src/audio/pcm_amplitude_log.inl             | 162 +++++++
+ src/backend/backend.inl                     |  16 +
+ src/backend/bridge.inl                      | 115 ++++-
+ src/config/config_watcher.inl               | 153 ++++++
+ src/config/device_config.inl                | 200 ++++++++
+ src/log/device_log.inl                      | 126 +++++
+ src/main.cpp                                |  82 +++-
+ src/map/runtime.cpp                         |   4 +
+ src/usbip/device.inl                        | 258 +++++++++-
+ src/usbip/server.inl                        |  32 ++
+ tests/device_config_test.cpp                | 463 ++++++++++++++++++
+ tests/harness.h                             |  55 +++
+ tests/iso_in_pacing_test.cpp                | 118 +++++
+ tests/map_defaults_test.cpp                 | 100 ++++
+ tests/rest_parser_test.cpp                  | 195 ++++++++
+ tests/tests_main.cpp                        |  18 +
+ tests/units.h                               |  47 ++
+ tools/device-config-panel-edge.bat          |   9 +
+ tools/device-config-panel-edge.ps1          | 327 +++++++++++++
+ tools/device-config-panel.bat               |   4 +
+ tools/device-config-panel.ps1               | 303 ++++++++++++
+ 43 files changed, 5832 insertions(+), 28 deletions(-)
 ```
 _Generated with `git diff upstream/main --stat`. Regenerate this block
 rather than editing it by hand._
