@@ -221,6 +221,9 @@ public:
 
     void stop()
     {
+        // Drop this controller's gyro motion state so a reconnect starts with
+        // clean calibration and the per-device map does not grow forever.
+        ctm_gyro_mouse::forget_device(this);
         stop_audio_stream();
     }
 
@@ -444,6 +447,12 @@ public:
         if (logMappedInput) {
             log_mapped_input_debug(data, length, report);
         }
+        // Gyro-to-mouse: read the DS5 motion out of the mapped report and feed
+        // the synthetic mouse. Never modifies `report` -- the controller passes
+        // through untouched; this only pushes a mouse delta into the mailbox.
+        // No-op for non-DualSense devices and when no gate is configured.
+        ctm_gyro_mouse::on_ds5_input(this, profile_.device_descriptor, linked_config(),
+                                     report.data, report.length);
         enqueue_input_report(report);
     }
 
@@ -559,6 +568,20 @@ public:
                 std::chrono::duration_cast<std::chrono::microseconds>(clock::now() - waitStart).count());
         }
         return kStatusOk;
+    }
+
+    // Public entry point for SYNTHETIC devices whose reports are generated on
+    // this side rather than relayed from a bridge -- currently the gyro mouse,
+    // whose pump thread produces movement from DualSense motion data. Ordinary
+    // bridged devices never call this: their reports arrive through the bridge
+    // input path and are enqueued internally.
+    //
+    // Deliberately a named wrapper rather than making enqueue_input_report()
+    // public: it keeps "who may inject reports, and why" explicit at the call
+    // site, and leaves the internal enqueue path private as before.
+    void inject_synthetic_input(const CTM_INPUT_REPORT &report)
+    {
+        enqueue_input_report(report);
     }
 
 private:

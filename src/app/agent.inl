@@ -313,6 +313,14 @@ static void bridge_session_worker(AgentBridgeSession *session)
     session->ready.store(true);
     std::wcout << L"agent bridge ready kind=" << widen_ascii(session->kind.c_str(), session->kind.size())
                << L" port=" << session->port << L" busid=" << session->busId << L"\n";
+    // Bring up the synthetic gyro mouse the first time a DualSense session is
+    // ready. Idempotent -- later sessions are no-ops. Always-present by design:
+    // the gyro gate decides whether it MOVES, not whether it exists, so
+    // enabling gyro mid-session through live config works without a reseat.
+    if (session->kind == "ds5" || session->kind == "ds5_usb" ||
+        session->kind == "ds5e_usb") {
+        ctm_gyro_mouse_ensure_mouse_started();   // defined in mouse_device.inl
+    }
     {
         std::string linked;
         {

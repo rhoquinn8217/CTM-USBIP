@@ -186,6 +186,8 @@ static std::string rest_keys_json()
 {"key":"gyro_to_mouse_gate","type":"choice","choices":["","always","L2","R2","L1","R1","touchpad","!touchpad","touchpad_click","PS"],"default":"","help":"What must be held for gyro to move the mouse. Blank is off."},
 {"key":"gyro_mouse_px_per_360","type":"int","min":1000,"max":200000,"default":1920,"help":"Pixels the cursor travels for one full turn of the controller. Higher is faster."},
 {"key":"gyro_mouse_min_sens","type":"int","min":0,"max":60,"default":8,"help":"Sensitivity for slow, precise movement."},
+{"key":"gyro_mouse_sens","type":"int","min":1,"max":200,"default":50,"help":"Legacy single sensitivity. Scales both tiers; 50 leaves them as shipped."},
+{"key":"gyro_mouse_debug_gate","type":"bool","default":false,"help":"Logs the raw trigger and touchpad bytes twice a second, for diagnosing a gate that never opens."},
 {"key":"gyro_mouse_max_sens","type":"int","min":0,"max":60,"default":16,"help":"Sensitivity for fast turns. Equal to min for no acceleration."},
 {"key":"gyro_mouse_min_threshold","type":"int","min":0,"max":200,"default":5,"help":"Degrees per second below which min_sens applies."},
 {"key":"gyro_mouse_max_threshold","type":"int","min":0,"max":400,"default":75,"help":"Degrees per second above which max_sens applies."},

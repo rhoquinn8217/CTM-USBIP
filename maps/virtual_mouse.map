@@ -1,0 +1,54 @@
+# Map for the synthetic CTM gyro mouse.
+#
+# This device has NO physical backing and NO bridge. Its input reports are
+# generated on the Windows side from DualSense gyro data and pushed straight
+# onto its interrupt-IN endpoint (0x81) via inject_synthetic_input(), which
+# bypasses translation entirely. So nothing here is ever exercised on the hot
+# path -- the map exists to satisfy the loader and to name the IN endpoint.
+#
+# The input path below is a plain 4-byte identity copy. It is declared because
+# the loader REQUIRES every map to carry either an op list or a legacy
+# `copy =` range, and rejects one that has neither. It is never invoked.
+
+[map]
+id = virtual_mouse
+version = 1
+virtual_device = virtual_mouse_usb
+physical_device = none
+
+[usb.endpoints]
+hid_in  = 0x81
+
+[path.input.controller_to_virtual]
+# Never used: reports are injected, not translated. Present only to satisfy
+# the loader's requirement that an input path declare a copy range.
+trigger = physical.read
+source_report = 0
+destination_endpoint = 0x81
+destination_report = 0
+op.1 = bytes.copy source[0..3] -> destination[0..3]
+destination_length = 4
+
+[path.output.virtual_to_controller]
+# Also never used. A boot mouse is input-only -- Windows sends it no output
+# reports, and there is no physical device behind this one to send them to.
+# Declared for the same reason as the input path above: the loader rejects a
+# map whose output path carries neither an op list nor a `copy =` range.
+trigger = usb.endpoint.hid_out
+source_report = 0
+destination_report = 0
+op.1 = bytes.copy source[0..3] -> destination[0..3]
+destination_length = 4
+
+# No [path.control.*]: a boot mouse takes no feature reports.
+
+[advertise]
+controller_name = CTM Gyro Mouse
+vendor = ctm
+rumble = false
+leds = false
+adaptive_triggers = false
+haptics = false
+audio_output = false
+audio_input = false
+battery = false
