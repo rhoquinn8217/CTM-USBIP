@@ -137,6 +137,23 @@ Output: `out\installer\CTM-Bridge-Setup.exe`.
 
 ---
 
+## 5. REST API (optional)
+
+The agent can additionally serve an HTTP/JSON control API for tooling —
+status, session list, start/stop bridges, soft/hard restart — while the TV
+keeps speaking the plaintext control channel unchanged:
+
+```powershell
+ctm-usbip agent --rest 48055                       # loopback-only
+ctm-usbip install --rest 48055 --rest-token sekrit # service mode, bearer auth
+curl -s localhost:48055/api/v1/status
+```
+
+Loopback-only unless `--rest-lan`; optional bearer token via `--rest-token`.
+Off by default. Full reference: [`docs/rest_api.md`](docs/rest_api.md).
+
+---
+
 ## Project layout
 
 | Path | What |
@@ -149,6 +166,7 @@ Output: `out\installer\CTM-Bridge-Setup.exe`.
 | `maps/` | per-controller translation maps |
 | `include/`, `app/` | headers, the MSBuild project, app icon + version resource |
 | `installer/` | Inno Setup script (`ctm-usbip.iss`) + icon generator |
+| `tests/` | unit tests, built by `build-tests.ps1` (map defaults, device config, audio pacing, REST parser) |
 | `docs/` | design notes + worklog |
 
 ## Status

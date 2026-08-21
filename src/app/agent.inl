@@ -121,6 +121,30 @@ static void set_bridge_session_error(AgentBridgeSession *session, const std::wst
     session->lastError = error;
 }
 
+// Read-only view for the REST API (GET /status, /sessions). Called on the
+// agent loop thread. Lock order sessions-mutex -> session-mutex is new but
+// safe: no existing path acquires g_agent_sessions_mutex while holding a
+// session mutex.
+static std::vector<CtmRestSessionSnapshot> collect_bridge_session_snapshots()
+{
+    std::vector<CtmRestSessionSnapshot> out;
+    std::lock_guard<std::mutex> lock(g_agent_sessions_mutex);
+    out.reserve(g_agent_sessions.size());
+    for (const auto &session : g_agent_sessions) {
+        CtmRestSessionSnapshot snap;
+        snap.busid = session->busIdAscii;
+        snap.kind = session->kind;
+        snap.port = session->port;
+        snap.ready = session->ready.load();
+        {
+            std::lock_guard<std::mutex> sessionLock(session->mutex);
+            snap.lastError = narrow_ascii(session->lastError);
+        }
+        out.push_back(std::move(snap));
+    }
+    return out;
+}
+
 static bool stop_bridge_session(const std::wstring &busId);
 static void drain_bridge_session_reaps();
 
@@ -572,6 +596,27 @@ static int run_agent(uint16_t port)
         return 4;
     }
 
+    g_rest_agent_start = std::chrono::steady_clock::now();
+    SOCKET rest = INVALID_SOCKET;
+    if (g_rest_port != 0) {
+        std::wstring restError;
+        rest = rest_open_listener(&restError);
+        if (rest == INVALID_SOCKET) {
+            // --rest was asked for explicitly; a silently missing API would be
+            // worse than failing startup, and every other bind above is fatal.
+            std::wcerr << L"agent REST listener failed: " << restError << L"\n";
+            g_agent_usbip_server->stop();
+            g_agent_usbip_server.reset();
+            closesocket(udp);
+            closesocket(tcp);
+            WSACleanup();
+            return 4;
+        }
+        std::wcout << L"ctm agent REST API on " << (g_rest_bind_lan ? L"0.0.0.0" : L"127.0.0.1")
+                   << L":" << g_rest_port
+                   << (g_rest_token.empty() ? L"" : L" (bearer token required)") << L"\n";
+    }
+
     std::wcout << L"ctm agent listening udp/tcp port " << port << L"\n";
     while (!g_stop.load()) {
         drain_bridge_session_reaps();
@@ -581,6 +626,9 @@ static int run_agent(uint16_t port)
         FD_ZERO(&readfds);
         FD_SET(udp, &readfds);
         FD_SET(tcp, &readfds);
+        if (rest != INVALID_SOCKET) {
+            FD_SET(rest, &readfds);
+        }
         timeval timeout {};
         timeout.tv_sec = 1;
         int rc = select(0, &readfds, nullptr, nullptr, &timeout);
@@ -610,8 +658,22 @@ static int run_agent(uint16_t port)
                 closesocket(client);
             }
         }
+        if (rest != INVALID_SOCKET && FD_ISSET(rest, &readfds)) {
+            sockaddr_in peer = {};
+            int peerLen = sizeof(peer);
+            SOCKET client = accept(rest, reinterpret_cast<sockaddr *>(&peer), &peerLen);
+            if (client != INVALID_SOCKET) {
+                // Inline on the loop thread, like handle_agent_client — this is
+                // what lets rest_route call start/stop_bridge_session directly.
+                rest_handle_client(client, port);
+                closesocket(client);
+            }
+        }
     }
 
+    if (rest != INVALID_SOCKET) {
+        closesocket(rest);
+    }
     stop_all_bridge_sessions();
     if (g_agent_usbip_server) {
         g_agent_usbip_server->stop();

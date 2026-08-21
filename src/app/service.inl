@@ -234,7 +234,9 @@ static void remove_firewall_rules()
                      kFirewallRuleName + L"\"");
 }
 
-static std::wstring service_image_path(uint16_t port, bool useEnet)
+static std::wstring service_image_path(uint16_t port, bool useEnet,
+                                       uint16_t restPort, bool restLan,
+                                       const std::wstring &restToken)
 {
     wchar_t self[MAX_PATH] = {};
     GetModuleFileNameW(nullptr, self, ARRAYSIZE(self));
@@ -242,10 +244,21 @@ static std::wstring service_image_path(uint16_t port, bool useEnet)
     if (useEnet) {
         command += L" --enet";
     }
+    if (restPort != 0) {
+        command += L" --rest " + std::to_wstring(restPort);
+        if (restLan) {
+            command += L" --rest-lan";
+        }
+        if (!restToken.empty()) {
+            command += L" --rest-token " + restToken;
+        }
+    }
     return command;
 }
 
-static int service_install(uint16_t port, bool useEnet)
+static int service_install(uint16_t port, bool useEnet,
+                           uint16_t restPort, bool restLan,
+                           const std::wstring &restToken)
 {
     SC_HANDLE scm = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CREATE_SERVICE | SC_MANAGER_CONNECT);
     if (!scm) {
@@ -257,7 +270,7 @@ static int service_install(uint16_t port, bool useEnet)
         return 1;
     }
 
-    const std::wstring image = service_image_path(port, useEnet);
+    const std::wstring image = service_image_path(port, useEnet, restPort, restLan, restToken);
     SC_HANDLE svc = CreateServiceW(
         scm, kServiceName, kServiceDisplayName,
         SERVICE_ALL_ACCESS, SERVICE_WIN32_OWN_PROCESS, SERVICE_AUTO_START,
@@ -302,7 +315,11 @@ static int service_install(uint16_t port, bool useEnet)
     CloseServiceHandle(svc);
     CloseServiceHandle(scm);
     std::wcout << L"installed and started service '" << kServiceName << L"' on port " << port
-               << (useEnet ? L" (--enet)" : L"") << L"\n";
+               << (useEnet ? L" (--enet)" : L"");
+    if (restPort != 0) {
+        std::wcout << L" (REST " << (restLan ? L"0.0.0.0" : L"127.0.0.1") << L":" << restPort << L")";
+    }
+    std::wcout << L"\n";
     return 0;
 }
 

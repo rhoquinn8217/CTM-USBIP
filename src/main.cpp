@@ -19,11 +19,13 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <deque>
 #include <filesystem>
@@ -71,6 +73,7 @@ static void mic_ring_reset(const CtmBackend *owner);
 #include "app/cli.inl"
 #include "audio/ds5_apply_settings.inl"
 #include "config/config_watcher.inl"
+#include "app/rest.inl"
 #include "app/agent.inl"
 #include "app/service.inl"
 
@@ -170,6 +173,23 @@ int wmain(int argc, wchar_t **argv)
             const std::wstring arg = argv[i];
             if (arg == L"--enet") {
                 g_use_enet.store(true);
+            } else if (arg == L"--rest" && i + 1 < argc) {
+                unsigned long value = 0;
+                if (!parse_uint_arg(argv[++i], 65535, &value) || value < 1024) {
+                    print_usage();
+                    return 2;
+                }
+                g_rest_port = static_cast<uint16_t>(value);
+            } else if (arg == L"--rest-lan") {
+                g_rest_bind_lan = true;
+            } else if (arg == L"--rest-token" && i + 1 < argc) {
+                const std::wstring token = argv[++i];
+                if (token.empty() || token.find(L' ') != std::wstring::npos ||
+                    token.find(L'"') != std::wstring::npos) {
+                    std::wcerr << L"--rest-token must be non-empty with no spaces or quotes\n";
+                    return 2;
+                }
+                g_rest_token = narrow_ascii(token);
             } else {
                 print_usage();
                 return 2;
@@ -189,8 +209,26 @@ int wmain(int argc, wchar_t **argv)
             argIndex = 3;
         }
         for (int i = argIndex; i < argc; ++i) {
-            if (std::wstring(argv[i]) == L"--enet") {
+            const std::wstring arg = argv[i];
+            if (arg == L"--enet") {
                 g_use_enet.store(true);
+            } else if (arg == L"--rest" && i + 1 < argc) {
+                unsigned long value = 0;
+                if (!parse_uint_arg(argv[++i], 65535, &value) || value < 1024) {
+                    print_usage();
+                    return 2;
+                }
+                g_rest_port = static_cast<uint16_t>(value);
+            } else if (arg == L"--rest-lan") {
+                g_rest_bind_lan = true;
+            } else if (arg == L"--rest-token" && i + 1 < argc) {
+                const std::wstring token = argv[++i];
+                if (token.empty() || token.find(L' ') != std::wstring::npos ||
+                    token.find(L'"') != std::wstring::npos) {
+                    std::wcerr << L"--rest-token must be non-empty with no spaces or quotes\n";
+                    return 2;
+                }
+                g_rest_token = narrow_ascii(token);
             } else {
                 print_usage();
                 return 2;
@@ -207,6 +245,9 @@ int wmain(int argc, wchar_t **argv)
         }
         unsigned long port = kAgentDefaultPort;
         bool useEnet = false;
+        unsigned long restPort = 0;
+        bool restLan = false;
+        std::wstring restToken;
         int argIndex = 2;
         if (argc >= 3 && argv[2][0] != L'-') {
             if (!parse_uint_arg(argv[2], 65535, &port) || port < 1024) {
@@ -216,14 +257,32 @@ int wmain(int argc, wchar_t **argv)
             argIndex = 3;
         }
         for (int i = argIndex; i < argc; ++i) {
-            if (std::wstring(argv[i]) == L"--enet") {
+            const std::wstring arg = argv[i];
+            if (arg == L"--enet") {
                 useEnet = true;
+            } else if (arg == L"--rest" && i + 1 < argc) {
+                if (!parse_uint_arg(argv[++i], 65535, &restPort) || restPort < 1024) {
+                    print_usage();
+                    return 2;
+                }
+            } else if (arg == L"--rest-lan") {
+                restLan = true;
+            } else if (arg == L"--rest-token" && i + 1 < argc) {
+                // Embedded verbatim in the service image path, so no spaces or
+                // quotes (it is visible via `sc qc`, like any service argument).
+                restToken = argv[++i];
+                if (restToken.empty() || restToken.find(L' ') != std::wstring::npos ||
+                    restToken.find(L'"') != std::wstring::npos) {
+                    std::wcerr << L"--rest-token must be non-empty with no spaces or quotes\n";
+                    return 2;
+                }
             } else {
                 print_usage();
                 return 2;
             }
         }
-        return service_install(static_cast<uint16_t>(port), useEnet);
+        return service_install(static_cast<uint16_t>(port), useEnet,
+                               static_cast<uint16_t>(restPort), restLan, restToken);
     }
 
     if (mode == L"bt") {
