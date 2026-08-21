@@ -72,10 +72,13 @@ static void mic_ring_reset(const CtmBackend *owner);
 #include "usbip/server.inl"
 #include "app/cli.inl"
 #include "audio/ds5_apply_settings.inl"
-#include "config/config_watcher.inl"
+#include "config/config_store.inl"   // per-controller config files; needs device_log + g_device_config
+#include "config/config_watcher.inl" // follows config_store: apply_change refreshes it too
 #include "app/rest.inl"
+#include "app/rest_config.inl"        // config routes; needs rest.inl's helpers, so it follows it
 #include "app/agent.inl"
-#include "app/rest_sessions.inl"   // defines what rest.inl declares; needs agent.inl's session list
+#include "app/rest_sessions.inl"
+#include "app/rest_config_sessions.inl"   // defines what rest_config.inl declares; needs agent.inl's sessions
 #include "app/service.inl"
 
 } // namespace

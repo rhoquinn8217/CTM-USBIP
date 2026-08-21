@@ -530,6 +530,9 @@ static std::string rest_handle_restart(const RestRequest &req)
     return rest_http_response(200, "{\"status\":\"bridges reset\"}");
 }
 
+struct RestRequest;
+static bool rest_route_config(const RestRequest &req, std::string *out);
+
 static std::string rest_route(const RestRequest &req, uint16_t agentPort)
 {
     if (!g_rest_token.empty()) {
@@ -541,6 +544,17 @@ static std::string rest_route(const RestRequest &req, uint16_t agentPort)
     }
     if (req.method == "OPTIONS") {
         return rest_http_response(204, "", "Allow: GET, POST, DELETE, OPTIONS\r\n");
+    }
+
+    // Per-controller config routes. Returns true when it recognised and
+    // answered the request; everything else falls through to the routes below.
+    // DEFINED in rest_config.inl, which follows this file because it uses the
+    // helpers above.
+    {
+        std::string configResponse;
+        if (rest_route_config(req, &configResponse)) {
+            return configResponse;
+        }
     }
 
     if (req.path == "/api/v1/status") {

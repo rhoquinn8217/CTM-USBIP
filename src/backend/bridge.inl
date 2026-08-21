@@ -534,6 +534,14 @@ private:
 
             CtmBridgeProtocol::DeviceCaps peerCaps = {};
             memcpy(&peerCaps, hello.payload.data(), sizeof(peerCaps));
+            // ⚠️ The SERIAL is refreshed on every connect, not just the first.
+            // Everything else stays initial-only, as before -- descriptors and
+            // capabilities describe the device type and do not change. But the
+            // serial identifies WHICH physical controller is on the other end,
+            // and within the reconnect grace a different one can arrive: unplug
+            // A, plug in B, and B lands in A's session. Before this, B kept A's
+            // serial and therefore A's per-controller config.
+            memcpy(capsRaw_.serial, peerCaps.serial, sizeof(capsRaw_.serial));
             if (initial) {
                 capsRaw_ = peerCaps;
                 hidReportDescriptor_.clear();

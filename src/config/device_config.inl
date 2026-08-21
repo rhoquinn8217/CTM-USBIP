@@ -107,7 +107,16 @@ static void device_config_invalidate()
 {
     std::lock_guard<std::mutex> guard(g_device_config_mutex);
     g_device_config_loaded = false;
-    g_device_config.clear();
+    // ⚠️ Erase only the sections THIS file owns. Per-controller config files
+    // load their settings into "cfg:<name>/<kind>" sections in the same map,
+    // and this function does not reload those -- a blanket clear() wiped them
+    // on every bridge and every save of the shared file, after which every
+    // linked device silently fell back to the shared section. Intermittent,
+    // and invisible until someone noticed their config had stopped applying.
+    for (auto it = g_device_config.begin(); it != g_device_config.end(); ) {
+        if (it->first.rfind("cfg:", 0) == 0) ++it;
+        else it = g_device_config.erase(it);
+    }
 }
 
 // Look up a text setting. Returns an empty string when the file, section, key

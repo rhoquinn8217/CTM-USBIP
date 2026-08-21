@@ -15,6 +15,12 @@ struct AgentBridgeSession {
     std::atomic_bool ready{false};
     std::mutex mutex;
     std::wstring lastError;
+    // Per-controller config. ordinal is monotonic and never reused, so a stale
+    // reference from an old device list fails rather than hitting the wrong
+    // controller. linkedConfig empty means the shared [kind] section.
+    std::string ordinal;
+    std::string physicalSerial;
+    std::string linkedConfig;
 };
 
 static std::mutex g_agent_sessions_mutex;
@@ -281,10 +287,40 @@ static void bridge_session_worker(AgentBridgeSession *session)
         });
     }
 
+    // Per-controller config: pick up the physical serial, then auto-link if a
+    // config claims it. A manual link made later overrides this for the life of
+    // the session -- auto_link decides the starting point, not the whole story.
+    {
+        const std::string serial = session->device ? session->device->physical_serial()
+                                                   : std::string();
+        std::lock_guard<std::mutex> lock(session->mutex);
+        session->physicalSerial = serial;
+        if (session->linkedConfig.empty()) {
+            session->linkedConfig = config_store::auto_link_for(serial, session->kind);
+            if (!session->linkedConfig.empty()) {
+                device_log::config(device_log::msg()
+                    << session->ordinal << " auto-linked to " << session->linkedConfig);
+            }
+        }
+        // The device resolves its own settings section on the output path, so
+        // it needs the link too -- the session field alone would be a link
+        // nothing acts on.
+        if (session->device) {
+            session->device->set_linked_config(session->linkedConfig);
+        }
+    }
+
     session->ready.store(true);
     std::wcout << L"agent bridge ready kind=" << widen_ascii(session->kind.c_str(), session->kind.size())
                << L" port=" << session->port << L" busid=" << session->busId << L"\n";
-    ds5_apply_initial_settings(backendPtr);
+    {
+        std::string linked;
+        {
+            std::lock_guard<std::mutex> lock(session->mutex);
+            linked = session->linkedConfig;
+        }
+        ds5_apply_initial_settings(backendPtr, linked);
+    }
     if (!run_usbip_attach(session->busId, kDefaultUsbipPort)) {
         std::wcerr << L"agent local attach failed busid=" << session->busId << L"\n";
     }
@@ -334,7 +370,16 @@ static bool start_bridge_session(const std::string &kind, uint16_t port, const s
     device_config_invalidate();   // a reseat re-reads the settings file
     ctm_audio_gain::refresh();   // and picks up a changed rumble gain
     ctm_config_watcher::ensure_started();   // live config changes, no reseat
+    config_store::reload_all();             // per-controller config files
     auto session = std::make_unique<AgentBridgeSession>();
+    // Assigned at CREATION, not when listed -- two consecutive device lists
+    // must not disagree. Monotonic per kind and never reused: ds5_1 that
+    // unbridges comes back as ds5_3, so a command naming a stale ordinal fails
+    // instead of hitting a different controller.
+    {
+        static std::map<std::string, unsigned> nextOrdinal;
+        session->ordinal = kind + "_" + std::to_string(++nextOrdinal[kind]);
+    }
     session->kind = kind;
     session->busId = busId;
     session->busIdAscii = busIdAscii;

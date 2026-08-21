@@ -40,7 +40,10 @@
 // Build and send one settings report. Does nothing unless the kind is wired and
 // at least one setting is configured, so an unconfigured install behaves
 // exactly as it did before this existed.
-static void ds5_apply_initial_settings(CtmBackend *backend)
+// `linkedConfig` names a per-controller config file, or is empty for the shared
+// section. Defaulted so every existing caller is unaffected.
+static void ds5_apply_initial_settings(CtmBackend *backend,
+                                       const std::string &linkedConfig = std::string())
 {
     if (backend == nullptr) {
         return;
@@ -53,10 +56,12 @@ static void ds5_apply_initial_settings(CtmBackend *backend)
     descriptor[9]  = static_cast<unsigned char>((caps.vendorId >> 8) & 0xff);
     descriptor[10] = static_cast<unsigned char>(caps.productId & 0xff);
     descriptor[11] = static_cast<unsigned char>((caps.productId >> 8) & 0xff);
-    const char *section = device_section_for(descriptor);
-    if (section == nullptr) {
+    const char *kind = device_section_for(descriptor);
+    if (kind == nullptr) {
         return;   // not a device we have settings for
     }
+    const std::string resolved = device_settings_section(kind, linkedConfig);
+    const char *section = resolved.c_str();
 
     const Ds5AudioOutput output = ds5_audio_output_for(section);
     const int speakerPercent = ds5_level_for(output, true, section);

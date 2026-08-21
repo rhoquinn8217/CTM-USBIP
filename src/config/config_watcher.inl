@@ -88,6 +88,11 @@ inline bool config_changed()
 inline void apply_change()
 {
     device_config_invalidate();      // drop and reload the file
+    // Per-controller config files are reloaded on the same beat. This watcher
+    // covers the shared file only, so a hand-edited config file is otherwise
+    // picked up on the next bridge -- touching the shared file is a way to
+    // force it without reseating a controller.
+    config_store::reload_all();
     ctm_audio_gain::refresh();       // pick up changed speaker/rumble gains
     change_pending().store(true, std::memory_order_relaxed);
     device_log::config(device_log::msg()

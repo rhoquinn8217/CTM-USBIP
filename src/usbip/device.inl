@@ -142,6 +142,19 @@ public:
         const BackendCaps caps = backend_->caps();
         std::wstring virtualSerial;
         std::wstring requestedSerial = caps.serial;
+        // Keep the PHYSICAL serial before any fallback is applied. For a
+        // DualSense the TV reports its MAC here, unique per controller and
+        // stable across sessions -- that is what per-controller config keys on.
+        // ⚠️ Deliberately left EMPTY when the backend gave us nothing: the
+        // constant below is shared by every device, so keying on it would apply
+        // one controller's settings to another while looking correct.
+        {
+            std::lock_guard<std::mutex> lock(physicalSerialMutex_);
+            physicalSerial_.clear();
+            for (wchar_t c : caps.serial) {
+                if (c < 128) physicalSerial_.push_back(static_cast<char>(c));
+            }
+        }
         if (requestedSerial.empty()) {
             requestedSerial = L"CTMUSBIP";
         }
@@ -169,6 +182,41 @@ public:
                    << std::chrono::duration_cast<std::chrono::milliseconds>(attachT2 - attachT1).count()
                    << L"ms\n";
         return true;
+    }
+
+    // The physical controller's serial, or empty when the backend reported
+    // none. Used only to resolve per-controller config.
+    // ⭐ Read LIVE from the backend rather than from a value cached at attach
+    // time. attach_backend() runs once per session, but a reconnect can bring a
+    // DIFFERENT physical controller into the same session -- and a cached
+    // serial would keep reporting the old one, handing the new controller
+    // someone else's per-controller config.
+    std::string physical_serial() const
+    {
+        if (backend_ != nullptr) {
+            const std::wstring wide = backend_->caps().serial;
+            std::string out;
+            for (wchar_t c : wide) {
+                if (c < 128) out.push_back(static_cast<char>(c));
+            }
+            if (!out.empty()) return out;
+        }
+        std::lock_guard<std::mutex> lock(physicalSerialMutex_);
+        return physicalSerial_;
+    }
+
+    // The per-controller config this device reads, or empty for the shared
+    // section. Set by the agent at bridge time and whenever a link changes.
+    std::string linked_config() const
+    {
+        std::lock_guard<std::mutex> lock(physicalSerialMutex_);
+        return linkedConfig_;
+    }
+
+    void set_linked_config(const std::string &name)
+    {
+        std::lock_guard<std::mutex> lock(physicalSerialMutex_);
+        linkedConfig_ = name;
     }
 
     void stop()
@@ -1467,7 +1515,8 @@ private:
         if (event.length != 0) {
             memcpy(event.data, data.data(), event.length);
         }
-        ds5_apply_output_overrides(event.data, event.length, profile_.device_descriptor);
+        ds5_apply_output_overrides(event.data, event.length, profile_.device_descriptor,
+                                   linked_config());
         std::cout << "usb endpoint out"
                   << " ep=0x" << std::hex << std::setw(2) << std::setfill('0')
                   << static_cast<unsigned int>(endpointAddress)
@@ -1686,6 +1735,9 @@ private:
     std::vector<uint8_t> lastFeatureSet_;
     std::vector<uint8_t> physicalFeatureScratch_;
     std::map<FeatureCacheKey, CTM_USB_RESPONSE> featureCache_;
+    mutable std::mutex physicalSerialMutex_;
+    std::string physicalSerial_;
+    std::string linkedConfig_;
     std::mutex unknownLogMutex_;
     std::map<std::string, uint64_t> unknownLogCounts_;
     std::chrono::steady_clock::time_point unknownLogLastFlush_;

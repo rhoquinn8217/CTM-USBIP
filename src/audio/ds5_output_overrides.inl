@@ -38,6 +38,28 @@ static const uint16_t kVendorSony = 0x054c;
 // (bytes 8-11, little-endian). Taken by reference on purpose: this runs on
 // every outbound report, and asking the backend for its caps would copy
 // several strings and a vector each time.
+// The settings section a device reads.
+//
+// ⭐ THIS IS WHERE A LINKED CONFIG TAKES EFFECT. Without a link the answer is
+// the shared section for the device type, exactly as before. With one, it is
+// that config file's namespaced section -- and because config files store
+// their settings under the DEVICE KIND, the two are the same shape and every
+// accessor works unchanged.
+//
+// ⓘ Built inline rather than calling config_store::section_for, because this
+// file is included before config_store.inl. Keep the two in step: the format
+// is "cfg:<lowered name>/<kind>".
+static std::string device_settings_section(const char *kind, const std::string &linkedConfig)
+{
+    if (kind == nullptr) return std::string();
+    if (linkedConfig.empty()) return std::string(kind);
+    std::string name;
+    for (char c : linkedConfig) {
+        name.push_back((c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c);
+    }
+    return "cfg:" + name + "/" + kind;
+}
+
 static const char *device_section_for(const std::vector<unsigned char> &descriptor)
 {
     if (descriptor.size() < 12) {
@@ -445,17 +467,22 @@ static void ds5_override_headset_volume(uint8_t *data, size_t length, const char
 // Single entry point called from the outbound report path. Safe on every
 // report: each override returns immediately for anything that is not its own
 // business, before any lookup.
+// `linkedConfig` names a per-controller config file, or is empty for the shared
+// section. Defaulted so every existing caller is unaffected.
 static void ds5_apply_output_overrides(uint8_t *data, size_t length,
-                                      const std::vector<unsigned char> &descriptor)
+                                      const std::vector<unsigned char> &descriptor,
+                                      const std::string &linkedConfig = std::string())
 {
     // Resolved once per report, before anything else: an unrecognised device
     // costs two comparisons and is then left entirely alone. The per-report
     // format checks stay inside each override, since report ids differ by
     // device -- a DualSense uses 0x02 and others do not.
-    const char *section = device_section_for(descriptor);
-    if (section == nullptr) {
+    const char *kind = device_section_for(descriptor);
+    if (kind == nullptr) {
         return;
     }
+    const std::string resolved = device_settings_section(kind, linkedConfig);
+    const char *section = resolved.c_str();
     ds5_override_audio_control(data, length, section);
     ds5_override_speaker_volume(data, length, section);
     ds5_override_headset_volume(data, length, section);
