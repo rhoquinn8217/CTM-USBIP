@@ -435,6 +435,29 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
             return true;
         }
 
+        if (action == "rename") {
+            auto nameIt = json.strings.find("name");
+            if (nameIt == json.strings.end()) {
+                *out = rest_error_response(400, "name is required");
+                return true;
+            }
+            if (!config_store::rename_config(name, nameIt->second, &error)) {
+                *out = rest_error_response(409, error);
+                return true;
+            }
+            // ⚠️ Re-point every live session that was reading it. The file moved
+            // and its settings section moved with it, so a session left holding
+            // the old name would silently fall back to the shared section --
+            // a rename that quietly unlinks is worse than one that fails.
+            for (const RestDeviceView &d : rest_collect_devices()) {
+                if (config_store::lower(d.linkedConfig) != config_store::lower(name)) continue;
+                std::string ignored;
+                rest_link_device(d.ordinal, nameIt->second, &ignored);
+            }
+            *out = rest_http_response(200, rest_configs_json());
+            return true;
+        }
+
         if (action == "archive") {
             std::string movedTo;
             if (!config_store::archive_config(name, &error, &movedTo)) {

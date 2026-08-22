@@ -6,7 +6,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.4.0 -- see the changelog at the bottom of this comment.
+  VERSION 2.6.0 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -25,6 +25,18 @@
   tidy message about it.
 
   CHANGELOG
+    2.6.0  Configs can be renamed. ⭐ Server-side, not create-copy-archive from
+           here: a rename has to carry the auto_link claim, the settings, and
+           every live session reading it -- doing that from the page would leave
+           an archived twin and drop the claim.
+    2.5.0  Bridging or unbridging a controller updates the page on its own.
+           ⭐ Polls every 4s but only REDRAWS when the device list actually
+           changed -- redrawing regardless would throw away a half-typed value
+           and move the controller focus every few seconds.
+           ⚠️ Background polls do NOT log. Left logging, they would bury the one
+           call you were trying to read under a poll every four seconds.
+           gamepadconnected triggers an immediate poll, so bridging feels
+           instant rather than up to four seconds late.
     2.4.0  Sections ordered by how often they are touched: Audio, then Rumble,
            then Gyro -- with audio_latency_ms first inside Audio, because it is
            the one tweaked constantly.
@@ -224,7 +236,7 @@
 </head>
 <body>
 
-<h1>Controller config API — test client <span class="muted" style="font-weight:400;font-size:12px">v2.4.0</span></h1>
+<h1>Controller config API — test client <span class="muted" style="font-weight:400;font-size:12px">v2.6.0</span></h1>
 <div class="sub">Every call and its raw response is logged at the bottom.</div>
 
 <div class="tabs" id="tabs"></div>
@@ -335,19 +347,21 @@ function setConn(msg, cls) {
   el.className = cls || 'muted';
 }
 
-function call(method, path, body) {
+// `quiet` suppresses logging. ⚠️ Only for background polls -- anything a person
+// asked for must appear, or the log stops being a record of what happened.
+function call(method, path, body, quiet) {
   var opts = { method: method, headers: headers() };
   if (body !== undefined) opts.body = JSON.stringify(body);
   var status = 0;
   return fetch(base() + path, opts)
     .then(function(r) { status = r.status; return r.text(); })
     .then(function(text) {
-      log(method, path, status, text);
+      if (!quiet) log(method, path, status, text);
       if (status < 200 || status >= 300) throw new Error(text || ('HTTP ' + status));
       try { return JSON.parse(text); } catch (e) { return {}; }
     })
     .catch(function(e) {
-      if (status === 0) {
+      if (status === 0 && !quiet) {
         // Reaching nothing at all is a different problem from a rejected call,
         // and the usual cause is the agent not running with --rest.
         log(method, path, 0, 'could not reach the agent: ' + e.message +
@@ -842,6 +856,7 @@ function loadDevices() {
       host.innerHTML = '<span class="muted">No controllers bridged. ' +
         'Bridge one from the TV, then Refresh.</span>';
       renderTabs([]);
+      DEVICE_SIG = deviceSignature([]);
       return;
     }
     var html = '<table><tr><th>ordinal</th><th>controller</th><th>serial</th>' +
@@ -867,6 +882,7 @@ function loadDevices() {
     host.innerHTML = html + '</table>';
 
     renderTabs(list);
+    DEVICE_SIG = deviceSignature(list);
   }).catch(function(){});
 }
 
@@ -940,7 +956,8 @@ function loadConfigs() {
       // archive.
       var actions = c.read_only
         ? '<span class="muted">edit ctm-device-config.txt by hand</span>'
-        : '<button class="warn" onclick="archive(\'' + esc(c.name) + '\')">Archive</button>';
+        : '<button onclick="renameConfig(\'' + esc(c.name) + '\')">Rename</button> ' +
+          '<button class="warn" onclick="archive(\'' + esc(c.name) + '\')">Archive</button>';
 
       // ⭐ The name opens the editor. Shared has no file to edit, so it stays
       // plain text rather than a button that would only report a 403.
@@ -980,6 +997,24 @@ function createConfig() {
     loadConfigs(); loadDevices();
     openConfig(name);                 // straight into editing it
   }).catch(function(){});
+}
+
+function renameConfig(name) {
+  var next = prompt('Rename "' + name + '" to:', name);
+  if (next === null) return;
+  next = next.trim();
+  if (!next || next === name) return;
+  call('POST', '/api/v1/configs/' + encodeURIComponent(name) + '/rename', { name: next })
+    .then(function() {
+      setConn('renamed to ' + next, 'good');
+      loadConfigs();
+      loadDevices();
+      // If the renamed config was open in the editor, reopen it under its new
+      // name -- leaving the old one on screen would show settings that no
+      // longer save anywhere.
+      var head = document.getElementById('editorName');
+      if (head && head.textContent === name) openConfig(next);
+    }).catch(function(){});
 }
 
 function archive(name) {
@@ -1180,7 +1215,48 @@ function gpPoll() {
   requestAnimationFrame(gpPoll);
 }
 
-window.addEventListener('gamepadconnected', gpCollect);
+// ---- Watching for controllers -----------------------------------------------
+//
+// ⭐ Poll, but only REDRAW when the device list actually changed.
+//
+// ⛔ Redrawing every poll would be actively hostile: it throws away a value
+// someone is halfway through typing, collapses an open dropdown, and moves the
+// controller focus -- every four seconds, forever. The signature check makes
+// the common case (nothing changed) cost nothing visible.
+var DEVICE_SIG = null;
+var POLL_MS = 4000;
+
+function deviceSignature(list) {
+  return (list || []).map(function(d) {
+    // Everything the page renders from. A change in any of it should redraw;
+    // anything else should not.
+    return [d.ordinal, d.kind, d.serial, d.linked_config, d.ready].join('|');
+  }).join(';');
+}
+
+function pollDevices() {
+  call('GET', '/api/v1/devices', undefined, true).then(function(d) {
+    var list = d.devices || [];
+    var sig = deviceSignature(list);
+    if (sig === DEVICE_SIG) return;          // nothing to do
+    var first = DEVICE_SIG === null;
+    DEVICE_SIG = sig;
+    if (first) return;                       // the initial load already drew it
+    setConn('controllers changed', 'good');
+    loadDevices();
+    loadConfigs();                           // linked_by and pickers follow
+  }).catch(function(){
+    // A failed poll is not worth reporting -- the agent may simply be
+    // restarting, and the next poll will pick it up.
+  });
+}
+
+// ⭐ A bridged controller appears to Windows as a gamepad, so the browser tells
+// us the moment it happens. Poll immediately rather than waiting out the timer.
+window.addEventListener('gamepadconnected', function() { gpCollect(); pollDevices(); });
+window.addEventListener('gamepaddisconnected', pollDevices);
+
+setInterval(pollDevices, POLL_MS);
 requestAnimationFrame(gpPoll);
 
 // Picking a different controller changes what the suggestion should be.

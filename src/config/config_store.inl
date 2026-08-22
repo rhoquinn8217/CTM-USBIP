@@ -388,6 +388,64 @@ inline bool create_config(const std::string &name, const std::string &kind, std:
     return true;
 }
 
+// Renames a config file.
+//
+// ⓘ Everything that matters follows the file. auto_link lives INSIDE it, so the
+// claim moves too; the settings section is namespaced by name, and reload_all
+// rebuilds those. The only thing left behind is a live session still pointing at
+// the old name, which the caller re-points.
+//
+// ⚠️ Refuses to overwrite an existing config, and refuses reserved names -- a
+// rename onto a name in use would silently destroy the other one.
+inline bool rename_config(const std::string &oldName, const std::string &newName,
+                          std::string *error)
+{
+    ConfigFile cfg;
+    if (!find_config(oldName, &cfg)) { *error = "no config named " + oldName; return false; }
+    if (!valid_name(newName)) {
+        *error = "name must be letters, digits, _ or - (max 48), and not a reserved name";
+        return false;
+    }
+    if (lower(newName) == lower(oldName)) return true;          // nothing to do
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        if (g_files.count(lower(newName))) {
+            *error = newName + " already exists";
+            return false;
+        }
+    }
+    const std::string target = path_for(newName);
+    const std::wstring wFrom(cfg.path.begin(), cfg.path.end());
+    const std::wstring wTo(target.begin(), target.end());
+    // No REPLACE_EXISTING: the check above says it is free, and if that raced
+    // then failing is much better than overwriting someone's config.
+    if (!MoveFileExW(wFrom.c_str(), wTo.c_str(), 0)) {
+        *error = "could not rename " + cfg.path;
+        return false;
+    }
+    // The name is written into the file's own header comment, which is now
+    // wrong. Cosmetic, but it is the first thing a person reads when they open
+    // it, so fix it rather than leave it lying.
+    {
+        std::vector<std::string> lines;
+        std::ifstream in(target);
+        std::string line;
+        while (std::getline(in, line)) {
+            if (!line.empty() && line.back() == '\r') line.pop_back();
+            lines.push_back(line);
+        }
+        in.close();
+        if (!lines.empty() && lines[0] == "# " + cfg.name) {
+            lines[0] = "# " + newName;
+            std::ofstream out(target, std::ios::binary | std::ios::trunc);
+            for (const std::string &l : lines) out << l << "\r\n";
+        }
+    }
+    reload_all();
+    notify_changed();
+    return true;
+}
+
 // ⭐ ARCHIVE, NOT DELETE. Moving the file to configs/archive/ means nothing is
 // ever destroyed, the watcher's existing "file vanished" path handles the
 // fallback for free, and restoring is a drag in Explorer rather than a verb

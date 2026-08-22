@@ -255,6 +255,42 @@ int run_config_store_tests()
         CTM_CHECK_EQ(cs::auto_link_for("aabbccddeeff", "ds5"), std::string(""));
     }
 
+    section("config store: rename carries the file, its claim and its settings");
+    {
+        std::string error;
+        write_config("oldname",
+            "# oldname\r\n[config]\r\nkind = ds5\r\nauto_link = aabbccddeeff\r\n\r\n"
+            "[ds5]\r\nspeaker_volume = 55\r\n");
+        CTM_CHECK_EQ(units::device_config_int("cfg:oldname/ds5", "speaker_volume", -1), 55);
+
+        CTM_CHECK(cs::rename_config("oldname", "newname", &error));
+
+        cs::ConfigFile gone, moved;
+        CTM_CHECK(!cs::find_config("oldname", &gone));
+        CTM_CHECK(cs::find_config("newname", &moved));
+        // ⭐ Settings follow, under the new namespaced section.
+        CTM_CHECK_EQ(units::device_config_int("cfg:newname/ds5", "speaker_volume", -1), 55);
+        CTM_CHECK_EQ(units::device_config_int("cfg:oldname/ds5", "speaker_volume", -1), -1);
+        // auto_link lives inside the file, so the claim moves with it.
+        CTM_CHECK_EQ(cs::auto_link_for("aabbccddeeff", "ds5"), std::string("newname"));
+        // and the header comment is corrected rather than left stale
+        CTM_CHECK(contains(read_config("newname"), "# newname"));
+    }
+
+    section("config store: rename refuses to overwrite or take a reserved name");
+    {
+        std::string error;
+        CTM_CHECK(cs::create_config("other", "ds5", &error));
+        // ⛔ Renaming onto a name in use would silently destroy the other one.
+        CTM_CHECK(!cs::rename_config("newname", "other", &error));
+        CTM_CHECK(contains(error, "already exists"));
+        CTM_CHECK(!cs::rename_config("newname", "shared", &error));
+        CTM_CHECK(!cs::rename_config("newname", "bad name", &error));
+        // the original survived every refusal
+        cs::ConfigFile still;
+        CTM_CHECK(cs::find_config("newname", &still));
+    }
+
     section("config store: archive moves rather than deletes, and never overwrites");
     {
         std::string error, movedTo;
