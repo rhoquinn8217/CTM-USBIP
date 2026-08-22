@@ -204,7 +204,19 @@ static void apply_pending_config_to_sessions()
         // the host config, which the TV accepts at any point in a session. Sent
         // separately for that reason, and only when the file names it: absent
         // must leave the TV's own value alone.
-        const int latency = device_config_int("ds5", "audio_latency_ms", -1);
+        // ⛔ Was hardcoded to the shared "ds5" section, which ignored the
+        // linked config entirely: a controller linked to a config holding
+        // audio_latency_ms=100 was sent whatever the SHARED section said, and
+        // a value set in its own config did nothing. Found 2026-08-22 when a
+        // stale shared 7 muted a controller whose config said 100.
+        //
+        // ⚠️ Uses the SESSION kind, not a literal, so an Edge resolves its own
+        // section rather than borrowing the DualSense one.
+        const std::string latencyKind = config_store::settings_kind_for(target.kind);
+        const std::string latencySection =
+            device_settings_section(latencyKind.empty() ? "ds5" : latencyKind.c_str(),
+                                    target.linkedConfig);
+        const int latency = device_config_int(latencySection.c_str(), "audio_latency_ms", -1);
         // Warn on the live path as well as at handshake. This is the one a
         // person actually meets: they edit the file mid-session, the audio goes
         // quiet, and without this there is nothing to explain why.
@@ -218,8 +230,16 @@ static void apply_pending_config_to_sessions()
             std::wstring latencyError;
             if (target.backend->send_audio_latency(static_cast<uint16_t>(latency), &latencyError)) {
                 device_log::config(device_log::msg()
-                    << "audio latency set to " << latency << " ms on busid="
-                    << target.busIdAscii);
+                    << latencySection << ": audio latency set to " << latency
+                    << " ms on busid=" << target.busIdAscii);
+            } else {
+                // ⛔ This used to log NOTHING. The error was captured into
+                // latencyError and discarded, so a failed send was
+                // indistinguishable from the code never running -- which led
+                // to "audio_latency_ms is wired-only", exactly backwards.
+                device_log::config(device_log::msg()
+                    << latencySection << ": audio latency FAILED on busid="
+                    << target.busIdAscii << " -- " << narrow_ascii(latencyError));
             }
         }
     }

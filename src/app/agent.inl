@@ -328,6 +328,34 @@ static void bridge_session_worker(AgentBridgeSession *session)
             linked = session->linkedConfig;
         }
         ds5_apply_initial_settings(backendPtr, linked);
+
+        // ⭐ Push the audio buffer too, now that the link is known.
+        //
+        // ⛔ The handshake read in bridge.inl can only see the shared section:
+        // it runs before the session exists, so no config is linked yet. Without
+        // this, a controller linked to a config holding audio_latency_ms would
+        // be sent the SHARED value at bridge and only get its own on the next
+        // config change. Found 2026-08-22, when a stale shared 7 muted a
+        // controller whose own config said 100.
+        const std::string latencyKind = config_store::settings_kind_for(session->kind);
+        if (!latencyKind.empty()) {
+            const std::string section = device_settings_section(latencyKind.c_str(), linked);
+            const int latency = device_config_int(section.c_str(), "audio_latency_ms", -1);
+            if (latency >= 0 && latency <= 255) {
+                std::wstring latencyError;
+                if (backendPtr->send_audio_latency(static_cast<uint16_t>(latency), &latencyError)) {
+                    device_log::config(device_log::msg()
+                        << section << ": audio latency set to " << latency << " ms at bridge");
+                } else {
+                    // ⛔ The failure used to be silent -- the error was captured
+                    // and discarded, which made an unreachable config and an
+                    // unsupported feature look identical. That cost hours.
+                    device_log::config(device_log::msg()
+                        << section << ": audio latency FAILED -- "
+                        << narrow_ascii(latencyError));
+                }
+            }
+        }
     }
     if (!run_usbip_attach(session->busId, kDefaultUsbipPort)) {
         std::wcerr << L"agent local attach failed busid=" << session->busId << L"\n";

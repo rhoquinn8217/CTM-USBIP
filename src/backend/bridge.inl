@@ -271,6 +271,17 @@ public:
     // nothing. -1 from device_config_int is "absent", which is the case that
     // must leave the TV's own value alone -- NOT a value of zero, which is a
     // legitimate setting we deliberately allow.
+    //
+    // ⓘ SHARED SECTION ONLY, deliberately. This runs at handshake, before the
+    // session exists and therefore before any config is linked to it -- there
+    // is nothing per-controller to read yet. agent.inl pushes the linked
+    // value once the session is ready, which is the point at which a link is
+    // known.
+    //
+    // ⚠️ The TV RETAINS the last value it was given. So "absent leaves it
+    // alone" means a bad value survives clearing the file: the only way back
+    // is to send a good one. That bit on 2026-08-22 -- a stale 7 kept a
+    // controller silent after the setting was removed.
     static uint16_t configured_audio_latency()
     {
         const int value = device_config_int("ds5", "audio_latency_ms", -1);

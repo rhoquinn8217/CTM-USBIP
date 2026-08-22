@@ -228,6 +228,7 @@ static std::string rest_keys_json()
 {"key":"speaker_volume","type":"int","min":0,"max":100,"default":100,"help":"Controller speaker level. 100 is maximum."},
 {"key":"headset_volume","type":"int","min":0,"max":100,"default":100,"help":"Controller headset jack level. 100 is maximum."},
 {"key":"audio_gain","type":"int","min":0,"max":500,"default":100,"help":"Scales audio passing through. 100 is unchanged, not maximum."},
+{"key":"audio_latency_ms","type":"int","min":0,"max":255,"default":-1,"help":"Controller speaker buffer. Measured 2026-08-16: below 8 is SILENT, 20 is choppy, 60-100 smooth. Absent leaves the TV's own value alone."},
 {"key":"force_echo_cancel","type":"bool","default":false,"help":"Off makes the controller mute its own speaker as feedback protection."},
 {"key":"master_rumble_gain","type":"int","min":0,"max":500,"default":100,"help":"Scales all rumble. 100 is unchanged."},
 {"key":"rumble_gain_heavy","type":"int","min":0,"max":500,"default":100,"help":"Heavy weight only. Multiplies with master."},
