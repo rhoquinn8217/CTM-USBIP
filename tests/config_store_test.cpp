@@ -66,6 +66,8 @@ int count_of(const std::string &haystack, const std::string &needle)
 
 int run_config_store_tests()
 {
+    wipe_configs();      // start from nothing, whatever a previous run left
+
     section("config store: names");
     CTM_CHECK(cs::valid_name("couch"));
     CTM_CHECK(cs::valid_name("ds5_custom-01"));
