@@ -6,7 +6,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.3.0 -- see the changelog at the bottom of this comment.
+  VERSION 2.4.0 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -25,6 +25,12 @@
   tidy message about it.
 
   CHANGELOG
+    2.4.0  Sections ordered by how often they are touched: Audio, then Rumble,
+           then Gyro -- with audio_latency_ms first inside Audio, because it is
+           the one tweaked constantly.
+           A controller with no config can now have one made from its own tab.
+           Sending someone to Overview to create a config for the controller
+           whose tab they already have open was a detour with no purpose.
     2.3.0  A setting that cannot act on the controller you are looking at is now
            marked, not silently offered. audio_latency_ms is the first: measured
            2026-08-22, it acts over Bluetooth and does nothing wired, because it
@@ -218,7 +224,7 @@
 </head>
 <body>
 
-<h1>Controller config API — test client <span class="muted" style="font-weight:400;font-size:12px">v2.3.0</span></h1>
+<h1>Controller config API — test client <span class="muted" style="font-weight:400;font-size:12px">v2.4.0</span></h1>
 <div class="sub">Every call and its raw response is logged at the bottom.</div>
 
 <div class="tabs" id="tabs"></div>
@@ -477,6 +483,16 @@ function claimAutoLink(ordinal, configName, serial) {
   }).catch(function(){ loadConfigs(); loadDevices(); });
 }
 
+// Creates a config for this controller and links it in one step. The kind
+// comes from the device, so the API is told which controller it is for and
+// links it itself.
+function createForDevice(ordinal) {
+  var box = document.getElementById('mk-' + ordinal);
+  if (!box || !box.value.trim()) { setConn('name required', 'bad'); return; }
+  call('POST', '/api/v1/configs', { name: box.value.trim(), device: ordinal })
+    .then(function() { loadConfigs(); loadDevices(); }).catch(function(){});
+}
+
 function pickConfig(ordinal) {
   var sel = document.getElementById('pick-' + ordinal);
   if (!sel) return;
@@ -558,9 +574,18 @@ function buildDevicePane(d) {
           '</div>';
 
   if (!d.linked_config) {
-    // Nothing to edit yet, and saying why beats an empty pane.
-    head += '<div class="kv"><span class="muted">No config selected. ' +
-            'Choose one above, or create one on Overview.</span></div>';
+    // ⭐ Make one HERE. Sending someone to Overview to create a config for the
+    // controller whose tab they already have open is a detour with no purpose --
+    // and the kind is already known, so there is nothing to ask.
+    var suggested = settingsKindOf(d.kind) + '_config';
+    var n = 2;
+    while (CONFIGS.some(function(c) { return c.name.toLowerCase() === suggested.toLowerCase(); })) {
+      suggested = settingsKindOf(d.kind) + '_config_' + (n++);
+    }
+    head += '<div class="kv"><label>no config yet</label>' +
+            '<input id="mk-' + esc(d.ordinal) + '" value="' + esc(suggested) + '" size="20">' +
+            '<button onclick="createForDevice(\'' + esc(d.ordinal) + '\')">Create and link</button>' +
+            '<span class="muted">or choose an existing one above</span></div>';
     pane.innerHTML = head;
     return;
   }
@@ -628,6 +653,16 @@ function renderConfigEditor(hostId, configName, prefix, ordinal) {
       var g = sectionOf(meta.key);
       (groups[g] = groups[g] || []).push(meta);
     });
+    // ⭐ audio_latency_ms first within Audio -- it is the one that gets tweaked
+    // constantly, and burying it under volumes meant scrolling for it every
+    // time.
+    if (groups.Audio) {
+      groups.Audio.sort(function(a, b) {
+        if (a.key === 'audio_latency_ms') return -1;
+        if (b.key === 'audio_latency_ms') return 1;
+        return 0;
+      });
+    }
 
     // ⭐ No Apply button. Changing a value writes it.
     //
@@ -660,7 +695,9 @@ function renderConfigEditor(hostId, configName, prefix, ordinal) {
     }
     html += '</div><div class="cols">';
 
-    ['Gyro', 'Audio', 'Rumble', 'Other'].forEach(function(g) {
+    // ⭐ Ordered by how often a setting is touched, not alphabetically. Audio
+    // leads because latency is tuned constantly; gyro is set once and left.
+    ['Audio', 'Rumble', 'Gyro', 'Other'].forEach(function(g) {
       if (!groups[g]) return;
       html += '<div class="sect"><h3>' + g + '</h3>';
       groups[g].forEach(function(meta) {

@@ -75,7 +75,23 @@
     // Below this the controller has less than one 10ms Opus frame buffered and
     // plays nothing at all. Measured, not assumed. Not enforced -- see
     // configured_audio_latency().
-    static constexpr int kLatencySilentBelow = 8;
+    // ⭐ Below this the controller's speaker is unusable. WARN, do not clamp --
+    // the floor was deliberately opened so the edge could be found at all, and
+    // nothing here is unrecoverable: any value recovers by setting a higher one.
+    //
+    // ⚠️ WAS 8, which was the WIRED figure. Over Bluetooth, 2026-08-22 found
+    // silence at 0-7, sound at 8-10, then silence AGAIN at 11-14 -- a dead band
+    // nobody has explained, probably quantisation against the 10 ms Opus frame.
+    // A warning that fires below 8 leaves that band silent with no explanation.
+    //
+    // ⭐ 20 is also where the setting stops being worth using. This is a JITTER
+    // BUFFER, not the pipeline: audio already crosses game -> host -> network ->
+    // TV -> controller, well over 100 ms, so dropping 15 to 8 saves 7 ms of
+    // hundreds and buys every dropout. 60 -> 20 saves a real 40 ms; below 20 is
+    // diagnostic range.
+    //
+    // ⓘ Ciprian's original TV-side floor was also 20, arrived at independently.
+    static constexpr int kLatencySilentBelow = 20;
 
     // CTMB_MSG_ENUM payload (puck composite): the device's own enumeration,
     // forwarded verbatim by the TV and replayed here. Layout:

@@ -220,10 +220,14 @@ static void apply_pending_config_to_sessions()
         // Warn on the live path as well as at handshake. This is the one a
         // person actually meets: they edit the file mid-session, the audio goes
         // quiet, and without this there is nothing to explain why.
-        if (latency >= 0 && latency < 8) {
+        // ⚠️ Uses the shared constant rather than a literal. This said 8 until
+        // 2026-08-22, which was the WIRED figure -- so a Bluetooth user hitting
+        // the 11-14 dead band got silence and no warning at all.
+        if (latency >= 0 && latency < CtmBridgeProtocol::kLatencySilentBelow) {
             device_log::config(device_log::msg()
-                << "audio_latency_ms=" << latency
-                << " is below 8 -- the controller's speaker will be SILENT."
+                << "audio_latency_ms=" << latency << " is below "
+                << CtmBridgeProtocol::kLatencySilentBelow
+                << " -- the controller's speaker may be SILENT."
                 << " Raise it to recover; 60 is the usual value");
         }
         if (latency >= 0 && latency <= 255) {
