@@ -1,12 +1,8 @@
-      html += '<tr><td>' + nameCell + '</td>' +
-              '<td>' + esc(c.kind) + '</td>' +
-              '<td>' + links + '</td>' +
-              '<td>' + actions + '</td></tr>';
 <!doctype html>
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.6.0 -- see the changelog at the bottom of this comment.
+  VERSION 2.7.0 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -25,6 +21,19 @@
   tidy message about it.
 
   CHANGELOG
+    2.7.0  The serial and config rows stay on screen with the tabs, and a
+           focused control scrolls clear of both.
+           ⛔ Sticky tabs alone made things WORSE under controller navigation:
+           scrollIntoView put the focused control at the top of the viewport,
+           which is exactly where the tab bar was covering. So D-pad focus could
+           land somewhere genuinely invisible.
+    2.6.1  ⛔ Fix: four lines of javascript sat ABOVE <!doctype html> and the
+           browser rendered them as text at the top of the page. An edit had
+           inserted its replacement at position 0 instead of at its anchor.
+           The title and subtitle are gone -- on a TV they cost a line of screen
+           to say what the page obviously is -- and the version moved into the
+           agent bar. The tabs are sticky, so switching controllers does not
+           mean scrolling back up first.
     2.6.0  Configs can be renamed. ⭐ Server-side, not create-copy-archive from
            here: a rename has to carry the auto_link claim, the settings, and
            every live session reading it -- doing that from the page would leave
@@ -159,7 +168,7 @@
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
-  body { margin:0; padding:20px; background:#15161a; color:#e8e8ea;
+  body { margin:0; padding:0 20px 20px; background:#15161a; color:#e8e8ea;
          font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
   h1 { font-size:17px; margin:0 0 2px; font-weight:600; }
   h2 { font-size:14px; margin:22px 0 8px; color:#b9bbc4; font-weight:600;
@@ -195,12 +204,25 @@
         overflow:auto; max-height:340px; font-size:12px; margin:0; white-space:pre-wrap;
         word-break:break-word; }
   .log-entry { margin-bottom:10px; }
-  .tabs { display:flex; gap:4px; margin:14px 0 18px; border-bottom:1px solid #2c2e36;
-          flex-wrap:wrap; }
+  /* ⭐ Sticky: switching controllers should not mean scrolling back up first,
+     and the settings list is long enough that it always would. */
+  .tabs { display:flex; gap:4px; margin:0 0 18px; border-bottom:1px solid #2c2e36;
+          flex-wrap:wrap; position:sticky; top:0; z-index:10;
+          background:#15161a; padding-top:10px; }
   .tabs button { background:transparent; border:none; border-bottom:2px solid transparent;
                  color:#8b8d96; padding:9px 14px; font-size:13.5px; border-radius:0; }
   .tabs button.on { color:#e8e8ea; border-bottom-color:#6c8cff; font-weight:600; }
   .pane { display:none; } .pane.on { display:block; }
+  /* ⭐ Sits under the tabs and stays with them. Which controller you are
+     editing, and which config it is reading, are the two things you must not
+     lose track of while scrolling a long settings list. */
+  .devhead { position:sticky; top:42px; z-index:9; background:#15161a;
+             border-bottom:1px solid #2c2e36; padding-bottom:8px; margin-bottom:14px; }
+  .devhead h2 { margin-top:0; border-bottom:none; padding-bottom:2px; }
+  /* ⛔ Without this, scrollIntoView puts a focused control at the very top of
+     the viewport -- underneath the sticky bars, invisible. The margin is the
+     tab bar plus the device header. */
+  button, select, input, .row { scroll-margin-top: 175px; }
   /* ⭐ The controller focus ring is deliberately loud. On a TV across a room a
      subtle outline is invisible, and not knowing what is selected makes the
      whole thing unusable. */
@@ -236,14 +258,15 @@
 </head>
 <body>
 
-<h1>Controller config API — test client <span class="muted" style="font-weight:400;font-size:12px">v2.6.0</span></h1>
-<div class="sub">Every call and its raw response is logged at the bottom.</div>
-
+<!-- ⛔ No title or subtitle. On a TV every line costs screen, and both said
+     what the page self-evidently is. The version stays because it settles
+     "which build am I looking at" in a screenshot. -->
 <div class="tabs" id="tabs"></div>
 
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
+  <span class="muted" style="font-size:12px">v2.7.0</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -600,10 +623,11 @@ function buildDevicePane(d) {
             '<input id="mk-' + esc(d.ordinal) + '" value="' + esc(suggested) + '" size="20">' +
             '<button onclick="createForDevice(\'' + esc(d.ordinal) + '\')">Create and link</button>' +
             '<span class="muted">or choose an existing one above</span></div>';
-    pane.innerHTML = head;
+    pane.innerHTML = '<div class="devhead">' + head + '</div>';
     return;
   }
-  pane.innerHTML = head + '<div id="dev-settings-' + esc(d.ordinal) + '">' +
+  pane.innerHTML = '<div class="devhead">' + head + '</div>' +
+                   '<div id="dev-settings-' + esc(d.ordinal) + '">' +
                    '<span class="muted">loading settings…</span></div>';
   loadDeviceSettings(d.ordinal, d.linked_config);
 }
