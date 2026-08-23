@@ -59,8 +59,39 @@
         uint16_t feature_report_len;
         uint8_t paced_report_count;
         uint8_t paced_report_ids[16];
-        uint8_t reserved[31];
+        // The DualSense's Bluetooth audio buffer. Higher is smoother, lower is
+        // choppier -- measured on hardware. kLatencyUnset leaves the TV's own
+        // value alone, so a client that never sets it behaves as before.
+        //
+        // 0 is a REAL VALUE and deliberately reachable: the point of host
+        // control is to find where the audio stops being recoverable, and a
+        // sentinel of 0 would put the interesting end of the range out of
+        // reach. Taken from the reserved block, so the struct size is
+        // unchanged and an older TV simply ignores it.
+        uint16_t latency_ms;
+        uint8_t reserved[29];
     };
+    static constexpr uint16_t kLatencyUnset = 0xFFFFu;
+    // Below this the controller has less than one 10ms Opus frame buffered and
+    // plays nothing at all. Measured, not assumed. Not enforced -- see
+    // configured_audio_latency().
+    // ⭐ Below this the controller's speaker is unusable. WARN, do not clamp --
+    // the floor was deliberately opened so the edge could be found at all, and
+    // nothing here is unrecoverable: any value recovers by setting a higher one.
+    //
+    // ⚠️ WAS 8, which was the WIRED figure. Over Bluetooth, 2026-08-22 found
+    // silence at 0-7, sound at 8-10, then silence AGAIN at 11-14 -- a dead band
+    // nobody has explained, probably quantisation against the 10 ms Opus frame.
+    // A warning that fires below 8 leaves that band silent with no explanation.
+    //
+    // ⭐ 20 is also where the setting stops being worth using. This is a JITTER
+    // BUFFER, not the pipeline: audio already crosses game -> host -> network ->
+    // TV -> controller, well over 100 ms, so dropping 15 to 8 saves 7 ms of
+    // hundreds and buys every dropout. 60 -> 20 saves a real 40 ms; below 20 is
+    // diagnostic range.
+    //
+    // ⓘ Ciprian's original TV-side floor was also 20, arrived at independently.
+    static constexpr int kLatencySilentBelow = 20;
 
     // CTMB_MSG_ENUM payload (puck composite): the device's own enumeration,
     // forwarded verbatim by the TV and replayed here. Layout:
@@ -197,7 +228,14 @@ public:
         caps.inputReportLength = capsRaw_.input_report_len ? capsRaw_.input_report_len : 64;
         caps.outputReportLength = capsRaw_.output_report_len ? capsRaw_.output_report_len : 64;
         caps.featureReportLength = capsRaw_.feature_report_len ? capsRaw_.feature_report_len : 64;
-        caps.serial = widen_ascii(capsRaw_.serial, sizeof(capsRaw_.serial));
+        // ⚠️ Guarded: unlike every other field here, the serial is now rewritten
+        // on RECONNECT (a different controller can arrive in the same session),
+        // so a reader on another thread can meet a write in progress. The rest
+        // of capsRaw_ is still written once, before any reader exists.
+        {
+            std::lock_guard<std::mutex> lock(serialMutex_);
+            caps.serial = widen_ascii(capsRaw_.serial, sizeof(capsRaw_.serial));
+        }
         caps.product = widen_ascii(capsRaw_.product, sizeof(capsRaw_.product));
         caps.path = widen_ascii(capsRaw_.path, sizeof(capsRaw_.path));
         caps.hidReportDescriptor = hidReportDescriptor_;
@@ -243,6 +281,73 @@ public:
             }
         }
         return *lastGetResponse != nullptr || !actions.empty();
+    }
+
+    // Read the configured audio buffer, or the sentinel when the file says
+    // nothing. -1 from device_config_int is "absent", which is the case that
+    // must leave the TV's own value alone -- NOT a value of zero, which is a
+    // legitimate setting we deliberately allow.
+    //
+    // ⓘ SHARED SECTION ONLY, deliberately. This runs at handshake, before the
+    // session exists and therefore before any config is linked to it -- there
+    // is nothing per-controller to read yet. agent.inl pushes the linked
+    // value once the session is ready, which is the point at which a link is
+    // known.
+    //
+    // ⚠️ The TV RETAINS the last value it was given. So "absent leaves it
+    // alone" means a bad value survives clearing the file: the only way back
+    // is to send a good one. That bit on 2026-08-22 -- a stale 7 kept a
+    // controller silent after the setting was removed.
+    static uint16_t configured_audio_latency()
+    {
+        const int value = device_config_int("ds5", "audio_latency_ms", -1);
+        if (value < 0 || value > 255) {
+            return CtmBridgeProtocol::kLatencyUnset;
+        }
+        // Say so when the value is in the silent range, rather than clamping.
+        //
+        // Measured on hardware 2026-08-16, walking the whole range with game
+        // audio playing: 0 to 7 is SILENT, 8 is white noise with the voice
+        // barely there, and it improves steadily from there. 20 is choppy but
+        // usable; 60 and 100 are smooth.
+        //
+        // It is a buffer in milliseconds and an Opus frame is 10ms, so below
+        // about 8 there is less than one frame to play.
+        //
+        // A clamp was considered and rejected. The range was deliberately
+        // opened -- the TV's own floor of 20 was removed -- so that the edge
+        // could be found at all, and a clamp here would put it back out of
+        // reach. Nothing is unrecoverable either: any value recovers by setting
+        // a higher one. The failure is confusing, not dangerous, so the answer
+        // is to explain it rather than prevent it.
+        if (value < CtmBridgeProtocol::kLatencySilentBelow) {
+            device_log::config(device_log::msg()
+                << "audio_latency_ms=" << value << " is below "
+                << CtmBridgeProtocol::kLatencySilentBelow
+                << " -- the controller's speaker will be SILENT."
+                << " Raise it to recover; 60 is the usual value");
+        }
+        return static_cast<uint16_t>(value);
+    }
+
+    // Re-send the whole host config with a new latency. Cheap -- it is 58 bytes
+    // -- and re-sending the lot avoids a second message type that could drift
+    // out of step with the first.
+    bool send_audio_latency(uint16_t latencyMs, std::wstring *error) override
+    {
+        CtmBridgeProtocol::HostConfig hostConfig = lastHostConfig_;
+        hostConfig.latency_ms = latencyMs;
+        if (!send_message(
+                CtmBridgeProtocol::MsgHostConfig,
+                CtmBridgeProtocol::kFlagOk,
+                0,
+                reinterpret_cast<const uint8_t *>(&hostConfig),
+                sizeof(hostConfig),
+                error)) {
+            return false;
+        }
+        lastHostConfig_ = hostConfig;
+        return true;
     }
 
     bool send_output_report(const std::vector<uint8_t> &report, bool paced, std::wstring *error) override
@@ -463,6 +568,17 @@ private:
 
             CtmBridgeProtocol::DeviceCaps peerCaps = {};
             memcpy(&peerCaps, hello.payload.data(), sizeof(peerCaps));
+            // ⚠️ The SERIAL is refreshed on every connect, not just the first.
+            // Everything else stays initial-only, as before -- descriptors and
+            // capabilities describe the device type and do not change. But the
+            // serial identifies WHICH physical controller is on the other end,
+            // and within the reconnect grace a different one can arrive: unplug
+            // A, plug in B, and B lands in A's session. Before this, B kept A's
+            // serial and therefore A's per-controller config.
+            {
+                std::lock_guard<std::mutex> lock(serialMutex_);
+                memcpy(capsRaw_.serial, peerCaps.serial, sizeof(capsRaw_.serial));
+            }
             if (initial) {
                 capsRaw_ = peerCaps;
                 hidReportDescriptor_.clear();
@@ -492,6 +608,7 @@ private:
             hostConfig.paced_report_count = 2;
             hostConfig.paced_report_ids[0] = 0x36;
             hostConfig.paced_report_ids[1] = 0x15;
+            hostConfig.latency_ms = configured_audio_latency();
             std::wstring sendError;
             if (!send_message(
                     CtmBridgeProtocol::MsgHostConfig,
@@ -508,6 +625,7 @@ private:
                 std::wcerr << L"bridge host config failed: " << sendError << L"\n";
                 continue;
             }
+            lastHostConfig_ = hostConfig;
 
             std::wcout << L"bridge backend"
                        << (initial ? L"" : L" reconnected")
@@ -928,6 +1046,10 @@ private:
 
     uint16_t port_ = 0;
     double btPaceMs_ = 10.0;
+    // The last host config sent, kept so a live latency change can re-send the
+    // whole thing rather than reconstruct it from scratch and risk drifting
+    // from the handshake's version.
+    CtmBridgeProtocol::HostConfig lastHostConfig_ = {};
     bool wsaStarted_ = false;
     // Bounded accept windows + idle rule (see accept_client / reader_loop).
     // All 0 = disabled: the CLI bridge mode keeps wait-forever semantics; the
@@ -940,6 +1062,8 @@ private:
     SOCKET listenSocket_ = INVALID_SOCKET;
     std::atomic<SOCKET> clientSocket_{INVALID_SOCKET};
     CtmBridgeProtocol::DeviceCaps capsRaw_ = {};
+    // Guards capsRaw_.serial only -- see caps(). Mutable so caps() can stay const.
+    mutable std::mutex serialMutex_;
     std::vector<uint8_t> hidReportDescriptor_;
     std::vector<uint8_t> enumPayload_;   // forwarded composite enumeration (CTMB_MSG_ENUM)
     RawInputCallback callback_;

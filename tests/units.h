@@ -10,6 +10,11 @@
 // !! the other three call; device_config defines the lookups the overrides and
 // !! the gains call.
 //
+// config_store.inl qualifies on the same terms as the rest: it needs only
+// device_log and device_config, both already above it here. It touches the
+// filesystem, which is fine -- the runner executes from the build output
+// directory, so its configs/ folder is scratch space, not the repo's.
+//
 // WHAT IS DELIBERATELY ABSENT. Only files with no dependency on the earlier
 // include chain are here. ds5_apply_settings.inl needs the backend type,
 // agent_session_sweep.inl needs the agent's session list, and config_watcher
@@ -26,6 +31,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <map>
 #include <mutex>
@@ -43,5 +49,6 @@ namespace units {
 #include "config/device_config.inl"
 #include "audio/audio_gain.inl"
 #include "audio/ds5_output_overrides.inl"
+#include "config/config_store.inl"
 
 }  // namespace units

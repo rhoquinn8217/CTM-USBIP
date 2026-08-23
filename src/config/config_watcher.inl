@@ -88,6 +88,11 @@ inline bool config_changed()
 inline void apply_change()
 {
     device_config_invalidate();      // drop and reload the file
+    // Per-controller config files are reloaded on the same beat. This watcher
+    // covers the shared file only, so a hand-edited config file is otherwise
+    // picked up on the next bridge -- touching the shared file is a way to
+    // force it without reseating a controller.
+    config_store::reload_all();
     ctm_audio_gain::refresh();       // pick up changed speaker/rumble gains
     change_pending().store(true, std::memory_order_relaxed);
     device_log::config(device_log::msg()
@@ -142,6 +147,18 @@ inline void watch_loop()
 }
 
 // Start once, on the first bridge session. Cheap to call repeatedly.
+// Wires config_store's change hook to the same flag a shared-file save raises,
+// so a per-controller config write reaches a live controller by the path that
+// already exists rather than a second one.
+inline void adopt_config_store()
+{
+    config_store::g_on_change = []() {
+        change_pending().store(true, std::memory_order_relaxed);
+        device_log::config(device_log::msg()
+            << "a controller config changed, pushing to live sessions");
+    };
+}
+
 inline void ensure_started()
 {
     static std::once_flag started;

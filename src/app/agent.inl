@@ -15,6 +15,12 @@ struct AgentBridgeSession {
     std::atomic_bool ready{false};
     std::mutex mutex;
     std::wstring lastError;
+    // Per-controller config. ordinal is monotonic and never reused, so a stale
+    // reference from an old device list fails rather than hitting the wrong
+    // controller. linkedConfig empty means the shared [kind] section.
+    std::string ordinal;
+    std::string physicalSerial;
+    std::string linkedConfig;
 };
 
 static std::mutex g_agent_sessions_mutex;
@@ -281,10 +287,87 @@ static void bridge_session_worker(AgentBridgeSession *session)
         });
     }
 
+    // Per-controller config: pick up the physical serial, then auto-link if a
+    // config claims it. A manual link made later overrides this for the life of
+    // the session -- auto_link decides the starting point, not the whole story.
+    {
+        const std::string serial = session->device ? session->device->physical_serial()
+                                                   : std::string();
+        std::lock_guard<std::mutex> lock(session->mutex);
+        session->physicalSerial = serial;
+        if (session->linkedConfig.empty()) {
+            session->linkedConfig = config_store::auto_link_for(serial, session->kind);
+            if (!session->linkedConfig.empty()) {
+                device_log::config(device_log::msg()
+                    << session->ordinal << " auto-linked to " << session->linkedConfig);
+            }
+        }
+        // The device resolves its own settings section on the output path, so
+        // it needs the link too -- the session field alone would be a link
+        // nothing acts on.
+        if (session->device) {
+            session->device->set_linked_config(session->linkedConfig);
+        }
+
+        // ⭐ Read the controller's own gyro calibration, once the session is up.
+        //
+        // Here rather than at attach because it is a round trip to the TV: the
+        // feature request has to reach the physical pad and come back. Best
+        // effort -- a controller whose calibration cannot be read still works,
+        // on the old fixed scale, and says so in the log.
+        if (session->kind == "ds5" || session->kind == "ds5_usb" ||
+            session->kind == "ds5e_usb") {
+            ctm_gyro_calib::fetch(session->device.get(), backendPtr, session->ordinal);
+        }
+    }
+
     session->ready.store(true);
     std::wcout << L"agent bridge ready kind=" << widen_ascii(session->kind.c_str(), session->kind.size())
                << L" port=" << session->port << L" busid=" << session->busId << L"\n";
-    ds5_apply_initial_settings(backendPtr);
+    // Bring up the synthetic gyro mouse the first time a DualSense session is
+    // ready. Idempotent -- later sessions are no-ops. Always-present by design:
+    // the gyro gate decides whether it MOVES, not whether it exists, so
+    // enabling gyro mid-session through live config works without a reseat.
+    if (session->kind == "ds5" || session->kind == "ds5_usb" ||
+        session->kind == "ds5e_usb") {
+        ctm_gyro_mouse_ensure_mouse_started();   // defined in mouse_device.inl
+    }
+    {
+        std::string linked;
+        {
+            std::lock_guard<std::mutex> lock(session->mutex);
+            linked = session->linkedConfig;
+        }
+        ds5_apply_initial_settings(backendPtr, linked);
+
+        // ⭐ Push the audio buffer too, now that the link is known.
+        //
+        // ⛔ The handshake read in bridge.inl can only see the shared section:
+        // it runs before the session exists, so no config is linked yet. Without
+        // this, a controller linked to a config holding audio_latency_ms would
+        // be sent the SHARED value at bridge and only get its own on the next
+        // config change. Found 2026-08-22, when a stale shared 7 muted a
+        // controller whose own config said 100.
+        const std::string latencyKind = config_store::settings_kind_for(session->kind);
+        if (!latencyKind.empty()) {
+            const std::string section = device_settings_section(latencyKind.c_str(), linked);
+            const int latency = device_config_int(section.c_str(), "audio_latency_ms", -1);
+            if (latency >= 0 && latency <= 255) {
+                std::wstring latencyError;
+                if (backendPtr->send_audio_latency(static_cast<uint16_t>(latency), &latencyError)) {
+                    device_log::config(device_log::msg()
+                        << section << ": audio latency set to " << latency << " ms at bridge");
+                } else {
+                    // ⛔ The failure used to be silent -- the error was captured
+                    // and discarded, which made an unreachable config and an
+                    // unsupported feature look identical. That cost hours.
+                    device_log::config(device_log::msg()
+                        << section << ": audio latency FAILED -- "
+                        << narrow_ascii(latencyError));
+                }
+            }
+        }
+    }
     if (!run_usbip_attach(session->busId, kDefaultUsbipPort)) {
         std::wcerr << L"agent local attach failed busid=" << session->busId << L"\n";
     }
@@ -334,7 +417,17 @@ static bool start_bridge_session(const std::string &kind, uint16_t port, const s
     device_config_invalidate();   // a reseat re-reads the settings file
     ctm_audio_gain::refresh();   // and picks up a changed rumble gain
     ctm_config_watcher::ensure_started();   // live config changes, no reseat
+    ctm_config_watcher::adopt_config_store();   // ...including per-controller ones
+    config_store::reload_all();             // per-controller config files
     auto session = std::make_unique<AgentBridgeSession>();
+    // Assigned at CREATION, not when listed -- two consecutive device lists
+    // must not disagree. Monotonic per kind and never reused: ds5_1 that
+    // unbridges comes back as ds5_3, so a command naming a stale ordinal fails
+    // instead of hitting a different controller.
+    {
+        static std::map<std::string, unsigned> nextOrdinal;
+        session->ordinal = kind + "_" + std::to_string(++nextOrdinal[kind]);
+    }
     session->kind = kind;
     session->busId = busId;
     session->busIdAscii = busIdAscii;
@@ -572,6 +665,27 @@ static int run_agent(uint16_t port)
         return 4;
     }
 
+    g_rest_agent_start = std::chrono::steady_clock::now();
+    SOCKET rest = INVALID_SOCKET;
+    if (g_rest_port != 0) {
+        std::wstring restError;
+        rest = rest_open_listener(&restError);
+        if (rest == INVALID_SOCKET) {
+            // --rest was asked for explicitly; a silently missing API would be
+            // worse than failing startup, and every other bind above is fatal.
+            std::wcerr << L"agent REST listener failed: " << restError << L"\n";
+            g_agent_usbip_server->stop();
+            g_agent_usbip_server.reset();
+            closesocket(udp);
+            closesocket(tcp);
+            WSACleanup();
+            return 4;
+        }
+        std::wcout << L"ctm agent REST API on " << (g_rest_bind_lan ? L"0.0.0.0" : L"127.0.0.1")
+                   << L":" << g_rest_port
+                   << (g_rest_token.empty() ? L"" : L" (bearer token required)") << L"\n";
+    }
+
     std::wcout << L"ctm agent listening udp/tcp port " << port << L"\n";
     while (!g_stop.load()) {
         drain_bridge_session_reaps();
@@ -581,6 +695,9 @@ static int run_agent(uint16_t port)
         FD_ZERO(&readfds);
         FD_SET(udp, &readfds);
         FD_SET(tcp, &readfds);
+        if (rest != INVALID_SOCKET) {
+            FD_SET(rest, &readfds);
+        }
         timeval timeout {};
         timeout.tv_sec = 1;
         int rc = select(0, &readfds, nullptr, nullptr, &timeout);
@@ -610,8 +727,22 @@ static int run_agent(uint16_t port)
                 closesocket(client);
             }
         }
+        if (rest != INVALID_SOCKET && FD_ISSET(rest, &readfds)) {
+            sockaddr_in peer = {};
+            int peerLen = sizeof(peer);
+            SOCKET client = accept(rest, reinterpret_cast<sockaddr *>(&peer), &peerLen);
+            if (client != INVALID_SOCKET) {
+                // Inline on the loop thread, like handle_agent_client — this is
+                // what lets rest_route call start/stop_bridge_session directly.
+                rest_handle_client(client, port);
+                closesocket(client);
+            }
+        }
     }
 
+    if (rest != INVALID_SOCKET) {
+        closesocket(rest);
+    }
     stop_all_bridge_sessions();
     if (g_agent_usbip_server) {
         g_agent_usbip_server->stop();

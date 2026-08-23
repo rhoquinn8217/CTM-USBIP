@@ -142,6 +142,19 @@ public:
         const BackendCaps caps = backend_->caps();
         std::wstring virtualSerial;
         std::wstring requestedSerial = caps.serial;
+        // Keep the PHYSICAL serial before any fallback is applied. For a
+        // DualSense the TV reports its MAC here, unique per controller and
+        // stable across sessions -- that is what per-controller config keys on.
+        // ⚠️ Deliberately left EMPTY when the backend gave us nothing: the
+        // constant below is shared by every device, so keying on it would apply
+        // one controller's settings to another while looking correct.
+        {
+            std::lock_guard<std::mutex> lock(physicalSerialMutex_);
+            physicalSerial_.clear();
+            for (wchar_t c : caps.serial) {
+                if (c < 128) physicalSerial_.push_back(static_cast<char>(c));
+            }
+        }
         if (requestedSerial.empty()) {
             requestedSerial = L"CTMUSBIP";
         }
@@ -150,15 +163,67 @@ public:
         }
         info_ = parse_usb_info(profile_);
         std::wcout << L"virtual USB serial: " << virtualSerial << L"\n";
+        // ⏱️ TIMED. A Bluetooth bridge takes seven seconds against a cable's
+        // one, and the TV finishes its whole side in 1.2s -- so the rest is
+        // here. Nine feature reports time out on Bluetooth and none on a cable,
+        // but shortening the timeout from 2000ms to 500ms did not move the
+        // number at all, which means the timeouts are not the bound. These two
+        // lines say which part actually is.
+        const auto attachT0 = std::chrono::steady_clock::now();
         if (!preload_features(error)) {
             return false;
         }
+        const auto attachT1 = std::chrono::steady_clock::now();
         start_audio_stream();
+        const auto attachT2 = std::chrono::steady_clock::now();
+        std::wcout << L"attach timing: preload="
+                   << std::chrono::duration_cast<std::chrono::milliseconds>(attachT1 - attachT0).count()
+                   << L"ms audio_start="
+                   << std::chrono::duration_cast<std::chrono::milliseconds>(attachT2 - attachT1).count()
+                   << L"ms\n";
         return true;
+    }
+
+    // The physical controller's serial, or empty when the backend reported
+    // none. Used only to resolve per-controller config.
+    // ⭐ Read LIVE from the backend rather than from a value cached at attach
+    // time. attach_backend() runs once per session, but a reconnect can bring a
+    // DIFFERENT physical controller into the same session -- and a cached
+    // serial would keep reporting the old one, handing the new controller
+    // someone else's per-controller config.
+    std::string physical_serial() const
+    {
+        if (backend_ != nullptr) {
+            const std::wstring wide = backend_->caps().serial;
+            std::string out;
+            for (wchar_t c : wide) {
+                if (c < 128) out.push_back(static_cast<char>(c));
+            }
+            if (!out.empty()) return out;
+        }
+        std::lock_guard<std::mutex> lock(physicalSerialMutex_);
+        return physicalSerial_;
+    }
+
+    // The per-controller config this device reads, or empty for the shared
+    // section. Set by the agent at bridge time and whenever a link changes.
+    std::string linked_config() const
+    {
+        std::lock_guard<std::mutex> lock(physicalSerialMutex_);
+        return linkedConfig_;
+    }
+
+    void set_linked_config(const std::string &name)
+    {
+        std::lock_guard<std::mutex> lock(physicalSerialMutex_);
+        linkedConfig_ = name;
     }
 
     void stop()
     {
+        // Drop this controller's gyro motion state so a reconnect starts with
+        // clean calibration and the per-device map does not grow forever.
+        ctm_gyro_mouse::forget_device(this);
         stop_audio_stream();
     }
 
@@ -360,6 +425,12 @@ public:
         if (logMappedInput) {
             log_mapped_input_debug(data, length, report);
         }
+        // Gyro-to-mouse: read the DS5 motion out of the mapped report and feed
+        // the synthetic mouse. Never modifies `report` -- the controller passes
+        // through untouched; this only pushes a mouse delta into the mailbox.
+        // No-op for non-DualSense devices and when no gate is configured.
+        ctm_gyro_mouse::on_ds5_input(this, profile_.device_descriptor, linked_config(),
+                                     report.data, report.length);
         enqueue_input_report(report);
     }
 
@@ -475,6 +546,20 @@ public:
                 std::chrono::duration_cast<std::chrono::microseconds>(clock::now() - waitStart).count());
         }
         return kStatusOk;
+    }
+
+    // Public entry point for SYNTHETIC devices whose reports are generated on
+    // this side rather than relayed from a bridge -- currently the gyro mouse,
+    // whose pump thread produces movement from DualSense motion data. Ordinary
+    // bridged devices never call this: their reports arrive through the bridge
+    // input path and are enqueued internally.
+    //
+    // Deliberately a named wrapper rather than making enqueue_input_report()
+    // public: it keeps "who may inject reports, and why" explicit at the call
+    // site, and leaves the internal enqueue path private as before.
+    void inject_synthetic_input(const CTM_INPUT_REPORT &report)
+    {
+        enqueue_input_report(report);
     }
 
 private:
@@ -738,6 +823,57 @@ private:
         }
     }
 
+    // ⛔⛔ HOW LONG TO WAIT FOR A FEATURE REPORT THE DEVICE MAY NEVER ANSWER.
+    //
+    // Was 2000ms. Measured on the host 2026-08-18: a Bluetooth DualSense bridge
+    // took ~8 seconds against ~2 on a cable, and the log named it twice --
+    //
+    //   bridge feature issue reason=feature-preload op=get-timeout report=0x0b
+    //   bridge feature issue reason=feature-preload op=get-timeout report=0x20
+    //
+    // -- between "agent bridge starting" and "agent bridge ready". The TV
+    // finishes its whole side in 1.2 seconds; the rest was this, waiting twice
+    // for answers that were not coming.
+    //
+    // ⭐ A device that answers, answers fast: this is a HID feature read, and
+    // the only thing between us and it is a LAN or an internet round trip.
+    // 500ms is comfortably above either and four times shorter than before.
+    //
+    // ⚠️ Timing out is not a failure. The preload is a CACHE -- it exists so
+    // Windows can be served without a round trip later. A miss costs one live
+    // fetch on first use; a two-second wait costs everyone eight seconds of
+    // staring at nothing.
+    static constexpr unsigned int kFeatureProbeTimeoutMs = 500;
+
+    // ⓘ UNUSED WHILE kSkipPreloadProbes IS TRUE. Kept because the number is
+    // the thing to revisit if the cache is ever wanted back -- three seconds
+    // was measured as too short.
+    // ⛔⛔ HOW LONG THE PRELOAD WOULD WAIT BEFORE PROBING.
+    //
+    // The probes were moved to their own thread so a bridge would not wait five
+    // seconds for nine feature reports a Bluetooth DualSense never answers.
+    // That fixed the bridge -- eight seconds to two -- and broke something
+    // else: they now ran IN PARALLEL with it, nine timeouts over the same
+    // Bluetooth link at exactly the moment the TV plays its confirmation tone.
+    //
+    // ⭐ It showed up in the TV's log as a difference between two events that
+    // run the same code:
+    //
+    //   pattern=1 (unbridge)  600ms for 600ms of audio   -- perfect
+    //   pattern=0 (bridge)    15531ms, 5454ms, 5401ms    -- same audio
+    //
+    // Skipping the probes entirely made every bridge 600ms for 600ms, on
+    // repeated attempts with power cycles in between. That confirmed it.
+    //
+    // ⭐⭐ So they are delayed rather than skipped: the cache is still worth
+    // having, and nothing needs it in the first seconds of a session. Three
+    // seconds clears the bridge, the tone, and the host's own enumeration.
+    //
+    // ⚠️ A request arriving before the cache is warm is served live, which is
+    // exactly what a cold cache does anyway.
+    static constexpr unsigned int kPreloadDelayMs = 3000;
+    static constexpr bool kSkipPreloadProbes = true;
+
     bool preload_features(std::wstring *error)
     {
         if (backend_ == nullptr) {
@@ -755,23 +891,74 @@ private:
             return false;
         }
         connectFeatureRequests_ = connectRequests;
-        log_feature_probe_requests(connectFeatureRequests_, "connect-feature", 2000);
 
         std::vector<CtmMapRuntime::FeaturePreloadRequest> preloads;
         if (!map_.build_preload_feature_requests(physicalFeatureLength, &preloads)) {
             if (error) *error = L"map preload feature request build failed";
             return false;
         }
+
+        // ⛔⛔ RUN THE PROBES ON A THREAD. THIS IS THE BLUETOOTH BRIDGE DELAY.
+        //
+        // Measured 2026-08-18: preload=5415ms on a Bluetooth DualSense against
+        // ~0 on a cable, and it is nearly all of the seven seconds between
+        // pressing bridge and the controller appearing in Windows. The TV
+        // finishes its whole side in 1.2 seconds.
+        //
+        // Nine feature reports time out, every time, on every Bluetooth bridge:
+        // 0x20 0x22 0x82 0x83 0xf0 0xf1 0xf2 0xf4 and a set on 0x80. The device
+        // does not answer them and will not start.
+        //
+        // ⭐ THE PRELOAD IS A CACHE, NOT A REQUIREMENT. It exists so Windows can
+        // be served a feature report without a round trip. A cold cache costs
+        // one live fetch on first use. Waiting for it costs five seconds on
+        // EVERY bridge, to learn the same thing every time.
+        //
+    // ⛔⛔ SKIPPED OUTRIGHT, 2026-08-19. The switch below is off and stays off.
+    //
+    // Running them on a thread was not enough: they then timed out over the
+    // Bluetooth link at the moment the TV was playing its confirmation tone,
+    // which broke the tone and took the controller offline.
+    //
+    // ⚠️ DELAYING THEM WAS TRIED AND FAILED. Three seconds put them in the
+    // TAIL of the tone -- a bridge completes around two seconds and the tone
+    // runs about 1.2 s after that -- so it was close to the worst number
+    // available. A longer head start would probably work, and is not worth
+    // finding: a cold cache costs one live fetch on first use, which is what a
+    // cache miss costs anyway.
+    //
+    // ⓘ The early return is INSIDE the thread, so the thread is still created
+    // and returns at once. That is deliberate and it is measured: thread
+    // creation is not the cost, the probes are.
+        //
+        // ⓘ Safe on this thread: every write below is under mapMutex_, and
+        // featureCache_ is read under the same lock on the serving path. A
+        // request that arrives mid-probe simply misses the cache and is served
+        // live, which is exactly what a cold cache does anyway.
+        std::thread([this, preloads, physicalFeatureLength]() mutable {
+            // Nothing below this runs today -- see kSkipPreloadProbes above.
+            if (kSkipPreloadProbes) return;
+            std::this_thread::sleep_for(std::chrono::milliseconds(kPreloadDelayMs));
+            std::vector<uint8_t> scratch(physicalFeatureLength, 0);
+            log_feature_probe_requests(connectFeatureRequests_, "connect-feature", kFeatureProbeTimeoutMs);
+            preload_probe_loop(preloads, &scratch);
+        }).detach();
+        return true;
+    }
+
+    void preload_probe_loop(std::vector<CtmMapRuntime::FeaturePreloadRequest> &preloads,
+                            std::vector<uint8_t> *scratch)
+    {
         for (CtmMapRuntime::FeaturePreloadRequest &preload : preloads) {
             const uint8_t *physicalResponse = nullptr;
             size_t physicalResponseLength = 0;
             if (!backend_->execute_feature_actions(
                     preload.actions,
-                    &physicalFeatureScratch_,
+                    scratch,
                     &physicalResponse,
                     &physicalResponseLength,
                     "feature-preload",
-                    2000)) {
+                    kFeatureProbeTimeoutMs)) {
                 continue;
             }
             CTM_USB_EVENT fakeEvent = {};
@@ -790,7 +977,6 @@ private:
                 featureCache_[FeatureCacheKey(preload.usbReport, preload.cacheSelector)] = cachedResponse;
             }
         }
-        return true;
     }
 
     void log_feature_probe_requests(
@@ -1330,7 +1516,8 @@ private:
         if (event.length != 0) {
             memcpy(event.data, data.data(), event.length);
         }
-        ds5_apply_output_overrides(event.data, event.length, profile_.device_descriptor);
+        ds5_apply_output_overrides(event.data, event.length, profile_.device_descriptor,
+                                   linked_config());
         std::cout << "usb endpoint out"
                   << " ep=0x" << std::hex << std::setw(2) << std::setfill('0')
                   << static_cast<unsigned int>(endpointAddress)
@@ -1567,6 +1754,9 @@ private:
     std::vector<uint8_t> lastFeatureSet_;
     std::vector<uint8_t> physicalFeatureScratch_;
     std::map<FeatureCacheKey, CTM_USB_RESPONSE> featureCache_;
+    mutable std::mutex physicalSerialMutex_;
+    std::string physicalSerial_;
+    std::string linkedConfig_;
     std::mutex unknownLogMutex_;
     std::map<std::string, uint64_t> unknownLogCounts_;
     std::chrono::steady_clock::time_point unknownLogLastFlush_;
