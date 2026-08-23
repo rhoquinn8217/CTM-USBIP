@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.7.0 -- see the changelog at the bottom of this comment.
+  VERSION 2.10.0 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,30 @@
   tidy message about it.
 
   CHANGELOG
+    2.10.0 The config picker takes typing: the list filters as you type, and if
+           what you typed is not an existing config the button becomes Create
+           and link. Naming a new config and attaching it is one field and one
+           press instead of a separate box further down.
+           ⛔ Fix: the focus ring was still clipped. It is drawn OUTSIDE the
+           element, so an element flush against the sticky block's edge had its
+           ring cut by that edge -- room had to be made for it, not just for the
+           element.
+    2.9.1  Space between the tabs and the agent bar -- they were touching. And
+           Refresh is "Reload", because that is what it is for now: devices are
+           polled automatically, but a config edited by hand outside this page
+           is not noticed until something asks.
+    2.9.0  ⛔ Fix: the serial and config rows became unreachable by controller in
+           2.8.0. Moving them into the sticky block took them out of the active
+           pane, and the focus scan only looked inside that pane -- so the config
+           picker, the auto-link button and Stop auto link could be seen but not
+           selected.
+           The auto-link button moved next to the config it applies to, rather
+           than sitting with Apply where it read as a settings action.
+    2.8.0  Fix: the sticky header clipped its own contents while scrolling. The
+           tabs and the device header were two SEPARATE sticky elements with
+           different offsets, so they slid over one another and cut off whatever
+           sat between. They are one block now, with the offset derived from its
+           real height rather than a guessed pixel count.
     2.7.0  The serial and config rows stay on screen with the tabs, and a
            focused control scrolls clear of both.
            ⛔ Sticky tabs alone made things WORSE under controller navigation:
@@ -206,9 +230,10 @@
   .log-entry { margin-bottom:10px; }
   /* ⭐ Sticky: switching controllers should not mean scrolling back up first,
      and the settings list is long enough that it always would. */
-  .tabs { display:flex; gap:4px; margin:0 0 18px; border-bottom:1px solid #2c2e36;
-          flex-wrap:wrap; position:sticky; top:0; z-index:10;
-          background:#15161a; padding-top:10px; }
+  /* One sticky block, not two. Two elements with separate offsets slid over
+     each other and clipped whatever sat between them. */
+  .tabs { display:flex; gap:4px; margin:0; border-bottom:1px solid #2c2e36;
+          flex-wrap:wrap; padding-top:10px; }
   .tabs button { background:transparent; border:none; border-bottom:2px solid transparent;
                  color:#8b8d96; padding:9px 14px; font-size:13.5px; border-radius:0; }
   .tabs button.on { color:#e8e8ea; border-bottom-color:#6c8cff; font-weight:600; }
@@ -216,13 +241,20 @@
   /* ⭐ Sits under the tabs and stays with them. Which controller you are
      editing, and which config it is reading, are the two things you must not
      lose track of while scrolling a long settings list. */
-  .devhead { position:sticky; top:42px; z-index:9; background:#15161a;
-             border-bottom:1px solid #2c2e36; padding-bottom:8px; margin-bottom:14px; }
+  .devhead { border-bottom:1px solid #2c2e36; padding:10px 0 8px; }
   .devhead h2 { margin-top:0; border-bottom:none; padding-bottom:2px; }
   /* ⛔ Without this, scrollIntoView puts a focused control at the very top of
      the viewport -- underneath the sticky bars, invisible. The margin is the
      tab bar plus the device header. */
-  button, select, input, .row { scroll-margin-top: 175px; }
+  /* Set from the sticky block's measured height -- a hardcoded guess is wrong
+     the moment a device row wraps onto two lines. */
+  button, select, input, .row { scroll-margin-top: var(--stickH, 180px); }
+  /* ⛔ The focus ring is drawn OUTSIDE the element it marks, so an element
+     flush against this block's edge gets its ring clipped by that edge. The
+     padding is for the RING, not the control. */
+  #stickyTop { position:sticky; top:0; z-index:10; background:#15161a;
+               padding:0 6px 14px; margin:0 -6px; overflow:visible; }
+  .bar { padding-top:6px; }
   /* ⭐ The controller focus ring is deliberately loud. On a TV across a room a
      subtle outline is invisible, and not knowing what is selected makes the
      whole thing unusable. */
@@ -261,17 +293,22 @@
 <!-- ⛔ No title or subtitle. On a TV every line costs screen, and both said
      what the page self-evidently is. The version stays because it settles
      "which build am I looking at" in a screenshot. -->
-<div class="tabs" id="tabs"></div>
+<div id="stickyTop">
+  <div class="tabs" id="tabs"></div>
+  <div id="stickyHead"></div>
+</div>
 
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.7.0</span>
+  <span class="muted" style="font-size:12px">v2.10.0</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
-  <input id="token" placeholder="only if --rest-token" size="16">
-  <button class="go" onclick="refreshAll()">Refresh</button>
+  <input id="token" placeholder="only if --rest-token" size="16"
+    title="Only needed if the agent was started with --rest-token. It makes the API require this value on every call, which matters when --rest-lan exposes it to the network.">
+  <button class="go" onclick="refreshAll()"
+    title="Controllers are picked up automatically. This reloads configs too, for when a file has been edited outside this page.">Reload</button>
   <span id="conn" class="muted">not checked</span>
 </div>
 
@@ -439,6 +476,7 @@ function renderTabs(devices) {
   // controller that has unbridged would be worse than no pane.
   var host = document.getElementById('devicePanes');
   host.innerHTML = '';
+  HEADS = {};
   LAST_DEVICES.forEach(function(d) {
     var pane = document.createElement('div');
     pane.className = 'pane' + (ACTIVE === d.ordinal ? ' on' : '');
@@ -520,24 +558,41 @@ function claimAutoLink(ordinal, configName, serial) {
   }).catch(function(){ loadConfigs(); loadDevices(); });
 }
 
-// Creates a config for this controller and links it in one step. The kind
-// comes from the device, so the API is told which controller it is for and
-// links it itself.
-function createForDevice(ordinal) {
-  var box = document.getElementById('mk-' + ordinal);
-  if (!box || !box.value.trim()) { setConn('name required', 'bad'); return; }
-  call('POST', '/api/v1/configs', { name: box.value.trim(), device: ordinal })
-    .then(function() { loadConfigs(); loadDevices(); }).catch(function(){});
+// The button's meaning follows what is typed: an existing config is applied, an
+// unknown name is created and linked, an empty field clears the link.
+function refreshPickButton(ordinal) {
+  var box = document.getElementById('pick-' + ordinal);
+  var btn = document.getElementById('pickbtn-' + ordinal);
+  if (!box || !btn) return;
+  var typed = box.value.trim();
+  if (!typed) { btn.textContent = 'Clear'; return; }
+  var known = CONFIGS.some(function(c) { return c.name.toLowerCase() === typed.toLowerCase(); });
+  btn.textContent = known ? 'Apply' : 'Create and link';
 }
 
-function pickConfig(ordinal) {
-  var sel = document.getElementById('pick-' + ordinal);
-  if (!sel) return;
-  // An empty value means unlink -- the API treats a body with no "config" as
-  // exactly that, so the two spellings agree.
-  var body = sel.value ? { config: sel.value } : {};
-  call('POST', '/api/v1/devices/' + encodeURIComponent(ordinal) + '/link', body)
-    .then(function() { loadDevices(); loadConfigs(); }).catch(function(){});
+function applyPick(ordinal) {
+  var box = document.getElementById('pick-' + ordinal);
+  if (!box) return;
+  var typed = box.value.trim();
+
+  // Empty means unlink -- the API reads a body with no "config" as exactly that.
+  if (!typed) {
+    call('POST', '/api/v1/devices/' + encodeURIComponent(ordinal) + '/link', {})
+      .then(function() { loadDevices(); loadConfigs(); }).catch(function(){});
+    return;
+  }
+
+  var known = CONFIGS.filter(function(c) { return c.name.toLowerCase() === typed.toLowerCase(); })[0];
+  if (known) {
+    call('POST', '/api/v1/devices/' + encodeURIComponent(ordinal) + '/link', { config: known.name })
+      .then(function() { loadDevices(); loadConfigs(); }).catch(function(){});
+    return;
+  }
+
+  // ⭐ Not a config yet, so make it. The device is named rather than the kind,
+  // so the agent works out which kind it needs and links it in the same call.
+  call('POST', '/api/v1/configs', { name: typed, device: ordinal })
+    .then(function() { loadConfigs(); loadDevices(); }).catch(function(){});
 }
 
 function showTab(name) {
@@ -548,6 +603,7 @@ function showTab(name) {
   document.querySelectorAll('#tabs button').forEach(function(b) {
     b.classList.toggle('on', b.dataset.tab === name);
   });
+  paintStickyHead();
   gpCollect();       // the focusable set changed
 }
 
@@ -595,39 +651,39 @@ function buildDevicePane(d) {
   var kindOk = CONFIGS.filter(function(c) {
     return settingsKindOf(d.kind) === c.kind;
   });
-  var options = '<option value="">(no config)</option>';
+  // ⭐ A typeable combobox, not a plain dropdown. A datalist gives filtering as
+  // you type for free, and lets a name that is NOT in the list be entered --
+  // which is how a new config gets created without a second box for it.
+  var listId = 'cfgs-' + d.ordinal;
+  var options = '';
   kindOk.forEach(function(c) {
-    options += '<option value="' + esc(c.name) + '"' +
-               (c.name === d.linked_config ? ' selected' : '') + '>' +
-               esc(c.name) + '</option>';
+    options += '<option value="' + esc(c.name) + '"></option>';
   });
 
   head += '<div class="kv"><label>config</label>' +
-          '<select id="pick-' + esc(d.ordinal) + '">' + options + '</select>' +
-          '<button onclick="pickConfig(\'' + esc(d.ordinal) + '\')">Apply</button>' +
+          '<input id="pick-' + esc(d.ordinal) + '" list="' + listId + '"' +
+          ' value="' + esc(d.linked_config || '') + '"' +
+          ' placeholder="(no config)" size="22"' +
+          ' oninput="refreshPickButton(\'' + esc(d.ordinal) + '\')">' +
+          '<datalist id="' + listId + '">' + options + '</datalist>' +
+          '<button id="pickbtn-' + esc(d.ordinal) + '" ' +
+          'onclick="applyPick(\'' + esc(d.ordinal) + '\')">Apply</button>' +
+          claimBtn +
           (kindOk.length ? '' :
             ' <span class="muted">no ' + esc(settingsKindOf(d.kind)) +
-            ' configs yet — create one from Overview</span>') +
+            ' configs yet — type a name to make one</span>') +
           '</div>';
 
   if (!d.linked_config) {
-    // ⭐ Make one HERE. Sending someone to Overview to create a config for the
-    // controller whose tab they already have open is a detour with no purpose --
-    // and the kind is already known, so there is nothing to ask.
-    var suggested = settingsKindOf(d.kind) + '_config';
-    var n = 2;
-    while (CONFIGS.some(function(c) { return c.name.toLowerCase() === suggested.toLowerCase(); })) {
-      suggested = settingsKindOf(d.kind) + '_config_' + (n++);
-    }
-    head += '<div class="kv"><label>no config yet</label>' +
-            '<input id="mk-' + esc(d.ordinal) + '" value="' + esc(suggested) + '" size="20">' +
-            '<button onclick="createForDevice(\'' + esc(d.ordinal) + '\')">Create and link</button>' +
-            '<span class="muted">or choose an existing one above</span></div>';
-    pane.innerHTML = '<div class="devhead">' + head + '</div>';
+    // ⓘ No separate create box. The config field above takes a new name and
+    // its button becomes "Create and link" -- one field, one press, rather than
+    // a second box saying the same thing a row lower.
+    pane.innerHTML = '';
+    setStickyHead(d.ordinal, head);
     return;
   }
-  pane.innerHTML = '<div class="devhead">' + head + '</div>' +
-                   '<div id="dev-settings-' + esc(d.ordinal) + '">' +
+  setStickyHead(d.ordinal, head);
+  pane.innerHTML = '<div id="dev-settings-' + esc(d.ordinal) + '">' +
                    '<span class="muted">loading settings…</span></div>';
   loadDeviceSettings(d.ordinal, d.linked_config);
 }
@@ -710,17 +766,7 @@ function renderConfigEditor(hostId, configName, prefix, ordinal) {
     // number, feel it, nudge again) into three actions instead of one.
     var html = '<div class="bar">';
 
-    if (ordinal) {
-      var dev = LAST_DEVICES.filter(function(x) { return x.ordinal === ordinal; })[0] || {};
-      var serial = normSerial(dev.serial);
-      var mine = (cfg.auto_link || []).some(function(sn) { return normSerial(sn) === serial; });
-      if (serial && !mine) {
-        html += '<button onclick="claimAutoLink(\'' + esc(ordinal) + '\',\'' +
-                esc(configName) + '\',\'' + esc(serial) + '\')" ' +
-                'title="this controller will get this config whenever it bridges">' +
-                'Auto link to ' + esc(configName) + '</button>';
-      }
-    } else {
+    if (!ordinal) {
       // ⛔ Read-only here on purpose. A claim belongs to a CONTROLLER, and
       // Overview does not have one in hand -- changing it from a config list
       // would mean picking a controller first, which is the roundabout route
@@ -1082,6 +1128,16 @@ var GP_SELECT_WAS = 0;
 function gpCollect() {
   var scope = document.getElementById('pane-' + ACTIVE);
   var list = [];
+  // ⛔ The device header lives in the sticky block, NOT in the pane -- moving it
+  // there in 2.8.0 silently took the config picker and the auto-link buttons out
+  // of D-pad reach. Scanned first so focus starts where the header is.
+  var head = document.getElementById('stickyHead');
+  if (head) {
+    head.querySelectorAll('button, select, input').forEach(function(e) {
+      if (e.offsetParent === null || e.disabled || e.type === 'checkbox') return;
+      list.push(e);
+    });
+  }
   // ⛔ Tabs are NOT in the D-pad set. L1/R1 move between them, so including
   // them here meant stepping through every tab to reach the first setting --
   // and two ways to do one thing, one of them slower.

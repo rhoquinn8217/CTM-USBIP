@@ -55,6 +55,7 @@ namespace {
 #include "log/device_log.inl"
 #include "config/device_config.inl"
 #include "audio/ds5_output_overrides.inl"
+#include "input/gyro_calibration.inl"   // read before gyro_mouse.inl uses it
 #include "input/gyro_mouse.inl"          // needs device_config_* and device_section_for
 #include "backend/backend.inl"
 #include "backend/bt.inl"
@@ -82,6 +83,7 @@ static void mic_ring_reset(const CtmBackend *owner);
 // breaks the include cycle -- the mouse device needs agent.inl's server and
 // asset helpers, while agent.inl needs only this one symbol.
 void ctm_gyro_mouse_ensure_mouse_started();
+#include "input/gyro_calibration_fetch.inl"   // needs CtmBackend; agent.inl calls it
 #include "app/agent.inl"
 #include "input/mouse_device.inl"      // needs g_agent_usbip_server, find_relative_asset, run_usbip_attach
 #include "app/rest_sessions.inl"

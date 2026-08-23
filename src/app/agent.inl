@@ -308,6 +308,17 @@ static void bridge_session_worker(AgentBridgeSession *session)
         if (session->device) {
             session->device->set_linked_config(session->linkedConfig);
         }
+
+        // ⭐ Read the controller's own gyro calibration, once the session is up.
+        //
+        // Here rather than at attach because it is a round trip to the TV: the
+        // feature request has to reach the physical pad and come back. Best
+        // effort -- a controller whose calibration cannot be read still works,
+        // on the old fixed scale, and says so in the log.
+        if (session->kind == "ds5" || session->kind == "ds5_usb" ||
+            session->kind == "ds5e_usb") {
+            ctm_gyro_calib::fetch(session->device.get(), backendPtr, session->ordinal);
+        }
     }
 
     session->ready.store(true);

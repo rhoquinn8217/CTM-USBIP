@@ -133,6 +133,7 @@ struct Config {
     // interpolated by rotation speed between the two thresholds.
     int min_sens = 8;
     int max_sens = 16;
+    bool debug_scale = false;   // print measured rate, dt and pixels at 2Hz
     int min_threshold = 5;      // deg/sec: below this, min_sens applies
     int max_threshold = 75;     // deg/sec: above this, max_sens applies
     bool invert_x = false;
@@ -158,6 +159,7 @@ inline Config load_config(const char *section)
     c.gate = parse_gate(device_config_str(section, "gyro_to_mouse_gate"));
     c.px_per_360 = device_config_int(section, "gyro_mouse_px_per_360", 1920);
     if (c.px_per_360 < 1) c.px_per_360 = 1920;
+    c.debug_scale = device_config_bool(section, "gyro_mouse_debug_scale", false);
     c.min_sens = device_config_int(section, "gyro_mouse_min_sens", 8);
     c.max_sens = device_config_int(section, "gyro_mouse_max_sens", 16);
     if (c.min_sens < 0) c.min_sens = 0;
@@ -221,6 +223,10 @@ public:
     // Feed one mapped DS5 report. Returns true and fills `out` when there is a
     // non-zero mouse movement to emit; returns false when the gate is closed,
     // the config is off, or the movement rounded to zero this tick.
+    // The controller's own gyro calibration. Set once when the session comes up;
+    // defaults to the old fixed divisor so an uncalibrated pad still works.
+    void set_calibration(const ctm_gyro_calib::Scale &s) { cal_ = s; }
+
     bool on_report(const uint8_t *d, size_t len, const char *section, MouseDelta *out)
     {
         if (d == nullptr || len < 28 || out == nullptr) {
@@ -290,11 +296,22 @@ public:
         };
 
         // Convert to the library's units.
-        //  gyro : 1024 raw units per deg/s
-        //  accel: 8192 raw units per g
-        const float gyroPitch = rd16(16) / 1024.0f;
-        const float gyroYaw   = rd16(18) / 1024.0f;
-        const float gyroRoll  = rd16(20) / 1024.0f;
+        //
+        // ⭐ GYRO USES THE CONTROLLER'S OWN CALIBRATION when it could be read.
+        // The raw values are not deg/s over a fixed divisor -- every unit ships
+        // its own scale in feature report 0x05, and 1024 is what the Linux
+        // driver normalises TO after applying it, not a substitute for it.
+        // Measured 2026-08-22: the fixed divisor read ~2 deg/s for a turn that
+        // was really ~45.
+        //
+        // ⓘ When calibration is unavailable the Scale defaults to the old
+        // 1/1024 with zero bias, so behaviour is unchanged rather than absent.
+        const ctm_gyro_calib::Scale &cal = cal_;
+        const float gyroPitch = (rd16(16) - cal.biasPitch) * cal.pitch;
+        const float gyroYaw   = (rd16(18) - cal.biasYaw)   * cal.yaw;
+        const float gyroRoll  = (rd16(20) - cal.biasRoll)  * cal.roll;
+        // accel: 8192 raw units per g, and not calibrated here -- the library
+        // only uses it to work out which way is down.
         const float accelX    = rd16(22) / 8192.0f;
         const float accelY    = rd16(24) / 8192.0f;
         const float accelZ    = rd16(26) / 8192.0f;
@@ -364,6 +381,61 @@ public:
         const float pxPerDegree = static_cast<float>(cfg.px_per_360) / 360.0f;
         const float step = dt * pxPerDegree * sens;
 
+        // ⭐⭐ SCALE DIAGNOSTIC. Off unless gyro_mouse_debug_scale is set.
+        //
+        // ⛔ WHY IT EXISTS. px_per_360 = 1920 with sens 8 should move the cursor
+        // 3840 px for a 90 degree turn, and on paper it does -- the arithmetic
+        // and the sub-pixel carry were both checked and are correct. In practice
+        // a usable speed needed px_per_360 around 64000, roughly 33x. A gap that
+        // size is a fault somewhere, not a preference, and it must be MEASURED
+        // rather than guessed at.
+        //
+        // Accumulates over the print window instead of sampling one report, so a
+        // deliberate turn can be compared against what actually came out:
+        //
+        //   deg   -- degrees the gyro says were turned in this window
+        //   px    -- pixels emitted for them
+        //   dt    -- mean seconds between reports. ⚠️ Expect ~0.004 at 250 Hz.
+        //            Much smaller, or often zero, and that IS the answer: the
+        //            guard above zeroes any gap over 100 ms, contributing
+        //            nothing at all.
+        //   rate  -- mean deg/sec while moving. Turn ~90 degrees over two
+        //            seconds and this should read ~45. If it reads ~1.4, the
+        //            1024 raw-units-per-deg/sec divisor is wrong -- that is the
+        //            figure the Linux driver NORMALISES to after applying the
+        //            controller's own calibration report, not necessarily what
+        //            raw values divide by without it.
+        //
+        // Expected ratio: px / deg == px_per_360/360 * sens. Whatever it
+        // actually reads localises the loss.
+        if (cfg.debug_scale) {
+            static auto lastScale = std::chrono::steady_clock::now();
+            static double accDeg = 0.0, accPx = 0.0, accDt = 0.0, accRate = 0.0;
+            static int nReports = 0, nMoving = 0;
+            const float mag = std::sqrt(horizontal * horizontal + vertical * vertical);
+            accDeg += mag * dt;
+            // dx/dy are not built yet at this point, so derive the same
+            // magnitude from the inputs to the step.
+            accPx += static_cast<double>(mag) * step;
+            accDt += dt;
+            ++nReports;
+            if (mag > 1.0f) { accRate += mag; ++nMoving; }
+            const auto nowScale = std::chrono::steady_clock::now();
+            if (std::chrono::duration_cast<std::chrono::milliseconds>(nowScale - lastScale).count() >= 500) {
+                lastScale = nowScale;
+                std::cout << "[gyro] deg=" << accDeg
+                          << " px=" << accPx
+                          << " px/deg=" << (accDeg > 0.001 ? accPx / accDeg : 0.0)
+                          << " expected=" << (cfg.px_per_360 / 360.0f) * sens
+                          << " dt=" << (nReports ? accDt / nReports : 0.0)
+                          << " rate=" << (nMoving ? accRate / nMoving : 0.0)
+                          << " reports=" << nReports
+                          << std::endl;
+                accDeg = accPx = accDt = accRate = 0.0;
+                nReports = nMoving = 0;
+            }
+        }
+
         float dx = horizontal * step * kSignH;
         float dy = vertical * step * kSignV;
         if (cfg.invert_x) dx = -dx;
@@ -386,6 +458,8 @@ public:
     }
 
 private:
+    ctm_gyro_calib::Scale cal_;
+
     void reset_remainder()
     {
         // When the gate closes, drop the fractional carry so a re-open starts
@@ -505,8 +579,13 @@ inline GyroMouse &gyro_for(const void *deviceKey)
 inline void forget_device(const void *deviceKey)
 {
     GyroRegistry &r = registry();
-    std::lock_guard<std::mutex> lock(r.mutex);
-    r.instances.erase(deviceKey);
+    {
+        std::lock_guard<std::mutex> lock(r.mutex);
+        r.instances.erase(deviceKey);
+    }
+    // The calibration belongs to the physical controller, so it goes when the
+    // device does -- a different pad on the same slot must not inherit it.
+    ctm_gyro_calib::forget(deviceKey);
 }
 
 inline MouseMailbox &shared_mailbox()
@@ -544,7 +623,11 @@ inline void on_ds5_input(const void *deviceKey,
     const std::string resolved = device_settings_section(kind, linkedConfig);
     const char *section = resolved.c_str();
     MouseDelta delta;
-    if (gyro_for(deviceKey).on_report(d, len, section, &delta)) {
+    GyroMouse &g = gyro_for(deviceKey);
+    // Cheap: a struct copy per report, and it keeps the calibration lookup off
+    // the report path where it would need a mutex 250 times a second.
+    g.set_calibration(ctm_gyro_calib::scale_for(deviceKey));
+    if (g.on_report(d, len, section, &delta)) {
         shared_mailbox().push(delta);
         g_diag_last_dx.store(static_cast<uint32_t>(delta.dx < 0 ? -delta.dx : delta.dx));
         g_diag_last_dy.store(static_cast<uint32_t>(delta.dy < 0 ? -delta.dy : delta.dy));

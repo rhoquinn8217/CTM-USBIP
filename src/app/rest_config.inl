@@ -218,6 +218,7 @@ static std::string rest_keys_json()
 {"key":"gyro_mouse_min_sens","type":"int","min":0,"max":60,"default":8,"help":"Sensitivity for slow, precise movement."},
 {"key":"gyro_mouse_sens","type":"int","min":1,"max":200,"default":50,"help":"Legacy single sensitivity. Scales both tiers; 50 leaves them as shipped."},
 {"key":"gyro_mouse_debug_gate","type":"bool","default":false,"help":"Logs the raw trigger and touchpad bytes twice a second, for diagnosing a gate that never opens."},
+{"key":"gyro_mouse_debug_scale","type":"bool","default":false,"help":"Logs measured degrees turned, pixels emitted, report interval and rate twice a second. For finding why a usable speed needs a px_per_360 far above the calibrated figure."},
 {"key":"gyro_mouse_max_sens","type":"int","min":0,"max":60,"default":16,"help":"Sensitivity for fast turns. Equal to min for no acceleration."},
 {"key":"gyro_mouse_min_threshold","type":"int","min":0,"max":200,"default":5,"help":"Degrees per second below which min_sens applies."},
 {"key":"gyro_mouse_max_threshold","type":"int","min":0,"max":400,"default":75,"help":"Degrees per second above which max_sens applies."},
