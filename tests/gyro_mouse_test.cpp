@@ -87,6 +87,14 @@ static const char *device_section_for(const std::vector<unsigned char> &d)
     return nullptr;
 }
 
+// ⭐ The calibration half that gyro_mouse.inl READS. Not the fetch half -- that
+// needs a backend, which this harness has no business knowing about. Without
+// this the scale type is undefined and nothing below compiles.
+//
+// ⚠️ This is the second time an include added to main.cpp was not added here.
+// The test binary assembles its own translation unit, so main.cpp's include
+// list is not a substitute for this one.
+#include "input/gyro_calibration.inl"
 #include "input/gyro_mouse.inl"
 
 using namespace ctm_gyro_mouse;
