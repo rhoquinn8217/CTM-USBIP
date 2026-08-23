@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.10.0 -- see the changelog at the bottom of this comment.
+  VERSION 2.13.2 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,60 @@
   tidy message about it.
 
   CHANGELOG
+    2.13.2 ⛔ Fix: Save and Cancel on the rename row could not be reached by the
+           D-pad, leaving ○ as the only way out. The focus scan looked at
+           #stickyHead by name, and the rename row is a sibling of it -- so it
+           was never collected. The scan now covers the whole sticky block,
+           minus the tabs, which L1/R1 own.
+           Focus also jumps INTO the rename row when it opens, so Save is one
+           press away rather than somewhere down the list.
+           Spacing: the row was flush against the block's border.
+    2.13.1 ⛔ Rename used prompt(), a NATIVE modal. A controller cannot dismiss
+           one -- no button reaches it, so pressing Rename from a pad trapped you
+           with no way out. It is an inline row now: a text field with Save and
+           Cancel beside it, both of which the D-pad can reach and ○ backs out
+           of.
+           ⚠️ Typing still needs a keyboard. What changed is that a controller
+           can now GET OUT, which is the part that mattered.
+    2.13.0 The last setting could not be reached from a controller: the page
+           stopped scrolling with it still under the fixed controls legend at the
+           bottom. ⛔ scrollIntoView cannot see a FIXED element -- it is outside
+           the flow, so the browser thinks the row is visible when it is covered.
+           The bar is now a real footer that takes up space instead of floating
+           over the content, and the page reserves room for it.
+    2.12.1 No Apply on the config picker -- choosing one links it. Everything
+           else on the page already saves as you change it, so a lone Apply here
+           was inconsistent as well as an extra press. It also cost a D-pad step
+           between the picker and New on every pass.
+    2.12.0 The config picker is a <select> again, so it behaves like the kind box
+           under a controller -- ✕ expands it into a visible list the D-pad steps
+           through. ⛔ The datalist was a text field with suggestions attached,
+           and browsers expose no way to open those: there was nothing to drop
+           down, which is why it felt dead from a pad.
+           Naming moves to a Rename button on the same line: New makes the next
+           ds5_config, Rename changes it afterwards. Two presses instead of a
+           text field a controller cannot use.
+    2.11.0 The config field works from a controller. ⛔ A datalist cannot be
+           opened programmatically, so there is no way to drop it down from a
+           pad -- ✕ cycles through the known configs instead, which is the same
+           result without pretending.
+           And a New button on the same line, because a controller cannot type a
+           name: it takes the next free ds5_config number and links it. Typing
+           still works for anyone with a keyboard; nothing was removed.
+    2.10.2 ⛔ Fix: controller tabs were empty. The sticky-header functions --
+           setStickyHead, paintStickyHead, measureSticky and the HEADS store --
+           were all deleted by an edit that replaced the block they sat in,
+           while showTab still called one of them. showTab runs on every
+           controller poll, so it threw continuously.
+           ⚠️ Third time this session an edit cut a range from one anchor to the
+           next and took more with it than intended. Restored, and every
+           function this file references is now checked as defined before it
+           ships.
+    2.10.1 ⛔ Fix: controller tabs rendered EMPTY. claimBtn was used but never
+           defined -- 2.9.0 put its definition inside a comment block that
+           2.10.0's rewrite then replaced, taking the definition with it. A
+           ReferenceError in buildDevicePane means no header is painted at all,
+           so the whole tab goes blank rather than one button going missing.
     2.10.0 The config picker takes typing: the list filters as you type, and if
            what you typed is not an existing config the button becomes Create
            and link. Naming a new config and attaching it is one field and one
@@ -192,7 +246,7 @@
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
-  body { margin:0; padding:0 20px 20px; background:#15161a; color:#e8e8ea;
+  body { margin:0; padding:0 20px 0; min-height:100vh; background:#15161a; color:#e8e8ea;
          font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
   h1 { font-size:17px; margin:0 0 2px; font-weight:600; }
   h2 { font-size:14px; margin:22px 0 8px; color:#b9bbc4; font-weight:600;
@@ -242,13 +296,15 @@
      editing, and which config it is reading, are the two things you must not
      lose track of while scrolling a long settings list. */
   .devhead { border-bottom:1px solid #2c2e36; padding:10px 0 8px; }
+  #renameRow:not(:empty) { padding:10px 0 4px; border-bottom:1px solid #2c2e36; }
   .devhead h2 { margin-top:0; border-bottom:none; padding-bottom:2px; }
   /* ⛔ Without this, scrollIntoView puts a focused control at the very top of
      the viewport -- underneath the sticky bars, invisible. The margin is the
      tab bar plus the device header. */
   /* Set from the sticky block's measured height -- a hardcoded guess is wrong
      the moment a device row wraps onto two lines. */
-  button, select, input, .row { scroll-margin-top: var(--stickH, 180px); }
+  button, select, input, .row { scroll-margin-top: var(--stickH, 180px);
+                                scroll-margin-bottom: 70px; }
   /* ⛔ The focus ring is drawn OUTSIDE the element it marks, so an element
      flush against this block's edge gets its ring clipped by that edge. The
      padding is for the RING, not the control. */
@@ -260,9 +316,13 @@
      whole thing unusable. */
   .gp-focus { outline:3px solid #6c8cff !important; outline-offset:2px;
               border-radius:6px; }
-  #gpbar { position:fixed; right:0; bottom:0; padding:7px 14px; font-size:12px;
-           background:#1d1f26; border-top:1px solid #2c2e36; border-left:1px solid #2c2e36;
-           border-top-left-radius:8px; color:#71737c; }
+  /* ⛔ WAS position:fixed, and that is what hid the last setting. A fixed
+     element is outside the flow, so scrollIntoView cannot see it -- the browser
+     scrolls a row "into view" and the bar sits on top of it. Sticky occupies
+     space, so the page can scroll far enough to clear it. */
+  #gpbar { position:sticky; bottom:0; padding:8px 14px; font-size:12px;
+           background:#1d1f26; border-top:1px solid #2c2e36; color:#71737c;
+           margin:24px -20px 0; }
   #gpbar.live { color:#7fd18c; }
   .kv { display:flex; gap:10px; align-items:center; margin-bottom:9px; flex-wrap:wrap; }
   .kv label { min-width:210px; color:#b9bbc4; font-size:13px; }
@@ -296,12 +356,13 @@
 <div id="stickyTop">
   <div class="tabs" id="tabs"></div>
   <div id="stickyHead"></div>
+  <div id="renameRow"></div>
 </div>
 
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.10.0</span>
+  <span class="muted" style="font-size:12px">v2.13.2</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -558,42 +619,65 @@ function claimAutoLink(ordinal, configName, serial) {
   }).catch(function(){ loadConfigs(); loadDevices(); });
 }
 
-// The button's meaning follows what is typed: an existing config is applied, an
-// unknown name is created and linked, an empty field clears the link.
-function refreshPickButton(ordinal) {
-  var box = document.getElementById('pick-' + ordinal);
-  var btn = document.getElementById('pickbtn-' + ordinal);
-  if (!box || !btn) return;
-  var typed = box.value.trim();
-  if (!typed) { btn.textContent = 'Clear'; return; }
-  var known = CONFIGS.some(function(c) { return c.name.toLowerCase() === typed.toLowerCase(); });
-  btn.textContent = known ? 'Apply' : 'Create and link';
+// Creates the next free <kind>_config and links it. The device is named rather
+// than the kind, so the agent works out which kind it needs and links it in the
+// same call.
+function newConfigFor(ordinal) {
+  var dev = LAST_DEVICES.filter(function(x) { return x.ordinal === ordinal; })[0];
+  if (!dev) return;
+  var base = settingsKindOf(dev.kind) + '_config';
+  var name = base;
+  var n = 2;
+  while (CONFIGS.some(function(c) { return c.name.toLowerCase() === name.toLowerCase(); })) {
+    name = base + '_' + (n++);
+  }
+  call('POST', '/api/v1/configs', { name: name, device: ordinal })
+    .then(function() { setConn('created ' + name, 'good'); loadConfigs(); loadDevices(); })
+    .catch(function(){});
 }
 
 function applyPick(ordinal) {
-  var box = document.getElementById('pick-' + ordinal);
-  if (!box) return;
-  var typed = box.value.trim();
-
-  // Empty means unlink -- the API reads a body with no "config" as exactly that.
-  if (!typed) {
-    call('POST', '/api/v1/devices/' + encodeURIComponent(ordinal) + '/link', {})
-      .then(function() { loadDevices(); loadConfigs(); }).catch(function(){});
-    return;
-  }
-
-  var known = CONFIGS.filter(function(c) { return c.name.toLowerCase() === typed.toLowerCase(); })[0];
-  if (known) {
-    call('POST', '/api/v1/devices/' + encodeURIComponent(ordinal) + '/link', { config: known.name })
-      .then(function() { loadDevices(); loadConfigs(); }).catch(function(){});
-    return;
-  }
-
-  // ⭐ Not a config yet, so make it. The device is named rather than the kind,
-  // so the agent works out which kind it needs and links it in the same call.
-  call('POST', '/api/v1/configs', { name: typed, device: ordinal })
-    .then(function() { loadConfigs(); loadDevices(); }).catch(function(){});
+  var sel = document.getElementById('pick-' + ordinal);
+  if (!sel) return;
+  // An empty value means unlink -- the API reads a body with no "config" as
+  // exactly that, so the two spellings agree.
+  var body = sel.value ? { config: sel.value } : {};
+  call('POST', '/api/v1/devices/' + encodeURIComponent(ordinal) + '/link', body)
+    .then(function() { loadDevices(); loadConfigs(); }).catch(function(){});
 }
+
+// Each device's header, held here rather than inside its pane so it can live in
+// the one sticky block at the top.
+//
+// ⚠️ THIS BLOCK HAS BEEN DELETED BY ACCIDENT THREE TIMES. It sits directly above
+// showTab, which calls into it, and every edit that replaced "everything up to
+// function showTab" took it along. If you are about to cut a range ending here,
+// check what is inside it first.
+var HEADS = {};
+var RENAMING = false;
+
+function setStickyHead(ordinal, html) {
+  HEADS[ordinal] = html;
+  if (ACTIVE === ordinal) paintStickyHead();
+}
+
+function paintStickyHead() {
+  var host = document.getElementById('stickyHead');
+  if (!host) return;
+  host.innerHTML = HEADS[ACTIVE] ? '<div class="devhead">' + HEADS[ACTIVE] + '</div>' : '';
+  measureSticky();
+}
+
+// ⭐ Measure the sticky block rather than hardcoding its height. A device row
+// wraps onto two lines on a narrow window, and a guessed pixel count is wrong
+// the moment it does -- which is how a focused control ends up underneath it.
+function measureSticky() {
+  var el = document.getElementById('stickyTop');
+  if (!el) return;
+  document.documentElement.style.setProperty('--stickH', (el.offsetHeight + 14) + 'px');
+}
+
+window.addEventListener('resize', measureSticky);
 
 function showTab(name) {
   ACTIVE = name;
@@ -645,33 +729,56 @@ function buildDevicePane(d) {
   }
   head += '</div>';
 
+  // ⭐ The auto-link button sits with the CONFIG it applies to, not with the
+  // settings Apply -- it answers "which config does this pad get next time",
+  // which is a question about that row, not about any setting.
+  var alreadyMine = mySerial && claimedBy &&
+                    claimedBy.toLowerCase() === (d.linked_config || '').toLowerCase();
+  var claimBtn = (mySerial && d.linked_config && !alreadyMine)
+    ? '<button onclick="claimAutoLink(\'' + esc(d.ordinal) + '\',\'' +
+      esc(d.linked_config) + '\',\'' + esc(mySerial) + '\')" ' +
+      'title="this controller gets this config whenever it bridges">' +
+      'Auto link</button>'
+    : '';
+
   // ⭐ Only configs whose kind matches are offered. The agent refuses a
   // mismatch with a 400, and a dropdown that can only produce an error is worse
   // than one that never offers the choice.
   var kindOk = CONFIGS.filter(function(c) {
     return settingsKindOf(d.kind) === c.kind;
   });
-  // ⭐ A typeable combobox, not a plain dropdown. A datalist gives filtering as
-  // you type for free, and lets a name that is NOT in the list be entered --
-  // which is how a new config gets created without a second box for it.
-  var listId = 'cfgs-' + d.ordinal;
-  var options = '';
+  // ⭐ A <select>, not a text field with a datalist.
+  //
+  // ⛔ The datalist looked right and was dead from a controller: it is an INPUT
+  // with suggestions attached, and browsers expose no API to open those. A
+  // select can at least be expanded -- gpActivate sets size, which turns it into
+  // a visible list the D-pad steps through, the same as the kind box.
+  //
+  // ⓘ Naming lives on the buttons beside it instead: New takes the next free
+  // number, Rename changes it afterwards. Both work without a keyboard.
+  var options = '<option value="">(no config)</option>';
   kindOk.forEach(function(c) {
-    options += '<option value="' + esc(c.name) + '"></option>';
+    options += '<option value="' + esc(c.name) + '"' +
+               (c.name === d.linked_config ? ' selected' : '') + '>' +
+               esc(c.name) + '</option>';
   });
 
   head += '<div class="kv"><label>config</label>' +
-          '<input id="pick-' + esc(d.ordinal) + '" list="' + listId + '"' +
-          ' value="' + esc(d.linked_config || '') + '"' +
-          ' placeholder="(no config)" size="22"' +
-          ' oninput="refreshPickButton(\'' + esc(d.ordinal) + '\')">' +
-          '<datalist id="' + listId + '">' + options + '</datalist>' +
-          '<button id="pickbtn-' + esc(d.ordinal) + '" ' +
-          'onclick="applyPick(\'' + esc(d.ordinal) + '\')">Apply</button>' +
+          // ⭐ Links on selection. Everything else on this page saves as you
+          // change it, so an Apply here was inconsistent -- and one more D-pad
+          // step between the picker and the buttons beside it.
+          '<select id="pick-' + esc(d.ordinal) + '"' +
+          ' onchange="applyPick(\'' + esc(d.ordinal) + '\')">' + options + '</select>' +
+          '<button onclick="newConfigFor(\'' + esc(d.ordinal) + '\')" ' +
+          'title="create the next ds5_config and link it">New</button>' +
+          (d.linked_config
+            ? '<button onclick="renameConfig(\'' + esc(d.linked_config) + '\')" ' +
+              'title="rename this config">Rename</button>'
+            : '') +
           claimBtn +
           (kindOk.length ? '' :
             ' <span class="muted">no ' + esc(settingsKindOf(d.kind)) +
-            ' configs yet — type a name to make one</span>') +
+            ' configs yet — press New</span>') +
           '</div>';
 
   if (!d.linked_config) {
@@ -1069,22 +1176,57 @@ function createConfig() {
   }).catch(function(){});
 }
 
+// ⛔ NOT prompt(). A native modal cannot be dismissed by a controller -- no
+// button reaches it and ○ does nothing, so pressing Rename from a pad left you
+// stuck. This is an inline row instead: the field and both buttons are ordinary
+// elements the D-pad can reach.
+//
+// ⚠️ Typing the new name still needs a keyboard. What this fixes is being able
+// to back out, which is the part that trapped people.
 function renameConfig(name) {
-  var next = prompt('Rename "' + name + '" to:', name);
-  if (next === null) return;
-  next = next.trim();
-  if (!next || next === name) return;
-  call('POST', '/api/v1/configs/' + encodeURIComponent(name) + '/rename', { name: next })
+  var host = document.getElementById('renameRow');
+  if (!host) return;
+  host.innerHTML =
+    '<div class="kv"><label>rename</label>' +
+    '<input id="renameTo" value="' + esc(name) + '" size="22">' +
+    '<button onclick="commitRename(\'' + esc(name) + '\')">Save</button>' +
+    '<button onclick="cancelRename()">Cancel</button>' +
+    '<span class="muted">or press ○</span></div>';
+  RENAMING = true;
+  gpCollect();
+  // ⭐ Put controller focus on Save. Opening a row and leaving focus elsewhere
+  // means hunting for it, and the field itself cannot be typed into from a pad
+  // anyway.
+  var save = document.querySelector('#renameRow button');
+  if (save) {
+    var at = GP_FOCUS.indexOf(save);
+    if (at >= 0) { GP_INDEX = at; gpPaint(); }
+  }
+  var box = document.getElementById('renameTo');
+  if (box) { box.focus(); box.select(); }
+}
+
+function cancelRename() {
+  var host = document.getElementById('renameRow');
+  if (host) host.innerHTML = '';
+  RENAMING = false;
+  gpCollect();
+}
+
+function commitRename(oldName) {
+  var box = document.getElementById('renameTo');
+  if (!box) return;
+  var next = box.value.trim();
+  if (!next || next === oldName) { cancelRename(); return; }
+  call('POST', '/api/v1/configs/' + encodeURIComponent(oldName) + '/rename', { name: next })
     .then(function() {
       setConn('renamed to ' + next, 'good');
+      cancelRename();
       loadConfigs();
       loadDevices();
-      // If the renamed config was open in the editor, reopen it under its new
-      // name -- leaving the old one on screen would show settings that no
-      // longer save anywhere.
       var head = document.getElementById('editorName');
-      if (head && head.textContent === name) openConfig(next);
-    }).catch(function(){});
+      if (head && head.textContent === oldName) openConfig(next);
+    }).catch(function(){ cancelRename(); });
 }
 
 function archive(name) {
@@ -1131,10 +1273,14 @@ function gpCollect() {
   // ⛔ The device header lives in the sticky block, NOT in the pane -- moving it
   // there in 2.8.0 silently took the config picker and the auto-link buttons out
   // of D-pad reach. Scanned first so focus starts where the header is.
-  var head = document.getElementById('stickyHead');
-  if (head) {
-    head.querySelectorAll('button, select, input').forEach(function(e) {
+  // ⛔ Scans the whole sticky block, not #stickyHead by name. The rename row is
+  // a SIBLING of that element, so naming one missed the other -- Save and Cancel
+  // were visible and unreachable, leaving ○ as the only way out.
+  var top = document.getElementById('stickyTop');
+  if (top) {
+    top.querySelectorAll('button, select, input').forEach(function(e) {
       if (e.offsetParent === null || e.disabled || e.type === 'checkbox') return;
+      if (e.closest && e.closest('#tabs')) return;   // L1/R1 own the tabs
       list.push(e);
     });
   }
@@ -1178,6 +1324,7 @@ function gpMove(delta) {
 function gpActivate() {
   var el = GP_FOCUS[GP_INDEX];
   if (!el) return;
+
   if (el.tagName === 'SELECT') {
     GP_SELECTING = el;
     GP_SELECT_WAS = el.selectedIndex;
@@ -1275,7 +1422,11 @@ function gpPoll() {
   if (edge(4)) gpTab(-1);
   if (edge(5)) gpTab(1);
   if (edge(0)) gpActivate();
-  if (edge(1)) { showTab('overview'); GP_INDEX = 0; gpCollect(); }
+  // ○ backs out of a rename first -- that is what it is for while one is open.
+  if (edge(1)) {
+    if (RENAMING) { cancelRename(); }
+    else { showTab('overview'); GP_INDEX = 0; gpCollect(); }
+  }
   if (edge(2)) gpToggleManaged();    // square: managed / unmanaged
 
   // ◄ ► step a focused number. Repeats while held, like the D-pad, because
