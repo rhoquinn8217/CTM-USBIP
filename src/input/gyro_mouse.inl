@@ -133,6 +133,8 @@ struct Config {
     // interpolated by rotation speed between the two thresholds.
     int min_sens = 8;
     int max_sens = 16;
+    float speed_h = 100.0f;     // percent: horizontal speed, 100 = unchanged
+    float speed_v = 100.0f;     // percent: vertical speed, 100 = unchanged
     bool debug_scale = false;   // print measured rate, dt and pixels at 2Hz
     int min_threshold = 5;      // deg/sec: below this, min_sens applies
     int max_threshold = 75;     // deg/sec: above this, max_sens applies
@@ -159,6 +161,8 @@ inline Config load_config(const char *section)
     c.gate = parse_gate(device_config_str(section, "gyro_to_mouse_gate"));
     c.px_per_360 = device_config_int(section, "gyro_mouse_px_per_360", 1920);
     if (c.px_per_360 < 1) c.px_per_360 = 1920;
+    c.speed_h = static_cast<float>(device_config_int(section, "gyro_mouse_speed_h", 100));
+    c.speed_v = static_cast<float>(device_config_int(section, "gyro_mouse_speed_v", 100));
     c.debug_scale = device_config_bool(section, "gyro_mouse_debug_scale", false);
     c.min_sens = device_config_int(section, "gyro_mouse_min_sens", 8);
     c.max_sens = device_config_int(section, "gyro_mouse_max_sens", 16);
@@ -436,8 +440,20 @@ public:
             }
         }
 
-        float dx = horizontal * step * kSignH;
-        float dy = vertical * step * kSignV;
+        // ⭐ Per-axis scale. Screens are wider than they are tall, so equal
+        // sensitivity means crossing the width takes longer than the height --
+        // and fine aiming often wants vertical slower than horizontal
+        // regardless. 100 is unchanged, so absent behaves as it always did.
+        //
+        // ⓘ JoyShockMapper spells this as a second value on its sensitivity
+        // commands. Two keys here instead, because this project's config format
+        // is one value per key and a silently-optional second number would be
+        // easy to miss on a settings page.
+        const float scaleH = cfg.speed_h / 100.0f;
+        const float scaleV = cfg.speed_v / 100.0f;
+
+        float dx = horizontal * step * kSignH * scaleH;
+        float dy = vertical * step * kSignV * scaleV;
         if (cfg.invert_x) dx = -dx;
         if (cfg.invert_y) dy = -dy;
 

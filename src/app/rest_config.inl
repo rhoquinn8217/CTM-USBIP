@@ -222,6 +222,8 @@ static std::string rest_keys_json()
 {"key":"gyro_mouse_max_sens","type":"int","min":0,"max":60,"default":16,"help":"Sensitivity for fast turns. Equal to min for no acceleration."},
 {"key":"gyro_mouse_min_threshold","type":"int","min":0,"max":200,"default":5,"help":"Degrees per second below which min_sens applies."},
 {"key":"gyro_mouse_max_threshold","type":"int","min":0,"max":400,"default":75,"help":"Degrees per second above which max_sens applies."},
+{"key":"gyro_mouse_speed_h","type":"int","min":10,"max":300,"default":100,"help":"Horizontal speed as a percentage. 100 is unchanged, not maximum."},
+{"key":"gyro_mouse_speed_v","type":"int","min":10,"max":300,"default":100,"help":"Vertical speed as a percentage. Lower than horizontal suits fine aiming, since a screen is wider than it is tall."},
 {"key":"gyro_mouse_invert","type":"int","min":0,"max":3,"default":0,"help":"0 neither, 1 horizontal, 2 vertical, 3 both."},
 {"key":"gyro_mouse_player_space","type":"bool","default":true,"help":"Account for how the controller is being held."},
 {"key":"gyro_mouse_recenter_button","type":"choice","choices":["","touchpad_click","PS","L1","R1"],"default":"","help":"Warps the cursor to screen centre. Desktop only -- games hide the cursor and read movement instead."},
