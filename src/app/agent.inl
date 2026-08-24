@@ -700,7 +700,7 @@ static int run_agent(uint16_t port)
 
     // The agent is up, so a page opened now finds something on its first poll.
     if (ctm_open_ui::g_open_ui && !ctm_open_ui::g_ui_already_focused) {
-        ctm_open_ui::open_new();
+        ctm_open_ui::open_new(g_rest_port);
     }
     while (!g_stop.load()) {
         drain_bridge_session_reaps();

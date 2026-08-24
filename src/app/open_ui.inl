@@ -70,25 +70,13 @@ inline bool focus_existing()
     return true;
 }
 
-// file:/// URL for the page, from the working directory.
+// ⭐ An http:// URL now, not a file path.
 //
-// ⚠️ The agent's working directory is the REPO ROOT, not the exe's folder --
-// which is also where it reads its config and writes its log. Resolving from
-// the exe path instead would look in out/x64/Debug and find nothing.
-inline std::wstring page_url(std::wstring *diskPath)
+// The agent serves the page, so there is nothing on disk to point at -- which
+// is the whole reason a released exe works with no files beside it.
+inline std::wstring page_url(uint16_t restPort)
 {
-    wchar_t cwd[MAX_PATH] = {};
-    if (GetCurrentDirectoryW(MAX_PATH, cwd) == 0) return std::wstring();
-    std::wstring path = std::wstring(cwd) + L"\\" + kRelativePage;
-    *diskPath = path;
-
-    std::wstring url = L"file:///";
-    for (wchar_t c : path) {
-        if (c == L'\\') url += L'/';
-        else if (c == L' ') url += L"%20";
-        else url += c;
-    }
-    return url;
+    return L"http://127.0.0.1:" + std::to_wstring(restPort) + L"/";
 }
 
 inline std::wstring find_browser()
@@ -127,22 +115,16 @@ inline bool focus_only()
 // start would leave a browser window reporting an unreachable agent -- a
 // confusing thing to hand someone whose real problem is that the exe did not
 // start.
-inline void open_new()
+inline void open_new(uint16_t restPort)
 {
-    std::wstring diskPath;
-    const std::wstring url = page_url(&diskPath);
-    if (url.empty() || GetFileAttributesW(diskPath.c_str()) == INVALID_FILE_ATTRIBUTES) {
-        std::wcerr << L"settings page not found at " << diskPath
-                   << L" -- skipping (the listener is unaffected)\n";
-        return;
-    }
+    const std::wstring url = page_url(restPort);
 
     const std::wstring browser = find_browser();
     if (browser.empty()) {
         // No Chrome or Edge: hand it to whatever is registered. Loses the app
         // window, which is cosmetic -- and losing the page entirely is not.
         std::wcout << L"no Chrome or Edge found, opening in the default browser\n";
-        ShellExecuteW(nullptr, L"open", diskPath.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        ShellExecuteW(nullptr, L"open", url.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
         return;
     }
 
