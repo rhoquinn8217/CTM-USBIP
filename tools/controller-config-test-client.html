@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.14.0 -- see the changelog at the bottom of this comment.
+  VERSION 2.16.1 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,26 @@
   tidy message about it.
 
   CHANGELOG
+    2.16.1 The disconnected message names the likely causes and what to do about
+           each, instead of assuming the listener simply is not running.
+           ⭐ "Can't reach the listener" rather than "not running" -- the page
+           knows it got no answer, not why. It could be running on another port,
+           or started without --rest, and telling someone to start something
+           that is already started wastes their time.
+    2.16.0 Health moves into the footer bar, bottom left, with the controller
+           legend on the right -- one strip that says what state things are in,
+           rather than two indicators in opposite corners.
+           ⭐ And when the agent stops answering, the page says so instead of
+           showing a stale picture: the controller tabs go, and Overview is
+           replaced with an explanation. Those tabs describe sessions that no
+           longer exist, and their settings would write to nothing.
+    2.15.0 A status dot on each controller tab.
+           ⓘ It reflects `ready` and nothing more, because that is the only
+           per-controller HEALTH the API reports -- serial and linked config are
+           state, not health. A dot implying more than one boolean would be
+           dressing up what we actually know.
+           Amber and a "starting" title while a session is coming up or tearing
+           down; green once it is ready.
     2.14.0 A health indicator, top right: whether the agent is answering, how
            many controllers are bridged, and how long since the last successful
            poll. ⭐ It reports the LAST SUCCESS rather than the last attempt --
@@ -303,6 +323,8 @@
   .tabs button { background:transparent; border:none; border-bottom:2px solid transparent;
                  color:#8b8d96; padding:9px 14px; font-size:13.5px; border-radius:0; }
   .tabs button.on { color:#e8e8ea; border-bottom-color:#6c8cff; font-weight:600; }
+  .tabdot { display:inline-block; width:7px; height:7px; border-radius:50%;
+            margin-right:7px; vertical-align:middle; }
   .pane { display:none; } .pane.on { display:block; }
   /* ⭐ Sits under the tabs and stays with them. Which controller you are
      editing, and which config it is reading, are the two things you must not
@@ -332,9 +354,12 @@
      element is outside the flow, so scrollIntoView cannot see it -- the browser
      scrolls a row "into view" and the bar sits on top of it. Sticky occupies
      space, so the page can scroll far enough to clear it. */
+  /* One status strip: health left, controller legend right. */
   #gpbar { position:sticky; bottom:0; padding:8px 14px; font-size:12px;
            background:#1d1f26; border-top:1px solid #2c2e36; color:#71737c;
-           margin:24px -20px 0; }
+           margin:24px -20px 0; display:flex; justify-content:space-between;
+           gap:16px; flex-wrap:wrap; }
+  #gpbar.live #gphint { color:#7fd18c; }
   #gpbar.live { color:#7fd18c; }
   .kv { display:flex; gap:10px; align-items:center; margin-bottom:9px; flex-wrap:wrap; }
   .kv label { min-width:210px; color:#b9bbc4; font-size:13px; }
@@ -371,10 +396,40 @@
   <div id="renameRow"></div>
 </div>
 
+<!-- ⭐ Shown when the agent stops answering. Overview's contents describe
+     configs and devices we can no longer reach, and every control on it would
+     write to nothing -- showing them greyed would still invite clicking. -->
+<div id="downCover" style="display:none">
+  <h2><span style="color:#ff8f8f">&#10007;</span> Can't reach the listener</h2>
+  <p class="muted">No reply from <code id="downAddr"></code>. Any of these
+  would do it:</p>
+  <table>
+    <tr><th>Cause</th><th>What to do</th></tr>
+    <tr>
+      <td>It isn't running</td>
+      <td>Start it from the desktop shortcut</td>
+    </tr>
+    <tr>
+      <td>It's running without the settings API</td>
+      <td>It needs <code>--rest</code>. The shortcut passes it; a listener
+          started by hand may not.</td>
+    </tr>
+    <tr>
+      <td>This page is pointed somewhere else</td>
+      <td>Check the address at the top against the port the listener reported
+          when it started</td>
+    </tr>
+    <tr>
+      <td>It's mid-restart, or a build just stopped it</td>
+      <td>Nothing — this comes back on its own</td>
+    </tr>
+  </table>
+</div>
+
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.14.0</span>
+  <span class="muted" style="font-size:12px">v2.16.1</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -383,7 +438,6 @@
   <button class="go" onclick="refreshAll()"
     title="Controllers are picked up automatically. This reloads configs too, for when a file has been edited outside this page.">Reload</button>
   <span id="conn" class="muted">not checked</span>
-  <span id="health" class="muted" style="margin-left:auto">checking…</span>
 </div>
 
 <h2>Devices</h2>
@@ -418,7 +472,10 @@
   <div id="log"></div>
 </div>
 
-<div id="gpbar">controller: press any button to connect</div>
+<div id="gpbar">
+  <span id="health" class="muted">checking…</span>
+  <span id="gphint">controller: press any button to connect</span>
+</div>
 
 <script>
 var KEYS = [];
@@ -540,9 +597,17 @@ function renderTabs(devices) {
           ' onclick="showTab(\'overview\')">Overview</button>';
   LAST_DEVICES.forEach(function(d) {
     TABS.push(d.ordinal);
+    // ⓘ `ready` is the whole story here. A session that is not ready is either
+    // still coming up or tearing down, and in both cases its settings may not
+    // stick -- which is worth seeing without opening the tab.
+    var dot = d.ready
+      ? '<span class="tabdot" style="background:#7fd18c"></span>'
+      : '<span class="tabdot" style="background:#e0c07a"></span>';
     html += '<button data-tab="' + esc(d.ordinal) + '"' +
             (ACTIVE === d.ordinal ? ' class="on"' : '') +
-            ' onclick="showTab(\'' + esc(d.ordinal) + '\')">' + esc(d.ordinal) + '</button>';
+            ' title="' + (d.ready ? 'ready' : 'starting or tearing down') + '"' +
+            ' onclick="showTab(\'' + esc(d.ordinal) + '\')">' +
+            dot + esc(d.ordinal) + '</button>';
   });
   bar.innerHTML = html;
 
@@ -1373,14 +1438,15 @@ function gpPoll() {
   var live = [];
   for (var i = 0; i < pads.length; i++) { if (pads[i]) live.push(pads[i]); }
   var bar = document.getElementById('gpbar');
+  var hint = document.getElementById('gphint');
   if (!live.length) {
-    bar.textContent = 'controller: press any button to connect';
+    hint.textContent = 'controller: press any button to connect';
     bar.className = '';
     requestAnimationFrame(gpPoll);
     return;
   }
-  bar.textContent = (live.length > 1 ? live.length + ' controllers' : 'controller') +
-                    ' — L1/R1 tabs, D-pad move, ✕ select, ◄► adjust, □ on/off, ○ back';
+  hint.textContent = (live.length > 1 ? live.length + ' controllers' : 'controller') +
+                     ' — L1/R1 tabs, D-pad move, ✕ select, ◄► adjust, □ on/off, ○ back';
   bar.className = 'live';
 
   var now = performance.now();
@@ -1478,6 +1544,32 @@ var LAST_OK = 0;
 var LAST_COUNT = 0;
 var FAILS = 0;
 
+var IS_DOWN = null;
+
+// ⛔ Hides Overview rather than greying it. A greyed control still invites a
+// click, and every one of them would write to an agent that is not there --
+// including the ones that create or rename a config.
+//
+// ⚠️ The controller tabs go too. They describe sessions that no longer exist,
+// and their settings pages would look editable while writing to nothing.
+function setDown(down) {
+  if (IS_DOWN === down) return;          // only touch the DOM on a change
+  IS_DOWN = down;
+  var cover = document.getElementById('downCover');
+  // ⓘ Shows the address that failed, so "pointed somewhere else" is checkable
+  // rather than a suggestion to go and compare two things from memory.
+  var addr = document.getElementById('downAddr');
+  if (addr && down) addr.textContent = base();
+  var pane = document.getElementById('pane-overview');
+  if (cover) cover.style.display = down ? 'block' : 'none';
+  if (pane) pane.style.display = down ? 'none' : (ACTIVE === 'overview' ? 'block' : 'none');
+  if (down) {
+    ACTIVE = 'overview';
+    renderTabs([]);
+    DEVICE_SIG = null;                   // so the next success redraws
+  }
+}
+
 function paintHealth() {
   var el = document.getElementById('health');
   if (!el) return;
@@ -1488,6 +1580,7 @@ function paintHealth() {
     colour = '#71737c';
     text = 'no contact with the agent yet';
   } else if (FAILS >= 3) {
+    setDown(true);
     // ⚠️ Three misses is twelve seconds. One failed poll is a restart or a
     // rebuild, which happens constantly -- calling that "down" would cry wolf
     // every time you build.
@@ -1497,6 +1590,7 @@ function paintHealth() {
     colour = '#e0c07a';
     text = 'agent quiet — last seen ' + age + 's ago';
   } else {
+    setDown(false);
     colour = '#7fd18c';
     text = LAST_COUNT
       ? LAST_COUNT + (LAST_COUNT === 1 ? ' controller' : ' controllers') + ' bridged'
