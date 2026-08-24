@@ -53,6 +53,47 @@ $msbuild = Find-MSBuild -VsInstall $vs
 if (-not $msbuild) { throw 'MSBuild.exe not found.' }
 
 $project = Join-Path $Root 'app\ctm-usbip.vcxproj'
+# --- vcpkg -------------------------------------------------------------------
+# ⭐ BOOTSTRAPPED HERE, because a fresh clone could not build without it.
+#
+# ⛔ Found 2026-08-24: cloning the repo and running this script failed with
+# "Cannot open include file: 'opus/opus.h'". third_party/vcpkg is gitignored --
+# correctly, it is a fetched dependency -- but nothing fetched it, and
+# .gitignore claimed this script did. So the only machines that could build were
+# ones where the folder happened to predate the clone.
+#
+# ⓘ One package: opus, static x64. Everything else the project links is either
+# a Windows library or the vendored FFmpeg under third_party/ffmpeg.
+#
+# ⚠️ Skipped entirely when it is already there. The first run takes several
+# minutes -- vcpkg compiles itself, then builds opus from source -- and doing
+# that on every build would be intolerable.
+$vcpkgRoot = Join-Path $Root 'third_party\vcpkg'
+$opusHeader = Join-Path $vcpkgRoot 'installed\x64-windows-static\include\opus\opus.h'
+
+if (-not (Test-Path $opusHeader)) {
+    Write-Host 'vcpkg dependency missing -- fetching it. First run only; several minutes.' -ForegroundColor Yellow
+
+    if (-not (Test-Path (Join-Path $vcpkgRoot '.git'))) {
+        Write-Host '  cloning vcpkg...' -ForegroundColor DarkGray
+        & git clone --depth 1 https://github.com/microsoft/vcpkg.git $vcpkgRoot
+        if ($LASTEXITCODE -ne 0) { throw 'could not clone vcpkg' }
+    }
+
+    $vcpkgExe = Join-Path $vcpkgRoot 'vcpkg.exe'
+    if (-not (Test-Path $vcpkgExe)) {
+        Write-Host '  bootstrapping vcpkg...' -ForegroundColor DarkGray
+        & (Join-Path $vcpkgRoot 'bootstrap-vcpkg.bat') -disableMetrics
+        if (-not (Test-Path $vcpkgExe)) { throw 'vcpkg bootstrap produced no vcpkg.exe' }
+    }
+
+    Write-Host '  building opus...' -ForegroundColor DarkGray
+    & $vcpkgExe install opus:x64-windows-static
+    if (-not (Test-Path $opusHeader)) { throw "vcpkg install finished but $opusHeader is missing" }
+
+    Write-Host '  vcpkg ready' -ForegroundColor DarkGray
+}
+
 # --- Embed the settings page ------------------------------------------------
 # ⭐ BEFORE msbuild, because the generated header is compiled into the exe.
 #
