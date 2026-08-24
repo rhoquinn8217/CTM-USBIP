@@ -72,6 +72,7 @@ static void mic_ring_reset(const CtmBackend *owner);
 #include "usbip/device.inl"
 #include "audio/iso_in_pacing.inl"
 #include "usbip/server.inl"
+#include "app/open_ui.inl"      // --ui: open the settings page, or focus one already open
 #include "app/cli.inl"
 #include "audio/ds5_apply_settings.inl"
 #include "config/config_store.inl"   // per-controller config files; needs device_log + g_device_config
@@ -193,6 +194,12 @@ int wmain(int argc, wchar_t **argv)
                     return 2;
                 }
                 g_rest_port = static_cast<uint16_t>(value);
+            } else if (arg == L"--ui") {
+                // ⭐ Opens the settings page once the agent is up, or brings an
+                // already-open one forward. The launcher used to do this and
+                // could not check for an existing window, so every rebuild left
+                // another one behind.
+                ctm_open_ui::g_open_ui = true;
             } else if (arg == L"--rest-lan") {
                 g_rest_bind_lan = true;
             } else if (arg == L"--rest-token" && i + 1 < argc) {
@@ -207,6 +214,28 @@ int wmain(int argc, wchar_t **argv)
                 print_usage();
                 return 2;
             }
+        }
+        // ⭐ ONE exe, ONE set of flags, four situations:
+        //
+        //   listener up,  page open  -> bring the page forward, exit
+        //   listener up,  no page    -> open a page, exit
+        //   listener off, page open  -> start the listener, bring the page forward
+        //   listener off, no page    -> start the listener, open a page
+        //
+        // The page is FOCUSED first because that works whether or not the agent
+        // starts. Opening a NEW one waits until we know which branch we are in:
+        // if the agent is not going to run, a page must still appear here; if it
+        // is, run_agent opens one only once it is actually listening, so a
+        // failed start never leaves a window reporting an unreachable agent.
+        if (ctm_open_ui::g_open_ui) {
+            const bool focused = ctm_open_ui::focus_only();
+            if (ctm_open_ui::agent_already_running(static_cast<uint16_t>(port))) {
+                if (!focused) ctm_open_ui::open_new();
+                std::wcout << L"a listener is already running on port " << port
+                           << L" -- left it alone\n";
+                return 0;
+            }
+            ctm_open_ui::g_ui_already_focused = focused;
         }
         return run_agent(static_cast<uint16_t>(port));
     }

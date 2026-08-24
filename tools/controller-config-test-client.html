@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.13.2 -- see the changelog at the bottom of this comment.
+  VERSION 2.14.0 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,14 @@
   tidy message about it.
 
   CHANGELOG
+    2.14.0 A health indicator, top right: whether the agent is answering, how
+           many controllers are bridged, and how long since the last successful
+           poll. ⭐ It reports the LAST SUCCESS rather than the last attempt --
+           "connected" that has not actually spoken to anything in two minutes
+           is worse than no indicator at all.
+           Reload stays. Polling watches DEVICES; a config edited by hand
+           outside this page is not noticed until something asks, so there is
+           still a case for it -- it is just no longer the main path.
     2.13.2 ⛔ Fix: Save and Cancel on the rename row could not be reached by the
            D-pad, leaving ○ as the only way out. The focus scan looked at
            #stickyHead by name, and the rename row is a sibling of it -- so it
@@ -253,6 +261,10 @@
        border-bottom:1px solid #2c2e36; padding-bottom:6px; }
   .sub { color:#8b8d96; font-size:12.5px; margin-bottom:16px; }
   .bar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px; }
+  /* Pushed right by margin-left:auto on the element itself. */
+  #health { font-size:12.5px; white-space:nowrap; }
+  #health .dot { display:inline-block; width:8px; height:8px; border-radius:50%;
+                 margin-right:6px; vertical-align:middle; }
   input, select { background:#1d1f26; color:#e8e8ea; border:1px solid #2c2e36;
                   border-radius:6px; padding:7px 9px; font-size:13px; font-family:inherit; }
   input { min-width:120px; }
@@ -362,7 +374,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.13.2</span>
+  <span class="muted" style="font-size:12px">v2.14.0</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -371,6 +383,7 @@
   <button class="go" onclick="refreshAll()"
     title="Controllers are picked up automatically. This reloads configs too, for when a file has been edited outside this page.">Reload</button>
   <span id="conn" class="muted">not checked</span>
+  <span id="health" class="muted" style="margin-left:auto">checking…</span>
 </div>
 
 <h2>Devices</h2>
@@ -1457,6 +1470,43 @@ function gpPoll() {
 var DEVICE_SIG = null;
 var POLL_MS = 4000;
 
+// ⭐ Health is measured from the last SUCCESSFUL poll, not the last attempt.
+// An indicator that says "connected" because it tried recently, while nothing
+// has actually answered for two minutes, is worse than no indicator -- it is
+// the failure mode of every status light that only reports intent.
+var LAST_OK = 0;
+var LAST_COUNT = 0;
+var FAILS = 0;
+
+function paintHealth() {
+  var el = document.getElementById('health');
+  if (!el) return;
+  var age = LAST_OK ? Math.round((Date.now() - LAST_OK) / 1000) : null;
+
+  var colour, text;
+  if (age === null) {
+    colour = '#71737c';
+    text = 'no contact with the agent yet';
+  } else if (FAILS >= 3) {
+    // ⚠️ Three misses is twelve seconds. One failed poll is a restart or a
+    // rebuild, which happens constantly -- calling that "down" would cry wolf
+    // every time you build.
+    colour = '#ff8f8f';
+    text = 'agent not answering — last seen ' + age + 's ago';
+  } else if (age > 15) {
+    colour = '#e0c07a';
+    text = 'agent quiet — last seen ' + age + 's ago';
+  } else {
+    colour = '#7fd18c';
+    text = LAST_COUNT
+      ? LAST_COUNT + (LAST_COUNT === 1 ? ' controller' : ' controllers') + ' bridged'
+      : 'agent up — no controllers bridged';
+  }
+  el.innerHTML = '<span class="dot" style="background:' + colour + '"></span>' + esc(text);
+}
+
+setInterval(paintHealth, 1000);
+
 function deviceSignature(list) {
   return (list || []).map(function(d) {
     // Everything the page renders from. A change in any of it should redraw;
@@ -1468,6 +1518,10 @@ function deviceSignature(list) {
 function pollDevices() {
   call('GET', '/api/v1/devices', undefined, true).then(function(d) {
     var list = d.devices || [];
+    LAST_OK = Date.now();
+    LAST_COUNT = list.length;
+    FAILS = 0;
+    paintHealth();
     var sig = deviceSignature(list);
     if (sig === DEVICE_SIG) return;          // nothing to do
     var first = DEVICE_SIG === null;
@@ -1477,8 +1531,11 @@ function pollDevices() {
     loadDevices();
     loadConfigs();                           // linked_by and pickers follow
   }).catch(function(){
-    // A failed poll is not worth reporting -- the agent may simply be
-    // restarting, and the next poll will pick it up.
+    // A failed poll is not worth a log line -- the agent may simply be
+    // restarting, which happens on every build. The health indicator counts
+    // them instead, and only calls it down after several in a row.
+    FAILS++;
+    paintHealth();
   });
 }
 
