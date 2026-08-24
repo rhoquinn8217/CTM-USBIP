@@ -623,6 +623,16 @@ static int run_agent(uint16_t port)
 {
     std::wcout << L"ctm-usbip " << widen_ascii(CTM_VERSION_DISPLAY, strlen(CTM_VERSION_DISPLAY))
                << L" agent starting\n";
+
+    // ⭐ FOCUS an existing page first, before any socket is bound. The commonest
+    // failure is another listener already holding the port, and surfacing the
+    // page you already have is exactly right in that case.
+    //
+    // ⛔ Opening a NEW one waits until the agent is actually up -- see below.
+    // A failed start that leaves behind a browser window reporting an
+    // unreachable agent is a confusing thing to hand someone.
+    // main has already focused an existing page and decided no listener was
+    // running -- see the four cases documented there.
     WSADATA data = {};
     if (WSAStartup(MAKEWORD(2, 2), &data) != 0) {
         std::wcerr << wsa_error_message(L"WSAStartup failed") << L"\n";
@@ -687,6 +697,11 @@ static int run_agent(uint16_t port)
     }
 
     std::wcout << L"ctm agent listening udp/tcp port " << port << L"\n";
+
+    // The agent is up, so a page opened now finds something on its first poll.
+    if (ctm_open_ui::g_open_ui && !ctm_open_ui::g_ui_already_focused) {
+        ctm_open_ui::open_new(g_rest_port);
+    }
     while (!g_stop.load()) {
         drain_bridge_session_reaps();
         sweep_bridge_sessions();

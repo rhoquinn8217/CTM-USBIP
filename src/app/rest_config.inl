@@ -262,6 +262,20 @@ static bool rest_kind_from_body(const RestJson &json, std::string *kind, std::st
 // Returns true when this request was one of ours and `out` holds the response.
 static bool rest_route_config(const RestRequest &req, std::string *out)
 {
+    // ⭐ GET / -- the settings page itself.
+    //
+    // Handled here rather than in rest.inl so the whole settings surface, page
+    // and endpoints, sits in one file. It is also the only route that answers
+    // with something other than JSON.
+    if (req.path == "/" || req.path == "/index.html") {
+        if (req.method != "GET") {
+            *out = rest_error_response(405, "method not allowed", "Allow: GET, OPTIONS\r\n");
+            return true;
+        }
+        *out = ctm_ui_page::http_response();
+        return true;
+    }
+
     // GET /api/v1/devices
     if (req.path == "/api/v1/devices") {
         if (req.method != "GET") {
