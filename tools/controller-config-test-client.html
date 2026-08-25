@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.17.0 -- see the changelog at the bottom of this comment.
+  VERSION 2.21.0 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,15 @@
   tidy message about it.
 
   CHANGELOG
+    2.18.0 Controller tabs get a name -- "Kestrel - DualSense (Bluetooth)"
+           instead of "ds5_usb_1".
+           ⓘ A DISPLAY name only. The API keeps the ordinal, so linking, config
+           lookups and the session log are untouched -- a name that changed the
+           wire would make every log line unmatchable against a tab.
+           ⚠️ New name on every bridge, as asked. Two controllers never share one
+           at the same time, which would defeat the point entirely.
+           The ordinal moves to its own labelled row in the header, where it can
+           be read when matching a tab against a log line.
     2.17.0 ⛔ Controller input is ignored while this window is not focused.
            Playing a game moved focus around this page and toggled settings --
            the browser gamepad API keeps reporting the pad whether or not the
@@ -337,12 +346,35 @@
   .tabs button.on { color:#e8e8ea; border-bottom-color:#6c8cff; font-weight:600; }
   .tabdot { display:inline-block; width:7px; height:7px; border-radius:50%;
             margin-right:7px; vertical-align:middle; }
+  /* Name on top, what it is underneath -- the name is for recognising the tab,
+     the kind for confirming you are on the right one. */
+  .tabs button .tabname { display:inline-block; }
+  .tabs button .tabkind { display:block; font-size:11px; color:#71737c;
+                          font-style:italic; margin-left:14px; margin-top:1px; }
   .pane { display:none; } .pane.on { display:block; }
   /* ⭐ Sits under the tabs and stays with them. Which controller you are
      editing, and which config it is reading, are the two things you must not
      lose track of while scrolling a long settings list. */
   .devhead { border-bottom:1px solid #2c2e36; padding:10px 0 8px; }
   #renameRow:not(:empty) { padding:10px 0 4px; border-bottom:1px solid #2c2e36; }
+  /* ⭐ Label above value, fields side by side. A label COLUMN forced every
+     value to start at the same x, so a row holding one short string left most
+     of the width empty. */
+  .fields { display:flex; flex-wrap:wrap; gap:6px 26px; align-items:flex-end; }
+  .devrow { margin-bottom:14px; }
+  #confirmBox { position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:50;
+                align-items:center; justify-content:center; }
+  .confirmCard { background:#1d1f26; border:1px solid #2c2e36; border-radius:10px;
+                 padding:18px 22px; max-width:420px; }
+  .confirmCard h2 { margin:0 0 8px; border:none; padding:0; font-size:15px; }
+  .confirmCard p { margin:0 0 16px; color:#c8c9ce; }
+  .confirmBtns { display:flex; gap:8px; justify-content:flex-end; }
+  /* ⚠️ The label is the first child and takes the full width; everything after
+     it wraps onto the line below and sits together. Without the 100% the label
+     shares a line with the first control and the stacking is lost. */
+  .f { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
+  .f > span:first-child { flex:0 0 100%; font-size:11px; color:#71737c;
+                          letter-spacing:.03em; margin-bottom:-2px; }
   .devhead h2 { margin-top:0; border-bottom:none; padding-bottom:2px; }
   /* ⛔ Without this, scrollIntoView puts a focused control at the very top of
      the viewport -- underneath the sticky bars, invisible. The margin is the
@@ -441,7 +473,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.17.0</span>
+  <span class="muted" style="font-size:12px">v2.21.0</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -463,6 +495,13 @@
 </div>
 <div id="configs"><span class="muted">Refresh to load.</span></div>
 
+<!-- ⭐ Its own picker. The editor used to be reachable only by clicking a
+     config name in the table, which is not a place anyone looks for a way in. -->
+<h2>Editing</h2>
+<div class="kv">
+  <label>config</label>
+  <select id="editorPick" onchange="openConfig(this.value)"></select>
+</div>
 <h2 id="editorHead" style="display:none">Editing <code id="editorName"></code></h2>
 <div id="cfgEditor"></div>
 
@@ -484,12 +523,76 @@
   <div id="log"></div>
 </div>
 
+<!-- ⛔ In-page, so it can carry a real title and be dismissed by a controller.
+     A native confirm() is titled with the origin and ignores the pad. -->
+<div id="confirmBox" style="display:none">
+  <div class="confirmCard">
+    <h2>Controller config</h2>
+    <p id="confirmText"></p>
+    <div class="confirmBtns">
+      <button id="confirmYes" class="go" onclick="confirmYes()">OK</button>
+      <button onclick="confirmNo()">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <div id="gpbar">
   <span id="health" class="muted">checking…</span>
   <span id="gphint">controller: press any button to connect</span>
 </div>
 
 <script>
+// ⭐ Display names for controller tabs.
+//
+// ⓘ DISPLAY ONLY. The API still uses the ordinal -- ds5_usb_1 -- for linking,
+// config lookups and the session log. A name that changed the wire would make
+// every log line unmatchable against what is on screen.
+//
+// ⚠️ A new name each time a controller appears, by request. Names are held
+// against the ordinal only while the device is present, so unbridge and
+// rebridge gives a different one.
+var NAME_POOL = [
+  'Nexus', 'Matrix', 'Vector', 'Cipher', 'Static', 'Quark', 'Photon', 'Orbit',
+  'Cosmo', 'Helix', 'Zenith', 'Apex', 'Nova', 'Warp', 'Beacon', 'Synapse',
+  'Pulsar', 'Rift', 'Nebula', 'Strobe', 'Pixel', 'Sprite', 'Voxel', 'Combo',
+  'Buffer', 'Lag', 'Glitch', 'Macro', 'Turbo', '8-Bit', 'Chiptune', 'Analog',
+  'Raster', 'Polygon', 'Token', 'Bonus', 'Easter', 'Cheat', 'Tilt', 'Falcon',
+  'Badger', 'Viper', 'Raptor', 'Kraken', 'Grizzly', 'Coyote', 'Panther', 'Jackal',
+  'Raven', 'Cobalt', 'Mamba', 'Python', 'Boar', 'Condor', 'Lynx', 'Rhino',
+  'Stallion', 'Osprey', 'Puma', 'Ignite', 'Frost', 'Magma', 'Vortex', 'Cyclone',
+  'Quake', 'Avalanche', 'Blizzard', 'Monsoon', 'Eclipse', 'Sol', 'Luna', 'Geyser',
+  'Tundra', 'Crater', 'Cinder', 'Singe', 'Flint', 'Pyro', 'Tidal', 'Saber',
+  'Aegis', 'Titan', 'Odin', 'Zeus', 'Hades', 'Valkyrie', 'Rogue', 'Paladin',
+  'Ronin', 'Ninja', 'Shogun', 'Gladiator', 'Sentry', 'Vanguard', 'Garrison', 'Siege',
+  'Bastion', 'Enforcer', 'Ranger', 'Nugget', 'Spud', 'Pickle', 'Taco', 'Waffle',
+  'Bagel', 'Biscuit', 'Cheddar', 'Muffin', 'Bean', 'S\'more', 'Wasabi', 'Sprout',
+  'Dumpling', 'Noodle', 'Chili', 'Toast', 'Peanut', 'Mochi', 'Frito'
+];
+
+var DEVICE_NAMES = {};
+
+// ⛔ Never hands out a name already in use. Random is the point, but two
+// controllers called the same thing at once would defeat it entirely.
+function nameFor(ordinal) {
+  if (DEVICE_NAMES[ordinal]) return DEVICE_NAMES[ordinal];
+  var taken = {};
+  Object.keys(DEVICE_NAMES).forEach(function(k) { taken[DEVICE_NAMES[k]] = true; });
+  var free = NAME_POOL.filter(function(n) { return !taken[n]; });
+  var pool = free.length ? free : NAME_POOL;      // 119 names; this cannot realistically empty
+  DEVICE_NAMES[ordinal] = pool[Math.floor(Math.random() * pool.length)];
+  return DEVICE_NAMES[ordinal];
+}
+
+// Drops names for controllers that are no longer present, so the next bridge
+// gets a fresh one and the pool does not fill up with the departed.
+function pruneNames(list) {
+  var here = {};
+  (list || []).forEach(function(d) { here[d.ordinal] = true; });
+  Object.keys(DEVICE_NAMES).forEach(function(k) {
+    if (!here[k]) delete DEVICE_NAMES[k];
+  });
+}
+
 var KEYS = [];
 
 function base() { return document.getElementById('base').value.replace(/\/+$/, ''); }
@@ -619,7 +722,9 @@ function renderTabs(devices) {
             (ACTIVE === d.ordinal ? ' class="on"' : '') +
             ' title="' + (d.ready ? 'ready' : 'starting or tearing down') + '"' +
             ' onclick="showTab(\'' + esc(d.ordinal) + '\')">' +
-            dot + esc(d.ordinal) + '</button>';
+            dot + '<span class="tabname">' + esc(nameFor(d.ordinal)) + '</span>' +
+            '<em class="tabkind">' + esc(deviceLabelShort(d)) + '</em>' +
+            '</button>';
   });
   bar.innerHTML = html;
 
@@ -628,6 +733,7 @@ function renderTabs(devices) {
   var host = document.getElementById('devicePanes');
   host.innerHTML = '';
   HEADS = {};
+  pruneNames(devices);
   LAST_DEVICES.forEach(function(d) {
     var pane = document.createElement('div');
     pane.className = 'pane' + (ACTIVE === d.ordinal ? ' on' : '');
@@ -654,8 +760,19 @@ function renderTabs(devices) {
 // two-repo protocol change rather than a rename.
 function transportOf(sessionKind) {
   if (sessionKind === 'ds5') return 'Bluetooth';
-  if (sessionKind === 'ds5_usb' || sessionKind === 'ds5e_usb') return 'wired';
+  // ⓘ "USB", not "wired": it pairs like-for-like with BT -- both name the
+  // transport -- and matches the wire string ds5_usb.
+  if (sessionKind === 'ds5_usb' || sessionKind === 'ds5e_usb') return 'USB';
   return '';
+}
+
+// ⓘ Short form for the tab, where a full "DualSense (Bluetooth)" alongside a
+// name makes the label long enough to wrap.
+function deviceLabelShort(d) {
+  var base = (d.kind === 'ds5e_usb') ? 'DualSense Edge' : 'DualSense';
+  if (d.kind === 'ds5') return base + ' (BT)';
+  if (d.kind === 'ds5_usb' || d.kind === 'ds5e_usb') return base + ' (USB)';
+  return d.kind || 'controller';
 }
 
 function deviceLabel(d) {
@@ -676,7 +793,12 @@ function normSerial(raw) {
   return String(raw || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 32);
 }
 
-function stopAutoLink(configName, serial) {
+function stopAutoLink(configName, serial, who) {
+  askConfirm('Stop ' + (who || 'this controller') + ' claiming "' + configName + '"?',
+             function() { stopAutoLinkConfirmed(configName, serial); });
+}
+
+function stopAutoLinkConfirmed(configName, serial) {
   call('POST', '/api/v1/configs/' + encodeURIComponent(configName) + '/unautolink',
        { serial: serial })
     .then(function() { loadConfigs(); loadDevices(); }).catch(function(){});
@@ -785,8 +907,15 @@ function showTab(name) {
 function buildDevicePane(d) {
   var pane = document.getElementById('pane-' + d.ordinal);
   if (!pane) return;
-  var head = '<h2>' + esc(d.ordinal) + ' <span class="muted">' + esc(deviceLabel(d)) +
-             '</span></h2>';
+  // ⛔ NO HEADING. It repeated the tab -- same name, same kind, a centimetre
+  // apart. The tab IS the title.
+  //
+  // ⭐ Labels sit ON TOP of their values rather than in a column beside them.
+  // A label column forces every value to start at the same x, which left most
+  // of the width empty on a row holding one short string.
+  // ⭐ The same shape as the Devices table on Overview. The information is
+  // identical, so reading it two different ways was work for no gain -- and a
+  // row is denser than stacked labels, which left most of the width empty.
 
   // ⭐ Serial and auto-link on ONE line: the claim is made BY the serial, so
   // splitting them meant reading two rows to answer one question.
@@ -802,50 +931,47 @@ function buildDevicePane(d) {
     });
   });
 
-  head += '<div class="kv"><label>serial</label>';
-  if (mySerial) {
-    head += '<code class="good">' + esc(d.serial) + '</code>' +
-            '<span class="muted">auto link:</span>' +
-            (claimedBy
-              ? '<code>' + esc(claimedBy) + '</code>' +
-                '<button onclick="stopAutoLink(\'' + esc(claimedBy) + '\',\'' +
-                esc(mySerial) + '\')">Stop auto link</button>'
-              : '<span class="muted">Not auto linked</span>');
-  } else {
-    // ⚠️ No serial means nothing to remember this controller BY. Saying so
-    // beats offering a control that cannot work.
-    head += '<span class="warnc">none reported</span>' +
-            '<span class="muted">auto link unavailable without a serial</span>';
-  }
-  head += '</div>';
+  var serialCell = d.serial
+    ? '<code class="good">' + esc(d.serial) + '</code>'
+    : '<span class="warnc">(none reported — auto_link cannot work)</span>';
 
-  // ⭐ The auto-link button sits with the CONFIG it applies to, not with the
-  // settings Apply -- it answers "which config does this pad get next time",
-  // which is a question about that row, not about any setting.
-  var alreadyMine = mySerial && claimedBy &&
-                    claimedBy.toLowerCase() === (d.linked_config || '').toLowerCase();
-  var claimBtn = (mySerial && d.linked_config && !alreadyMine)
-    ? '<button onclick="claimAutoLink(\'' + esc(d.ordinal) + '\',\'' +
-      esc(d.linked_config) + '\',\'' + esc(mySerial) + '\')" ' +
-      'title="this controller gets this config whenever it bridges">' +
-      'Auto link</button>'
+  // ⓘ "ready" is gone. A bridged controller that is not ready is a state you
+  // see for a moment during setup, not something worth a permanent column.
+  //
+  // ⭐ AUTO LINKED, not "linked". They are different things and the old label
+  // named neither: the linked config is what this controller reads NOW and
+  // lives with the picker below; the auto-linked one is what it will get NEXT
+  // time it bridges.
+  var autoCell = claimedBy
+    ? '<code>' + esc(claimedBy) + '</code>'
+    : '<span class="muted">none</span>';
+
+  // ⭐ Its own column, beside Reset. Both are destructive and both act on this
+  // controller, so they belong together rather than one hiding inside a value.
+  var autoBtn = claimedBy
+    ? '<button onclick="stopAutoLink(\'' + esc(claimedBy) + '\',\'' +
+      esc(mySerial) + '\',\'' + esc(nameFor(d.ordinal)) + '\')" ' +
+      'title="this controller stops claiming a config at bridge time">' +
+      'Remove auto link</button>'
     : '';
 
-  // ⭐ Only configs whose kind matches are offered. The agent refuses a
-  // mismatch with a 400, and a dropdown that can only produce an error is worse
-  // than one that never offers the choice.
+  var head = '<table class="devrow"><tr><th>controller</th><th>serial</th>' +
+             '<th>auto linked config</th><th></th><th>id</th><th></th></tr>' +
+             '<tr><td>' + esc(deviceLabel(d)) + '</td>' +
+             '<td>' + serialCell + '</td>' +
+             '<td>' + autoCell + '</td>' +
+             '<td>' + autoBtn + '</td>' +
+             '<td><code>' + esc(d.ordinal) + '</code></td>' +
+             '<td><button onclick="unlink(\'' + esc(d.ordinal) +
+                 '\')" title="stop reading this config NOW — falls back to the shared settings">Reset</button>' +
+             '</td></tr></table>';
+
+  // ⭐ Only configs whose kind matches are offered. The agent refuses a mismatch
+  // with a 400, and a dropdown that can only produce an error is worse than one
+  // that never offers the choice.
   var kindOk = CONFIGS.filter(function(c) {
     return settingsKindOf(d.kind) === c.kind;
   });
-  // ⭐ A <select>, not a text field with a datalist.
-  //
-  // ⛔ The datalist looked right and was dead from a controller: it is an INPUT
-  // with suggestions attached, and browsers expose no API to open those. A
-  // select can at least be expanded -- gpActivate sets size, which turns it into
-  // a visible list the D-pad steps through, the same as the kind box.
-  //
-  // ⓘ Naming lives on the buttons beside it instead: New takes the next free
-  // number, Rename changes it afterwards. Both work without a keyboard.
   var options = '<option value="">(no config)</option>';
   kindOk.forEach(function(c) {
     options += '<option value="' + esc(c.name) + '"' +
@@ -853,7 +979,46 @@ function buildDevicePane(d) {
                esc(c.name) + '</option>';
   });
 
-  head += '<div class="kv"><label>config</label>' +
+  // ⭐ Auto link sits with the CONFIG it applies to. It answers "which config
+  // does this pad get next time", which is a question about that row.
+  //
+  // ⚠️ Rebuilt here after the serial row was replaced by the devices table --
+  // the table shows the serial and the claim, but the ACTION to change it
+  // belongs beside the config picker.
+  var alreadyMine = mySerial && claimedBy &&
+                    claimedBy.toLowerCase() === (d.linked_config || '').toLowerCase();
+  // ⛔ NOT A TOGGLE. Removing an auto link lives in the row above, next to the
+  // value it removes. This button only ever SETS one, so its label always
+  // describes what pressing it does -- a single button that sometimes set and
+  // sometimes cleared meant reading the label to find out which.
+  //
+  // ⓘ Offered only when there is something to claim: a controller with no
+  // serial cannot be remembered, a controller on the shared settings has no
+  // config to claim, and one already claiming this config has nothing to do.
+  // ⛔ SHOWN EVEN WHEN IT CANNOT BE USED, with the reason.
+  //
+  // It used to vanish, and on a wired pad it vanished ALWAYS -- a wired
+  // DualSense reports no serial, so there is nothing to remember it by. A
+  // button that is simply absent reads as a bug; one that is greyed with a
+  // reason answers the question.
+  var claimBtn;
+  if (!mySerial) {
+    claimBtn = '<button disabled title="this controller reports no serial, so ' +
+               'there is nothing to remember it by">Set auto link</button>';
+  } else if (!d.linked_config) {
+    claimBtn = '<button disabled title="pick a config first — there is nothing ' +
+               'to claim while it reads the shared settings">Set auto link</button>';
+  } else if (alreadyMine) {
+    claimBtn = '<button disabled title="already claimed by this config">' +
+               'Auto link</button>';
+  } else {
+    claimBtn = '<button onclick="claimAutoLink(\'' + esc(d.ordinal) + '\',\'' +
+               esc(d.linked_config) + '\',\'' + esc(mySerial) + '\')" ' +
+               'title="give this controller this config whenever it bridges">' +
+               'Auto link</button>';
+  }
+
+  head += '<div class="f"><span>currently linked config</span>' +
           // ⭐ Links on selection. Everything else on this page saves as you
           // change it, so an Apply here was inconsistent -- and one more D-pad
           // step between the picker and the buttons beside it.
@@ -1024,6 +1189,11 @@ function renderConfigEditor(hostId, configName, prefix, ordinal) {
           ? '<small class="warnc">' + esc(inert) + '</small>'
           : '<small>' + esc(meta.help || '') + '</small>';
 
+        // ⭐ On the NAME, not only in the help. Someone changing a value reads
+        // the label; the help is what you read when the value does not work.
+        var only = TRANSPORT_ONLY[meta.key];
+        var shownKey = only ? (meta.key + ' (' + only + ' only)') : meta.key;
+
         html += '<div class="row' + (managed ? '' : ' off') + (inert ? ' inert' : '') +
                 '" id="row-' + id + '">' +
                 '<input type="checkbox" id="mg-' + id + '"' + (managed ? ' checked' : '') +
@@ -1031,7 +1201,7 @@ function renderConfigEditor(hostId, configName, prefix, ordinal) {
                 ' onchange="toggleManaged(\'' + id + '\',\'' + esc(prefix) +
                 '\',\'' + esc(configName) + '\',\'' + esc(meta.key) + '\')" ' +
                 'title="unchecked: the listener leaves this alone and the game controls it">' +
-                '<div class="name">' + esc(meta.key) + note + '</div>' +
+                '<div class="name">' + esc(shownKey) + note + '</div>' +
                 control + '</div>';
       });
       html += '</div>';
@@ -1150,7 +1320,17 @@ function loadDevices() {
 
     renderTabs(list);
     DEVICE_SIG = deviceSignature(list);
-  }).catch(function(){});
+  }).catch(function(e) {
+    // ⛔ NOT SILENT. This used to be .catch(function(){}), and a one-word typo
+    // inside renderTabs -- pruneNames(list) where the parameter is `devices` --
+    // threw between building the tabs and building the panes. Tabs appeared,
+    // content did not, and the console was clean. A blank screen with no error
+    // is the hardest kind of fault there is.
+    //
+    // ⓘ A failed FETCH is expected and normal; the health indicator reports it.
+    // A thrown error inside the draw is not, and has to be visible.
+    if (e && e.stack) console.error('renderTabs failed:', e);
+  });
 }
 
 // ⭐ Suggest a name so the box is never empty.
@@ -1189,7 +1369,11 @@ function apply_suggested_name(existing) {
     box.dataset.suggested = name;
 }
 
-function loadConfigs() {
+// ⚠️ isRetry stops a failed load retrying forever. The FIRST attempt can race
+// the agent -- the page is opened as the listener starts -- and waiting for the
+// slow poll meant an empty config list for up to ten seconds, which reads as
+// "there are no configs" rather than "not loaded yet".
+function loadConfigs(isRetry) {
   call('GET', '/api/v1/configs').then(function(d) {
     // ⛔ Drop the shared section here rather than everywhere downstream. It is
     // an admin-level global default edited in the file, not a config anyone
@@ -1207,6 +1391,18 @@ function loadConfigs() {
       apply_suggested_name(list);
       return;
     }
+    // Keep the editor's picker in step with the list.
+    var ed = document.getElementById('editorPick');
+    if (ed) {
+      var cur = ed.value;
+      ed.innerHTML = '<option value="">(pick a config)</option>' +
+        list.filter(function(c) { return !c.read_only; })
+            .map(function(c) {
+              return '<option value="' + esc(c.name) + '">' + esc(c.name) + '</option>';
+            }).join('');
+      if (cur) ed.value = cur;
+    }
+
     var html = '<table><tr><th>name</th><th>kind</th><th>auto links</th>' +
                '<th></th></tr>';
     list.forEach(function(c) {
@@ -1226,12 +1422,11 @@ function loadConfigs() {
         : '<button onclick="renameConfig(\'' + esc(c.name) + '\')">Rename</button> ' +
           '<button class="warn" onclick="archive(\'' + esc(c.name) + '\')">Archive</button>';
 
-      // ⭐ The name opens the editor. Shared has no file to edit, so it stays
-      // plain text rather than a button that would only report a 403.
-      var nameCell = c.read_only
-        ? '<code>' + esc(c.name) + '</code> <span class="muted">(shared, read-only)</span>'
-        : '<button onclick="openConfig(\'' + esc(c.name) + '\')"><code>' +
-          esc(c.name) + '</code></button>';
+      // ⓘ Plain text. The name was a button that opened the editor, which made
+      // a list of names look like a row of controls -- and the editor has its
+      // own picker now, so the only way in is no longer clicking a label.
+      var nameCell = '<code>' + esc(c.name) + '</code>' +
+        (c.read_only ? ' <span class="muted">(shared, read-only)</span>' : '');
       html += '<tr><td>' + nameCell + '</td>' +
               '<td>' + esc(c.kind) + '</td>' +
               '<td>' + links + '</td>' +
@@ -1239,13 +1434,21 @@ function loadConfigs() {
     });
     host.innerHTML = html + '</table>';
     apply_suggested_name(list);
-  }).catch(function(){});
+  }).catch(function() {
+    // One quick retry: the first load can race the agent starting.
+    if (!isRetry) setTimeout(function() { loadConfigs(true); }, 1200);
+  });
 }
 
 // Clears a controller's config. Reachable from the devices table (Reset) and
 // from a controller tab's picker (its blank option) -- both mean the same
 // thing: this controller no longer has a config of its own.
 function unlink(ordinal) {
+  askConfirm('Unlink the config from ' + nameFor(ordinal) + '?',
+             function() { unlinkConfirmed(ordinal); });
+}
+
+function unlinkConfirmed(ordinal) {
   call('POST', '/api/v1/devices/' + encodeURIComponent(ordinal) + '/link', {})
     .then(function() { loadDevices(); loadConfigs(); }).catch(function(){});
 }
@@ -1319,7 +1522,46 @@ function commitRename(oldName) {
     }).catch(function(){ cancelRename(); });
 }
 
+// ⛔ ASK FIRST. Archive and Reset are one click each, sit next to controls you
+// press routinely, and there is nothing between the click and the loss. A
+// config takes real time to tune.
+//
+// ⓘ confirm() is a native dialog and a controller cannot dismiss one -- see the
+// rename row, which had to become inline for that reason. These are keyboard
+// and mouse actions in practice, and the alternative is losing work silently.
+// ⛔ NOT confirm(). Chrome titles a native dialog with the ORIGIN --
+// "127.0.0.1:48055 says" -- and a page cannot change that. It also cannot be
+// dismissed by a controller, which is why the rename row had to become inline.
+//
+// ⭐ This is ordinary markup, so it takes a real title, and ○ backs out of it.
+var CONFIRM_CB = null;
+
+function askConfirm(message, onYes) {
+  CONFIRM_CB = onYes;
+  document.getElementById('confirmText').textContent = message;
+  document.getElementById('confirmBox').style.display = 'flex';
+  var yes = document.getElementById('confirmYes');
+  if (yes) yes.focus();
+  gpCollect();
+}
+
+function confirmYes() {
+  var cb = CONFIRM_CB;
+  confirmNo();
+  if (cb) cb();
+}
+
+function confirmNo() {
+  CONFIRM_CB = null;
+  document.getElementById('confirmBox').style.display = 'none';
+  gpCollect();
+}
+
 function archive(name) {
+  askConfirm('Archive "' + name + '"?', function() { archiveConfirmed(name); });
+}
+
+function archiveConfirmed(name) {
   call('POST', '/api/v1/configs/' + encodeURIComponent(name) + '/archive', {})
     .then(function() { loadConfigs(); loadDevices(); }).catch(function(){});
 }
@@ -1366,6 +1608,16 @@ function gpCollect() {
   // ⛔ Scans the whole sticky block, not #stickyHead by name. The rename row is
   // a SIBLING of that element, so naming one missed the other -- Save and Cancel
   // were visible and unreachable, leaving ○ as the only way out.
+  // ⛔ When the dialog is open it is the ONLY thing focusable. A D-pad that can
+  // still reach the page behind a modal is worse than one that cannot move.
+  if (CONFIRM_CB) {
+    document.querySelectorAll('#confirmBox button').forEach(function(e) { list.push(e); });
+    GP_FOCUS = list;
+    if (GP_INDEX >= list.length) GP_INDEX = 0;
+    gpPaint();
+    return;
+  }
+
   var top = document.getElementById('stickyTop');
   if (top) {
     top.querySelectorAll('button, select, input').forEach(function(e) {
@@ -1532,7 +1784,10 @@ function gpPoll() {
   if (edge(0)) gpActivate();
   // ○ backs out of a rename first -- that is what it is for while one is open.
   if (edge(1)) {
-    if (RENAMING) { cancelRename(); }
+    // ⭐ ○ backs out of the dialog first -- it is modal, so nothing behind it
+    // should be reachable while it is open.
+    if (CONFIRM_CB) { confirmNo(); }
+    else if (RENAMING) { cancelRename(); }
     else { showTab('overview'); GP_INDEX = 0; gpCollect(); }
   }
   if (edge(2)) gpToggleManaged();    // square: managed / unmanaged
@@ -1574,6 +1829,9 @@ var LAST_COUNT = 0;
 var FAILS = 0;
 
 var IS_DOWN = null;
+// ⚠️ Separate from IS_DOWN: that starts null, so "not down" on first paint
+// would otherwise look like a recovery and reload the page on open.
+var IS_DOWN_EVER = false;
 
 // ⛔ Hides Overview rather than greying it. A greyed control still invites a
 // click, and every one of them would write to an agent that is not there --
@@ -1596,10 +1854,31 @@ function setDown(down) {
   // visible on every controller tab afterwards -- showTab dutifully removed the
   // class and nothing happened.
   if (pane) pane.style.display = down ? 'none' : '';
+  if (!down) {
+    // ⭐ RELOAD, rather than repainting.
+    //
+    // The listener stops on every build, so "the agent came back" almost always
+    // means a NEW build -- and the page is served from inside the exe, so the
+    // copy in this window is a stale version of a file that has just changed.
+    // Repainting would leave yesterday's page talking to today's agent.
+    //
+    // ⓘ Served with Cache-Control: no-store, so an ordinary reload fetches the
+    // new one. IS_DOWN starts null, so this cannot fire on first load.
+    if (IS_DOWN_EVER) {
+      location.reload();
+      return;
+    }
+    loadDevices();
+  }
   if (down) {
+    IS_DOWN_EVER = true;
     ACTIVE = 'overview';
     renderTabs([]);
-    DEVICE_SIG = null;                   // so the next success redraws
+    // ⛔ NOT null. pollDevices treats null as "first load, already drawn" and
+    // returns without redrawing -- so this asked for a redraw and got the one
+    // thing that guarantees none. Any value that cannot match a real signature
+    // works, and an empty string is not null.
+    DEVICE_SIG = '';                     // so the next success redraws
   }
 }
 
@@ -1672,6 +1951,19 @@ window.addEventListener('gamepadconnected', function() { gpCollect(); pollDevice
 window.addEventListener('gamepaddisconnected', pollDevices);
 
 setInterval(pollDevices, POLL_MS);
+
+// ⭐ Configs refresh on their own clock, slowly.
+//
+// ⛔ They were loaded once at startup and then only as a side effect of a
+// device change -- so with NO controller bridged nothing ever refreshed them,
+// and a startup that happened while the agent was unreachable left the list
+// empty until something else happened to reload it.
+//
+// ⓘ 10s rather than the 4s device poll: a config list changes when someone
+// changes it, not on its own.
+setInterval(function() {
+  if (!IS_DOWN) loadConfigs();
+}, 10000);
 requestAnimationFrame(gpPoll);
 
 // Picking a different controller changes what the suggestion should be.
