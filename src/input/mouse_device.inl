@@ -48,7 +48,10 @@ inline void pump_loop()
 
     while (g_running.load() && !g_stop.load()) {
         int8_t dx = 0, dy = 0;
-        if (ctm_gyro_mouse::shared_mailbox().drain(&dx, &dy)) {
+        const bool moved = ctm_gyro_mouse::shared_mailbox().drain(&dx, &dy);
+        // ⭐ A trigger pull needs reports even with no movement -- otherwise the
+        // pump sleeps through it and the gun never fires.
+        if (moved || ctm_trigger_fire::wants_reports()) {
             std::shared_ptr<CtmUsbipDevice> dev;
             {
                 std::lock_guard<std::mutex> lock(g_mutex);
@@ -58,12 +61,21 @@ inline void pump_loop()
                 CTM_INPUT_REPORT report = {};
                 report.endpoint_address = kMouseInEndpoint;
                 report.length = 4;
-                report.data[0] = 0x00;                       // no buttons
+                report.data[0] = ctm_trigger_fire::button_byte();
                 report.data[1] = static_cast<uint8_t>(dx);   // relative X
                 report.data[2] = static_cast<uint8_t>(dy);   // relative Y
                 report.data[3] = 0x00;                       // wheel
                 dev->inject_synthetic_input(report);
             }
+            // ⛔ SLEEP AFTER SENDING TOO, not only when idle.
+            //
+            // Movement drains the mailbox, so an empty mailbox used to be the
+            // only way out of the loop -- but a held trigger keeps
+            // wants_reports() true forever with nothing to drain, and the loop
+            // then spun flat out, pushing thousands of reports a second into an
+            // endpoint expecting about 250. Reports were lost and the gun fired
+            // erratically or not at all.
+            std::this_thread::sleep_for(std::chrono::milliseconds(4));
         } else {
             // Nothing pending: sleep a mouse poll interval rather than spin.
             // ~4ms keeps latency well under the 10ms endpoint bInterval while

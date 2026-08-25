@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.16.2 -- see the changelog at the bottom of this comment.
+  VERSION 2.17.0 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,12 @@
   tidy message about it.
 
   CHANGELOG
+    2.17.0 ⛔ Controller input is ignored while this window is not focused.
+           Playing a game moved focus around this page and toggled settings --
+           the browser gamepad API keeps reporting the pad whether or not the
+           page is in front, so every shot fired was also a button press here.
+           ⚠️ Not cosmetic: a stray ✕ while playing can flip a managed checkbox
+           or change a config, and you would not see it happen.
     2.16.2 ⛔ Fix: Overview's contents appeared on every controller tab. The
            disconnected handling set an INLINE display on the Overview pane, and
            an inline style beats the .pane/.pane.on class rules permanently --
@@ -435,7 +441,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.16.2</span>
+  <span class="muted" style="font-size:12px">v2.17.0</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -1440,6 +1446,23 @@ function gpTab(delta) {
 }
 
 function gpPoll() {
+  // ⛔ IGNORE THE PAD WHEN THIS WINDOW IS NOT IN FRONT.
+  //
+  // The gamepad API reports a controller regardless of which window has focus,
+  // so playing a game drove this page too: focus jumping around, checkboxes
+  // toggling, configs changing -- invisibly, because the page was behind the
+  // game. Polling continues so the connection state stays live; only the INPUT
+  // is dropped.
+  if (!document.hasFocus()) {
+    GP_PREV = {};                 // so returning does not replay a held button
+    // ⚠️ Say so. A controller that silently stops working looks like a fault,
+    // and someone would go looking for one.
+    var hintOff = document.getElementById('gphint');
+    if (hintOff) hintOff.textContent = 'controller ignored while this window is behind — click it to use the pad';
+    requestAnimationFrame(gpPoll);
+    return;
+  }
+
   var pads = navigator.getGamepads ? navigator.getGamepads() : [];
   var live = [];
   for (var i = 0; i < pads.length; i++) { if (pads[i]) live.push(pads[i]); }

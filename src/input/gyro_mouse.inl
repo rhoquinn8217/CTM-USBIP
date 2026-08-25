@@ -638,6 +638,12 @@ inline void on_ds5_input(const void *deviceKey,
     // Same resolution the audio path uses: shared section unless linked.
     const std::string resolved = device_settings_section(kind, linkedConfig);
     const char *section = resolved.c_str();
+    // ⭐ The trigger-fire watcher rides the same input report and the same
+    // resolved section. Here rather than in its own hook because this function
+    // already has both, and a second hook would mean a second place to keep in
+    // step when the section rules change.
+    ctm_trigger_fire::observe_input(d, len, section);
+
     MouseDelta delta;
     GyroMouse &g = gyro_for(deviceKey);
     // Cheap: a struct copy per report, and it keeps the calibration lookup off

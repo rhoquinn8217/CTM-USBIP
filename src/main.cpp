@@ -55,6 +55,11 @@ namespace {
 #include "log/device_log.inl"
 #include "config/device_config.inl"
 #include "audio/ds5_output_overrides.inl"
+// ⚠️ trigger_watch BEFORE trigger_fire: the fire path gates on the watcher's
+// "is a replacement active" so it only clicks while the game is sending the
+// effect being replaced.
+#include "input/trigger_watch.inl"        // observes and replaces trigger fields
+#include "input/trigger_fire.inl"         // R2 -> virtual mouse click, gated on the above
 #include "input/gyro_calibration.inl"   // read before gyro_mouse.inl uses it
 #include "input/gyro_mouse.inl"          // needs device_config_* and device_section_for
 #include "backend/backend.inl"

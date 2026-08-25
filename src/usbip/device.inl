@@ -1282,6 +1282,10 @@ private:
             (void)backend_->remote_interface_feature(interfaceNumber, false, raw, &reply, 250);
             return kStatusOk;
         }
+        // ⭐ Watch the adaptive trigger fields on their way past. Observation
+        // only, and off unless trigger_watch is set -- it exists to find out
+        // what a game sends, which cannot be read from another tool because the
+        // game re-claims those fields every report.
         CTM_USB_EVENT event = {};
         event.event_type = reportType == 0x02 ? CTM_USB_EVENT_HID_OUTPUT :
             (reportType == 0x03 ? CTM_USB_EVENT_FEATURE_SET : CTM_USB_EVENT_CONTROL);
@@ -1540,6 +1544,20 @@ private:
         }
         ds5_apply_output_overrides(event.data, event.length, profile_.device_descriptor,
                                    linked_config());
+
+        // ⭐ HERE, not on the control-transfer path.
+        //
+        // ⛔ It was hooked into the SET_REPORT handler first and never fired: a
+        // game drives the triggers through the INTERRUPT OUT endpoint, which is
+        // this function. The log line below -- "usb endpoint out ep=0x03" --
+        // said so all along and was read as background noise.
+        //
+        // ⓘ event.data is already a mutable copy here, which is also why the
+        // const juggling the other path needed is unnecessary.
+        ctm_trigger_watch::observe(this, profile_.device_descriptor, linked_config(),
+                                   event.data, event.length);
+        ctm_trigger_watch::replace_if_matched(profile_.device_descriptor, linked_config(),
+                                              event.data, event.length);
         std::cout << "usb endpoint out"
                   << " ep=0x" << std::hex << std::setw(2) << std::setfill('0')
                   << static_cast<unsigned int>(endpointAddress)
