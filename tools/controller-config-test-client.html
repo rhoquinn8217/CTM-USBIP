@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.27.0 -- see the changelog at the bottom of this comment.
+  VERSION 2.29.1 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -395,7 +395,12 @@
   /* ⭐ The controller focus ring is deliberately loud. On a TV across a room a
      subtle outline is invisible, and not knowing what is selected makes the
      whole thing unusable. */
-  .gp-focus { outline:3px solid #6c8cff !important; outline-offset:2px;
+  /* ⛔ An outline is drawn OUTSIDE the element, so a table cell or any
+     overflow:hidden ancestor clips it -- which is why Rename and Archive in the
+     Configs table could be focused with no halo to show it. The background and
+     border are inside the element and cannot be clipped. */
+  .gp-focus { background:#2a3566 !important; border-color:#6c8cff !important;
+              outline:3px solid #6c8cff !important; outline-offset:2px;
               border-radius:6px; }
   /* ⛔ WAS position:fixed, and that is what hid the last setting. A fixed
      element is outside the flow, so scrollIntoView cannot see it -- the browser
@@ -476,7 +481,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.27.0</span>
+  <span class="muted" style="font-size:12px">v2.29.1</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -1303,6 +1308,9 @@ function preserveScroll(fn) {
   var end = el && el.selectionEnd;
   fn();
   if (window.scrollY !== y) window.scrollTo(0, y);
+  // ⭐ The pad's list is rebuilt too -- every element it pointed at was just
+  // replaced.
+  gpCollect();
   if (id) {
     var again = document.getElementById(id);
     if (again && again.focus) {
@@ -1481,6 +1489,9 @@ function loadConfigs(isRetry) {
     });
     host.innerHTML = html + '</table>';
     apply_suggested_name(list);
+    // ⭐ This table holds Rename and Archive, so replacing it detaches whatever
+    // the pad was pointing at.
+    gpCollect();
   }).catch(function() {
     // One quick retry: the first load can race the agent starting.
     if (!isRetry) setTimeout(function() { loadConfigs(true); }, 1200);
@@ -1606,9 +1617,13 @@ function askConfirm(message, onYes) {
   CONFIRM_CB = onYes;
   document.getElementById('confirmText').textContent = message;
   document.getElementById('confirmBox').style.display = 'flex';
-  var yes = document.getElementById('confirmYes');
-  if (yes) yes.focus();
   gpCollect();
+  // ⭐ DEFAULT TO CANCEL. Everything this dialog guards destroys something, and
+  // a reflex press should do nothing rather than the destructive thing.
+  GP_INDEX = Math.max(0, GP_FOCUS.length - 1);
+  gpPaint();
+  var no = document.querySelector('#confirmBox button:last-of-type');
+  if (no) no.focus();
 }
 
 function confirmYes() {
@@ -1714,6 +1729,35 @@ function gpCollect() {
 }
 
 function gpPaint() {
+  // ⛔⛔ RE-COLLECT IF THE LIST HAS GONE STALE.
+  //
+  // Every redraw replaces the elements, and GP_FOCUS keeps holding the OLD
+  // ones. A detached node still accepts a class and still fires its onclick --
+  // which is why a button could be "focused" and clickable with no halo
+  // anywhere: the highlight was landing on a node that is no longer in the
+  // page, while the button you could see was a different element entirely.
+  //
+  // ⛔ CHECK THE ELEMENT WE ARE ABOUT TO PAINT, not the first in the list.
+  //
+  // Testing GP_FOCUS[0] was wrong: on Overview the first entry is the agent
+  // box, which is never rebuilt -- so the list looked fresh while the Configs
+  // table below it had been replaced wholesale. The Rename and Archive buttons
+  // were detached, took the class anyway, and showed nothing.
+  //
+  // ⓘ isConnected is the exact question: is this node still in the document.
+  var want = GP_FOCUS[GP_INDEX];
+  if (want && !want.isConnected) {
+    gpCollect();
+    return;                       // gpCollect paints
+  }
+
+  // ⛔ CLAMP FIRST. A redraw replaces the elements, and if the new list is
+  // shorter -- picking "(no config)" removes the Rename button -- the index can
+  // point past the end. GP_FOCUS[GP_INDEX] is then undefined, gpPaint returns
+  // early, and the pad appears dead with no way to recover.
+  if (GP_INDEX >= GP_FOCUS.length) GP_INDEX = Math.max(0, GP_FOCUS.length - 1);
+  if (GP_INDEX < 0) GP_INDEX = 0;
+
   document.querySelectorAll('.gp-focus').forEach(function(e) { e.classList.remove('gp-focus'); });
   var el = GP_FOCUS[GP_INDEX];
   if (!el) return;
@@ -1879,7 +1923,16 @@ function gpPoll() {
   // ◄ ► step a focused number. Repeats while held, like the D-pad, because
   // crossing a large range one press at a time is not usable.
   var left = pressed(14), right = pressed(15);
-  if (edge(14)) { gpStepValue(-1); GP_REPEAT_AT = now + 400; }
+  // ⭐ In the dialog, left and right move between OK and Cancel. Two buttons
+  // side by side read as a horizontal choice, and reaching for the D-pad's
+  // vertical axis to answer one is a small surprise every time.
+  if (CONFIRM_CB && (edge(14) || edge(15))) {
+    GP_INDEX = edge(14) ? Math.max(0, GP_INDEX - 1)
+                        : Math.min(GP_FOCUS.length - 1, GP_INDEX + 1);
+    gpPaint();
+    GP_REPEAT_AT = now + 400;
+  }
+  else if (edge(14)) { gpStepValue(-1); GP_REPEAT_AT = now + 400; }
   else if (edge(15)) { gpStepValue(1); GP_REPEAT_AT = now + 400; }
   else if ((left || right) && now >= GP_REPEAT_AT) {
     gpStepValue(left ? -1 : 1); GP_REPEAT_AT = now + 90;
@@ -2157,6 +2210,22 @@ function selfTest() {
   confirmNo();
   ok('dialog closes', document.getElementById('confirmBox').style.display === 'none');
   ok('callback cleared', CONFIRM_CB === null);
+
+  // 8. ⭐ THE ONE THAT TOOK THREE ATTEMPTS. After a redraw the pad's list held
+  //    DETACHED nodes -- they still take a class and still fire onclick, so a
+  //    button appeared focusable with no halo anywhere, and the highlight was
+  //    landing on an element that was no longer in the page.
+  renderTabs(fake);
+  gpCollect();
+  var before = GP_FOCUS[0];
+  renderTabs(fake);                        // redraw: every element is replaced
+  ok('focus list is not stale after a redraw',
+     !GP_FOCUS.length || GP_FOCUS[0].isConnected,
+     'first entry detached');
+  ok('every focus target is in the document',
+     GP_FOCUS.every(function(e) { return e.isConnected; }));
+  ok('index is within the list', GP_INDEX < Math.max(1, GP_FOCUS.length));
+  ok('redraw really did replace elements', before !== GP_FOCUS[0] || !before);
 
   // Leave the page as it was found.
   renderTabs(LAST_DEVICES || []);
