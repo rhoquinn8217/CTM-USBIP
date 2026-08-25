@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.21.0 -- see the changelog at the bottom of this comment.
+  VERSION 2.27.0 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -383,6 +383,9 @@
      the moment a device row wraps onto two lines. */
   button, select, input, .row { scroll-margin-top: var(--stickH, 180px);
                                 scroll-margin-bottom: 70px; }
+  /* ⛔ The sticky header is always on screen, so scrolling to reach it is never
+     necessary -- and doing so dragged the settings list underneath it. */
+  #stickyTop button, #stickyTop select, #stickyTop input { scroll-margin:0; }
   /* ⛔ The focus ring is drawn OUTSIDE the element it marks, so an element
      flush against this block's edge gets its ring clipped by that edge. The
      padding is for the RING, not the control. */
@@ -473,7 +476,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.21.0</span>
+  <span class="muted" style="font-size:12px">v2.27.0</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -794,7 +797,7 @@ function normSerial(raw) {
 }
 
 function stopAutoLink(configName, serial, who) {
-  askConfirm('Stop ' + (who || 'this controller') + ' claiming "' + configName + '"?',
+  askConfirm('Stop automatically setting ' + configName + ' for ' + (who || 'this controller') + '?',
              function() { stopAutoLinkConfirmed(configName, serial); });
 }
 
@@ -1010,12 +1013,16 @@ function buildDevicePane(d) {
                'to claim while it reads the shared settings">Set auto link</button>';
   } else if (alreadyMine) {
     claimBtn = '<button disabled title="already claimed by this config">' +
-               'Auto link</button>';
+               'Set auto link</button>';
   } else {
-    claimBtn = '<button onclick="claimAutoLink(\'' + esc(d.ordinal) + '\',\'' +
-               esc(d.linked_config) + '\',\'' + esc(mySerial) + '\')" ' +
+    // ⭐ Live even when another config holds the claim -- REPLACING one is the
+    // common case, and a disabled button meant removing the old claim first
+    // just to make this one work again.
+    claimBtn = '<button onclick="setAutoLink(\'' + esc(d.ordinal) + '\',\'' +
+               esc(d.linked_config) + '\',\'' + esc(mySerial) + '\',\'' +
+               esc(claimedBy) + '\')" ' +
                'title="give this controller this config whenever it bridges">' +
-               'Auto link</button>';
+               'Set auto link</button>';
   }
 
   head += '<div class="f"><span>currently linked config</span>' +
@@ -1285,6 +1292,29 @@ function gpStepValue(dir) {
   el.dispatchEvent(new Event('change'));
 }
 
+// ⭐ A redraw must not move the page under you. renderTabs rebuilds panes with
+// innerHTML, which resets scroll and drops focus -- so a poll landing mid-edit
+// threw away the rest of what you were typing.
+function preserveScroll(fn) {
+  var y = window.scrollY;
+  var el = document.activeElement;
+  var id = el && el.id;
+  var start = el && el.selectionStart;
+  var end = el && el.selectionEnd;
+  fn();
+  if (window.scrollY !== y) window.scrollTo(0, y);
+  if (id) {
+    var again = document.getElementById(id);
+    if (again && again.focus) {
+      again.focus();
+      // ⓘ Put the caret back too, or focus alone still loses your place.
+      if (start != null && again.setSelectionRange) {
+        try { again.setSelectionRange(start, end); } catch (e) {}
+      }
+    }
+  }
+}
+
 function loadDevices() {
   call('GET', '/api/v1/devices').then(function(d) {
     var list = d.devices || [];
@@ -1318,7 +1348,7 @@ function loadDevices() {
     });
     host.innerHTML = html + '</table>';
 
-    renderTabs(list);
+    preserveScroll(function() { renderTabs(list); });
     DEVICE_SIG = deviceSignature(list);
   }).catch(function(e) {
     // ⛔ NOT SILENT. This used to be .catch(function(){}), and a one-word typo
@@ -1384,7 +1414,24 @@ function loadConfigs(isRetry) {
     // A device pane's picker is built from this, so rebuild the panes whenever
     // the config list changes -- otherwise a newly created config would not
     // appear until the next device refresh.
-    if (LAST_DEVICES.length) LAST_DEVICES.forEach(buildDevicePane);
+    // ⛔ ONLY WHEN THE LIST ACTUALLY CHANGED.
+    //
+    // Rebuilding a device pane replaces every element in it, so a background
+    // poll landing while you are working discards a half-typed value, drops
+    // focus and resets the scroll. Ten seconds of that is unusable.
+    //
+    // ⭐ The panes depend on the config NAMES and kinds, not on anything that
+    // changes on its own -- so comparing a signature makes the common case
+    // (nothing changed) cost nothing at all. Same approach as DEVICE_SIG.
+    var sig = list.map(function(c) {
+      return c.name + '|' + c.kind + '|' + (c.auto_link || []).join(',');
+    }).join(';');
+    if (sig !== CONFIG_SIG) {
+      CONFIG_SIG = sig;
+      if (LAST_DEVICES.length) preserveScroll(function() {
+        LAST_DEVICES.forEach(buildDevicePane);
+      });
+    }
     var host = document.getElementById('configs');
     if (!list.length) {
       host.innerHTML = '<span class="muted">No configs yet. Create one above.</span>';
@@ -1444,7 +1491,7 @@ function loadConfigs(isRetry) {
 // from a controller tab's picker (its blank option) -- both mean the same
 // thing: this controller no longer has a config of its own.
 function unlink(ordinal) {
-  askConfirm('Unlink the config from ' + nameFor(ordinal) + '?',
+  askConfirm('Reset all custom configuration for ' + whoIs(ordinal) + '?',
              function() { unlinkConfirmed(ordinal); });
 }
 
@@ -1536,6 +1583,25 @@ function commitRename(oldName) {
 // ⭐ This is ordinary markup, so it takes a real title, and ○ backs out of it.
 var CONFIRM_CB = null;
 
+// Nickname AND serial: the nickname is how you recognise the tab, the serial is
+// what the setting is keyed on, and a destructive confirmation should name its
+// target precisely.
+function whoIs(ordinal) {
+  var d = (LAST_DEVICES || []).filter(function(x) { return x.ordinal === ordinal; })[0];
+  var nick = nameFor(ordinal);
+  return (d && d.serial) ? (nick + ' (' + d.serial + ')') : nick;
+}
+
+// Sets the claim, asking only when it would REPLACE one. Setting a first claim
+// is unremarkable; changing one silently alters what a controller does next
+// time it bridges.
+function setAutoLink(ordinal, configName, serial, currentlyClaimedBy) {
+  if (!currentlyClaimedBy) { claimAutoLink(ordinal, configName, serial); return; }
+  askConfirm('Change auto linked config for ' + whoIs(ordinal) +
+             ' from ' + currentlyClaimedBy + ' to ' + configName + '?',
+             function() { claimAutoLink(ordinal, configName, serial); });
+}
+
 function askConfirm(message, onYes) {
   CONFIRM_CB = onYes;
   document.getElementById('confirmText').textContent = message;
@@ -1558,7 +1624,7 @@ function confirmNo() {
 }
 
 function archive(name) {
-  askConfirm('Archive "' + name + '"?', function() { archiveConfirmed(name); });
+  askConfirm('Archive ' + name + '?', function() { archiveConfirmed(name); });
 }
 
 function archiveConfirmed(name) {
@@ -1672,10 +1738,28 @@ function gpActivate() {
     GP_SELECT_WAS = el.selectedIndex;
     el.classList.add('gp-selecting');
     el.size = Math.min(el.options.length, 8);   // show the list
+    // ⛔ Nothing in the sticky block needs scrolling to: it is pinned on screen by
+  // definition. Calling scrollIntoView on it moved the SETTINGS list beneath,
+  // so navigating the header appeared to scroll the page for no reason.
+  if (!el.closest || !el.closest('#stickyTop')) {
     el.scrollIntoView({ block: 'nearest' });
+  }
     return;
   }
   if (el.type === 'checkbox') { el.checked = !el.checked; el.dispatchEvent(new Event('change')); return; }
+
+  // ⭐ A text field gets REAL focus, so a keyboard can type into it.
+  //
+  // ⛔ It fell through to el.click() below, which marks a field as the D-pad's
+  // position without focusing it -- so it looked selected and swallowed every
+  // keystroke, and you had to reach for the mouse. A pad cannot type either
+  // way, but the pad is not always the only thing on the desk.
+  if (el.tagName === 'INPUT') {
+    el.focus();
+    if (el.select) el.select();
+    return;
+  }
+
   el.click();
 }
 
@@ -1818,6 +1902,7 @@ function gpPoll() {
 // controller focus -- every four seconds, forever. The signature check makes
 // the common case (nothing changed) cost nothing visible.
 var DEVICE_SIG = null;
+var CONFIG_SIG = null;   // so a config poll only redraws when something changed
 var POLL_MS = 4000;
 
 // ⭐ Health is measured from the last SUCCESSFUL poll, not the last attempt.
@@ -1873,6 +1958,15 @@ function setDown(down) {
   if (down) {
     IS_DOWN_EVER = true;
     ACTIVE = 'overview';
+    // ⛔ The sticky header lives OUTSIDE the panes, so hiding the overview pane
+    // left a controller's row and picker sitting above the "can't reach the
+    // listener" message -- describing a session we can no longer see, with
+    // controls that would write to nothing.
+    HEADS = {};
+    var sh = document.getElementById('stickyHead');
+    if (sh) sh.innerHTML = '';
+    var rr = document.getElementById('renameRow');
+    if (rr) rr.innerHTML = '';
     renderTabs([]);
     // ⛔ NOT null. pollDevices treats null as "first load, already drawn" and
     // returns without redrawing -- so this asked for a redraw and got the one
@@ -1962,7 +2056,13 @@ setInterval(pollDevices, POLL_MS);
 // ⓘ 10s rather than the 4s device poll: a config list changes when someone
 // changes it, not on its own.
 setInterval(function() {
-  if (!IS_DOWN) loadConfigs();
+  // ⛔ NOT WHILE YOU ARE EDITING. loadConfigs rebuilds every device pane, which
+  // replaces the element you are typing in -- so a background refresh landing
+  // mid-edit threw away the value and moved the focus. A config list changes
+  // when someone changes it, and the someone is you.
+  var el = document.activeElement;
+  var busy = el && (el.tagName === 'INPUT' || el.tagName === 'SELECT');
+  if (!IS_DOWN && !busy && !CONFIRM_CB && !RENAMING) loadConfigs();
 }, 10000);
 requestAnimationFrame(gpPoll);
 
@@ -1970,7 +2070,114 @@ requestAnimationFrame(gpPoll);
 document.getElementById('newKind').addEventListener('change', function() {
   loadConfigs();      // re-suggest a name for the new kind
 });
-refreshAll();
+// ---- Self test --------------------------------------------------------------
+//
+// ⭐ Open with ?selftest to run it. In the BROWSER rather than under node,
+// because the browser is already here -- adding a JS runtime to a repo that
+// needs only MSVC and vcpkg would cost more than these tests are worth.
+//
+// ⛔ EVERY case below is a fault that actually shipped. This page broke six
+// times in one day and every break was found by hand, after install, usually
+// as "the tab is empty". They share two causes: something referenced before it
+// exists, and something thrown inside a draw that a bare .catch swallowed.
+//
+// ⚠️ It is NOT automatic -- build.ps1 cannot run it. A check you open after a
+// change beats a perfect one that does not exist.
+function selfTest() {
+  var pass = 0, fail = 0, out = [];
+  function ok(name, cond, detail) {
+    if (cond) { pass++; out.push('  PASS  ' + name); }
+    else { fail++; out.push('  FAIL  ' + name + (detail ? '  — ' + detail : '')); }
+  }
+
+  // 1. Nothing above the doctype. A stray edit once put four lines of script
+  //    there and the browser rendered them as text.
+  ok('document starts with html', document.documentElement.tagName === 'HTML');
+
+  // 2. Every function the page calls exists. Deleting a block that sits just
+  //    above its caller has happened three times.
+  ['renderTabs','buildDevicePane','setStickyHead','paintStickyHead','measureSticky',
+   'nameFor','pruneNames','deviceLabel','deviceLabelShort','settingsKindOf',
+   'askConfirm','confirmYes','confirmNo','whoIs','setAutoLink','claimAutoLink',
+   'stopAutoLink','archive','unlink','renameConfig','loadConfigs','loadDevices',
+   'openConfig','applyPick','newConfigFor','preserveScroll','setDown','gpCollect'
+  ].forEach(function(n) {
+    ok('function ' + n, typeof window[n] === 'function');
+  });
+
+  // 3. The name pool parses. One unescaped apostrophe in S'more truncated the
+  //    array and every statement after it became a syntax error.
+  ok('name pool intact', Array.isArray(NAME_POOL) && NAME_POOL.length > 100,
+     'length ' + (NAME_POOL || []).length);
+  ok("name pool survives S'more", NAME_POOL.indexOf("S'more") >= 0);
+  ok('names are unique', new Set(NAME_POOL).size === NAME_POOL.length);
+
+  // 4. ⭐ THE BIG ONE. renderTabs with real-shaped devices, which is what every
+  //    empty-tab failure would have been caught by.
+  var fake = [
+    { ordinal:'ds5_1', kind:'ds5', serial:'aa:bb:cc:dd:ee:ff',
+      linked_config:'', reads:'shared', ready:true, supports_config:true },
+    { ordinal:'ds5e_usb_1', kind:'ds5e_usb', serial:'11:22:33:44:55:66',
+      linked_config:'ds5_edge_config', reads:'ds5_edge_config', ready:true,
+      supports_config:true }
+  ];
+  var threw = '';
+  try { renderTabs(fake); } catch (e) { threw = e.message; }
+  ok('renderTabs does not throw', !threw, threw);
+
+  ok('a tab per device', document.querySelectorAll('#tabs button').length >= 3,
+     'overview + 2');
+  fake.forEach(function(d) {
+    var pane = document.getElementById('pane-' + d.ordinal);
+    ok('pane exists for ' + d.ordinal, !!pane);
+    ok('header built for ' + d.ordinal, !!HEADS[d.ordinal]);
+  });
+
+  // 5. Names are assigned, distinct, and stable while the device is present.
+  var n1 = nameFor('ds5_1');
+  ok('name assigned', !!n1);
+  ok('name stable', nameFor('ds5_1') === n1);
+  ok('names differ per device', nameFor('ds5e_usb_1') !== n1);
+
+  // 6. Down and back. DEVICE_SIG = null once meant "redraw next time" AND
+  //    "never loaded", so the redraw never happened.
+  setDown(true);
+  ok('tabs cleared when down', document.querySelectorAll('#tabs button').length <= 1);
+  ok('header cleared when down',
+     document.getElementById('stickyHead').innerHTML === '');
+  ok('signature is not the never-loaded sentinel', DEVICE_SIG !== null);
+  setDown(false);
+
+  // 7. The dialog opens, traps the pad, and closes.
+  askConfirm('self test', function(){});
+  ok('dialog visible', document.getElementById('confirmBox').style.display === 'flex');
+  gpCollect();
+  ok('pad focus trapped in dialog',
+     GP_FOCUS.length > 0 && GP_FOCUS.every(function(e) { return e.closest('#confirmBox'); }));
+  confirmNo();
+  ok('dialog closes', document.getElementById('confirmBox').style.display === 'none');
+  ok('callback cleared', CONFIRM_CB === null);
+
+  // Leave the page as it was found.
+  renderTabs(LAST_DEVICES || []);
+
+  var head = (fail ? 'FAILED' : 'PASSED') + ' — ' + pass + ' passed, ' + fail + ' failed';
+  console.log('%c' + head, 'font-weight:bold;color:' + (fail ? '#ff8f8f' : '#7fd18c'));
+  console.log(out.join('\n'));
+  document.body.innerHTML =
+    '<pre style="padding:20px;font:13px ui-monospace,monospace">' +
+    esc(head) + '\n\n' + esc(out.join('\n')) + '</pre>';
+  return fail === 0;
+}
+
+if (location.search.indexOf('selftest') >= 0) {
+  // ⓘ After refreshAll so KEYS and CONFIGS are populated the way they would be
+  // in use; the interesting failures need real data shapes, not empty ones.
+  refreshAll();
+  setTimeout(selfTest, 1200);
+} else {
+  refreshAll();
+}
 </script>
 </body>
 </html>

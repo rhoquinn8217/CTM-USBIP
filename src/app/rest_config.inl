@@ -163,6 +163,17 @@ static std::string rest_shared_json(const std::vector<RestDeviceView> &devices)
 
 static std::string rest_configs_json()
 {
+    // ⛔ SCAN DISK FIRST, the same as the detail endpoint below.
+    //
+    // Without it this answered from whatever happened to be loaded, and at
+    // startup that is nothing but the shared section -- the config files are
+    // only read when a device bridges. So a page opened alongside the listener
+    // was told there were no configs, correctly reported it, and looked like a
+    // bug in the page. Measured 2026-08-25.
+    //
+    // Cheap: the files are tiny and this is a human-paced call.
+    config_store::reload_all();
+
     const std::vector<RestDeviceView> devices = rest_collect_devices();
     std::string out = "{\"configs\":[";
     bool first = false;
