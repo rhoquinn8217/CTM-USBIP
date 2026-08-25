@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.29.1 -- see the changelog at the bottom of this comment.
+  VERSION 2.30.2 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -362,6 +362,13 @@
      of the width empty. */
   .fields { display:flex; flex-wrap:wrap; gap:6px 26px; align-items:flex-end; }
   .devrow { margin-bottom:14px; }
+  /* ⛔ A disabled button looked EXACTLY like a live one -- so it read as broken
+     rather than unavailable: the pad skips it, a click does nothing, and there
+     was nothing on screen saying why. The title attribute already carried the
+     reason; nobody hovers a button that appears to be working.
+     ⓘ not-allowed on the cursor is the other half: it answers the question at
+     the moment the mouse arrives. */
+  button[disabled] { opacity:.4; cursor:not-allowed; }
   #confirmBox { position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:50;
                 align-items:center; justify-content:center; }
   .confirmCard { background:#1d1f26; border:1px solid #2c2e36; border-radius:10px;
@@ -459,21 +466,17 @@
     <tr><th>Cause</th><th>What to do</th></tr>
     <tr>
       <td>It isn't running</td>
-      <td>Start it from the desktop shortcut</td>
+      <td>Start it: <code>ctm-usbip.exe agent 48054 --rest 48055 --ui</code></td>
     </tr>
     <tr>
       <td>It's running without the settings API</td>
-      <td>It needs <code>--rest</code>. The shortcut passes it; a listener
-          started by hand may not.</td>
+      <td>It needs <code>--rest</code>. Stop it and start it with the command
+          above.</td>
     </tr>
     <tr>
-      <td>This page is pointed somewhere else</td>
-      <td>Check the address at the top against the port the listener reported
-          when it started</td>
-    </tr>
-    <tr>
-      <td>It's mid-restart, or a build just stopped it</td>
-      <td>Nothing — this comes back on its own</td>
+      <td>This window is broken</td>
+      <td>Try going to <a id="downLink" href="#" target="_blank"></a> in a
+          browser.</td>
     </tr>
   </table>
 </div>
@@ -481,7 +484,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.29.1</span>
+  <span class="muted" style="font-size:12px">v2.30.2</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -1855,7 +1858,7 @@ function gpPoll() {
     return;
   }
   hint.textContent = (live.length > 1 ? live.length + ' controllers' : 'controller') +
-                     ' — L1/R1 tabs, D-pad move, ✕ select, ◄► adjust, □ on/off, ○ back';
+                     ' — L1/R1 tabs, D-pad move, ✕ select, □ on/off, ○ back';
   bar.className = 'live';
 
   var now = performance.now();
@@ -1886,15 +1889,23 @@ function gpPoll() {
 
   // Standard mapping: 0 cross, 1 circle, 2 square, 3 triangle, 4 L1, 5 R1,
   // 12-15 dpad.
-  var up = pressed(12), down = pressed(13);
+  // ⭐ Left mirrors up, right mirrors down. On a TV the stick and D-pad are one
+  // control in the hand, and reaching for a different axis to move through a
+  // list is a small friction on every single step.
+  //
+  // ⓘ This takes value-stepping off left/right. It was a second meaning for the
+  // same buttons depending on what was focused, which is exactly the ambiguity
+  // that made the auto-link toggle worth splitting.
+  var up = pressed(12) || pressed(14);
+  var down = pressed(13) || pressed(15);
 
   // ⚠️ While a dropdown is open it OWNS the D-pad and both face buttons.
   // Letting tab-switching through here would leave a list open on a hidden
   // pane.
   if (GP_SELECTING) {
     var stepped = 0;
-    if (edge(12)) { stepped = -1; GP_REPEAT_AT = now + 400; }
-    else if (edge(13)) { stepped = 1; GP_REPEAT_AT = now + 400; }
+    if (edge(12) || edge(14)) { stepped = -1; GP_REPEAT_AT = now + 400; }
+    else if (edge(13) || edge(15)) { stepped = 1; GP_REPEAT_AT = now + 400; }
     else if ((up || down) && now >= GP_REPEAT_AT) { stepped = up ? -1 : 1; GP_REPEAT_AT = now + 90; }
     if (stepped) {
       var n = GP_SELECTING.options.length;
@@ -1932,15 +1943,12 @@ function gpPoll() {
     gpPaint();
     GP_REPEAT_AT = now + 400;
   }
-  else if (edge(14)) { gpStepValue(-1); GP_REPEAT_AT = now + 400; }
-  else if (edge(15)) { gpStepValue(1); GP_REPEAT_AT = now + 400; }
-  else if ((left || right) && now >= GP_REPEAT_AT) {
-    gpStepValue(left ? -1 : 1); GP_REPEAT_AT = now + 90;
-  }
+  // ⓘ No value-stepping on left/right any more: they move now, and a number
+  // field is edited by selecting it and typing.
 
   // D-pad: fire on the edge, then repeat while held after a short delay.
-  if (edge(12)) { gpMove(-1); GP_REPEAT_AT = now + 400; }
-  else if (edge(13)) { gpMove(1); GP_REPEAT_AT = now + 400; }
+  if (edge(12) || edge(14)) { gpMove(-1); GP_REPEAT_AT = now + 400; }
+  else if (edge(13) || edge(15)) { gpMove(1); GP_REPEAT_AT = now + 400; }
   else if ((up || down) && now >= GP_REPEAT_AT) { gpMove(up ? -1 : 1); GP_REPEAT_AT = now + 90; }
 
   requestAnimationFrame(gpPoll);
@@ -1985,6 +1993,13 @@ function setDown(down) {
   // rather than a suggestion to go and compare two things from memory.
   var addr = document.getElementById('downAddr');
   if (addr && down) addr.textContent = base();
+  // ⓘ href and text both from base(), so a page pointed at a non-default port
+  // offers the address it is ACTUALLY using rather than a guess.
+  var link = document.getElementById('downLink');
+  if (link && down) {
+    link.textContent = base();
+    link.href = base();
+  }
   var pane = document.getElementById('pane-overview');
   if (cover) cover.style.display = down ? 'block' : 'none';
   // ⛔ CLEAR the inline style, never set one to show. An inline display beats
