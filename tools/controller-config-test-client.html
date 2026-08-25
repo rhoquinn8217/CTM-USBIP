@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.30.2 -- see the changelog at the bottom of this comment.
+  VERSION 2.31.0 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -484,7 +484,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.30.2</span>
+  <span class="muted" style="font-size:12px">v2.31.0</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -538,7 +538,7 @@
      A native confirm() is titled with the origin and ignores the pad. -->
 <div id="confirmBox" style="display:none">
   <div class="confirmCard">
-    <h2>Controller config</h2>
+    <h2 id="confirmTitle">Controller config</h2>
     <p id="confirmText"></p>
     <div class="confirmBtns">
       <button id="confirmYes" class="go" onclick="confirmYes()">OK</button>
@@ -805,7 +805,8 @@ function normSerial(raw) {
 }
 
 function stopAutoLink(configName, serial, who) {
-  askConfirm('Stop automatically setting ' + configName + ' for ' + (who || 'this controller') + '?',
+  askConfirm('Remove auto link',
+             'Stop automatically setting ' + configName + ' for ' + (who || 'this controller') + '?',
              function() { stopAutoLinkConfirmed(configName, serial); });
 }
 
@@ -961,7 +962,7 @@ function buildDevicePane(d) {
   // controller, so they belong together rather than one hiding inside a value.
   var autoBtn = claimedBy
     ? '<button onclick="stopAutoLink(\'' + esc(claimedBy) + '\',\'' +
-      esc(mySerial) + '\',\'' + esc(nameFor(d.ordinal)) + '\')" ' +
+      esc(mySerial) + '\',\'' + esc(whoIs(d.ordinal)) + '\')" ' +
       'title="this controller stops claiming a config at bridge time">' +
       'Remove auto link</button>'
     : '';
@@ -1477,7 +1478,8 @@ function loadConfigs(isRetry) {
       // archive.
       var actions = c.read_only
         ? '<span class="muted">edit ctm-device-config.txt by hand</span>'
-        : '<button onclick="renameConfig(\'' + esc(c.name) + '\')">Rename</button> ' +
+        : '<button data-rename="' + esc(c.name) + '" ' +
+          'onclick="renameConfig(\'' + esc(c.name) + '\')">Rename</button> ' +
           '<button class="warn" onclick="archive(\'' + esc(c.name) + '\')">Archive</button>';
 
       // ⓘ Plain text. The name was a button that opened the editor, which made
@@ -1505,7 +1507,8 @@ function loadConfigs(isRetry) {
 // from a controller tab's picker (its blank option) -- both mean the same
 // thing: this controller no longer has a config of its own.
 function unlink(ordinal) {
-  askConfirm('Reset all custom configuration for ' + whoIs(ordinal) + '?',
+  askConfirm('Reset',
+             'Reset all custom configuration for ' + whoIs(ordinal) + '?',
              function() { unlinkConfirmed(ordinal); });
 }
 
@@ -1540,6 +1543,28 @@ function createConfig() {
 function renameConfig(name) {
   var host = document.getElementById('renameRow');
   if (!host) return;
+
+  // ⭐ Open it WHERE IT WAS ASKED FOR. The row lives in the sticky block at the
+  // top, so renaming a config halfway down the table opened an editor offscreen
+  // -- you pressed Rename and nothing appeared to happen.
+  //
+  // ⓘ Moved rather than duplicated: one row, one piece of state, and it goes
+  // back to the top when it is used from a controller tab.
+  var btn = document.querySelector('[data-rename="' + name.replace(/"/g, '') + '"]');
+  var row = btn && btn.closest('tr');
+  if (row) {
+    var cell = document.createElement('tr');
+    cell.id = 'renameHolder';
+    var td = document.createElement('td');
+    td.colSpan = 4;
+    cell.appendChild(td);
+    row.parentNode.insertBefore(cell, row.nextSibling);
+    td.appendChild(host);
+  } else {
+    // From a controller tab there is no table row, so it stays where it lives.
+    var top = document.getElementById('stickyTop');
+    if (top && host.parentNode !== top) top.appendChild(host);
+  }
   host.innerHTML =
     '<div class="kv"><label>rename</label>' +
     '<input id="renameTo" value="' + esc(name) + '" size="22">' +
@@ -1563,6 +1588,10 @@ function renameConfig(name) {
 function cancelRename() {
   var host = document.getElementById('renameRow');
   if (host) host.innerHTML = '';
+  // ⚠️ The holder row is ours and would otherwise linger as an empty row in
+  // the table after the editor closes.
+  var holder = document.getElementById('renameHolder');
+  if (holder) holder.parentNode.removeChild(holder);
   RENAMING = false;
   gpCollect();
 }
@@ -1611,13 +1640,18 @@ function whoIs(ordinal) {
 // time it bridges.
 function setAutoLink(ordinal, configName, serial, currentlyClaimedBy) {
   if (!currentlyClaimedBy) { claimAutoLink(ordinal, configName, serial); return; }
-  askConfirm('Change auto linked config for ' + whoIs(ordinal) +
+  askConfirm('Set auto link',
+             'Change auto linked config for ' + whoIs(ordinal) +
              ' from ' + currentlyClaimedBy + ' to ' + configName + '?',
              function() { claimAutoLink(ordinal, configName, serial); });
 }
 
-function askConfirm(message, onYes) {
+// ⭐ TITLED WITH THE BUTTON THAT OPENED IT. "Controller config" was the same
+// on every dialog, so it said nothing -- and a confirmation exists precisely to
+// tell you which action you are about to take.
+function askConfirm(title, message, onYes) {
   CONFIRM_CB = onYes;
+  document.getElementById('confirmTitle').textContent = title;
   document.getElementById('confirmText').textContent = message;
   document.getElementById('confirmBox').style.display = 'flex';
   gpCollect();
@@ -1642,7 +1676,7 @@ function confirmNo() {
 }
 
 function archive(name) {
-  askConfirm('Archive ' + name + '?', function() { archiveConfirmed(name); });
+  askConfirm('Archive', 'Archive ' + name + '?', function() { archiveConfirmed(name); });
 }
 
 function archiveConfirmed(name) {
@@ -2217,7 +2251,7 @@ function selfTest() {
   setDown(false);
 
   // 7. The dialog opens, traps the pad, and closes.
-  askConfirm('self test', function(){});
+  askConfirm('self test', 'self test', function(){});
   ok('dialog visible', document.getElementById('confirmBox').style.display === 'flex');
   gpCollect();
   ok('pad focus trapped in dialog',
