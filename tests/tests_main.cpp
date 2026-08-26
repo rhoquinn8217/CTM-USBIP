@@ -15,6 +15,7 @@ int run_iso_in_pacing_tests(int argc, char **argv);
 int run_rest_parser_tests();
 int run_config_store_tests();
 int run_gyro_mouse_tests();
+int run_host_audio_settings_tests();
 
 // ⛔ THE TEST BINARY RUNS FROM THE SAME DIRECTORY AS THE AGENT.
 //
@@ -72,6 +73,7 @@ int main(int argc, char **argv)
     run_rest_parser_tests();
     run_config_store_tests();
     run_gyro_mouse_tests();
+    run_host_audio_settings_tests();
     restore_runtime_state();
     return ctmtest::summary();
 }
