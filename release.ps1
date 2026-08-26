@@ -49,14 +49,35 @@ Copy-Item -Force -Path (Join-Path $Root 'profiles\descriptors\*.profile') `
                  -Destination (Join-Path $stage 'profiles\descriptors')
 Copy-Item -Force -Path (Join-Path $Root 'maps\*.map') -Destination (Join-Path $stage 'maps')
 
+# ⭐ The launcher. Double-clicking the exe passes no arguments, so it prints
+# usage and exits -- a window flashes and vanishes, which reads as a crash.
+#
+# ⛔ Throws rather than copying quietly. A silent Copy-Item shipped a zip with
+# no launcher in it and nothing said so; the same reason profiles and maps are
+# checked below.
+$launcher = Join-Path $Root 'tools\start-ctm-usbip.bat'
+if (-not (Test-Path $launcher)) { throw "launcher missing: $launcher" }
+Copy-Item -Force -Path $launcher -Destination $stage
+
 # A README in the zip, because the first question is always how to start it.
 $readme = @"
 CTM-USBIP $Version
 ==================
 
-Start it:
+Start it: double-click start-ctm-usbip.bat
+
+Or from a command prompt in this folder:
 
     ctm-usbip.exe agent 48054 --ui
+
+IMPORTANT: FIRST, install usbip-win2 0.9.77 from
+https://github.com/vadimgrn/usbip-win2/releases -- a separate project whose
+signed driver lets Windows attach the controller. Without it this listener
+starts normally and bridges nothing.
+
+Keep this folder together, somewhere writable -- Desktop or Documents, not
+Program Files. The exe finds profiles and maps beside itself, and creates its
+config and logs here as you use it.
 
 --ui opens the settings page in a browser window. The page is built into the
 exe and served by it, so there is no file to place and it cannot fall out of
@@ -86,7 +107,25 @@ Full documentation: https://github.com/rhoquinn8217/CTM-USBIP
 
 $zip = Join-Path $Root "out\release\ctm-usbip-$Version.zip"
 if (Test-Path $zip) { Remove-Item -Force $zip }
-Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip
+# ⭐ The FOLDER, not its contents. Extracting loose files into whatever
+# directory the user picked scatters them among what is already there -- and
+# these must stay together: the exe finds profiles and maps beside itself.
+# ZipFile rather than Compress-Archive, for the includeBaseDirectory argument
+# below.
+#
+# NOTE: this does NOT fix the "appears to use backslashes as path separators"
+# warning -- tested 2026-08-26, ZipFile writes the platform separator too.
+# Fixing it properly means enumerating files and writing entries by hand, which
+# is real code and real risk for a cosmetic message every extractor tolerates.
+# Left alone deliberately.
+#
+# The last argument is includeBaseDirectory: true puts everything inside one
+# top-level folder, so extracting does not scatter files into whatever
+# directory the user picked -- and these must stay together, since the exe
+# finds profiles and maps beside itself.
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+[System.IO.Compression.ZipFile]::CreateFromDirectory(
+    $stage, $zip, [System.IO.Compression.CompressionLevel]::Optimal, $true)
 
 # ⭐ Report what shipped rather than just "done". A release missing a profile
 # starts fine and fails only when someone tries to bridge, which is a long way
