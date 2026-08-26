@@ -246,5 +246,75 @@ static void apply_pending_config_to_sessions()
                     << target.busIdAscii << " -- " << narrow_ascii(latencyError));
             }
         }
+
+        // ⭐⭐ AND THE AUDIO SETTINGS, THE SAME WAY. T-130, 2026-08-25.
+        //
+        // ⛔ THE FAULT: ds5_output_overrides.inl patches speaker volume, headset
+        // volume, routing and rumble gain into the host's outbound report, and
+        // every one of those overrides begins `if (data[0] != 0x02) return;`.
+        // 0x02 is the WIRED report id. Over Bluetooth the host sends 0x36, so
+        // none of them ran. Heard, not inferred: speaker_volume = 0 left the
+        // controller at FULL volume.
+        //
+        // WHY THEY TRAVEL INSTEAD OF BEING PATCHED HERE: a Bluetooth output
+        // report is SIGNED, and the TV re-signs only when it patched something
+        // itself. A report edited on this side alone would arrive with a stale
+        // signature and be dropped by the controller. The TV already walks that
+        // block, already knows the offsets, and already re-signs.
+        //
+        // ⚠️⚠️ AND THIS IS THE PATH THAT ACTUALLY RUNS. The first attempt put
+        // this beside the bridge-time send in agent.inl and NOTHING HAPPENED --
+        // not even a failure line. The log said why, once it was read rather
+        // than reasoned about: every latency line ends "on busid=", which is
+        // THIS function. The bridge-time block logs "at bridge" and never
+        // appeared. ➡️ **Settings reach a live session through the sweep.**
+        //
+        // ⚠️ kAudioUnset for anything absent, NEVER zero -- zero is a legal
+        // percentage and means silent.
+        {
+            const int spk  = device_config_int(latencySection.c_str(), "speaker_volume", -1);
+            const int hset = device_config_int(latencySection.c_str(), "headset_volume", -1);
+            const std::string outStr = device_config_str(latencySection.c_str(), "audio_output");
+
+            uint8_t mode = CtmBridgeProtocol::kAudioUnset;
+            // ⓘ The TV's enum: AUTO 0, OFF 1, SPEAKER 2, HEADSET 3, BOTH 4.
+            // headset_mono has NO TV equivalent -- it is a downmix done on this
+            // side -- so it maps to HEADSET.
+            if      (outStr == "auto")         mode = 0;
+            else if (outStr == "off")          mode = 1;
+            else if (outStr == "speaker")      mode = 2;
+            else if (outStr == "headset")      mode = 3;
+            else if (outStr == "headset_mono") mode = 3;
+            else if (outStr == "both")         mode = 4;
+
+            const uint8_t spkByte  = (spk  >= 0 && spk  <= 100)
+                                   ? static_cast<uint8_t>(spk)
+                                   : CtmBridgeProtocol::kAudioUnset;
+            const uint8_t hsetByte = (hset >= 0 && hset <= 100)
+                                   ? static_cast<uint8_t>(hset)
+                                   : CtmBridgeProtocol::kAudioUnset;
+
+            if (spkByte  != CtmBridgeProtocol::kAudioUnset ||
+                hsetByte != CtmBridgeProtocol::kAudioUnset ||
+                mode     != CtmBridgeProtocol::kAudioUnset) {
+                std::wstring audioError;
+                if (target.backend->send_audio_settings(spkByte, hsetByte, mode, &audioError)) {
+                    device_log::config(device_log::msg()
+                        << latencySection << ": audio settings speaker="
+                        << static_cast<int>(spkByte) << " headset="
+                        << static_cast<int>(hsetByte) << " mode="
+                        << static_cast<int>(mode)
+                        << " on busid=" << target.busIdAscii
+                        << " (255 = leave the TV's value)");
+                } else {
+                    // ⛔ Never silent. A failed send that logs nothing is
+                    // indistinguishable from code that never ran -- which is
+                    // exactly what cost this ticket an evening.
+                    device_log::config(device_log::msg()
+                        << latencySection << ": audio settings FAILED on busid="
+                        << target.busIdAscii << " -- " << narrow_ascii(audioError));
+                }
+            }
+        }
     }
 }

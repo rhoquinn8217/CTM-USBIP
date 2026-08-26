@@ -366,6 +366,71 @@ static void bridge_session_worker(AgentBridgeSession *session)
                         << narrow_ascii(latencyError));
                 }
             }
+
+            // ⭐⭐ AND THE AUDIO SETTINGS, T-130, 2026-08-25.
+            //
+            // ⛔ THE FAULT: ds5_output_overrides.inl patches speaker volume,
+            // headset volume, routing and rumble gain into the host's outbound
+            // report, and every one of those overrides begins
+            // `if (data[0] != 0x02) return;`. 0x02 is the WIRED report id. Over
+            // Bluetooth the host sends 0x36, so all of them silently did
+            // nothing. Heard rather than inferred: speaker_volume = 0 left the
+            // controller at full volume.
+            //
+            // They travel instead of being patched here because a Bluetooth
+            // output report is SIGNED, and the TV re-signs only when it patched
+            // something itself. A report edited on this side alone would arrive
+            // with a stale signature and be dropped by the controller.
+            //
+            // ⓘ Same place as the latency send, and for the same reason the
+            // comment above gives: the handshake in bridge.inl runs before the
+            // session exists, so no config is linked yet and only the shared
+            // section is visible.
+            //
+            // ⚠️ kAudioUnset for anything absent, never zero -- zero is a legal
+            // percentage and means silent.
+            {
+                const int spk  = device_config_int(section.c_str(), "speaker_volume", -1);
+                const int hset = device_config_int(section.c_str(), "headset_volume", -1);
+                const std::string outStr = device_config_str(section.c_str(), "audio_output");
+
+                uint8_t mode = CtmBridgeProtocol::kAudioUnset;
+                // ⓘ The TV's enum: AUTO 0, OFF 1, SPEAKER 2, HEADSET 3, BOTH 4.
+                // headset_mono has NO TV equivalent -- it is a Windows-side
+                // downmix -- so it maps to HEADSET and the mono part stays on
+                // this side.
+                if      (outStr == "auto")         mode = 0;
+                else if (outStr == "off")          mode = 1;
+                else if (outStr == "speaker")      mode = 2;
+                else if (outStr == "headset")      mode = 3;
+                else if (outStr == "headset_mono") mode = 3;
+                else if (outStr == "both")         mode = 4;
+
+                const uint8_t spkByte  = (spk  >= 0 && spk  <= 100)
+                                       ? static_cast<uint8_t>(spk)
+                                       : CtmBridgeProtocol::kAudioUnset;
+                const uint8_t hsetByte = (hset >= 0 && hset <= 100)
+                                       ? static_cast<uint8_t>(hset)
+                                       : CtmBridgeProtocol::kAudioUnset;
+
+                if (spkByte  != CtmBridgeProtocol::kAudioUnset ||
+                    hsetByte != CtmBridgeProtocol::kAudioUnset ||
+                    mode     != CtmBridgeProtocol::kAudioUnset) {
+                    std::wstring audioError;
+                    if (backendPtr->send_audio_settings(spkByte, hsetByte, mode, &audioError)) {
+                        device_log::config(device_log::msg()
+                            << section << ": audio settings sent at bridge -- speaker="
+                            << static_cast<int>(spkByte) << " headset="
+                            << static_cast<int>(hsetByte) << " mode="
+                            << static_cast<int>(mode)
+                            << " (255 = leave the TV's value)");
+                    } else {
+                        device_log::config(device_log::msg()
+                            << section << ": audio settings FAILED -- "
+                            << narrow_ascii(audioError));
+                    }
+                }
+            }
         }
     }
     if (!run_usbip_attach(session->busId, kDefaultUsbipPort)) {
@@ -623,16 +688,6 @@ static int run_agent(uint16_t port)
 {
     std::wcout << L"ctm-usbip " << widen_ascii(CTM_VERSION_DISPLAY, strlen(CTM_VERSION_DISPLAY))
                << L" agent starting\n";
-
-    // ⭐ FOCUS an existing page first, before any socket is bound. The commonest
-    // failure is another listener already holding the port, and surfacing the
-    // page you already have is exactly right in that case.
-    //
-    // ⛔ Opening a NEW one waits until the agent is actually up -- see below.
-    // A failed start that leaves behind a browser window reporting an
-    // unreachable agent is a confusing thing to hand someone.
-    // main has already focused an existing page and decided no listener was
-    // running -- see the four cases documented there.
     WSADATA data = {};
     if (WSAStartup(MAKEWORD(2, 2), &data) != 0) {
         std::wcerr << wsa_error_message(L"WSAStartup failed") << L"\n";
@@ -697,11 +752,6 @@ static int run_agent(uint16_t port)
     }
 
     std::wcout << L"ctm agent listening udp/tcp port " << port << L"\n";
-
-    // The agent is up, so a page opened now finds something on its first poll.
-    if (ctm_open_ui::g_open_ui && !ctm_open_ui::g_ui_already_focused) {
-        ctm_open_ui::open_new(g_rest_port);
-    }
     while (!g_stop.load()) {
         drain_bridge_session_reaps();
         sweep_bridge_sessions();
