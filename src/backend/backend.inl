@@ -44,6 +44,19 @@ public:
     {
         (void)latencyMs; (void)error; return false;
     }
+
+    // ⭐ The per-controller audio settings, T-130. Same shape and same reason as
+    // send_audio_latency: they have to reach the TV because the TV is the side
+    // that can re-sign a Bluetooth output report after editing it.
+    //
+    // Default no-op, so a wired backend is unaffected -- on a cable these
+    // settings already work, patched into the 0x02 report on this side.
+    virtual bool send_audio_settings(uint8_t speakerPct, uint8_t headsetPct,
+                                     uint8_t audioMode, std::wstring *error)
+    {
+        (void)speakerPct; (void)headsetPct; (void)audioMode; (void)error;
+        return false;
+    }
     virtual bool send_output_report(const std::vector<uint8_t> &report, bool paced, std::wstring *error) = 0;
 
     // Composite: forward an OUT report tagged with the physical OUT endpoint it

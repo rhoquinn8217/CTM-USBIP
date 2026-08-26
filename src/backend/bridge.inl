@@ -69,9 +69,39 @@
         // reach. Taken from the reserved block, so the struct size is
         // unchanged and an older TV simply ignores it.
         uint16_t latency_ms;
-        uint8_t reserved[29];
+
+        // ⭐⭐ THE PER-CONTROLLER AUDIO SETTINGS, T-130, 2026-08-25.
+        //
+        // ⛔ THE FAULT: ds5_output_overrides.inl patches these into the host's
+        // outbound report, and every override there begins
+        // `if (data[0] != 0x02) return;`. 0x02 is the WIRED report id. Over
+        // Bluetooth the host sends 0x36, so speaker volume, headset volume,
+        // routing and the three rumble gains silently did nothing. Confirmed by
+        // ear: speaker_volume = 0 left the controller at full.
+        //
+        // WHY THEY TRAVEL RATHER THAN THIS SIDE LEARNING THE 0x36 LAYOUT: a
+        // Bluetooth output report is SIGNED, and the TV re-signs only when it
+        // patched something itself. A report we edited alone would arrive with
+        // a stale signature and be dropped by the controller. The TV already
+        // walks that block, already knows the offsets, and already re-signs --
+        // it only ever lacked our numbers.
+        //
+        // Percent, not the raw byte: the TV owns the curve and it is not
+        // linear. Same reserved block and same unset convention as latency_ms,
+        // which is the one setting that has always worked over Bluetooth --
+        // because it is the one already sent this way.
+        uint8_t speaker_volume_pct;
+        uint8_t headset_volume_pct;
+        uint8_t audio_mode;
+        uint8_t reserved[26];
     };
     static constexpr uint16_t kLatencyUnset = 0xFFFFu;
+
+    // ⛔⛔ AND THE ZERO CASE IS THE TRAP. A NEWER TV reading a zeroed reserved
+    // block from an OLDER host would see "volume 0" -- silent -- and mute the
+    // controller. The TV treats an all-zero triple as unset for that reason;
+    // this side must never send one by accident.
+    static constexpr uint8_t kAudioUnset = 0xFFu;
     // Below this the controller has less than one 10ms Opus frame buffered and
     // plays nothing at all. Measured, not assumed. Not enforced -- see
     // configured_audio_latency().
@@ -333,6 +363,36 @@ public:
     // Re-send the whole host config with a new latency. Cheap -- it is 58 bytes
     // -- and re-sending the lot avoids a second message type that could drift
     // out of step with the first.
+    // ⭐⭐ The audio settings, sent the same way and for the same reason. T-130.
+    //
+    // A parallel method rather than extra arguments on send_audio_latency: that
+    // one is also called by the config watcher on a live change, and widening it
+    // would make every caller supply values it does not have.
+    //
+    // Re-sends the whole HostConfig, as send_audio_latency does -- a second
+    // message type could drift out of step with the first.
+    //
+    // ⚠️ kAudioUnset for anything the config does not set, NEVER zero.
+    bool send_audio_settings(uint8_t speakerPct, uint8_t headsetPct,
+                             uint8_t audioMode, std::wstring *error) override
+    {
+        CtmBridgeProtocol::HostConfig hostConfig = lastHostConfig_;
+        hostConfig.speaker_volume_pct = speakerPct;
+        hostConfig.headset_volume_pct = headsetPct;
+        hostConfig.audio_mode = audioMode;
+        if (!send_message(
+                CtmBridgeProtocol::MsgHostConfig,
+                CtmBridgeProtocol::kFlagOk,
+                0,
+                reinterpret_cast<const uint8_t *>(&hostConfig),
+                sizeof(hostConfig),
+                error)) {
+            return false;
+        }
+        lastHostConfig_ = hostConfig;
+        return true;
+    }
+
     bool send_audio_latency(uint16_t latencyMs, std::wstring *error) override
     {
         CtmBridgeProtocol::HostConfig hostConfig = lastHostConfig_;
