@@ -119,7 +119,7 @@ inline bool ensure_started()
     g_running.store(true);
     g_pump = std::thread(pump_loop);
     g_started.store(true);
-    std::wcout << L"gyro mouse: synthetic mouse up (busid=" << widen_ascii(busId.c_str(), busId.size()) << L")\n";
+    device_log::input_w() << L"gyro mouse: synthetic mouse up (busid=" << widen_ascii(busId.c_str(), busId.size()) << L")";
     return true;
 }
 

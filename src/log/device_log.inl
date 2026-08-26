@@ -103,6 +103,88 @@ inline void config(const std::string &message)  { write("config", message); }
 inline void audio(const std::string &message)   { write("audio", message); }
 inline void report(const std::string &message)  { write("report", message); }
 inline void session(const std::string &message) { write("session", message); }
+inline void usb(const std::string &message)     { write("usb", message); }
+inline void bridge(const std::string &message)  { write("bridge", message); }
+inline void input(const std::string &message)   { write("input", message); }
+
+// ⭐ A STREAM that logs when the statement ends.
+//
+// ⛔ WHY THIS EXISTS. Around 85 call sites wrote straight to std::cout as
+// multi-line streaming expressions -- no timestamp, no tag, no lock, and NO
+// COPY IN device.log. So a line could interleave mid-word with a tagged one,
+// and anything turned on with --verbose was console-only: gone when the window
+// closed, and impossible to send anyone.
+//
+// ⓘ Converting each into a string would mean restructuring 85 expressions.
+// This changes one token instead:
+//
+//     std::cout        << "usb control" << " ep=0x" << ep << std::endl;
+//     device_log::usb_s() << "usb control" << " ep=0x" << ep;
+//
+// ⚠️ It writes in its DESTRUCTOR, so the line appears when the full expression
+// ends -- which is what makes the one-token swap possible, and why nothing here
+// should hold one of these in a variable.
+class stream {
+public:
+    explicit stream(const char *tag) : tag_(tag) {}
+    ~stream() { write(tag_, buf_.str()); }
+
+    stream(const stream &) = delete;
+    stream &operator=(const stream &) = delete;
+
+    template <typename T>
+    stream &operator<<(const T &value) { buf_ << value; return *this; }
+
+    // ⓘ Swallows std::endl and friends. A converted call site keeps its
+    // trailing << std::endl, and write() adds the newline itself -- without
+    // this every converted line would gain a blank one.
+    stream &operator<<(std::ostream &(*)(std::ostream &)) { return *this; }
+
+private:
+    const char *tag_;
+    std::ostringstream buf_;
+};
+
+// ⭐ The WIDE variant. About 30 call sites use std::wcout with L"..." literals,
+// which a narrow buffer cannot take -- and converting each by hand is 30
+// chances to get one wrong.
+//
+// ⓘ Converts once at the end rather than per piece: narrow_ascii on the whole
+// assembled line, so a wide literal streams in exactly as it did before.
+class wstream {
+public:
+    explicit wstream(const char *tag) : tag_(tag) {}
+    ~wstream() { write(tag_, narrow_ascii(buf_.str())); }
+
+    wstream(const wstream &) = delete;
+    wstream &operator=(const wstream &) = delete;
+
+    template <typename T>
+    wstream &operator<<(const T &value) { buf_ << value; return *this; }
+
+    // Swallows std::endl, as the narrow one does.
+    wstream &operator<<(std::wostream &(*)(std::wostream &)) { return *this; }
+
+private:
+    const char *tag_;
+    std::wostringstream buf_;
+};
+
+inline stream config_s()  { return stream("config"); }
+inline stream audio_s()   { return stream("audio"); }
+inline stream report_s()  { return stream("report"); }
+inline stream session_s() { return stream("session"); }
+inline stream usb_s()     { return stream("usb"); }
+inline stream bridge_s()  { return stream("bridge"); }
+inline stream input_s()   { return stream("input"); }
+
+inline wstream config_w()  { return wstream("config"); }
+inline wstream audio_w()   { return wstream("audio"); }
+inline wstream report_w()  { return wstream("report"); }
+inline wstream session_w() { return wstream("session"); }
+inline wstream usb_w()     { return wstream("usb"); }
+inline wstream bridge_w()  { return wstream("bridge"); }
+inline wstream input_w()   { return wstream("input"); }
 
 // Build a message from streamed pieces without every call site constructing an
 // ostringstream by hand:

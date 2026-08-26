@@ -60,8 +60,16 @@ struct EnetGlobalGuard {
     EnetGlobalGuard &operator=(const EnetGlobalGuard &) = delete;
 };
 
+// ⭐ Set by --verbose, or by CTM_USBIP_VERBOSE for a shell that wants it.
+//
+// ⛔ The environment variable alone was not enough. A released user runs a
+// launcher by double-clicking it -- setting a variable first means editing the
+// batch file, which nobody will do to see a log. A flag is what people expect.
+inline bool g_verbose_flag = false;
+
 static bool ctm_verbose_logs()
 {
+    if (g_verbose_flag) return true;
     static const bool enabled = []() {
         wchar_t value[16] = {};
         const DWORD len = GetEnvironmentVariableW(L"CTM_USBIP_VERBOSE", value, 16);

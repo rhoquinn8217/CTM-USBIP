@@ -166,7 +166,7 @@ static void mic_ring_pop_fill(const CtmBackend *owner, std::vector<uint8_t> *out
     // without arming anything. ⭐ short_bytes near zero with a steady
     // fill_bytes is a healthy stream.
     if (report) {
-        std::cout << "mic ring"
+        device_log::audio_s() << "mic ring"
                   << " session=" << slotIndex
                   << " in_bytes=" << pushed
                   << " out_bytes=" << popped

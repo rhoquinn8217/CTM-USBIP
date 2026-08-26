@@ -196,6 +196,11 @@ int wmain(int argc, wchar_t **argv)
                     return 2;
                 }
                 g_rest_port = static_cast<uint16_t>(value);
+            } else if (arg == L"--verbose") {
+                // ⓘ Everything the agent can say. Off by default: the per-report
+                // lines run at roughly 250 a second and bury the handful a
+                // person actually needs.
+                g_verbose_flag = true;
             } else if (arg == L"--ui") {
                 // ⭐ Opens the settings page once the agent is up, or brings an
                 // already-open one forward. The launcher used to do this and
@@ -236,8 +241,8 @@ int wmain(int argc, wchar_t **argv)
             // reading of "give me the settings page".
             if (g_rest_port == 0) {
                 g_rest_port = 48055;
-                std::wcout << L"--ui needs the settings API; enabling it on port "
-                           << g_rest_port << L"\n";
+                device_log::config_w() << L"--ui needs the settings API; enabling it on port "
+                           << g_rest_port ;
             }
             const bool focused = ctm_open_ui::focus_only();
             if (ctm_open_ui::agent_already_running(static_cast<uint16_t>(port))) {
@@ -480,12 +485,12 @@ int wmain(int argc, wchar_t **argv)
         const bool autoAttach = !noAttach;
         enetBackend->set_disconnect_callback([&server, detachBusId]() {
             const bool detached = server.detach_device(detachBusId);
-            std::wcout << L"bridge link down: virtual device UNPLUGGED busid="
+            device_log::session_w() << L"bridge link down: virtual device UNPLUGGED busid="
                        << widen_ascii(detachBusId.c_str(), detachBusId.size())
-                       << (detached ? L" (usb/ip client detached)" : L" (no active import)") << L"\n";
+                       << (detached ? L" (usb/ip client detached)" : L" (no active import)");
         });
         enetBackend->set_reconnect_callback([attachBusId, attachPort, autoAttach]() {
-            std::wcout << L"bridge link up: virtual device PLUGGED IN busid=" << attachBusId << L"\n";
+            device_log::session_w() << L"bridge link up: virtual device PLUGGED IN busid=" << attachBusId;
             if (autoAttach && !run_usbip_attach(attachBusId, attachPort)) {
                 std::wcerr << L"re-attach failed; server remains running for manual attach\n";
             }

@@ -188,8 +188,8 @@ static void bridge_session_worker(AgentBridgeSession *session)
         {
             const std::wstring busId = session->busId;
             backend->set_closed_callback([busId]() {
-                std::wcout << L"agent bridge client lost busid=" << busId
-                           << L" -> virtual device UNPLUGGED\n";
+                device_log::session_w() << L"agent bridge client lost busid=" << busId
+                           << L" -> virtual device UNPLUGGED";
                 request_bridge_session_reap(busId);
             });
         }
@@ -266,15 +266,15 @@ static void bridge_session_worker(AgentBridgeSession *session)
         const std::string busIdAscii = session->busIdAscii;
         const std::shared_ptr<CtmUsbipDevice> sessionDevice = session->device;
         enetBackendPtr->set_disconnect_callback([busId, busIdAscii]() {
-            std::wcout << L"agent bridge link down busid=" << busId
-                       << L" -> virtual device UNPLUGGED\n";
+            device_log::session_w() << L"agent bridge link down busid=" << busId
+                       << L" -> virtual device UNPLUGGED";
             if (g_agent_usbip_server) {
                 g_agent_usbip_server->remove_device(busIdAscii);
             }
         });
         enetBackendPtr->set_reconnect_callback([busId, busIdAscii, sessionDevice]() {
-            std::wcout << L"agent bridge link up busid=" << busId
-                       << L" -> virtual device PLUGGED IN\n";
+            device_log::session_w() << L"agent bridge link up busid=" << busId
+                       << L" -> virtual device PLUGGED IN";
             std::wstring reAddError;
             if (g_agent_usbip_server &&
                 g_agent_usbip_server->add_device(sessionDevice, busIdAscii, &reAddError)) {
@@ -322,8 +322,8 @@ static void bridge_session_worker(AgentBridgeSession *session)
     }
 
     session->ready.store(true);
-    std::wcout << L"agent bridge ready kind=" << widen_ascii(session->kind.c_str(), session->kind.size())
-               << L" port=" << session->port << L" busid=" << session->busId << L"\n";
+    device_log::session_w() << L"agent bridge ready kind=" << widen_ascii(session->kind.c_str(), session->kind.size())
+               << L" port=" << session->port << L" busid=" << session->busId;
     // Bring up the synthetic gyro mouse the first time a DualSense session is
     // ready. Idempotent -- later sessions are no-ops. Always-present by design:
     // the gyro gate decides whether it MOVES, not whether it exists, so
@@ -355,13 +355,13 @@ static void bridge_session_worker(AgentBridgeSession *session)
             if (latency >= 0 && latency <= 255) {
                 std::wstring latencyError;
                 if (backendPtr->send_audio_latency(static_cast<uint16_t>(latency), &latencyError)) {
-                    device_log::config(device_log::msg()
+                    device_log::report(device_log::msg()
                         << section << ": audio latency set to " << latency << " ms at bridge");
                 } else {
                     // ⛔ The failure used to be silent -- the error was captured
                     // and discarded, which made an unreachable config and an
                     // unsupported feature look identical. That cost hours.
-                    device_log::config(device_log::msg()
+                    device_log::report(device_log::msg()
                         << section << ": audio latency FAILED -- "
                         << narrow_ascii(latencyError));
                 }
@@ -418,7 +418,7 @@ static void bridge_session_worker(AgentBridgeSession *session)
                     mode     != CtmBridgeProtocol::kAudioUnset) {
                     std::wstring audioError;
                     if (backendPtr->send_audio_settings(spkByte, hsetByte, mode, &audioError)) {
-                        device_log::config(device_log::msg()
+                        device_log::report(device_log::msg()
                             << section << ": audio settings sent at bridge -- speaker="
                             << static_cast<int>(spkByte) << " headset="
                             << static_cast<int>(hsetByte) << " mode="
@@ -469,8 +469,8 @@ static bool start_bridge_session(const std::string &kind, uint16_t port, const s
         }
     }
     if (!staleBusId.empty()) {
-        std::wcout << L"agent bridge replacing stale session busid=" << staleBusId
-                   << L" (port " << port << L" requested by busid=" << busId << L")\n";
+        device_log::session_w() << L"agent bridge replacing stale session busid=" << staleBusId
+                   << L" (port " << port << L" requested by busid=" << busId << L")";
         (void)stop_bridge_session(staleBusId);
     }
 
@@ -501,8 +501,8 @@ static bool start_bridge_session(const std::string &kind, uint16_t port, const s
     AgentBridgeSession *sessionPtr = session.get();
     session->worker = std::thread([sessionPtr]() { bridge_session_worker(sessionPtr); });
     g_agent_sessions.push_back(std::move(session));
-    std::wcout << L"agent bridge starting kind=" << widen_ascii(kind.c_str(), kind.size())
-               << L" port=" << port << L" busid=" << busId << L"\n";
+    device_log::session_w() << L"agent bridge starting kind=" << widen_ascii(kind.c_str(), kind.size())
+               << L" port=" << port << L" busid=" << busId;
     return true;
 }
 
@@ -540,7 +540,7 @@ static bool stop_bridge_session(const std::wstring &busId)
     if (session->worker.joinable()) {
         session->worker.join();
     }
-    std::wcout << L"agent bridge stopped busid=" << busId << L"\n";
+    device_log::session_w() << L"agent bridge stopped busid=" << busId;
     return true;
 }
 
@@ -686,8 +686,8 @@ static void handle_agent_client(SOCKET client, const sockaddr_in &peer)
 
 static int run_agent(uint16_t port)
 {
-    std::wcout << L"ctm-usbip " << widen_ascii(CTM_VERSION_DISPLAY, strlen(CTM_VERSION_DISPLAY))
-               << L" agent starting\n";
+    device_log::session_w() << L"ctm-usbip " << widen_ascii(CTM_VERSION_DISPLAY, strlen(CTM_VERSION_DISPLAY))
+               << L" agent starting";
     WSADATA data = {};
     if (WSAStartup(MAKEWORD(2, 2), &data) != 0) {
         std::wcerr << wsa_error_message(L"WSAStartup failed") << L"\n";
@@ -746,12 +746,12 @@ static int run_agent(uint16_t port)
             WSACleanup();
             return 4;
         }
-        std::wcout << L"ctm agent REST API on " << (g_rest_bind_lan ? L"0.0.0.0" : L"127.0.0.1")
+        device_log::session_w() << L"ctm agent REST API on " << (g_rest_bind_lan ? L"0.0.0.0" : L"127.0.0.1")
                    << L":" << g_rest_port
-                   << (g_rest_token.empty() ? L"" : L" (bearer token required)") << L"\n";
+                   << (g_rest_token.empty() ? L"" : L" (bearer token required)");
     }
 
-    std::wcout << L"ctm agent listening udp/tcp port " << port << L"\n";
+    device_log::session_w() << L"ctm agent listening udp/tcp port " << port;
     while (!g_stop.load()) {
         drain_bridge_session_reaps();
         sweep_bridge_sessions();

@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.31.0 -- see the changelog at the bottom of this comment.
+  VERSION 2.32.0 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -484,7 +484,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.31.0</span>
+  <span class="muted" style="font-size:12px">v2.32.0</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -1245,7 +1245,28 @@ function openConfig(name) {
 // identical to absent: device_config_int throws on "" and returns its fallback,
 // and callers are documented as treating empty as "not configured". So
 // unmanaging really does hand the setting back to the game.
+// ⭐ DEBOUNCED. Every write goes to a file, the watcher notices, reloads, and
+// pushes the settings to the live controller -- so holding a stepper produced
+// one write, one reload and one HID push PER INCREMENT.
+//
+// ⛔ Not just log noise: those pushes reach the controller. Ten writes meant
+// ten settings messages for what should be one, which can stutter audio while
+// you drag a value.
+//
+// ⓘ 400ms after you stop. Long enough to swallow a held key, short enough that
+// releasing and looking at the controller feels immediate.
+var WRITE_TIMERS = {};
+
 function writeOne(prefix, configName, key) {
+  var slot = prefix + '|' + key;
+  if (WRITE_TIMERS[slot]) clearTimeout(WRITE_TIMERS[slot]);
+  WRITE_TIMERS[slot] = setTimeout(function() {
+    delete WRITE_TIMERS[slot];
+    writeOneNow(prefix, configName, key);
+  }, 400);
+}
+
+function writeOneNow(prefix, configName, key) {
   var id = 'dv-' + prefix + '-' + key;
   var el = document.getElementById(id);
   var box = document.getElementById('mg-' + id);

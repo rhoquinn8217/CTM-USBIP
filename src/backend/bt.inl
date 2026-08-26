@@ -137,7 +137,7 @@ public:
         reader_ = std::thread([this]() { reader_loop(); });
         writer_ = std::thread([this]() { paced_writer_loop(); });
 
-        std::wcout << L"bt backend"
+        device_log::bridge_w() << L"bt backend"
                    << L" index=" << index_
                    << L" product=" << device_.product
                    << L" serial=" << virtual_usb_serial_from_bt_device(device_)
@@ -146,15 +146,14 @@ public:
                    << L" output_len=" << device_.output_report_length
                    << L" feature_len=" << device_.feature_report_length
                    << L" pace_ms=" << std::fixed << std::setprecision(3) << btPaceMs_
-                   << std::defaultfloat << L"\n";
+                   << std::defaultfloat;
         // Extra serial-source dump so the chain of fallbacks for
         // virtual_usb_serial_from_bt_device is auditable on a per-device basis.
-        std::wcout << L"bt backend serial sources"
+        device_log::bridge_w() << L"bt backend serial sources"
                    << L" hid_serial=[" << device_.serial << L"]"
                    << L" instance_id=[" << device_.instance_id << L"]"
                    << L" parent_instance_id=[" << device_.parent_instance_id << L"]"
-                   << L" path=[" << device_.path << L"]"
-                   << L"\n";
+                   << L" path=[" << device_.path << L"]";
         return true;
     }
 
@@ -224,7 +223,7 @@ public:
                 ? HidD_SetFeature(handle_, scratch->data(), action.length)
                 : HidD_GetFeature(handle_, scratch->data(), action.length);
             if (!ok) {
-                std::cout << "bt feature issue reason=" << reason
+                if (ctm_verbose_logs()) device_log::bridge_s() << "bt feature issue reason=" << reason
                           << " op=" << (action.operation == CtmMapRuntime::PhysicalFeatureOperation::SetFeature ? "set" : "get")
                           << " report=0x" << std::hex << std::setw(2) << std::setfill('0')
                           << static_cast<unsigned int>(action.report)
@@ -328,7 +327,8 @@ private:
                 const double callbackAvgUs = callbackDelta == 0
                     ? 0.0
                     : static_cast<double>(callbackUsDelta) / static_cast<double>(callbackDelta);
-                std::cout << "bt input"
+                // periodic transport statistics -- once a second, forever
+                if (ctm_verbose_logs()) device_log::bridge_s() << "bt input"
                           << " rx_hz=" << std::fixed << std::setprecision(1)
                           << static_cast<double>(rxDelta) / seconds
                           << " callback_hz=" << static_cast<double>(callbackDelta) / seconds
@@ -429,7 +429,7 @@ private:
                     std::lock_guard<std::mutex> lock(pacedMutex_);
                     depth = pacedQueue_.size();
                 }
-                std::cout << "bt audio"
+                device_log::bridge_s() << "bt audio"
                           << " queued=" << (queued - lastQueued)
                           << " sent=" << (sent - lastSent)
                           << " dropped=" << (dropped - lastDropped)

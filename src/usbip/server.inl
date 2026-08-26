@@ -99,8 +99,8 @@ public:
         }
         running_.store(true);
         thread_ = std::thread([this]() { accept_loop(); });
-        std::wcout << L"usbip server listening on 127.0.0.1:" << port
-                   << L" exports=" << snapshot_devices().size() << L"\n";
+        device_log::usb_w() << L"usbip server listening on 127.0.0.1:" << port
+                   << L" exports=" << snapshot_devices().size();
         return true;
     }
 
@@ -268,7 +268,7 @@ private:
             if (!send_import(client, ok ? &match : nullptr) || !ok) {
                 return;
             }
-            std::cout << "usbip imported busid=" << match.busId << std::endl;
+            device_log::usb_s() << "usbip imported busid=" << match.busId << std::endl;
             register_active_client(match.busId, client);
             urb_loop(client, match.device, match.busId);
             unregister_active_client(match.busId, client);
@@ -785,7 +785,7 @@ private:
             if (status != kStatusOk) {
                 record_error();
                 if (ctm_verbose_logs()) {
-                    std::cout << "usbip issue"
+                    device_log::usb_s() << "usbip issue"
                               << " seq=" << seqnum
                               << " status=" << status
                               << " dir=" << (direction == kUsbipDirIn ? "in" : "out")
@@ -796,9 +796,9 @@ private:
                               << " start_frame=" << startFrame
                               << " interval=" << interval;
                     if (isControl) {
-                        std::cout << " setup=" << hex_span(setup, 8);
+                        device_log::usb_s() << " setup=" << hex_span(setup, 8);
                     }
-                    std::cout << std::endl;
+                    device_log::usb_s() << std::endl;
                 }
             }
 
@@ -870,7 +870,7 @@ private:
                 const uint64_t errorDelta = errorSnapshot - lastError;
 
                 if (ctm_verbose_logs()) {
-                    std::cout << "usbip summary"
+                    device_log::usb_s() << "usbip summary"
                               << " win_urb_hz=" << std::fixed << std::setprecision(1)
                               << urbHz
                               << " win_control_hz=" << controlHz
@@ -913,8 +913,11 @@ private:
                               << " errors=" << errorDelta
                               << std::defaultfloat
                               << std::endl;
-                } else {
-                    std::cout << "input poll/fresh=" << std::fixed << std::setprecision(1)
+                } else if (ctm_verbose_logs()) {
+                    // ⓘ A periodic statistics line: poll rate, wait times, audio
+                    // rate and error. Useful when chasing a fault, meaningless
+                    // to someone who just wants to know the pad is connected.
+                    device_log::usb_s() << "input poll/fresh=" << std::fixed << std::setprecision(1)
                               << intInHz << "/" << inputFreshHz
                               << "Hz wait=" << std::fixed << std::setprecision(2)
                               << inputWaitAvgMs << "/" << static_cast<double>(inputWaitUsMaxSnapshot) / 1000.0
@@ -1020,7 +1023,7 @@ private:
         if (isoOutAckWorker.joinable()) {
             isoOutAckWorker.join();
         }
-        std::cout << "usbip import connection closed busid=" << busId << std::endl;
+        device_log::usb_s() << "usbip import connection closed busid=" << busId << std::endl;
     }
 
     std::mutex devicesMutex_;

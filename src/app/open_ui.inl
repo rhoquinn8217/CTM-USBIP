@@ -105,7 +105,7 @@ inline std::wstring find_browser()
 inline bool focus_only()
 {
     if (!focus_existing()) return false;
-    std::wcout << L"settings page already open, brought to the front\n";
+    device_log::session_w() << L"settings page already open, brought to the front";
     return true;
 }
 
@@ -123,7 +123,7 @@ inline void open_new(uint16_t restPort)
     if (browser.empty()) {
         // No Chrome or Edge: hand it to whatever is registered. Loses the app
         // window, which is cosmetic -- and losing the page entirely is not.
-        std::wcout << L"no Chrome or Edge found, opening in the default browser\n";
+        device_log::session_w() << L"no Chrome or Edge found, opening in the default browser";
         ShellExecuteW(nullptr, L"open", url.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
         return;
     }
@@ -133,7 +133,7 @@ inline void open_new(uint16_t restPort)
     // things to hit by accident.
     const std::wstring args = L"--app=" + url + L" --window-size=1150,820";
     ShellExecuteW(nullptr, L"open", browser.c_str(), args.c_str(), nullptr, SW_SHOWNORMAL);
-    std::wcout << L"settings page opened\n";
+    device_log::session_w() << L"settings page opened";
 }
 
 // Is a listener already running on the control port?

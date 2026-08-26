@@ -162,7 +162,7 @@ public:
             return false;
         }
         info_ = parse_usb_info(profile_);
-        std::wcout << L"virtual USB serial: " << virtualSerial << L"\n";
+        device_log::usb_w() << L"virtual USB serial: " << virtualSerial;
         // ⏱️ TIMED. A Bluetooth bridge takes seven seconds against a cable's
         // one, and the TV finishes its whole side in 1.2s -- so the rest is
         // here. Nine feature reports time out on Bluetooth and none on a cable,
@@ -176,11 +176,11 @@ public:
         const auto attachT1 = std::chrono::steady_clock::now();
         start_audio_stream();
         const auto attachT2 = std::chrono::steady_clock::now();
-        std::wcout << L"attach timing: preload="
+        device_log::usb_w() << L"attach timing: preload="
                    << std::chrono::duration_cast<std::chrono::milliseconds>(attachT1 - attachT0).count()
                    << L"ms audio_start="
                    << std::chrono::duration_cast<std::chrono::milliseconds>(attachT2 - attachT1).count()
-                   << L"ms\n";
+                   << L"ms";
         return true;
     }
 
@@ -268,11 +268,11 @@ public:
             return;
         }
 
-        std::cout << "unknown reports";
+        if (ctm_verbose_logs()) device_log::usb_s() << "unknown reports";
         for (const auto &entry : unknownLogCounts_) {
-            std::cout << " " << entry.first << "=" << entry.second;
+            device_log::usb_s() << " " << entry.first << "=" << entry.second;
         }
-        std::cout << std::endl;
+        device_log::usb_s() << std::endl;
         unknownLogCounts_.clear();
         unknownLogLastFlush_ = now;
     }
@@ -292,7 +292,7 @@ public:
             input31FramesSinceLog_ = 0;
             input31ChangedFramesSinceLog_ = 0;
             input31DeltaCounts_.fill(0);
-            std::cout << "input31 baseline"
+            if (ctm_verbose_logs()) device_log::usb_s() << "input31 baseline"
                       << " len=" << length
                       << " head=" << hex_span(data, (std::min<size_t>)(length, 32))
                       << std::endl;
@@ -347,7 +347,7 @@ public:
             }
         }
 
-        std::cout << "input31 research"
+        if (ctm_verbose_logs()) device_log::usb_s() << "input31 research"
                   << " frames=" << input31FramesSinceLog_
                   << " changed_frames=" << input31ChangedFramesSinceLog_
                   << " baseline_diff=" << baselineDiffCount << baselineDiff.str()
@@ -367,7 +367,7 @@ public:
         }
         if (!compInLogged_[endpoint]) {
             compInLogged_[endpoint] = true;
-            std::cout << "composite input first report ep=0x" << std::hex << std::setw(2) << std::setfill('0')
+            if (ctm_verbose_logs()) device_log::usb_s() << "composite input first report ep=0x" << std::hex << std::setw(2) << std::setfill('0')
                       << static_cast<unsigned int>(endpoint) << std::dec << std::setfill(' ')
                       << " len=" << length
                       << " head=" << hex_span(data, (std::min<size_t>)(length, 12)) << std::endl;
@@ -401,7 +401,7 @@ public:
             static unsigned long micDropped = 0;
             ++micDropped;
             if (micDropped == 1 || (micDropped % 500) == 0) {
-                std::cout << "[mic] dropped " << micDropped
+                device_log::usb_s() << "[mic] dropped " << micDropped
                           << " audio report(s) -- the controller's microphone is"
                           << " streaming and nothing here asked it to"
                           << std::endl;
@@ -433,7 +433,7 @@ public:
             if (!map_.translate_controller_input(data, length, &report)) {
                 record_unknown_report("input", data[0]);
                 if (ctm_verbose_logs()) {
-                    std::cout << "input unmapped report=0x" << std::hex << std::setw(2) << std::setfill('0')
+                    if (ctm_verbose_logs()) device_log::usb_s() << "input unmapped report=0x" << std::hex << std::setw(2) << std::setfill('0')
                               << static_cast<unsigned int>(data[0])
                               << std::dec << std::setfill(' ')
                               << " len=" << length
@@ -511,7 +511,7 @@ public:
         }
         if (!compPollLogged_[endpointAddress]) {
             compPollLogged_[endpointAddress] = true;
-            std::cout << "interrupt-IN first poll ep=0x" << std::hex << std::setw(2) << std::setfill('0')
+            if (ctm_verbose_logs()) device_log::usb_s() << "interrupt-IN first poll ep=0x" << std::hex << std::setw(2) << std::setfill('0')
                       << static_cast<unsigned int>(endpointAddress) << std::dec << std::setfill(' ') << std::endl;
         }
         if (submitInfo != nullptr) {
@@ -612,7 +612,7 @@ private:
             audioChannels_,
             map_.intermediate_buffer_max_ms(),
             map_.intermediate_buffer_warmup_ms());
-        std::cout << "audio pipeline"
+        if (ctm_verbose_logs()) device_log::usb_s() << "audio pipeline"
                   << " usb_rate=" << audioInputSampleRate_
                   << " reservoir_rate=" << audioReservoirSampleRate_
                   << " channels=" << static_cast<unsigned int>(audioChannels_)
@@ -653,7 +653,7 @@ private:
             enqueue_input_report(report);
         }
         if (!reports.empty()) {
-            std::cout << "virtual input queued"
+            if (ctm_verbose_logs()) device_log::usb_s() << "virtual input queued"
                       << " trigger=" << event.event_type
                       << " count=" << reports.size()
                       << " ep=0x" << std::hex << std::setw(2) << std::setfill('0')
@@ -679,7 +679,7 @@ private:
         mappedInputLastLog_ = now;
         const uint64_t frames = mappedInputFramesSinceLog_;
         mappedInputFramesSinceLog_ = 0;
-        std::cout << "mapped input"
+        if (ctm_verbose_logs()) device_log::usb_s() << "mapped input"
                   << " frames=" << frames
                   << " src_len=" << sourceLength
                   << " src=" << hex_span(source, (std::min<size_t>)(sourceLength, 24))
@@ -723,7 +723,7 @@ private:
         const size_t chunkBytes = chunkSamples * sizeof(int16_t);
         const size_t eventCapacity = sizeof(((CTM_USB_EVENT *)0)->data);
         if (chunkBytes == 0 || chunkBytes > eventCapacity) {
-            std::cout << "audio issue reason=invalid-chunk"
+            device_log::usb_s() << "audio issue reason=invalid-chunk"
                       << " chunk_bytes=" << chunkBytes
                       << " event_capacity=" << eventCapacity
                       << std::endl;
@@ -1027,16 +1027,16 @@ private:
                 &responseLength,
                 reason,
                 timeoutMs);
-            std::cout << reason << " get report=0x"
+            device_log::usb_s() << reason << " get report=0x"
                       << std::hex << std::setw(2) << std::setfill('0')
                       << static_cast<unsigned int>(action.report)
                       << std::dec << std::setfill(' ')
                       << " ok=" << (ok ? 1 : 0)
                       << " len=" << responseLength;
             if (ok && response != nullptr && responseLength > 0) {
-                std::cout << " head=" << hex_span(response, (std::min<size_t>)(responseLength, 32));
+                if (ctm_verbose_logs()) device_log::usb_s() << " head=" << hex_span(response, (std::min<size_t>)(responseLength, 32));
             }
-            std::cout << std::endl;
+            device_log::usb_s() << std::endl;
         }
     }
 
@@ -1164,7 +1164,7 @@ private:
                 return kStatusOk;
             case 0x09: // SET_CONFIGURATION
                 configuration_ = static_cast<uint8_t>(value & 0xff);
-                std::cout << "usb control set_configuration"
+                if (ctm_verbose_logs()) device_log::usb_s() << "usb control set_configuration"
                           << " value=" << static_cast<unsigned int>(configuration_)
                           << " setup=" << hex_span(setup, 8)
                           << std::endl;
@@ -1179,7 +1179,7 @@ private:
             case 0x0b: // SET_INTERFACE
                 if (recipient == 1 && (index & 0xff) < interfaceAlternate_.size()) {
                     interfaceAlternate_[index & 0xff] = static_cast<uint8_t>(value & 0xff);
-                    std::cout << "usb control set_interface"
+                    if (ctm_verbose_logs()) device_log::usb_s() << "usb control set_interface"
                               << " interface=" << static_cast<unsigned int>(index & 0xff)
                               << " alt=" << static_cast<unsigned int>(value & 0xff)
                               << " setup=" << hex_span(setup, 8)
@@ -1222,7 +1222,7 @@ private:
             memcpy(event.data + 8, outData.data(), event.length - 8);
         }
         if (!dirIn || !outData.empty()) {
-            std::cout << "usb control write"
+            if (ctm_verbose_logs()) device_log::usb_s() << "usb control write"
                       << " setup=" << hex_span(setup, 8)
                       << " payload=" << hex_span(outData.data(), (std::min<size_t>)(outData.size(), 32))
                       << std::endl;
@@ -1234,7 +1234,7 @@ private:
             handled = map_.build_control_response(event, &response);
         }
         if (!handled || response.status != CTM_USB_RESPONSE_SUCCESS) {
-            std::cout << "usb control unmapped"
+            if (ctm_verbose_logs()) device_log::usb_s() << "usb control unmapped"
                       << " setup=" << hex_span(setup, 8)
                       << " payload=" << hex_span(outData.data(), (std::min<size_t>)(outData.size(), 16))
                       << std::endl;
@@ -1300,7 +1300,7 @@ private:
             memcpy(event.data + offset, payload.data(), event.length - offset);
         }
         if (event.event_type == CTM_USB_EVENT_HID_OUTPUT) {
-            std::cout << "usb hid set-output"
+            if (ctm_verbose_logs()) device_log::usb_s() << "usb hid set-output"
                       << " report=0x" << std::hex << std::setw(2) << std::setfill('0')
                       << static_cast<unsigned int>(reportId)
                       << std::dec << std::setfill(' ')
@@ -1310,7 +1310,7 @@ private:
         }
         if (event.event_type == CTM_USB_EVENT_FEATURE_SET) {
             lastFeatureSet_.assign(event.data, event.data + event.length);
-            std::cout << "usb feature set"
+            if (ctm_verbose_logs()) device_log::usb_s() << "usb feature set"
                       << " report=0x" << std::hex << std::setw(2) << std::setfill('0')
                       << static_cast<unsigned int>(reportId)
                       << std::dec << std::setfill(' ')
@@ -1345,7 +1345,7 @@ private:
             if (!handled) {
                 record_unknown_report("feature-set", reportId);
                 if (ctm_verbose_logs()) {
-                    std::cout << "feature set unmapped report=0x" << std::hex << std::setw(2) << std::setfill('0')
+                    if (ctm_verbose_logs()) device_log::usb_s() << "feature set unmapped report=0x" << std::hex << std::setw(2) << std::setfill('0')
                               << static_cast<unsigned int>(reportId)
                               << std::dec << std::setfill(' ')
                               << " head=" << hex_span(event.data, (std::min<size_t>)(event.length, 24))
@@ -1457,7 +1457,7 @@ private:
         if (!handled) {
             record_unknown_report("feature-get", reportId);
             if (ctm_verbose_logs()) {
-                std::cout << "feature get unmapped report=0x" << std::hex << std::setw(2) << std::setfill('0')
+                device_log::usb_s() << "feature get unmapped report=0x" << std::hex << std::setw(2) << std::setfill('0')
                           << static_cast<unsigned int>(reportId)
                           << std::dec << std::setfill(' ') << std::endl;
             }
@@ -1540,7 +1540,11 @@ private:
         }
         ds5_apply_output_overrides(event.data, event.length, profile_.device_descriptor,
                                    linked_config());
-        std::cout << "usb endpoint out"
+        // ⛔ EVERY OUTPUT REPORT, at roughly 250 a second. A game drives the
+        // triggers and rumble continuously, so this buried the handful of lines
+        // a person actually needs -- and scrolled the console fast enough that
+        // "controller bridged" was gone before it could be read.
+        if (ctm_verbose_logs()) device_log::usb_s() << "usb endpoint out"
                   << " ep=0x" << std::hex << std::setw(2) << std::setfill('0')
                   << static_cast<unsigned int>(endpointAddress)
                   << std::dec << std::setfill(' ')
@@ -1651,7 +1655,7 @@ private:
             std::wstring epError;
             if (!backend_->send_output_report_ep(raw, event.endpoint_address, false, &epError) &&
                 ctm_verbose_logs()) {
-                std::cout << "composite output forward failed ep=0x" << std::hex
+                device_log::usb_s() << "composite output forward failed ep=0x" << std::hex
                           << static_cast<unsigned int>(event.endpoint_address)
                           << std::dec << " len=" << event.length << std::endl;
             }
@@ -1669,7 +1673,7 @@ private:
         if (!ok) {
             record_unknown_report("hid-output", event.report_id);
             if (ctm_verbose_logs()) {
-                std::cout << "hid output unmapped"
+                device_log::usb_s() << "hid output unmapped"
                           << " endpoint=0x" << std::hex << std::setw(2) << std::setfill('0')
                           << static_cast<unsigned int>(event.endpoint_address)
                           << std::dec << std::setfill(' ')

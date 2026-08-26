@@ -352,7 +352,7 @@ private:
             if (!initial && (!running_.load() || g_stop.load())) {
                 return false;
             }
-            std::wcout << L"bridge waiting on ENet/UDP port " << port_ << L"\n";
+            device_log::bridge_w() << L"bridge waiting on ENet/UDP port " << port_;
 
             // Wait for a CONNECT.
             connected_.store(false);
@@ -465,10 +465,10 @@ private:
             enet_host_flush(host_);
 
             handshakeDone_ = true;
-            std::wcout << L"bridge enet backend"
+            device_log::bridge_w() << L"bridge enet backend"
                        << (initial ? L"" : L" reconnected")
                        << L" product=" << widen_ascii(peerCaps.product, sizeof(peerCaps.product))
-                       << L" serial=" << widen_ascii(peerCaps.serial, sizeof(peerCaps.serial)) << L"\n";
+                       << L" serial=" << widen_ascii(peerCaps.serial, sizeof(peerCaps.serial));
             if (!initial && reconnectCallback_) {
                 reconnectCallback_();
             }
@@ -557,7 +557,7 @@ private:
                 } else if (message.header.type == CtmBridgeProtocol::MsgLog ||
                            message.header.type == CtmBridgeProtocol::MsgError) {
                     std::string text(message.payload.begin(), message.payload.end());
-                    std::cout << "bridge enet peer "
+                    device_log::bridge_s() << "bridge enet peer "
                               << (message.header.type == CtmBridgeProtocol::MsgError ? "error " : "log ")
                               << text << std::endl;
                 }
@@ -572,8 +572,8 @@ private:
     {
         connected_.store(false);
         featureCv_.notify_all();
-        std::wcout << L"bridge enet link lost port=" << port_
-                   << L" -> virtual device UNPLUGGED (detaching)\n";
+        device_log::bridge_w() << L"bridge enet link lost port=" << port_
+                   << L" -> virtual device UNPLUGGED (detaching)";
         if (disconnectCallback_) {
             disconnectCallback_();
         }
@@ -682,7 +682,8 @@ private:
                 const uint64_t queueMaxUs = inputQueueDelayUsMax_.exchange(0, std::memory_order_relaxed);
                 const uint64_t callbackMaxUs = inputCallbackUsMax_.exchange(0, std::memory_order_relaxed);
 
-                std::cout << "bridge enet input"
+                // periodic transport statistics -- once a second, forever
+                if (ctm_verbose_logs()) device_log::bridge_s() << "bridge enet input"
                           << " rx_hz=" << std::fixed << std::setprecision(1)
                           << static_cast<double>(queuedDelta) / seconds
                           << " callback_hz=" << static_cast<double>(processedDelta) / seconds
@@ -741,7 +742,7 @@ private:
                    !connected_.load();
         });
         if (!signaled || g_stop.load() || !connected_.load()) {
-            std::cout << "bridge enet feature issue reason=" << reason
+            device_log::bridge_s() << "bridge enet feature issue reason=" << reason
                       << " op=" << (get ? "get-timeout" : "set-timeout")
                       << " report=0x" << std::hex << std::setw(2) << std::setfill('0')
                       << static_cast<unsigned int>(request[0])

@@ -248,7 +248,7 @@ public:
             const auto nowDbg = std::chrono::steady_clock::now();
             if (std::chrono::duration_cast<std::chrono::milliseconds>(nowDbg - lastPrint).count() >= 500) {
                 lastPrint = nowDbg;
-                std::cout << "[gyro] len=" << len
+                device_log::input_s() << "[gyro] len=" << len
                           << " L2[5]=" << (len > 5 ? (int)d[5] : -1)
                           << " R2[6]=" << (len > 6 ? (int)d[6] : -1)
                           << " btn[9]=0x" << std::hex << (len > 9 ? (int)d[9] : 0)
@@ -427,7 +427,7 @@ public:
             const auto nowScale = std::chrono::steady_clock::now();
             if (std::chrono::duration_cast<std::chrono::milliseconds>(nowScale - lastScale).count() >= 500) {
                 lastScale = nowScale;
-                std::cout << "[gyro] deg=" << accDeg
+                device_log::input_s() << "[gyro] deg=" << accDeg
                           << " px=" << accPx
                           << " px/deg=" << (accDeg > 0.001 ? accPx / accDeg : 0.0)
                           << " expected=" << (cfg.px_per_360 / 360.0f) * sens

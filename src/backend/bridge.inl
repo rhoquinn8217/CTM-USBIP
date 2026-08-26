@@ -518,7 +518,7 @@ private:
             if (!initial && (!running_.load() || g_stop.load())) {
                 return false;
             }
-            std::wcout << L"bridge waiting on TCP port " << port_ << L"\n";
+            if (ctm_verbose_logs()) device_log::bridge_w() << L"bridge waiting on TCP port " << port_;
             SOCKET pendingOn = listenSocket_;
             if (pendingOn == INVALID_SOCKET) {
                 return false;
@@ -591,8 +591,8 @@ private:
                              nullptr, 0, &keepAliveBytes, nullptr, nullptr) == SOCKET_ERROR) {
                     std::wcerr << wsa_error_message(L"bridge keepalive enable FAILED") << L"\n";
                 } else {
-                    std::wcout << L"bridge keepalive enabled time_ms=" << keepAlive.keepalivetime
-                               << L" interval_ms=" << keepAlive.keepaliveinterval << L"\n";
+                    if (ctm_verbose_logs()) device_log::bridge_w() << L"bridge keepalive enabled time_ms=" << keepAlive.keepalivetime
+                               << L" interval_ms=" << keepAlive.keepaliveinterval;
                 }
             }
             clientSocket_.store(client);
@@ -606,8 +606,8 @@ private:
             for (int skip = 0; skip < 4; ++skip) {
                 if (!recv_message(&hello, &helloError)) break;
                 if (hello.header.type == CtmBridgeProtocol::MsgEnum) {
-                    std::wcout << L"bridge received composite enumeration ("
-                               << hello.payload.size() << L" bytes)\n";
+                    device_log::bridge_w() << L"bridge received composite enumeration ("
+                               << hello.payload.size() << L" bytes)";
                     if (initial) enumPayload_ = hello.payload;   // stored for the composite builder
                     continue;
                 }
@@ -687,10 +687,10 @@ private:
             }
             lastHostConfig_ = hostConfig;
 
-            std::wcout << L"bridge backend"
+            device_log::bridge_w() << L"bridge backend"
                        << (initial ? L"" : L" reconnected")
                        << L" product=" << widen_ascii(peerCaps.product, sizeof(peerCaps.product))
-                       << L" serial=" << widen_ascii(peerCaps.serial, sizeof(peerCaps.serial)) << L"\n";
+                       << L" serial=" << widen_ascii(peerCaps.serial, sizeof(peerCaps.serial));
             return true;
         }
     }
@@ -917,7 +917,7 @@ private:
             } else if (message.header.type == CtmBridgeProtocol::MsgLog ||
                        message.header.type == CtmBridgeProtocol::MsgError) {
                 std::string text(message.payload.begin(), message.payload.end());
-                std::cout << "bridge peer "
+                device_log::bridge_s() << "bridge peer "
                           << (message.header.type == CtmBridgeProtocol::MsgError ? "error " : "log ")
                           << text << std::endl;
             }
@@ -1027,7 +1027,8 @@ private:
                 const uint64_t queueMaxUs = inputQueueDelayUsMax_.exchange(0, std::memory_order_relaxed);
                 const uint64_t callbackMaxUs = inputCallbackUsMax_.exchange(0, std::memory_order_relaxed);
 
-                std::cout << "bridge input"
+                // periodic transport statistics -- once a second, forever
+                if (ctm_verbose_logs()) device_log::bridge_s() << "bridge input"
                           << " rx_hz=" << std::fixed << std::setprecision(1)
                           << static_cast<double>(queuedDelta) / seconds
                           << " callback_hz=" << static_cast<double>(processedDelta) / seconds
@@ -1086,7 +1087,7 @@ private:
                    clientSocket_.load() == INVALID_SOCKET;
         });
         if (!signaled || g_stop.load() || clientSocket_.load() == INVALID_SOCKET) {
-            std::cout << "bridge feature issue reason=" << reason
+            device_log::bridge_s() << "bridge feature issue reason=" << reason
                       << " op=" << (get ? "get-timeout" : "set-timeout")
                       << " report=0x" << std::hex << std::setw(2) << std::setfill('0')
                       << static_cast<unsigned int>(request[0])

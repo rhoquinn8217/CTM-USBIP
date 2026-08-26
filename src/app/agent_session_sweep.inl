@@ -233,7 +233,7 @@ static void apply_pending_config_to_sessions()
         if (latency >= 0 && latency <= 255) {
             std::wstring latencyError;
             if (target.backend->send_audio_latency(static_cast<uint16_t>(latency), &latencyError)) {
-                device_log::config(device_log::msg()
+                device_log::report(device_log::msg()
                     << latencySection << ": audio latency set to " << latency
                     << " ms on busid=" << target.busIdAscii);
             } else {
@@ -241,7 +241,7 @@ static void apply_pending_config_to_sessions()
                 // latencyError and discarded, so a failed send was
                 // indistinguishable from the code never running -- which led
                 // to "audio_latency_ms is wired-only", exactly backwards.
-                device_log::config(device_log::msg()
+                device_log::report(device_log::msg()
                     << latencySection << ": audio latency FAILED on busid="
                     << target.busIdAscii << " -- " << narrow_ascii(latencyError));
             }
@@ -299,7 +299,7 @@ static void apply_pending_config_to_sessions()
                 mode     != CtmBridgeProtocol::kAudioUnset) {
                 std::wstring audioError;
                 if (target.backend->send_audio_settings(spkByte, hsetByte, mode, &audioError)) {
-                    device_log::config(device_log::msg()
+                    device_log::report(device_log::msg()
                         << latencySection << ": audio settings speaker="
                         << static_cast<int>(spkByte) << " headset="
                         << static_cast<int>(hsetByte) << " mode="
@@ -310,7 +310,7 @@ static void apply_pending_config_to_sessions()
                     // ⛔ Never silent. A failed send that logs nothing is
                     // indistinguishable from code that never ran -- which is
                     // exactly what cost this ticket an evening.
-                    device_log::config(device_log::msg()
+                    device_log::report(device_log::msg()
                         << latencySection << ": audio settings FAILED on busid="
                         << target.busIdAscii << " -- " << narrow_ascii(audioError));
                 }

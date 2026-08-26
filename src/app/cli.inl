@@ -38,7 +38,16 @@ static bool run_usbip_attach_to(const std::wstring &remote, const std::wstring &
     STARTUPINFOW si = {};
     si.cb = sizeof(si);
     PROCESS_INFORMATION pi = {};
-    std::wcout << L"running: " << command << L"\n";
+    // ⓘ The command itself is only interesting when something went wrong with
+    // it, so it is verbose-only -- but tagged either way, because a line with
+    // no timestamp among tagged ones reads as if it escaped from somewhere.
+    //
+    // ⚠️ usbip.exe's OWN output ("succesfully attached to port 1", typo theirs)
+    // is inherited through this console and cannot be tagged from here. Doing so
+    // would mean capturing the child's stdout and re-emitting it.
+    if (ctm_verbose_logs()) {
+        device_log::usb_w() << L"running: " << command;
+    }
     if (!CreateProcessW(nullptr, mutableCommand.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) {
         std::wcerr << last_error_message(L"CreateProcess usbip attach failed") << L"\n";
         return false;
