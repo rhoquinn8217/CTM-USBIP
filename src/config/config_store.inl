@@ -297,8 +297,17 @@ inline void reload_all()
     } while (FindNextFileW(handle, &find));
     FindClose(handle);
 
-    device_log::config(device_log::msg()
-        << "loaded " << g_files.size() << " controller config(s) from " << kDir);
+    // ⭐ ONLY WHEN IT CHANGED. The settings page polls the configs endpoint
+    // every ten seconds and each poll reloads, so an unconditional line here
+    // described nothing and buried everything else.
+    {
+        static size_t lastCount = static_cast<size_t>(-1);
+        if (g_files.size() != lastCount) {
+            lastCount = g_files.size();
+            device_log::config(device_log::msg()
+                << "loaded " << g_files.size() << " controller config(s) from " << kDir);
+        }
+    }
 }
 
 inline std::vector<ConfigFile> list_configs()

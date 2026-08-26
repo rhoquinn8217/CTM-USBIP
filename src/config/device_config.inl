@@ -96,8 +96,17 @@ static void device_config_load_locked()
         ++entries;
     }
 
-    device_log::config(device_log::msg()
-        << "loaded " << entries << " setting(s) from " << kDeviceConfigFileName);
+    // ⭐ Only when it changed. The settings page polls every ten seconds and
+    // each poll reloads, so an unconditional line here said nothing and buried
+    // everything that mattered.
+    {
+        static int lastEntries = -1;
+        if (entries != lastEntries) {
+            lastEntries = entries;
+            device_log::config(device_log::msg()
+                << "loaded " << entries << " setting(s) from " << kDeviceConfigFileName);
+        }
+    }
 }
 
 // Drop the cached copy so the next lookup re-reads the file. Called when a

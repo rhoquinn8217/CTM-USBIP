@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.33.0 -- see the changelog at the bottom of this comment.
+  VERSION 2.34.1 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -406,6 +406,15 @@
      overflow:hidden ancestor clips it -- which is why Rename and Archive in the
      Configs table could be focused with no halo to show it. The background and
      border are inside the element and cannot be clipped. */
+  /* ⭐ Editing looks DIFFERENT from merely focused. The two states behave
+     completely differently -- in one the D-pad moves, in the other it changes a
+     number -- so they cannot look the same. The pulse is deliberate: it is the
+     one thing you notice without looking for it. */
+  input.gp-selecting { outline:3px solid #e0c07a !important; outline-offset:2px;
+                       background:#3a3320 !important;
+                       animation:gpEdit 1.1s ease-in-out infinite; }
+  @keyframes gpEdit { 50% { outline-color:#8a7440; } }
+
   .gp-focus { background:#2a3566 !important; border-color:#6c8cff !important;
               outline:3px solid #6c8cff !important; outline-offset:2px;
               border-radius:6px; }
@@ -484,7 +493,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.33.0</span>
+  <span class="muted" style="font-size:12px">v2.34.1</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -1949,24 +1958,56 @@ function gpPoll() {
   // ⚠️ Before the dropdown branch and before tab switching: while inside a value
   // box the D-pad belongs to it, exactly as it belongs to an open dropdown.
   if (GP_EDITING) {
-    var stepE = 0;
-    if (edge(12) || edge(14)) { stepE = 1;  GP_REPEAT_AT = now + 400; }
-    else if (edge(13) || edge(15)) { stepE = -1; GP_REPEAT_AT = now + 400; }
-    else if ((up || down) && now >= GP_REPEAT_AT) { stepE = up ? 1 : -1; GP_REPEAT_AT = now + 90; }
+    // ⭐ THREE SIZES, so a range of 0-255 is reachable without holding a
+    // direction for half a minute. Left/right is the fine one because it is
+    // the axis a thumb rests on.
+    //
+    //   ◄ ►    1     L1 R1   100
+    //   ▲ ▼   10
+    // ⛔ LEFT DECREASES, RIGHT INCREASES. The first version had them backwards,
+    // which fights every slider and every volume control anyone has ever used.
+    //
+    //   ▲ ▼    1     L1 R1  100
+    //   ◄ ►   10
+    var stepE = 0, mult = 1;
+    if (edge(12))      { stepE =  1; mult = 1;   GP_REPEAT_AT = now + 400; }
+    else if (edge(13)) { stepE = -1; mult = 1;   GP_REPEAT_AT = now + 400; }
+    else if (edge(15)) { stepE =  1; mult = 10;  GP_REPEAT_AT = now + 400; }
+    else if (edge(14)) { stepE = -1; mult = 10;  GP_REPEAT_AT = now + 400; }
+    else if (edge(5))  { stepE =  1; mult = 100; GP_REPEAT_AT = now + 400; }
+    else if (edge(4))  { stepE = -1; mult = 100; GP_REPEAT_AT = now + 400; }
+    else if (now >= GP_REPEAT_AT) {
+      // Held: repeat whichever direction is still down, keeping its size.
+      if (pressed(12))      { stepE =  1; mult = 1;  GP_REPEAT_AT = now + 90; }
+      else if (pressed(13)) { stepE = -1; mult = 1;  GP_REPEAT_AT = now + 90; }
+      else if (pressed(15)) { stepE =  1; mult = 10; GP_REPEAT_AT = now + 90; }
+      else if (pressed(14)) { stepE = -1; mult = 10; GP_REPEAT_AT = now + 90; }
+    }
     if (stepE) {
       // ⓘ Uses the field's own step and bounds, so a percentage cannot be
       // nudged past 100 and a byte cannot go past 255.
       var st = parseFloat(GP_EDITING.step) || 1;
       var cur = parseFloat(GP_EDITING.value);
       if (isNaN(cur)) cur = 0;
-      var next = cur + stepE * st;
+      var next = cur + stepE * st * mult;
       var lo = GP_EDITING.min === '' ? null : parseFloat(GP_EDITING.min);
       var hi = GP_EDITING.max === '' ? null : parseFloat(GP_EDITING.max);
       if (lo !== null && !isNaN(lo) && next < lo) next = lo;
       if (hi !== null && !isNaN(hi) && next > hi) next = hi;
       GP_EDITING.value = String(next);
       GP_EDITING.dispatchEvent(new Event('change'));
+      // ⚠️ Scrolling away from the box you are editing is how this mode becomes
+      // invisible -- the pad then feels dead and there is nothing on screen
+      // explaining why.
+      GP_EDITING.scrollIntoView({ block: 'nearest' });
     }
+    // ⭐ SAY SO, in the footer. A mode you cannot tell you are in is worse than
+    // no mode: every other button stops working and the pad just feels broken.
+    var hintEd = document.getElementById('gphint');
+    if (hintEd) {
+      hintEd.textContent = 'editing a value — ▲▼ 1, ◄► 10, L1/R1 100, ✕ or ○ to leave';
+    }
+
     if (edge(0) || edge(1)) {
       GP_EDITING.classList.remove('gp-selecting');
       GP_EDITING.blur();

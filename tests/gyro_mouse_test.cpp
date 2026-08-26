@@ -94,6 +94,23 @@ static const char *device_section_for(const std::vector<unsigned char> &d)
 // ⚠️ This is the second time an include added to main.cpp was not added here.
 // The test binary assembles its own translation unit, so main.cpp's include
 // list is not a substitute for this one.
+// ⭐ A device_log stub, matching how this test stubs everything else.
+//
+// Each test file is its own translation unit, so the real header being included
+// by another one does not help here. And including it would pull in a file
+// mutex, an output stream and a log file -- none of which belongs in a unit
+// test, and it would print over the test results.
+//
+// ⓘ Only the tags gyro_mouse.inl actually uses. Adding one it does not use
+// would be dead code that quietly rots.
+namespace device_log {
+struct sink {
+    template <typename T> sink &operator<<(const T &) { return *this; }
+    sink &operator<<(std::ostream &(*)(std::ostream &)) { return *this; }
+};
+inline sink input_s() { return sink(); }
+}  // namespace device_log
+
 #include "input/gyro_calibration.inl"
 #include "input/gyro_mouse.inl"
 

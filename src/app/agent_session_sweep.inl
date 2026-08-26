@@ -223,13 +223,6 @@ static void apply_pending_config_to_sessions()
         // ⚠️ Uses the shared constant rather than a literal. This said 8 until
         // 2026-08-22, which was the WIRED figure -- so a Bluetooth user hitting
         // the 11-14 dead band got silence and no warning at all.
-        if (latency >= 0 && latency < CtmBridgeProtocol::kLatencySilentBelow) {
-            device_log::config(device_log::msg()
-                << "audio_latency_ms=" << latency << " is below "
-                << CtmBridgeProtocol::kLatencySilentBelow
-                << " -- the controller's speaker may be SILENT."
-                << " Raise it to recover; 60 is the usual value");
-        }
         if (latency >= 0 && latency <= 255) {
             std::wstring latencyError;
             if (target.backend->send_audio_latency(static_cast<uint16_t>(latency), &latencyError)) {

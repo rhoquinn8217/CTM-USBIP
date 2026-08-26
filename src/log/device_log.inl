@@ -87,7 +87,15 @@ inline std::ofstream &file()
 // misspelled at a call site.
 inline void write(const char *tag, const std::string &message)
 {
-    const std::string line = stamp() + " [" + tag + "] " + message;
+    // ⛔ TRIM TRAILING NEWLINES. Converted call sites often ended with << "\n"
+    // as a STRING rather than std::endl -- the stream swallows std::endl but a
+    // literal newline lands in the buffer, and this function adds its own. Every
+    // such line printed a blank one after it.
+    std::string body = message;
+    while (!body.empty() && (body.back() == '\n' || body.back() == '\r')) {
+        body.pop_back();
+    }
+    const std::string line = stamp() + " [" + tag + "] " + body;
 
     std::lock_guard<std::mutex> guard(write_mutex());
     std::cout << line << std::endl;   // endl flushes -- deliberate, see above
@@ -149,12 +157,25 @@ private:
 // which a narrow buffer cannot take -- and converting each by hand is 30
 // chances to get one wrong.
 //
-// ⓘ Converts once at the end rather than per piece: narrow_ascii on the whole
-// assembled line, so a wide literal streams in exactly as it did before.
+// ⓘ Converts once at the end rather than per piece, so a wide literal streams
+// in exactly as it did before.
 class wstream {
 public:
     explicit wstream(const char *tag) : tag_(tag) {}
-    ~wstream() { write(tag_, narrow_ascii(buf_.str())); }
+    // ⛔ Converts inline rather than calling narrow_ascii from common.inl.
+    // device_log is included EARLY -- before common.inl in the test binary --
+    // so depending on it made this header unusable there. A log header should
+    // not need anything but the standard library.
+    ~wstream()
+    {
+        const std::wstring wide = buf_.str();
+        std::string narrow;
+        narrow.reserve(wide.size());
+        for (wchar_t c : wide) {
+            narrow.push_back(c < 128 ? static_cast<char>(c) : '?');
+        }
+        write(tag_, narrow);
+    }
 
     wstream(const wstream &) = delete;
     wstream &operator=(const wstream &) = delete;
