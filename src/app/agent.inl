@@ -752,6 +752,19 @@ static int run_agent(uint16_t port)
     }
 
     device_log::session_w() << L"ctm agent listening udp/tcp port " << port;
+
+    // ⭐ Open the page HERE, once the agent is actually listening.
+    //
+    // ⛔ main.cpp only FOCUSES an existing window, and only opens a new one when
+    // it finds the port already taken. So a first run -- nothing running, no
+    // window -- opened nothing at all, and the page appeared only on the second
+    // launch. This is the missing half.
+    //
+    // ⓘ Late rather than early on purpose: a page opened before the agent binds
+    // would load, fail its first poll and show "cannot reach the listener".
+    if (ctm_open_ui::g_open_ui && !ctm_open_ui::g_ui_already_focused) {
+        ctm_open_ui::open_new(g_rest_port);
+    }
     while (!g_stop.load()) {
         drain_bridge_session_reaps();
         sweep_bridge_sessions();
