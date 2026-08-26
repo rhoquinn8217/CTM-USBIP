@@ -131,7 +131,7 @@ inline void open_new(uint16_t restPort)
     // --app strips the address bar, tabs and bookmarks: this is a control
     // surface, not a page being browsed, and on a TV that furniture is a row of
     // things to hit by accident.
-    const std::wstring args = L"--app=" + url + L" --window-size=1500,950";
+    const std::wstring args = L"--app=" + url + L" --window-size=1150,820";
     ShellExecuteW(nullptr, L"open", browser.c_str(), args.c_str(), nullptr, SW_SHOWNORMAL);
     std::wcout << L"settings page opened\n";
 }

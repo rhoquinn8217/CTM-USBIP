@@ -163,6 +163,17 @@ static std::string rest_shared_json(const std::vector<RestDeviceView> &devices)
 
 static std::string rest_configs_json()
 {
+    // ⛔ SCAN DISK FIRST, the same as the detail endpoint below.
+    //
+    // Without it this answered from whatever happened to be loaded, and at
+    // startup that is nothing but the shared section -- the config files are
+    // only read when a device bridges. So a page opened alongside the listener
+    // was told there were no configs, correctly reported it, and looked like a
+    // bug in the page. Measured 2026-08-25.
+    //
+    // Cheap: the files are tiny and this is a human-paced call.
+    config_store::reload_all();
+
     const std::vector<RestDeviceView> devices = rest_collect_devices();
     std::string out = "{\"configs\":[";
     bool first = false;
@@ -214,14 +225,16 @@ static std::string rest_keys_json()
 {
     return R"({"keys":[
 {"key":"gyro_to_mouse_gate","type":"choice","choices":["","always","L2","R2","L1","R1","touchpad","!touchpad","touchpad_click","PS"],"default":"","help":"What must be held for gyro to move the mouse. Blank is off."},
-{"key":"gyro_mouse_px_per_360","type":"int","min":1000,"max":200000,"default":1920,"help":"Pixels the cursor travels for one full turn of the controller. Higher is faster."},
-{"key":"gyro_mouse_min_sens","type":"int","min":0,"max":60,"default":8,"help":"Sensitivity for slow, precise movement."},
+{"key":"gyro_mouse_px_per_360","type":"int","min":1000,"max":200000,"default":1920,"help":"Pixels the cursor travels for one full turn. 1920 means one turn crosses a 1080p screen, which is the calibrated figure -- if you need far more than that, the sensitivity settings are usually what is actually wrong."},
+{"key":"gyro_mouse_min_sens","type":"int","min":0,"max":60,"default":8,"help":"Sensitivity for slow, precise movement. ⭐ 8 is the recommended starting point and 4-10 is the useful band; below about 4 slow movement becomes almost dead, which people then compensate for by raising everything else."},
 {"key":"gyro_mouse_sens","type":"int","min":1,"max":200,"default":50,"help":"Legacy single sensitivity. Scales both tiers; 50 leaves them as shipped."},
 {"key":"gyro_mouse_debug_gate","type":"bool","default":false,"help":"Logs the raw trigger and touchpad bytes twice a second, for diagnosing a gate that never opens."},
 {"key":"gyro_mouse_debug_scale","type":"bool","default":false,"help":"Logs measured degrees turned, pixels emitted, report interval and rate twice a second. For finding why a usable speed needs a px_per_360 far above the calibrated figure."},
-{"key":"gyro_mouse_max_sens","type":"int","min":0,"max":60,"default":16,"help":"Sensitivity for fast turns. Equal to min for no acceleration."},
+{"key":"gyro_mouse_max_sens","type":"int","min":0,"max":60,"default":16,"help":"Sensitivity for fast turns. ⭐ Set it EQUAL to min to turn acceleration off, and start there -- with a wide gap between them the same setting feels too slow and too fast depending on how fast you happen to be moving."},
 {"key":"gyro_mouse_min_threshold","type":"int","min":0,"max":200,"default":5,"help":"Degrees per second below which min_sens applies."},
 {"key":"gyro_mouse_max_threshold","type":"int","min":0,"max":400,"default":75,"help":"Degrees per second above which max_sens applies."},
+{"key":"gyro_mouse_speed_h","type":"int","min":10,"max":300,"default":100,"help":"Horizontal speed as a percentage. 100 is unchanged, not maximum."},
+{"key":"gyro_mouse_speed_v","type":"int","min":10,"max":300,"default":100,"help":"Vertical speed as a percentage. Lower than horizontal suits fine aiming, since a screen is wider than it is tall."},
 {"key":"gyro_mouse_invert","type":"int","min":0,"max":3,"default":0,"help":"0 neither, 1 horizontal, 2 vertical, 3 both."},
 {"key":"gyro_mouse_player_space","type":"bool","default":true,"help":"Account for how the controller is being held."},
 {"key":"gyro_mouse_recenter_button","type":"choice","choices":["","touchpad_click","PS","L1","R1"],"default":"","help":"Warps the cursor to screen centre. Desktop only -- games hide the cursor and read movement instead."},
