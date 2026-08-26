@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.36.2 -- see the changelog at the bottom of this comment.
+  VERSION 2.37.0 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -448,6 +448,12 @@
            background:#1d1f26; border-top:1px solid #2c2e36; color:#71737c;
            margin:24px -20px 0; display:flex; justify-content:space-between;
            gap:16px; flex-wrap:wrap; }
+  /* ⓘ The hint takes the middle so the bar stays two-ended: status left, the
+     button right, and the hint filling between them. Without this, adding a
+     third child to a space-between row moves the hint to the centre and the
+     bar reads as three unrelated things. */
+  #gpbar #gphint { margin-left:auto; }
+  #fitBtn { padding:2px 8px; font-size:11px; margin-left:16px; }
   #gpbar.live #gphint { color:#7fd18c; }
   #gpbar.live { color:#7fd18c; }
   .kv { display:flex; gap:10px; align-items:center; margin-bottom:9px; flex-wrap:wrap; }
@@ -514,7 +520,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.36.2</span>
+  <span class="muted" style="font-size:12px">v2.37.0</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -580,6 +586,10 @@
 <div id="gpbar">
   <span id="health" class="muted">checking…</span>
   <span id="gphint">controller: press any button to connect</span>
+  <!-- ⭐ On demand. The load-time check only fires when the window is clearly
+       wrong, so a window nudged slightly off keeps its size -- this is how you
+       ask for it back without hunting for the right drag. -->
+  <button id="fitBtn" onclick="fitWindow()" title="centre this window and set a sensible size">Fit window</button>
 </div>
 
 <script>
@@ -717,6 +727,40 @@ function call(method, path, body, quiet) {
       }
       throw e;
     });
+}
+
+// ⭐ SIZE AND PLACE THE WINDOW.
+//
+// ⛔ Chrome REMEMBERS an app window's bounds and ignores --window-size when it
+// reopens one it has seen, so the flag on the exe cannot bring a stretched
+// window back. A page in an app window is allowed to move and resize itself,
+// which is the only lever left.
+//
+// ⓘ FRACTIONS of the screen, not fixed pixels. This display is 3840x2160 at
+// 150%, so CSS sees 2560x1440 -- a fixed 1150x820 is a third of it here and
+// most of the screen on a 1080p laptop. Two thirds of the height and a bit over
+// half the width works on both.
+//
+// ⚠️ Only in an APP window. A normal browser tab silently ignores moveTo and
+// resizeTo, so this does nothing there rather than failing loudly.
+function fitWindow() {
+  var w = Math.round(Math.min(1400, screen.availWidth * 0.55));
+  var h = Math.round(screen.availHeight * 0.66);
+
+  window.resizeTo(w, h);
+  window.moveTo(Math.round((screen.availWidth  - w) / 2),
+                Math.round((screen.availHeight - h) / 2));
+}
+
+// ⓘ On load, but only when the window is WRONG -- too wide or too tall by a
+// clear margin. A window you deliberately sized should stay as you left it, and
+// one you moved should stay where you put it.
+function fitWindowIfOversized() {
+  var wantW = Math.min(1400, screen.availWidth * 0.55);
+  var wantH = screen.availHeight * 0.66;
+  if (window.outerWidth > wantW * 1.15 || window.outerHeight > wantH * 1.15) {
+    fitWindow();
+  }
 }
 
 function refreshAll() {
@@ -2471,9 +2515,11 @@ function selfTest() {
 if (location.search.indexOf('selftest') >= 0) {
   // ⓘ After refreshAll so KEYS and CONFIGS are populated the way they would be
   // in use; the interesting failures need real data shapes, not empty ones.
+  fitWindowIfOversized();
   refreshAll();
   setTimeout(selfTest, 1200);
 } else {
+  fitWindowIfOversized();
   refreshAll();
 }
 </script>
