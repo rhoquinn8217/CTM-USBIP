@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.35.0 -- see the changelog at the bottom of this comment.
+  VERSION 2.36.2 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -362,10 +362,27 @@
      of the width empty. */
   .fields { display:flex; flex-wrap:wrap; gap:6px 26px; align-items:flex-end; }
   .devrow { margin-bottom:14px; }
-  tr.r-set td:first-child    { box-shadow: inset 3px 0 0 #4f9d69; }
-  tr.r-shared td:first-child { box-shadow: inset 3px 0 0 #5b7fb5; }
-  tr.r-wait td:first-child   { box-shadow: inset 3px 0 0 #b58b4f; }
-  tr.r-set td, tr.r-shared td, tr.r-wait td { background:#1b1d24; }
+  /* ⭐ The WHOLE row. A 3px bar at the left edge was invisible unless you knew
+     to look, and the point is noticing at a glance that a pad is connected.
+     Kept dim enough that the text still reads. */
+  /* ⓘ No left bar. It was the marker from before the row itself was tinted, and
+     two indicators for one state just raises the question of what the second
+     one means. */
+  tr.r-set td    { background:#1b2b21; }
+  tr.r-shared td { background:#1a2230; }
+  tr.r-wait td   { background:#2b2517; }
+
+  /* ⭐ A new controller slides in. The table can change while you are looking
+     somewhere else, and a row that simply appears is easy to miss -- the motion
+     is what draws the eye to it.
+     ⚠️ Only on a row that is genuinely NEW: re-animating every row whenever
+     anything changed would be noise, and would pull attention to rows that did
+     not do anything. */
+  @keyframes rowIn {
+    from { opacity:0; transform:translateX(-14px); }
+    to   { opacity:1; transform:translateX(0); }
+  }
+  tr.r-new td { animation: rowIn .28s ease-out both; }
   /* ⛔ A disabled button looked EXACTLY like a live one -- so it read as broken
      rather than unavailable: the pad skips it, a click does nothing, and there
      was nothing on screen saying why. The title attribute already carried the
@@ -497,7 +514,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.35.0</span>
+  <span class="muted" style="font-size:12px">v2.36.2</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -758,6 +775,12 @@ function renderTabs(devices) {
   host.innerHTML = '';
   HEADS = {};
   pruneNames(devices);
+  // ⓘ A controller that left should animate again when it comes back.
+  var here = {};
+  (devices || []).forEach(function(d) { here[d.ordinal] = true; });
+  Object.keys(SEEN_DEVICES).forEach(function(k) {
+    if (!here[k]) delete SEEN_DEVICES[k];
+  });
   LAST_DEVICES.forEach(function(d) {
     var pane = document.createElement('div');
     pane.className = 'pane' + (ACTIVE === d.ordinal ? ' on' : '');
@@ -982,7 +1005,12 @@ function buildDevicePane(d) {
 
   var head = '<table class="devrow"><tr><th>controller</th><th>serial</th>' +
              '<th>auto linked config</th><th></th><th>id</th><th></th></tr>' +
-             '<tr><td>' + esc(deviceLabel(d)) + '</td>' +
+             // ⭐ Same status tint as Overview. The two tables show the same
+             // row, so a controller that reads green there and plain here
+             // would suggest the two disagreed about something.
+             '<tr class="' + (!d.ready ? 'r-wait'
+                            : (d.linked_config ? 'r-set' : 'r-shared')) + '">' +
+             '<td>' + esc(deviceLabelShort(d)) + '</td>' +
              '<td>' + serialCell + '</td>' +
              '<td>' + autoCell + '</td>' +
              '<td>' + autoBtn + '</td>' +
@@ -1365,29 +1393,59 @@ function loadDevices() {
       DEVICE_SIG = deviceSignature([]);
       return;
     }
-    var html = '<table><tr><th>ordinal</th><th>controller</th><th>serial</th>' +
-               '<th>ready</th><th>linked</th><th></th></tr>';
+    // ⭐ THE SAME COLUMNS AS THE CONTROLLER TAB. The two tables described the
+    // same thing in different words -- 'linked' here, 'auto linked config'
+    // there -- so reading one taught you nothing about the other.
+    var html = '<table><tr><th>controller</th><th>serial</th>' +
+               '<th>auto linked config</th><th></th><th>id</th><th></th></tr>';
     list.forEach(function(dev) {
       // ⭐ The serial is the point of this whole screen. auto_link works only
       // if it is a real per-unit value, and that has never been observed.
       var serial = dev.serial
         ? '<code class="good">' + esc(dev.serial) + '</code>'
         : '<span class="warnc">(none reported — auto_link cannot work)</span>';
-      // ⭐ Colour the ROW by what the controller can actually do, so the table
-      // is scannable rather than needing every cell read. A left border, not a
-      // fill: tinting whole rows turns the table into a colour chart.
+      // ⭐ THE WHOLE ROW, not a 3px edge. A bar at the left was invisible unless
+      // you already knew to look for it -- and the point is noticing at a
+      // glance that a controller is there and working.
       var rowClass = !dev.ready ? 'r-wait'
                    : (dev.linked_config ? 'r-set' : 'r-shared');
 
-      html += '<tr class="' + rowClass + '"><td><code>' + esc(dev.ordinal) + '</code></td>' +
-              '<td>' + esc(deviceLabel(dev)) + (dev.supports_config ? '' :
+      // ⓘ Seen before? The table is rebuilt whenever ANYTHING about a device
+      // changes -- a config linked, a session becoming ready -- so without this
+      // every row would re-animate on each of those.
+      if (!SEEN_DEVICES[dev.ordinal]) {
+        SEEN_DEVICES[dev.ordinal] = true;
+        rowClass += ' r-new';
+      }
+
+      // ⓘ Which config claims this controller at bridge time, matching the
+      // controller tab. 'linked' meant the one it reads NOW, which is a
+      // different question and lives with the picker on that tab.
+      var claimedBy = '';
+      var mySerial = normSerial(dev.serial);
+      CONFIGS.forEach(function(c) {
+        (c.auto_link || []).forEach(function(sn) {
+          if (mySerial && normSerial(sn) === mySerial) claimedBy = c.name;
+        });
+      });
+
+      var autoCell = claimedBy
+        ? '<code>' + esc(claimedBy) + '</code>'
+        : '<span class="muted">none</span>';
+      var autoBtn = claimedBy
+        ? '<button onclick="stopAutoLink(\'' + esc(claimedBy) + '\',\'' +
+          esc(mySerial) + '\',\'' + esc(whoIs(dev.ordinal)) + '\')" ' +
+          'title="this controller stops claiming a config at bridge time">' +
+          'Remove auto link</button>'
+        : '';
+
+      html += '<tr class="' + rowClass + '">' +
+              '<td>' + esc(deviceLabelShort(dev)) + (dev.supports_config ? '' :
                   ' <span class="muted">(no config support)</span>') + '</td>' +
               '<td>' + serial + '</td>' +
-              '<td>' + (dev.ready ? '<span class="good">yes</span>'
-                                  : '<span class="warnc">not yet</span>') + '</td>' +
-              '<td>' + (dev.linked_config
-                  ? '<code>' + esc(dev.linked_config) + '</code>'
-                  : '<span class="muted">no config</span>') + '</td>' +
+              '<td>' + autoCell + '</td>' +
+              '<td>' + autoBtn + '</td>' +
+              '<td><code>' + esc(dev.ordinal) + '</code></td>' +
               '<td><button onclick="unlink(\'' + esc(dev.ordinal) +
                   '\')" title="clear this controller\'s config">Reset</button></td></tr>';
     });
@@ -2116,6 +2174,9 @@ function gpPoll() {
 // controller focus -- every four seconds, forever. The signature check makes
 // the common case (nothing changed) cost nothing visible.
 var DEVICE_SIG = null;
+// Which controllers have already been shown, so only a genuinely new one
+// animates. Cleared when a device goes, so a reconnect animates again.
+var SEEN_DEVICES = {};
 var CONFIG_SIG = null;   // so a config poll only redraws when something changed
 var POLL_MS = 4000;
 
