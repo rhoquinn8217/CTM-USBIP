@@ -1,0 +1,46 @@
+# Virtual keyboard identity map.
+#
+# There is no physical device behind this one -- the reports are built on the
+# Windows side from controller buttons and pushed straight to the virtual
+# endpoint. So this map does no translation; it exists because the runtime
+# expects every virtual device to have one.
+#
+# Report is 8 bytes: [0] modifiers  [1] reserved  [2..7] up to six key usages.
+
+[map]
+id = virtual_keyboard
+version = 1
+virtual_device = virtual_keyboard_usb
+physical_device = none
+
+[usb.endpoints]
+hid_in  = 0x81
+
+[path.input.controller_to_virtual]
+trigger = physical.read
+source_report = 0
+destination_endpoint = 0x81
+destination_report = 0
+op.1 = bytes.copy source[0..7] -> destination[0..7]
+destination_length = 8
+
+[path.output.virtual_to_controller]
+# ⓘ The host sends LED state (caps lock and friends) over EP0 as SET_REPORT,
+# because a boot keyboard declares LED outputs. Nothing is behind this device to
+# light up, so the copy is here for shape and the bytes go nowhere.
+trigger = usb.endpoint.hid_out
+source_report = 0
+destination_report = 0
+op.1 = bytes.copy source[0..7] -> destination[0..7]
+destination_length = 8
+
+[advertise]
+controller_name = CTM Rebind Keyboard
+vendor = ctm
+rumble = false
+leds = false
+adaptive_triggers = false
+haptics = false
+audio_output = false
+audio_input = false
+battery = false

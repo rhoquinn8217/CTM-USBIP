@@ -375,6 +375,17 @@ static void bridge_session_worker(AgentBridgeSession *session)
         session->kind == "ds5e_usb") {
         ctm_gyro_mouse_ensure_mouse_started();   // defined in mouse_device.inl
     }
+
+    // ⭐ The keyboard comes up for ANY controller that can carry a config, not
+    // just a DualSense -- buttons are the universal capability, and an Xbox pad
+    // can be rebound too.
+    //
+    // ⓘ Same always-present reasoning as the mouse: a rebind configured
+    // mid-session should work without a reseat. It sends nothing until
+    // something is bound.
+    if (config_store::kind_supports_config(session->kind)) {
+        ctm_rebind_ensure_keyboard_started();
+    }
     {
         std::string linked;
         {

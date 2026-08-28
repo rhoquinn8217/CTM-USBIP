@@ -453,6 +453,15 @@ public:
         // No-op for non-DualSense devices and when no gate is configured.
         ctm_gyro_mouse::on_ds5_input(this, profile_.device_descriptor, linked_config(),
                                      report.data, report.length);
+
+        // ⭐ Button rebinding. ⚠️ Unlike the gyro hook above, this MODIFIES the
+        // report -- a rebound button is cleared before Windows sees it, so the
+        // game never receives it. Placed here because `report` is a fresh local
+        // that nobody else holds, and because the map has already run, so the
+        // bytes are in the virtual device's layout.
+        ctm_rebind_apply(this, profile_.device_descriptor, linked_config(),
+                         report.data, report.length);
+
         enqueue_input_report(report);
     }
 

@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.37.0 -- see the changelog at the bottom of this comment.
+  VERSION 2.38.1 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -520,7 +520,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.37.0</span>
+  <span class="muted" style="font-size:12px">v2.38.1</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -645,6 +645,7 @@ function pruneNames(list) {
 }
 
 var KEYS = [];
+var KEY_NAMES = [];   // KeyboardEvent.code names a button can be bound to
 
 function base() { return document.getElementById('base').value.replace(/\/+$/, ''); }
 
@@ -769,6 +770,10 @@ function refreshAll() {
     // KEYS drives every editor on the page -- the sections, the controls and
     // the ranges all come from the agent rather than being hard-coded here.
     KEYS = d.keys || [];
+    // ⭐ ONE shared list, not repeated inside every rebind setting. ~100 names
+    // across 17 rebind keys would add roughly 17 KB to a response the page
+    // fetches on every load, all of it identical.
+    KEY_NAMES = d.key_names || [];
     setConn('connected', 'good');
   }).catch(function(){});
   loadDevices();
@@ -1265,7 +1270,41 @@ function renderConfigEditor(hostId, configName, prefix, ordinal) {
           ? (LAST_DEVICES.filter(function(x) { return x.ordinal === ordinal; })[0] || {})
           : {}).kind) ? ' disabled' : '';
         var control;
-        if (meta.type === 'choice' && meta.choices) {
+        // ⭐ A rebind is a PICKER, not a text field. The names are
+        // KeyboardEvent.code -- KeyR, ArrowUp, ShiftLeft -- and typing one by
+        // hand invites a typo that silently binds nothing.
+        //
+        // ⓘ Coarse steps make a 100-item list navigable from a pad: left/right
+        // jumps 10 and L1/R1 jumps 100, so any key is a couple of presses away.
+        // ⚠️ A NUMBERED rebind only. 'rebind_debug' also starts with 'rebind_'
+        // and is a bool -- the prefix test alone turned it into a key picker.
+        if (meta.key && /^rebind_\d+$/.test(meta.key) && KEY_NAMES.length) {
+          control = '<select id="' + id + '"' + onchange + dis + '>' +
+            '<option value=""' + (String(shown) === '' ? ' selected' : '') +
+            '>(not bound)</option>' +
+            KEY_NAMES.map(function(k) {
+              return '<option value="' + esc(k) + '"' +
+                     (String(shown).toLowerCase() === k.toLowerCase() ? ' selected' : '') +
+                     '>' + esc(k) + '</option>';
+            }).join('') + '</select>';
+
+          // ⛔ THE BUTTONS THIS PAGE IS DRIVEN BY. Binding cross takes away the
+          // button that chooses; binding circle takes away the one that backs
+          // out. The rebind still WORKS -- it just means this page can no longer
+          // be driven by the pad, and undoing it needs a mouse or a keyboard.
+          //
+          // ⓘ A warning rather than a refusal: someone who wants cross bound in
+          // a game is not wrong, and this is their controller. ⚠️ Config mode
+          // removes the problem entirely -- it gates every button and drives
+          // the page with keystrokes, so a rebind cannot reach it.
+          if ((meta.key === 'rebind_0' || meta.key === 'rebind_1') && shown) {
+            control += '<div class="warnc" style="font-size:11px;margin-top:3px">' +
+                    (meta.key === 'rebind_0'
+                      ? 'Cross selects on this page. While this is bound you will need a mouse or keyboard to change it back.'
+                      : 'Circle backs out on this page. While this is bound you will need a mouse or keyboard to change it back.') +
+                    '</div>';
+          }
+        } else if (meta.type === 'choice' && meta.choices) {
           control = '<select id="' + id + '"' + onchange + dis + '>' + meta.choices.map(function(c) {
             var label = c === '' ? '(blank — off)' : c;
             return '<option value="' + esc(c) + '"' +
@@ -1906,6 +1945,21 @@ function gpCollect() {
   gpPaint();
 }
 
+// ⭐ A mouse click moves the pad's focus to what was clicked.
+//
+// ⛔ Without this the two disagree: you click a field, then press down on the
+// pad and the highlight jumps back to wherever it was before -- which reads as
+// the pad ignoring you.
+document.addEventListener('click', function (ev) {
+  if (!GP_FOCUS.length) return;
+  var el = ev.target;
+  while (el && el !== document.body) {
+    var at = GP_FOCUS.indexOf(el);
+    if (at >= 0) { GP_INDEX = at; gpPaint(); return; }
+    el = el.parentElement;
+  }
+}, true);
+
 function gpPaint() {
   // ⛔⛔ RE-COLLECT IF THE LIST HAS GONE STALE.
   //
@@ -2136,7 +2190,7 @@ function gpPoll() {
     // no mode: every other button stops working and the pad just feels broken.
     var hintEd = document.getElementById('gphint');
     if (hintEd) {
-      hintEd.textContent = 'editing a value — ▲▼ 1, ◄► 10, L1/R1 100, ✕ or ○ to leave';
+      hintEd.textContent = '▲▼ 1, ◄► 10, L1/R1 100 — ✕ or ○ to leave';
     }
 
     if (edge(0) || edge(1)) {
@@ -2150,13 +2204,34 @@ function gpPoll() {
   }
 
   if (GP_SELECTING) {
+    // ⭐ THREE STEP SIZES, matching a value box: up/down 1, left/right 10,
+    // L1/R1 100. The key list is around a hundred entries, and stepping one at
+    // a time from a pad makes the far end unreachable in practice.
+    //
+    // ⓘ Same sizes and same axes as editing a number, so there is one thing to
+    // learn rather than two.
     var stepped = 0;
-    if (edge(12) || edge(14)) { stepped = -1; GP_REPEAT_AT = now + 400; }
-    else if (edge(13) || edge(15)) { stepped = 1; GP_REPEAT_AT = now + 400; }
-    else if ((up || down) && now >= GP_REPEAT_AT) { stepped = up ? -1 : 1; GP_REPEAT_AT = now + 90; }
+    if (edge(12)) { stepped = -1;   GP_REPEAT_AT = now + 400; }
+    else if (edge(13)) { stepped = 1;    GP_REPEAT_AT = now + 400; }
+    else if (edge(14)) { stepped = -10;  GP_REPEAT_AT = now + 400; }
+    else if (edge(15)) { stepped = 10;   GP_REPEAT_AT = now + 400; }
+    else if (edge(4))  { stepped = -100; GP_REPEAT_AT = now + 400; }
+    else if (edge(5))  { stepped = 100;  GP_REPEAT_AT = now + 400; }
+    else if (now >= GP_REPEAT_AT) {
+      if (pressed(12))      { stepped = -1;  GP_REPEAT_AT = now + 90; }
+      else if (pressed(13)) { stepped = 1;   GP_REPEAT_AT = now + 90; }
+      else if (pressed(14)) { stepped = -10; GP_REPEAT_AT = now + 90; }
+      else if (pressed(15)) { stepped = 10;  GP_REPEAT_AT = now + 90; }
+    }
     if (stepped) {
       var n = GP_SELECTING.options.length;
-      GP_SELECTING.selectedIndex = (GP_SELECTING.selectedIndex + stepped + n) % n;
+      // ⚠️ CLAMPED, not wrapped, for the coarse steps. Wrapping from near the
+      // end back to the start on a +100 makes the list feel like it lost your
+      // place; stopping at the end is what a long list should do.
+      var next = GP_SELECTING.selectedIndex + stepped;
+      if (Math.abs(stepped) === 1) { next = (next + n) % n; }
+      else { next = Math.max(0, Math.min(n - 1, next)); }
+      GP_SELECTING.selectedIndex = next;
     }
     if (edge(0)) gpSelectEnd(true);
     if (edge(1)) gpSelectEnd(false);

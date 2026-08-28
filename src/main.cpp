@@ -69,6 +69,13 @@ static void mic_ring_reset(const CtmBackend *owner);
 #include "audio/audio_gain.inl"
 #include "audio/pcm_amplitude_log.inl"  // needs monotonic_us from backend/bridge.inl; must precede its caller
 #include "audio/iso_in_test_tone.inl"
+// ⓘ And the same for the rebind hook itself: device.inl calls it on the input
+// path but is included long before rebind.inl, which needs the keyboard device
+// and the config helpers.
+void ctm_rebind_apply(const void *deviceKey,
+                      const std::vector<unsigned char> &descriptor,
+                      const std::string &linkedConfig,
+                      uint8_t *data, size_t len);
 #include "usbip/device.inl"
 #include "audio/iso_in_pacing.inl"
 #include "usbip/server.inl"
@@ -86,9 +93,17 @@ static void mic_ring_reset(const CtmBackend *owner);
 // breaks the include cycle -- the mouse device needs agent.inl's server and
 // asset helpers, while agent.inl needs only this one symbol.
 void ctm_gyro_mouse_ensure_mouse_started();
+// ⓘ Same cycle, same shape: the keyboard device needs agent.inl's server and
+// asset helpers, while agent.inl needs only this one symbol from it.
+void ctm_rebind_ensure_keyboard_started();
 #include "input/gyro_calibration_fetch.inl"   // needs CtmBackend; agent.inl calls it
 #include "app/agent.inl"
 #include "input/mouse_device.inl"      // needs g_agent_usbip_server, find_relative_asset, run_usbip_attach
+#include "input/keyboard_device.inl"   // same dependencies as the mouse above
+// ⚠️ AFTER keyboard_device: rebind pushes key state into it, so it must be
+// defined first. And after gyro_mouse, for device_section_for and the config
+// helpers.
+#include "input/rebind.inl"
 #include "app/rest_sessions.inl"
 #include "app/rest_config_sessions.inl"   // defines what rest_config.inl declares; needs agent.inl's sessions
 #include "app/service.inl"
