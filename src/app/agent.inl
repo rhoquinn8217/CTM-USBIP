@@ -287,6 +287,49 @@ static void bridge_session_worker(AgentBridgeSession *session)
         });
     }
 
+    // ⛔ RETIRE AN OLDER SESSION FOR THE SAME PHYSICAL CONTROLLER.
+    //
+    // Measured 2026-08-27: a re-bridge arriving before the previous session has
+    // finished dying leaves TWO sessions attached to one pad. The controller
+    // answers the OLD session's endpoint, so the new one's feature request times
+    // out -- three attempts, 370ms apart, all of them -- and the gyro falls back
+    // to a scale 62x too slow.
+    //
+    // ⚠️ The stale check upstream matches on PORT, and the TV picks a new port
+    // each bridge: the log shows busid-9 on 48056 and busid-10 on 48057, same
+    // serial, coexisting for five seconds. The SERIAL is what identifies the
+    // physical device.
+    //
+    // ⛔ OUTSIDE the session->mutex block below, deliberately. Taking
+    // g_agent_sessions_mutex while holding a session mutex inverts the lock
+    // order the rest of this file uses, and stop_bridge_session takes both.
+    {
+        const std::string mySerial = session->device ? session->device->physical_serial()
+                                                     : std::string();
+        if (!mySerial.empty()) {
+            std::vector<std::wstring> older;
+            {
+                std::lock_guard<std::mutex> guard(g_agent_sessions_mutex);
+                for (const auto &other : g_agent_sessions) {
+                    if (other->busId == session->busId) continue;
+                    // ⓘ A session that has not reached ready yet has no serial,
+                    // so it cannot be matched -- and does not need to be: it is
+                    // not holding the pad's control endpoint either.
+                    std::lock_guard<std::mutex> otherLock(other->mutex);
+                    if (other->physicalSerial == mySerial) {
+                        older.push_back(other->busId);
+                    }
+                }
+            }
+            for (const std::wstring &staleId : older) {
+                device_log::session_w()
+                    << L"retiring an older session for the same controller busid="
+                    << staleId << L" -- it was still holding the pad";
+                (void)stop_bridge_session(staleId);
+            }
+        }
+    }
+
     // Per-controller config: pick up the physical serial, then auto-link if a
     // config claims it. A manual link made later overrides this for the life of
     // the session -- auto_link decides the starting point, not the whole story.

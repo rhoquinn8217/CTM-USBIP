@@ -56,6 +56,10 @@ static void ds5_apply_initial_settings(CtmBackend *backend,
     descriptor[9]  = static_cast<unsigned char>((caps.vendorId >> 8) & 0xff);
     descriptor[10] = static_cast<unsigned char>(caps.productId & 0xff);
     descriptor[11] = static_cast<unsigned char>((caps.productId >> 8) & 0xff);
+    // ⛔ The CAPABILITY question, not the kind question -- this builds a DS5 output report, so it must not run for anything else.
+    if (!device_has_ds5_audio(descriptor)) {
+        return;
+    }
     const char *kind = device_section_for(descriptor);
     if (kind == nullptr) {
         return;   // not a device we have settings for

@@ -76,8 +76,51 @@ static const char *device_section_for(const std::vector<unsigned char> &descript
     switch (product) {
         case 0x0ce6: return "ds5";
         case 0x0df2: return "ds5_edge";
+        case 0x09cc: return "ds4";        // DualShock 4, second revision
+        case 0x05c4: return "ds4";        // DualShock 4, first revision
         default:     return nullptr;
     }
+}
+
+// ⛔ SEPARATE FROM device_section_for, and the separation matters.
+//
+// That function's null return was carrying TWO meanings: "no config for this
+// device" and "not a DualSense". The audio paths relied on the second -- they
+// take any non-null kind as licence to build a DUALSENSE OUTPUT REPORT from it.
+//
+// ⚠️ So teaching device_section_for about other controllers, which the config
+// system needs, would have started writing DS5 audio bytes into an Xbox report.
+// Nothing would have failed loudly; the controller would just behave oddly.
+//
+// ➡️ Each caller now says which question it is asking. This one is "does this
+// device speak the DS5 output report format", and only the two DualSense
+// product ids do.
+// ⓘ Motion is a separate question from audio, even though today they answer the
+// same. The DS4 HAS a gyro -- at different report offsets -- so when a DS4
+// motion path is written this changes and the audio one does not.
+static bool device_has_ds5_motion(const std::vector<unsigned char> &descriptor);
+
+static bool device_has_ds5_audio(const std::vector<unsigned char> &descriptor)
+{
+    if (descriptor.size() < 12) {
+        return false;
+    }
+    const uint16_t vendor = static_cast<uint16_t>(
+        descriptor[8] | (static_cast<uint16_t>(descriptor[9]) << 8));
+    const uint16_t product = static_cast<uint16_t>(
+        descriptor[10] | (static_cast<uint16_t>(descriptor[11]) << 8));
+
+    // ⓘ The DS4 has a speaker and a headphone jack, and its map already encodes
+    // SBC for it -- but its OUTPUT REPORT is a different layout entirely, so the
+    // DS5 byte positions do not apply. It needs its own apply path before it can
+    // be listed here.
+    return vendor == kVendorSony && (product == 0x0ce6 || product == 0x0df2);
+}
+
+static bool device_has_ds5_motion(const std::vector<unsigned char> &descriptor)
+{
+    // Same two devices today. Kept separate because the question is different.
+    return device_has_ds5_audio(descriptor);
 }
 
 // DualSense USB output report layout. Positions and claim bits are ours, from
@@ -490,6 +533,10 @@ static void ds5_apply_output_overrides(uint8_t *data, size_t length,
     // costs two comparisons and is then left entirely alone. The per-report
     // format checks stay inside each override, since report ids differ by
     // device -- a DualSense uses 0x02 and others do not.
+    // ⛔ The CAPABILITY question, not the kind question -- this patches DS5 output report bytes, so it must not run for anything else.
+    if (!device_has_ds5_audio(descriptor)) {
+        return;
+    }
     const char *kind = device_section_for(descriptor);
     if (kind == nullptr) {
         return;

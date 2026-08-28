@@ -87,6 +87,21 @@ static const char *device_section_for(const std::vector<unsigned char> &d)
     return nullptr;
 }
 
+// ⭐ The CAPABILITY question, stubbed alongside the kind question.
+//
+// gyro_mouse.inl asks this before reading motion, because device_section_for
+// now answers for controllers whose report layout it cannot handle -- a DS4 has
+// a gyro, at different offsets, so a kind check would silently read the wrong
+// bytes.
+//
+// ⚠️ The test binary is its own translation unit, so it sees nothing that
+// main.cpp includes. Anything the real code gains has to be stubbed here too.
+static bool device_has_ds5_motion(const std::vector<unsigned char> &d)
+{
+    const char *kind = device_section_for(d);
+    return kind != nullptr;
+}
+
 // ⭐ The calibration half that gyro_mouse.inl READS. Not the fetch half -- that
 // needs a backend, which this harness has no business knowing about. Without
 // this the scale type is undefined and nothing below compiles.

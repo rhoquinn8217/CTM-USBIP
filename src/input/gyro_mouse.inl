@@ -631,9 +631,18 @@ inline void on_ds5_input(const void *deviceKey,
                          const std::string &linkedConfig,
                          const uint8_t *d, size_t len)
 {
+    // ⛔ The CAPABILITY question. This reads motion out of the DUALSENSE input
+    // report at DualSense offsets -- the DS4 has a gyro too, but at different
+    // positions, so a kind check would have silently read the wrong bytes.
+    //
+    // ⓘ device_section_for now answers for controllers this path cannot handle,
+    // which is why it is no longer the right question to ask here.
+    if (!device_has_ds5_motion(descriptor)) {
+        return;
+    }
     const char *kind = device_section_for(descriptor);
     if (kind == nullptr) {
-        return;                                 // not a DualSense; ignore
+        return;
     }
     // Same resolution the audio path uses: shared section unless linked.
     const std::string resolved = device_settings_section(kind, linkedConfig);

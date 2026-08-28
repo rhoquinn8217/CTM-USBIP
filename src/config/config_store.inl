@@ -109,6 +109,19 @@ inline std::string settings_kind_for(const std::string &sessionKind)
 {
     if (sessionKind == "ds5" || sessionKind == "ds5_usb") return "ds5";
     if (sessionKind == "ds5e_usb" || sessionKind == "ds5_edge") return "ds5_edge";
+    // ⭐ Buttons are the UNIVERSAL capability -- every controller has them, in the
+    // same standard positions. Audio and gyro are the exceptions layered on top,
+    // not the other way round, so a kind earns a config by existing rather than
+    // by being a DualSense.
+    //
+    // ⓘ These are the session kinds the TV actually sends -- checked against
+    // bridge_profile_for_kind(). Adding one here that the TV never sends would
+    // create a config nothing can ever link to.
+    if (sessionKind == "ds4") return "ds4";
+    if (sessionKind == "xbox") return "xbox";
+    // ⛔ NOT "puck". Composite devices take an early return in handle_input and
+    // are forwarded verbatim -- they never reach the paths a config would act
+    // on. Structural, not a gap to fill later.
     return std::string();                    // not a kind we carry configs for
 }
 
@@ -120,9 +133,17 @@ inline bool kind_supports_config(const std::string &kind)
     // refused as a kind mismatch. Checked against bridge_profile_for_kind():
     // ds5, ds5_usb, ds5e_usb.
     //
-    // DS5 family only, and not because other devices cannot have settings:
-    // auto_link needs a trustworthy per-unit serial, and these are the ones
-    // established to have one (measured 2026-08-21: 7c:66:ef:82:10:ed).
+    // ⚠️ WIDENED 2026-08-27 to ds4 and xbox, for button rebinding.
+    //
+    // The earlier DS5-only limit was about auto_link needing a trustworthy
+    // per-unit serial, not about capability -- and those two are separable. A
+    // config can be LINKED BY HAND with no serial at all; only AUTO-linking
+    // needs one. So a controller that reports no usable serial still gets a
+    // config, it just cannot claim one at bridge time.
+    //
+    // ⓘ Whether a DS4 or an Xbox pad reports a usable serial through this bridge
+    // is UNMEASURED. If not, auto_link quietly will not work for them and the
+    // page already says so -- it disables the button when there is no serial.
     // Accepts either form, so callers need not know which they hold.
     return !settings_kind_for(kind).empty();
 }

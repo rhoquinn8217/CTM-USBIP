@@ -109,8 +109,16 @@ int run_config_store_tests()
     CTM_CHECK(cs::kind_supports_config("ds5"));
     CTM_CHECK(cs::kind_supports_config("ds5_usb"));
     CTM_CHECK(cs::kind_supports_config("ds5e_usb"));
-    CTM_CHECK(!cs::kind_supports_config("ds4"));
+    // ⭐ WIDENED 2026-08-27: ds4 and xbox carry configs now, for button
+    // rebinding. Buttons are the universal capability -- audio and gyro are the
+    // exceptions layered on top.
+    CTM_CHECK(cs::kind_supports_config("ds4"));
+    CTM_CHECK(cs::kind_supports_config("xbox"));
+    // ⛔ The puck is the unsupported case, and structurally so: composite
+    // devices take an early return in handle_input and are forwarded verbatim,
+    // so they never reach the paths a config would act on.
     CTM_CHECK(!cs::kind_supports_config("puck"));
+    CTM_CHECK(!cs::kind_supports_config("nonsense"));
 
     section("config store: ⭐ a session kind maps to the settings section name");
     // The section a setting is READ from comes from the USB product id, not the
@@ -120,7 +128,11 @@ int run_config_store_tests()
     CTM_CHECK_EQ(cs::settings_kind_for("ds5"), std::string("ds5"));
     CTM_CHECK_EQ(cs::settings_kind_for("ds5_usb"), std::string("ds5"));
     CTM_CHECK_EQ(cs::settings_kind_for("ds5e_usb"), std::string("ds5_edge"));
-    CTM_CHECK_EQ(cs::settings_kind_for("ds4"), std::string(""));
+    CTM_CHECK_EQ(cs::settings_kind_for("ds4"), std::string("ds4"));
+    CTM_CHECK_EQ(cs::settings_kind_for("xbox"), std::string("xbox"));
+    // ⓘ A kind the TV never sends must map to nothing, or a config could be
+    // created that nothing can ever link to.
+    CTM_CHECK_EQ(cs::settings_kind_for("puck"), std::string(""));
 
     section("config store: a config created for a ds5_usb device stores ds5");
     {
@@ -228,8 +240,14 @@ int run_config_store_tests()
         CTM_CHECK(!contains(body, "speaker_volume"));
         // and a second create with the same name is refused
         CTM_CHECK(!cs::create_config("fresh", "ds5", &error));
-        // as is a kind that cannot carry a config
-        CTM_CHECK(!cs::create_config("nope", "ds4", &error));
+        // ⭐ A ds4 config IS creatable now, and lands in its own section.
+        CTM_CHECK(cs::create_config("pad4", "ds4", &error));
+        const std::string ds4body = read_config("pad4");
+        CTM_CHECK(contains(ds4body, "kind = ds4"));
+        CTM_CHECK(contains(ds4body, "[ds4]"));
+        // ⛔ And a kind that cannot carry one is still refused -- the puck,
+        // structurally, rather than ds4 which used to stand in for this.
+        CTM_CHECK(!cs::create_config("nope", "puck", &error));
         CTM_CHECK(contains(error, "unsupported"));
     }
 
