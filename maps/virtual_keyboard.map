@@ -25,9 +25,9 @@ op.1 = bytes.copy source[0..7] -> destination[0..7]
 destination_length = 8
 
 [path.output.virtual_to_controller]
-# ⓘ The host sends LED state (caps lock and friends) over EP0 as SET_REPORT,
-# because a boot keyboard declares LED outputs. Nothing is behind this device to
-# light up, so the copy is here for shape and the bytes go nowhere.
+# ⓘ Nothing comes back from this device -- the report descriptor declares no
+# outputs, so the host has nothing to send. Kept for shape, as the mouse map
+# does.
 trigger = usb.endpoint.hid_out
 source_report = 0
 destination_report = 0

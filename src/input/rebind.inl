@@ -218,6 +218,84 @@ inline long long now_ms()
 
 // ---- The hook ---------------------------------------------------------------
 
+// ---- Config mode ------------------------------------------------------------
+//
+// ⭐ WHY THIS EXISTS. With the settings page open, the buttons you press to
+// navigate it ALSO reach the game -- you press select and your character jumps.
+//
+// ⛔ The page cannot fix that. It already ignores the pad when it is not the
+// front window, but it cannot make the GAME ignore it. Only the agent can,
+// because it is what presents the controller to Windows.
+//
+// ➡️ So the agent strips the navigation buttons from the report and sends
+// KEYSTROKES instead. Keyboard input goes to whichever window is in front, so
+// the keys reach the page and cannot leak to the game.
+//
+// ⓘ This is button rebinding with a fixed target, which is why rebinding was
+// built first.
+inline std::atomic_bool g_configMode{false};
+
+inline void set_config_mode(bool on)
+{
+    const bool was = g_configMode.exchange(on);
+    if (was && !on) {
+        // ⛔ Release everything on the way out. A key left down repeats forever
+        // and looks like a stuck keyboard -- and this is the path that runs
+        // when someone closes the settings window, so it must not depend on
+        // anything else going right.
+        ctm_keyboard_device::release_all();
+    }
+}
+
+inline bool config_mode() { return g_configMode.load(std::memory_order_relaxed); }
+
+// ⛔ THE PAGE INTERPRETS THESE, and they carry CTRL+ALT.
+//
+// ⚠️ MEASURED 2026-08-28, after a long hunt: F13-F24 do NOT reach a browser as
+// keystrokes. The same virtual keyboard types 't' from a rebind in the same
+// session, so detection, resolution, publishing and the device were all fine --
+// only the choice of key was wrong.
+//
+// ⛔ The mistake was mine and is worth naming: I confirmed F13-F24 have virtual
+// key constants and that Microsoft leaves them unassigned, then treated "the OS
+// understands the key" as "the browser receives a keydown". Those are different
+// claims and only the first had evidence.
+//
+// ⭐ CTRL+ALT is what makes ordinary letters safe here. A text field ignores
+// them, so typing a config name still works, and the page can tell a gate press
+// from someone typing 'd'.
+//
+// ⓘ WASD because it reads as movement without a lookup table, and Q/E because
+// those are the keys beside it that games use for adjacent actions. The letters
+// are for legibility; the MODIFIERS are what make it work.
+//
+// ⓘ Native keys were tried before this and rejected for a different reason:
+// arrows scroll rather than moving between controls, Tab focus is a different
+// visual that is not trapped inside a modal, and space toggles a checkbox but
+// OPENS a dropdown -- one key meaning two things.
+struct GateBinding { int standardIndex; const char *code; uint8_t modifier; };
+
+// ⭐ Ctrl (0x01) + Shift (0x02) + Alt (0x04) on every one.
+//
+// ⛔ Ctrl+Alt alone was not enough: Ctrl+Alt+S opens the Windows SOUND panel,
+// measured 2026-08-28. THREE modifiers is a far smaller target -- it is what
+// applications reach for precisely because the OS and browsers leave it alone.
+//
+// ⓘ Adding Shift also let KeyS come back, so WASD reads properly again.
+#define CTM_GATE_MODS 0x07
+
+inline const GateBinding kConfigModeKeys[] = {
+    { kBtnDpadUp,    "KeyW",  CTM_GATE_MODS },   // up
+    { kBtnDpadDown,  "KeyS",  CTM_GATE_MODS },   // down
+    { kBtnDpadLeft,  "KeyA",  CTM_GATE_MODS },   // left  -- coarse step
+    { kBtnDpadRight, "KeyD",  CTM_GATE_MODS },   // right -- coarse step
+    { kBtnL1,        "KeyQ",  CTM_GATE_MODS },   // previous tab
+    { kBtnR1,        "KeyE",  CTM_GATE_MODS },   // next tab
+    { kBtnFaceDown,  "Enter", CTM_GATE_MODS },   // cross:  select
+    { kBtnFaceRight, "KeyZ",  CTM_GATE_MODS },   // circle: back out
+    { kBtnFaceLeft,  "KeyX",  CTM_GATE_MODS },   // square: toggle
+};
+
 inline void apply(const void *deviceKey,
                   const std::vector<unsigned char> &descriptor,
                   const std::string &linkedConfig,
@@ -227,6 +305,65 @@ inline void apply(const void *deviceKey,
 
     const char *kind = device_section_for(descriptor);
     if (kind == nullptr) return;
+
+    // ⭐ CONFIG MODE WINS over anything the user bound.
+    //
+    // ⛔ Otherwise a pad with cross bound to KeyF could not press "select" on
+    // the settings page -- the lockout problem arriving by a different route.
+    // While the page is open, the pad drives the page. Full stop.
+    //
+    // ⓘ It runs for EVERY bridged controller, not just the one being
+    // configured: nobody is playing while the settings page is up, including
+    // co-op players on the same screen, and gating one pad while leaving
+    // another live would suggest the other person could carry on.
+    // ⓘ A config key turns it on for now, so the gate can be tested before any
+    // of the plumbing around it exists -- set it, press select, watch the game
+    // not react. The REST endpoint replaces this; the key stays as an escape
+    // hatch when the page itself is the thing that is broken.
+    //
+    // ⚠️ Read per device but applied GLOBALLY: setting it on one controller
+    // gates them all, which is the intended behaviour and worth knowing when
+    // reading the config.
+    {
+        const std::string s0 = device_settings_section(kind, linkedConfig);
+        if (device_config_bool(s0.c_str(), "config_mode", false) != config_mode()) {
+            set_config_mode(device_config_bool(s0.c_str(), "config_mode", false));
+        }
+    }
+
+    if (config_mode()) {
+        uint8_t gateKeys[6] = {0, 0, 0, 0, 0, 0};
+        size_t gateCount = 0;
+        uint8_t gateMods = 0;
+
+        for (const GateBinding &g : kConfigModeKeys) {
+            const bool held = is_pressed(data, len, g.standardIndex);
+            // ⛔ Cleared whether or not it is held, so a button released this
+            // frame cannot leave a stale bit behind.
+            clear_button(data, len, g.standardIndex);
+            if (!held) continue;
+            const KeyName *k = key_for(g.code);
+            if (k != nullptr && k->usage != 0 && gateCount < 6) {
+                gateKeys[gateCount++] = k->usage;
+                // ⓘ Shift for Shift+Tab. The modifier rides in report byte 0
+                // alongside the key, which is how a real keyboard sends it.
+                gateMods = static_cast<uint8_t>(gateMods | g.modifier);
+            }
+        }
+
+        // ⓘ Verbose only. This fires on every press, and it was left on by
+        // accident after the F13-F24 hunt -- which filled the log during normal
+        // use with something nobody needs unless they are debugging the gate.
+        if (gateCount > 0 && ctm_verbose_logs()) {
+            device_log::input(device_log::msg()
+                << "config mode: sending " << gateCount << " key(s), first usage 0x"
+                << std::hex << static_cast<int>(gateKeys[0]) << std::dec);
+        }
+
+        ctm_keyboard_device::set_state(gateMods, gateKeys, gateCount);
+        return;                       // ⭐ user rebinds do not run in this mode
+    }
+
     const std::string section = device_settings_section(kind, linkedConfig);
 
     uint8_t modifiers = 0;

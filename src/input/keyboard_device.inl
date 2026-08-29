@@ -51,14 +51,35 @@ inline std::wstring keyboard_map_path()
 // keyboard carries; anything past that is dropped rather than rolled over.
 inline void set_state(uint8_t modifiers, const uint8_t *keys, size_t count)
 {
+    // ⛔ ONLY MARK DIRTY WHEN SOMETHING ACTUALLY CHANGED.
+    //
+    // Measured 2026-08-28: config mode calls this on EVERY input report, about
+    // 250 times a second. Most carry no button, so the pump published an empty
+    // report each time -- and a key set for one frame was cleared milliseconds
+    // later, faster than Windows could register it. Eight empty reports in
+    // 37 ms, and not a single keystroke arrived.
+    //
+    // ⭐ A HID keyboard is STATE, not events: the host holds the last report
+    // until a new one arrives. Re-sending an unchanged state is not just
+    // wasteful, it is what broke this.
+    bool changed = false;
     {
         std::lock_guard<std::mutex> lock(g_stateMutex);
-        g_modifiers = modifiers;
+        if (g_modifiers != modifiers) {
+            g_modifiers = modifiers;
+            changed = true;
+        }
         for (size_t i = 0; i < 6; ++i) {
-            g_keys[i] = (i < count && keys != nullptr) ? keys[i] : 0;
+            const uint8_t want = (i < count && keys != nullptr) ? keys[i] : 0;
+            if (g_keys[i] != want) {
+                g_keys[i] = want;
+                changed = true;
+            }
         }
     }
-    g_dirty.store(true, std::memory_order_relaxed);
+    if (changed) {
+        g_dirty.store(true, std::memory_order_relaxed);
+    }
 }
 
 // ⭐ Everything up. Called when a controller unbridges and when rebinds are
@@ -99,6 +120,24 @@ inline void pump_loop()
         }
         if (device) {
             device->inject_synthetic_input(report);
+            // ⓘ The last untested link. The agent resolves the key correctly --
+            // measured -- and nothing reaches the browser, so the question is
+            // whether the pump publishes at all and whether the device takes it.
+            if (ctm_verbose_logs()) {
+                device_log::input(device_log::msg()
+                    << "keyboard report sent: mod=0x" << std::hex
+                    << static_cast<int>(report.data[0]) << " key0=0x"
+                    << static_cast<int>(report.data[2]) << std::dec);
+            }
+        } else {
+            // ⛔ No device means ensure_started() never completed, or the
+            // pointer was cleared -- and the pump would spin silently forever.
+            static bool said = false;
+            if (!said) {
+                said = true;
+                device_log::input(device_log::msg()
+                    << "keyboard pump has NO DEVICE -- nothing can be sent");
+            }
         }
     }
 }

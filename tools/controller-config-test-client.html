@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.38.1 -- see the changelog at the bottom of this comment.
+  VERSION 2.45.0 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -463,7 +463,12 @@
      so a wide window otherwise wastes most of itself. */
   .cols { display:grid; grid-template-columns:1fr; gap:16px; }
   @media (min-width:1100px) { .cols { grid-template-columns:1fr 1fr; } }
-  .sect { border:1px solid #2c2e36; border-radius:10px; padding:12px 14px; }
+  /* ⛔ WITHOUT THIS the sticky header swallows a jumped-to section. Every
+     control already has the same margin; the section wrapper did not, so
+     scrollIntoView put it at the very top of the viewport -- underneath the
+     header -- and took the focused control with it. */
+  .sect { border:1px solid #2c2e36; border-radius:10px; padding:12px 14px;
+          scroll-margin-top: var(--stickH, 180px); }
   .sect h3 { margin:0 0 10px; font-size:13.5px; color:#e8e8ea; font-weight:600; }
   .row { display:grid; grid-template-columns:18px 1fr auto; gap:11px; align-items:start;
          padding:6px 0; border-bottom:1px solid #1f2128; }
@@ -520,7 +525,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.38.1</span>
+  <span class="muted" style="font-size:12px">v2.45.0</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -1999,9 +2004,17 @@ function gpPaint() {
   el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 
+// ⛔ CLAMPS, does not wrap.
+//
+// Wrapping meant pressing up on the first control threw you to the LAST setting
+// of the LAST section, and pressing down on that threw you back to the header.
+// A long list has ends; arriving at one should feel like an end, not like being
+// teleported.
 function gpMove(delta) {
   if (!GP_FOCUS.length) return;
-  GP_INDEX = (GP_INDEX + delta + GP_FOCUS.length) % GP_FOCUS.length;
+  var next = GP_INDEX + delta;
+  if (next < 0 || next >= GP_FOCUS.length) return;   // already at the end
+  GP_INDEX = next;
   gpPaint();
 }
 
@@ -2058,12 +2071,272 @@ function gpSelectEnd(commit) {
   GP_SELECTING = null;
 }
 
+// ⭐ CONFIG MODE keys.
+//
+// While the agent is gating the pad, its buttons arrive here as keystrokes --
+// keyboard input goes to whichever window is in front, so it reaches this page
+// and cannot leak to the game.
+//
+// ⛔ These are PRIVATE keys, not keyboard equivalents. Native keys were tried
+// and do not work: arrows scroll instead of moving between controls, Tab focus
+// is a different visual from the pad's and is not trapped inside a modal, and
+// space toggles a checkbox but OPENS a dropdown -- one key meaning two things.
+//
+// ⭐ So each key calls the function the pad already calls. Config mode then
+// behaves exactly like using the pad directly: same halo, same modal trap, same
+// coarse steps. Nothing is re-solved.
+//
+// ⓘ F13-F24 are deliberately unassigned by Microsoft, so nothing else claims
+// them and nobody types one by accident.
+// ⚠️ MEASURED: F13-F24 do NOT reach a browser as keystrokes. The same virtual
+// keyboard types an ordinary letter fine, so the device was never the problem --
+// only the choice of key.
+//
+// ⭐ CTRL+ALT is what makes ordinary letters safe. A text field ignores them, so
+// typing a config name still works and the page can tell a gate press from
+// someone typing 'd'. WASD reads as movement without a lookup table.
+var CONFIG_MODE_KEYS = {
+  KeyW: function () { gpKeyMove(-1); },
+  KeyS: function () { gpKeyMove(1); },
+  KeyA: function () { gpKeyStep(-1); },
+  KeyD: function () { gpKeyStep(1); },
+  // ⭐ L1/R1 switch tabs normally, but are the COARSE step inside an editor or
+  // an open dropdown -- matching the pad, where they jump 100.
+  KeyQ: function () { gpKeyCoarse(-1); },
+  KeyE: function () { gpKeyCoarse(1); },
+  Enter: function () { gpKeySelect(); },
+  KeyZ: function () { gpKeyBack(); },
+  KeyX: function () { gpToggleManaged(); }
+};
+
+// ⭐ One place that steps the value being edited. It was inline in gpPoll; the
+// key handler needs the same behaviour, and two copies of clamping logic is how
+// they drift apart.
+function gpEditStep(dir, mult) {
+  if (!GP_EDITING) return;
+  var st = parseFloat(GP_EDITING.step) || 1;
+  var cur = parseFloat(GP_EDITING.value);
+  if (isNaN(cur)) cur = 0;
+  var next = cur + dir * st * mult;
+  // ⓘ The field's own bounds, so a percentage cannot pass 100 and a byte
+  // cannot pass 255.
+  var lo = GP_EDITING.min === '' ? null : parseFloat(GP_EDITING.min);
+  var hi = GP_EDITING.max === '' ? null : parseFloat(GP_EDITING.max);
+  if (lo !== null && !isNaN(lo) && next < lo) next = lo;
+  if (hi !== null && !isNaN(hi) && next > hi) next = hi;
+  GP_EDITING.value = String(next);
+  GP_EDITING.dispatchEvent(new Event('change'));
+  GP_EDITING.scrollIntoView({ block: 'nearest' });
+}
+
+// ⓘ Up/down has three meanings depending on what is open, exactly as the pad
+// does -- so it routes the same way rather than duplicating the logic.
+function gpKeyMove(delta) {
+  // ⚠️ INVERTED for an editor. Moving a halo DOWN is delta +1, but pressing up
+  // on a value must INCREASE it -- measured: up was decrementing.
+  if (GP_EDITING) { gpEditStep(-delta, 1); return; }
+  if (GP_SELECTING) {
+    var n = GP_SELECTING.options.length;
+    GP_SELECTING.selectedIndex = (GP_SELECTING.selectedIndex + delta + n) % n;
+    return;
+  }
+  gpMove(delta);
+}
+
+// ⛔ Cross has TWO meanings and gpActivate only knows one: it OPENS a dropdown
+// but never closes one -- the pad's own loop handles that separately with
+// gpSelectEnd(true). Routed through here so a press chooses rather than
+// re-opening.
+function gpKeySelect() {
+  if (GP_SELECTING) { gpSelectEnd(true); return; }
+  if (GP_EDITING) {
+    // Leaving a value box, matching what the pad does.
+    GP_EDITING.classList.remove('gp-selecting');
+    GP_EDITING.blur();
+    GP_EDITING = null;
+    gpPaint();
+    return;
+  }
+  if (CONFIRM_CB) { confirmYes(); return; }
+  gpActivate();
+}
+
+// L1/R1: tabs when nothing is open, the big step when something is.
+function gpKeyCoarse(dir) {
+  if (GP_EDITING) { gpEditStep(dir, 100); return; }
+  if (GP_SELECTING) {
+    var n = GP_SELECTING.options.length;
+    var next = GP_SELECTING.selectedIndex + dir * 100;
+    GP_SELECTING.selectedIndex = Math.max(0, Math.min(n - 1, next));
+    return;
+  }
+  gpTab(dir);
+}
+
+// Left/right: the COARSE step inside an editor, and nothing outside one.
+// ⭐ Left/right JUMP BETWEEN SECTIONS when nothing is open -- Audio, Rumble,
+// Gyro, Buttons and back round. With 34 button settings a section is a long
+// scroll, and skipping one is the common case.
+//
+// ⓘ Inside an editor or a dropdown they keep their coarse-step meaning, so each
+// axis has one job at each level: up/down moves within, left/right moves
+// between, L1/R1 is the big jump.
+// ⛔ Returns FALSE when there is nothing to jump between, so the caller can fall
+// back to moving up and down. Sections only exist on a controller tab -- on
+// Overview, and inside a dialog, left/right should behave like up/down rather
+// than doing nothing.
+function gpJumpSection(dir) {
+  if (ACTIVE === 'overview' || CONFIRM_CB || RENAMING) return false;
+
+  // ⛔ And only when focus is INSIDE a section. The controller tab's header --
+  // the device row, the config picker, New and Rename -- sits above them, and
+  // jumping from there would throw you into the settings unasked. Up/down is
+  // what left/right should do while you are still in the header.
+  var focused = GP_FOCUS[GP_INDEX];
+  if (!focused || !focused.closest || !focused.closest('.sect')) return false;
+  var heads = [];
+  var pane = document.getElementById('pane-' + ACTIVE);
+  if (!pane) return false;
+  // ⓘ Each section is a <div class="sect"> holding an <h3> and its rows -- see
+  // where the groups are emitted. The DIV is the anchor, not the heading.
+  pane.querySelectorAll('.sect').forEach(function (h) { heads.push(h); });
+  if (!heads.length) return false;
+
+  // Where are we now? The first heading at or before the focused control.
+  var here = GP_FOCUS[GP_INDEX];
+  var at = 0;
+  if (here) {
+    for (var i = 0; i < heads.length; i++) {
+      if (heads[i].compareDocumentPosition(here) & Node.DOCUMENT_POSITION_FOLLOWING) {
+        at = i;
+      }
+    }
+  }
+  // ⭐ WRAP THROUGH THE HEADER, not straight round the sections.
+  //
+  // Going forward past the last section, or back before the first, lands on the
+  // device row and config picker above them -- which is where you came in from
+  // and where New, Rename and the config picker live. Skipping over it would
+  // make the header reachable only by scrolling up through a whole section.
+  var next = at + dir;
+
+  // ⛔ FORWARD PAST THE LAST SECTION STOPS. Cycling back to the header made the
+  // end of the list feel like a loop rather than an end.
+  if (next >= heads.length) return true;
+
+  // ⭐ BACK FROM THE FIRST SECTION lands in the header -- but on the CONFIG
+  // ROW, not the first focusable thing there.
+  //
+  // ⓘ The first focusable is "Remove auto link", which is a destructive button
+  // in the device row and an awkward place to arrive. "Set auto link" sits with
+  // New and Rename in the config row, which is what you came up here for.
+  // Falls back to Rename when Set auto link is disabled, and to the first
+  // header control if neither exists.
+  if (next < 0) {
+    var want = null, fallback = null, firstHeader = null;
+    for (var h = 0; h < GP_FOCUS.length; h++) {
+      var el = GP_FOCUS[h];
+      if (el.closest && el.closest('.sect')) continue;   // in a section: skip
+      if (firstHeader === null) firstHeader = h;
+      var label = (el.textContent || '').trim();
+      if (label === 'Set auto link' && !el.disabled) want = h;
+      else if (label === 'Rename') fallback = h;
+    }
+    var landOn = (want !== null) ? want
+               : (fallback !== null) ? fallback
+               : firstHeader;
+    if (landOn === null) return true;
+    GP_INDEX = landOn;
+    gpPaint();
+    window.scrollTo(0, 0);
+    return true;
+  }
+
+  // Focus the first control after that heading.
+  var found = null;
+  for (var j = 0; j < GP_FOCUS.length; j++) {
+    var pos = heads[next].compareDocumentPosition(GP_FOCUS[j]);
+    if (pos & Node.DOCUMENT_POSITION_FOLLOWING) { found = j; break; }
+  }
+  if (found !== null) {
+    GP_INDEX = found;
+    // ⚠️ Scroll to the SECTION first so its heading is visible, then let
+    // gpPaint bring the focused control into view. Scrolling to the heading
+    // alone left the halo somewhere else on screen, and the next press
+    // snapped the page back -- which read as the jump not having worked.
+    // ⚠️ PAINT FIRST, THEN SCROLL. gpPaint scrolls the focused control into
+    // view, so scrolling the section first meant gpPaint immediately undid it,
+    // and a nudge afterwards just fought both. Painting first lets the halo
+    // land, then one scroll puts the HEADING at the top with the focused
+    // control just below it.
+    gpPaint();
+    heads[next].scrollIntoView({ block: 'start' });
+    return true;
+  }
+  return false;
+}
+
+function gpKeyStep(dir) {
+  if (GP_EDITING) { gpEditStep(dir, 10); return; }
+  if (GP_SELECTING) {
+    var n = GP_SELECTING.options.length;
+    var next = GP_SELECTING.selectedIndex + dir * 10;
+    GP_SELECTING.selectedIndex = Math.max(0, Math.min(n - 1, next));
+    return;
+  }
+  // ⭐ Sections only exist on a controller tab. Everywhere else -- Overview, a
+  // dialog, a rename row -- left/right behave like up/down, so the axis is
+  // never dead.
+  if (!gpJumpSection(dir)) {
+    gpMove(dir);
+  }
+}
+
+// ○ in order of what is open, matching the pad's own precedence.
+function gpKeyBack() {
+  if (CONFIRM_CB) { confirmNo(); return; }
+  if (GP_EDITING) {
+    GP_EDITING.classList.remove('gp-selecting');
+    GP_EDITING.blur();
+    GP_EDITING = null;
+    gpPaint();
+    return;
+  }
+  if (GP_SELECTING) { gpSelectEnd(false); return; }
+  if (RENAMING) { cancelRename(); return; }
+  showTab('overview'); GP_INDEX = 0; gpCollect();
+}
+
+document.addEventListener('keydown', function (ev) {
+  // ⛔ BOTH MODIFIERS REQUIRED. Without this check a plain 'd' typed into a
+  // config name would move the halo, and Enter would press whatever is focused
+  // instead of committing a rename.
+  // ⛔ ALL THREE. Ctrl+Alt alone collided with the OS -- Ctrl+Alt+S opens the
+  // Windows Sound panel -- so Shift is required too. Three modifiers is a far
+  // smaller target, and it let KeyS come back so WASD reads properly.
+  if (!ev.ctrlKey || !ev.altKey || !ev.shiftKey) return;
+  var fn = CONFIG_MODE_KEYS[ev.code];
+  if (!fn) return;
+  ev.preventDefault();
+  fn();
+}, true);
+
 function gpTab(delta) {
   var at = TABS.indexOf(ACTIVE);
   if (at < 0) at = 0;
   showTab(TABS[(at + delta + TABS.length) % TABS.length]);
   GP_INDEX = 0;
   gpCollect();
+
+  // ⭐ In CONFIG MODE the pad arrives as keystrokes, so there is no gamepad for
+  // gpCollect to find and the pad's own focus list stays empty. Focus the first
+  // real control instead, so Tab has somewhere to start from -- otherwise the
+  // page changes tab and the keyboard is still pointing at nothing.
+  var pane = document.getElementById('pane-' + ACTIVE);
+  if (pane) {
+    var first = pane.querySelector('button, select, input');
+    if (first && first.focus) first.focus();
+  }
 }
 
 function gpPoll() {
@@ -2273,13 +2546,25 @@ function gpPoll() {
     requestAnimationFrame(gpPoll);
     return;
   }
-  // ⓘ No value-stepping on left/right any more: they move now, and a number
-  // field is edited by selecting it and typing.
+  // ⭐ LEFT/RIGHT JUMP SECTIONS, they no longer mirror up/down.
+  //
+  // ⛔ Mirroring made left/right duplicate the vertical axis for no gain, and
+  // with 34 button settings a section is a long scroll -- skipping one is the
+  // common case. Each axis now has one job: up/down moves within a section,
+  // left/right moves between them, L1/R1 switches controllers.
+  //
+  // ⚠️ This was added to the CONFIG MODE key handler first and not here, so it
+  // worked with a gated pad and not with one used directly. Same behaviour on
+  // both paths now.
+  if (edge(14)) { if (!gpJumpSection(-1)) gpMove(-1); GP_REPEAT_AT = now + 400; }
+  else if (edge(15)) { if (!gpJumpSection(1)) gpMove(1); GP_REPEAT_AT = now + 400; }
 
   // D-pad: fire on the edge, then repeat while held after a short delay.
-  if (edge(12) || edge(14)) { gpMove(-1); GP_REPEAT_AT = now + 400; }
-  else if (edge(13) || edge(15)) { gpMove(1); GP_REPEAT_AT = now + 400; }
-  else if ((up || down) && now >= GP_REPEAT_AT) { gpMove(up ? -1 : 1); GP_REPEAT_AT = now + 90; }
+  else if (edge(12)) { gpMove(-1); GP_REPEAT_AT = now + 400; }
+  else if (edge(13)) { gpMove(1); GP_REPEAT_AT = now + 400; }
+  else if ((pressed(12) || pressed(13)) && now >= GP_REPEAT_AT) {
+    gpMove(pressed(12) ? -1 : 1); GP_REPEAT_AT = now + 90;
+  }
 
   requestAnimationFrame(gpPoll);
 }

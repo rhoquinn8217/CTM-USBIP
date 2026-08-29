@@ -224,6 +224,7 @@ static std::string rest_config_detail_json(const config_store::ConfigFile &cfg)
 static std::string rest_keys_json()
 {
     return R"({"keys":[
+{"key":"config_mode","type":"bool","default":false,"help":"While on, the D-pad, face buttons and shoulders drive THIS PAGE and the game receives nothing from them. Applies to every bridged controller, because nobody is playing while settings are open. Turn it off to give the pad back to the game."},
 {"key":"rebind_debug","type":"bool","default":false,"help":"Logs what each bound button is doing, twice a second: whether it was seen as pressed, and the raw button bytes. For working out why a rebind does nothing."},
 {"key":"rebind_0","type":"string","default":"","help":"Cross / A (bottom face) -- send a keyboard key instead of this button. Names are KeyboardEvent.code: KeyR, Enter, Escape, ArrowUp, F13. The game stops seeing the button entirely."},
 {"key":"turbo_0","type":"int","min":0,"max":1000,"default":0,"help":"Cross / A (bottom face) -- milliseconds between presses while held. 0 is off. Works with or without a rebind: on its own the button repeats itself."},
