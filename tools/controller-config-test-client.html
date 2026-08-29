@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.47.2 -- see the changelog at the bottom of this comment.
+  VERSION 2.50.0 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -459,6 +459,12 @@
      bar reads as three unrelated things. */
   #gpbar #gphint { margin-left:auto; }
   #fitBtn, #closeBtn { padding:2px 8px; font-size:11px; margin-left:8px; }
+  /* ⓘ Sized like the page's own buttons -- New, Rename, Reset -- not like the
+     small footer ones it briefly lived beside. */
+  /* Locked: the page has the pads. Mirrored: the game still sees them. */
+  #holdBtn { background:#1b2b21; border-color:#4f9d69; color:#8fd6a4;
+             font-weight:600; }
+  #holdBtn.on { background:#3a3320; border-color:#e0c07a; color:#e8cf92; }
   #padDest { margin-left:auto; }
   #padDest.on { color:#7fd18c; }
   #gpbar.live #gphint { color:#7fd18c; }
@@ -532,7 +538,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.47.2</span>
+  <span class="muted" style="font-size:12px">v2.50.0</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -541,7 +547,20 @@
   <button class="go" onclick="refreshAll()"
     title="Controllers are picked up automatically. This reloads configs too, for when a file has been edited outside this page.">Reload</button>
   <span id="conn" class="muted">not checked</span>
+  <!-- ⭐ On the agent row rather than a line of its own: it is a session-wide
+       switch like the agent address beside it, and a row to itself made it look
+       like a heading for the table below. -->
+  <button id="holdBtn" onclick="toggleGateHold()"
+          style="margin-left:18px">Controller Inputs Locked to Page</button>
+  <span id="holdHint" class="muted" style="font-size:12px">click to unlock</span>
 </div>
+
+<!-- ⭐ Stops the page taking the controller, whatever focus does. Two reasons
+     to want it: adjusting settings at the desk while not minding that the game
+     sees the pad, and getting out when something is stuck.
+     ⓘ On Overview rather than the footer -- it is a session-wide choice, and the
+     footer is for status rather than controls. -->
+
 
 <h2>Devices</h2>
 <div id="devices"><span class="muted">Refresh to load.</span></div>
@@ -604,7 +623,7 @@
   <!-- ⭐ Where the controller's input is going. Says it plainly rather than
        naming the mechanism: "gated" means nothing to someone who did not build
        it, and this is the one piece of state that changes under you. -->
-  <span id="padDest" class="muted">controller → game</span>
+  <span id="padDest" class="muted">controllers → game</span>
   <button id="fitBtn" onclick="fitWindow()" title="centre this window and set a sensible size">Fit window</button>
   <!-- ⓘ Closing releases the gate on the way out, via the pagehide beacon, so
        this is a safe exit rather than a way to strand yourself. -->
@@ -1272,6 +1291,10 @@ function renderConfigEditor(hostId, configName, prefix, ordinal) {
       if (!groups[g]) return;
       html += '<div class="sect"><h3>' + g + '</h3>';
       groups[g].forEach(function(meta) {
+        // ⛔ Debug keys are for someone reading the log, not for the person
+        // adjusting a controller -- and every row is one more to scroll past.
+        // Set them by hand in the config file when they are needed.
+        if (/_debug(_|$)/.test(meta.key)) return;
         var val = current[meta.key];
         // ⚠️ Present-but-empty counts as UNMANAGED, not as a value. That is
         // what the agent does too: "" fails to parse and falls back, and an
@@ -1351,7 +1374,19 @@ function renderConfigEditor(hostId, configName, prefix, ordinal) {
         // ⭐ On the NAME, not only in the help. Someone changing a value reads
         // the label; the help is what you read when the value does not work.
         var only = TRANSPORT_ONLY[meta.key];
-        var shownKey = only ? (meta.key + ' (' + only + ' only)') : meta.key;
+        // ⭐ A rebind row is labelled by its BUTTON, not by rebind_7.
+        //
+        // ⓘ The KEY stays numeric because it is the W3C standard gamepad index,
+        // which is what makes a config portable -- index 0 is the bottom face
+        // button on any pad. But nobody navigating this page should have to
+        // know that, so the label comes from the help text's own name.
+        var prettyKey = meta.key;
+        var m = /^(rebind|turbo)_(\d+)$/.exec(meta.key);
+        if (m && meta.help) {
+          var name = meta.help.split(' -- ')[0];
+          prettyKey = (m[1] === 'turbo') ? (name + ' — rapid fire') : name;
+        }
+        var shownKey = only ? (prettyKey + ' (' + only + ' only)') : prettyKey;
 
         html += '<div class="row' + (managed ? '' : ' off') + (inert ? ' inert' : '') +
                 '" id="row-' + id + '">' +
@@ -2787,12 +2822,56 @@ function deviceSignature(list) {
 //
 // ⓘ Not from the config file: the endpoints set the flag directly and never
 // write to disk, so a ticked box there says nothing about what is happening.
+var GATE_HELD = false;
+
 function paintPadDestination(d) {
   var dest = document.getElementById('padDest');
   if (!dest) return;
   var gated = (d && d.config_mode === true);
-  dest.textContent = gated ? 'controller → page' : 'controller → game';
+  GATE_HELD = (d && d.gate_hold === true);
+
+  // ⓘ Three states, not two: held off reads differently from simply not gated,
+  // because one is a choice and the other is just where focus happens to be.
+  dest.textContent = GATE_HELD ? 'controllers → game (held)'
+                   : gated     ? 'controllers → page'
+                               : 'controllers → game';
   dest.classList.toggle('on', gated);
+
+  // ⭐ The button says the STATE it is in; the line beside it says what a click
+  // would do. A button labelled with its own action reads as a question about
+  // what is currently true.
+  var btn = document.getElementById('holdBtn');
+  if (btn) {
+    btn.classList.toggle('on', GATE_HELD);
+    // ⭐ Colour carries the state at a glance: green while the page holds the
+    // controllers, amber while the game is still seeing them. The exclamation
+    // is on the amber one because that is the state you might not have meant.
+    btn.textContent = GATE_HELD ? 'Controller inputs mirrored in game!'
+                                : 'Controller Inputs Locked to Page';
+  }
+  var hint = document.getElementById('holdHint');
+  if (hint) {
+    hint.textContent = GATE_HELD ? 'click to lock to page' : 'click to unlock';
+  }
+}
+
+function toggleGateHold() {
+  var want = !GATE_HELD;
+  fetch(base() + '/api/v1/ui/hold', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ hold: want })
+  }).then(function () {
+    // ⛔ RE-ASSERT FOCUS when releasing. Focus has not CHANGED -- the page has
+    // had it all along -- so nothing would fire an event and the gate would
+    // stay off until you clicked away and back. The agent only learns focus
+    // from us, so we have to say it again.
+    if (!want) {
+      LAST_FOCUS_SENT = null;      // forget, so syncFocus sends it
+      syncFocus();
+    }
+    loadDevices();
+  }).catch(function () {});
 }
 
 function pollDevices() {

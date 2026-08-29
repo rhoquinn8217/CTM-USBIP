@@ -235,8 +235,31 @@ inline long long now_ms()
 // built first.
 inline std::atomic_bool g_configMode{false};
 
+// ⭐ HELD OFF. Beats focus, because a toggle that focus can undo is not a
+// control -- click the page and it would turn straight back on.
+//
+// ⓘ Deliberately NOT persisted. Every window is a fresh one, and each session
+// starting in the default mode matches that; if you want the pad free again you
+// say so again.
+inline std::atomic_bool g_gateHold{false};
+
+inline bool gate_hold() { return g_gateHold.load(std::memory_order_relaxed); }
+
+inline void set_config_mode(bool on);
+
+inline void set_gate_hold(bool hold)
+{
+    g_gateHold.store(hold, std::memory_order_relaxed);
+    if (hold) {
+        set_config_mode(false);      // release immediately, not on next focus
+    }
+}
+
 inline void set_config_mode(bool on)
 {
+    // ⛔ Nothing turns the gate on while it is held off.
+    if (on && g_gateHold.load(std::memory_order_relaxed)) return;
+
     const bool was = g_configMode.exchange(on);
     if (was && !on) {
         // ⛔ Release everything on the way out. A key left down repeats forever
@@ -333,8 +356,16 @@ inline void apply(const void *deviceKey,
     // ⚠️ Read per device but applied GLOBALLY -- setting it on one controller
     // gates them all, which is intended and worth knowing when reading a config.
     {
-        const std::string s0 = device_settings_section(kind, linkedConfig);
-        const bool fromFile = device_config_bool(s0.c_str(), "config_mode", false);
+        // ⭐ [global] in ctm-device-config.txt, NOT the per-controller config.
+        //
+        // ⛔ It gates every bridged pad, so living in ds5_config_3 said it was a
+        // property of that controller when it never was.
+        //
+        // ⚠️ And it stays a FILE setting rather than becoming a button on the
+        // settings page. It exists for the one case nothing else catches -- the
+        // page frozen but still holding focus, so no blur fires and no beacon
+        // sends. A control inside a frozen page cannot rescue anything.
+        const bool fromFile = device_config_bool("global", "config_mode", false);
         static bool lastFromFile = false;
         if (fromFile != lastFromFile) {
             lastFromFile = fromFile;
@@ -365,6 +396,23 @@ inline void apply(const void *deviceKey,
         // ⓘ Verbose only. This fires on every press, and it was left on by
         // accident after the F13-F24 hunt -- which filled the log during normal
         // use with something nobody needs unless they are debugging the gate.
+        // ⭐ EVERYTHING ELSE, once the buttons have been READ.
+        //
+        // ⛔ Sticks and triggers were still reaching the game, so "controllers
+        // → page" was not true -- you could steer and shoot while adjusting
+        // settings. If the pad is driving the page, nothing of it should drive
+        // the game.
+        //
+        // ⚠️ AFTER the loop above, deliberately: wiping first would erase the
+        // buttons before they were read, and nothing would ever register.
+        //
+        // ⓘ Sticks go to CENTRE (0x80) -- zero is full deflection, not neutral.
+        data[1] = data[2] = data[3] = data[4] = 0x80;   // LX LY RX RY
+        data[5] = data[6] = 0x00;                       // L2 R2 analog
+        data[9] = 0x00;                                 // shoulders, start, stick clicks
+        data[10] = static_cast<uint8_t>(data[10] & ~0x07);   // PS, touchpad, mute
+        data[8] = 0x08;                                 // faces clear, hat centred
+
         if (gateCount > 0 && ctm_verbose_logs()) {
             device_log::input(device_log::msg()
                 << "config mode: sending " << gateCount << " key(s), first usage 0x"
@@ -466,6 +514,16 @@ inline void apply(const void *deviceKey,
 bool ctm_rebind_config_mode()
 {
     return ctm_rebind::config_mode();
+}
+
+bool ctm_rebind_gate_hold()
+{
+    return ctm_rebind::gate_hold();
+}
+
+void ctm_rebind_set_gate_hold(bool hold)
+{
+    ctm_rebind::set_gate_hold(hold);
 }
 
 void ctm_rebind_set_config_mode(bool on)

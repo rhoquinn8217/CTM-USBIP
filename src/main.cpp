@@ -76,6 +76,8 @@ static void mic_ring_reset(const CtmBackend *owner);
 // from its endpoints, so the setter is forward declared here too.
 void ctm_rebind_set_config_mode(bool on);
 bool ctm_rebind_config_mode();
+bool ctm_rebind_gate_hold();
+void ctm_rebind_set_gate_hold(bool hold);
 
 void ctm_rebind_apply(const void *deviceKey,
                       const std::vector<unsigned char> &descriptor,

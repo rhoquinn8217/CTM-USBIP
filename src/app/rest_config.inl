@@ -69,6 +69,8 @@ static std::string rest_devices_json()
     // worse than no checkbox.
     out += "],\"config_mode\":";
     out += ctm_rebind_config_mode() ? "true" : "false";
+    out += ",\"gate_hold\":";
+    out += ctm_rebind_gate_hold() ? "true" : "false";
     return out + "}";
 }
 
@@ -232,7 +234,6 @@ static std::string rest_config_detail_json(const config_store::ConfigFile &cfg)
 static std::string rest_keys_json()
 {
     return R"({"keys":[
-{"key":"config_mode","type":"bool","default":false,"help":"While on, the D-pad, face buttons and shoulders drive THIS PAGE and the game receives nothing from them. Applies to every bridged controller, because nobody is playing while settings are open. Turn it off to give the pad back to the game."},
 {"key":"rebind_debug","type":"bool","default":false,"help":"Logs what each bound button is doing, twice a second: whether it was seen as pressed, and the raw button bytes. For working out why a rebind does nothing."},
 {"key":"rebind_0","type":"string","default":"","help":"Cross / A (bottom face) -- send a keyboard key instead of this button. Names are KeyboardEvent.code: KeyR, Enter, Escape, ArrowUp, F13. The game stops seeing the button entirely."},
 {"key":"turbo_0","type":"int","min":0,"max":1000,"default":0,"help":"Cross / A (bottom face) -- milliseconds between presses while held. 0 is off. Works with or without a rebind: on its own the button repeats itself."},
@@ -410,21 +411,26 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
 
         const std::string what = req.path.substr(11);
 
-        // Opening the OVERLAY resets everything: gate off, window gone. It is
-        // the recovery path, so it must not depend on anything else working.
-        if (what == "reset") {
-            ctm_rebind_set_config_mode(false);
-            ctm_open_ui::close_existing();
-            *out = rest_http_response(200, R"({"ok":true,"config_mode":false})");
-            return true;
-        }
-
-        // The overlay's BUTTON: gate on, fresh window.
+        // ⭐ RESET, not "open" -- named for what it does rather than what you
+        // hoped for. It kills whatever window exists, sets the gate, and opens a
+        // fresh one. Opening the first window is a special case of that, not a
+        // separate action.
         //
-        // ⚠️ Kill and recreate rather than focusing an existing one -- every
-        // open is then a known state, with nothing carried over from a window
-        // that may have been left in the middle of something.
-        if (what == "open") {
+        // ⓘ A separate reset endpoint was designed and dropped as redundant:
+        // there is no state that survives this, so there is nothing left for one
+        // to clear.
+        //
+        // ⚠️ Kill and recreate rather than focusing an existing window -- every
+        // call then lands in a known state, with nothing carried over from a
+        // window left in the middle of something.
+        if (what == "reset" || what == "open") {
+            // ⛔ CLEAR THE HOLD FIRST. Hold beats config mode by design, so a
+            // reset with one still set would close the window, fail to gate,
+            // and leave the caller believing it had worked.
+            //
+            // ⓘ This is what makes it a reset rather than an open: every path
+            // into it lands in the same known state.
+            ctm_rebind_set_gate_hold(false);
             ctm_open_ui::close_existing();
             ctm_rebind_set_config_mode(true);
             ctm_open_ui::open_new(g_rest_port);
@@ -466,6 +472,30 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
 
         // The page reporting its own teardown, sent with navigator.sendBeacon
         // so it survives the page being torn down.
+        // ⭐ THE MANUAL ESCAPE HATCH. Stops gating and STAYS off, whatever
+        // focus does -- otherwise clicking the page would turn it straight back
+        // on and the control would look broken.
+        //
+        // ⓘ Two reasons to want it: adjusting settings at the desk while not
+        // minding that the game sees the pad, and getting out when something is
+        // stuck. The second is why it must not live only in a config file --
+        // one you would have to find and hand-edit is not reachable in the
+        // moment you need it.
+        if (what == "hold") {
+            RestJson json;
+            std::string parseError;
+            if (!rest_parse_flat_json(req.body, &json, &parseError)) {
+                *out = rest_error_response(400, parseError);
+                return true;
+            }
+            auto it = json.bools.find("hold");
+            const bool hold = (it != json.bools.end()) && it->second;
+            ctm_rebind_set_gate_hold(hold);
+            *out = rest_http_response(200, hold ? R"({"ok":true,"hold":true})"
+                                                : R"({"ok":true,"hold":false})");
+            return true;
+        }
+
         if (what == "closed") {
             ctm_rebind_set_config_mode(false);
             *out = rest_http_response(200, R"({"ok":true,"config_mode":false})");
