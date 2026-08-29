@@ -72,6 +72,11 @@ static void mic_ring_reset(const CtmBackend *owner);
 // ⓘ And the same for the rebind hook itself: device.inl calls it on the input
 // path but is included long before rebind.inl, which needs the keyboard device
 // and the config helpers.
+// ⓘ rest_config.inl is included before rebind.inl and needs to flip the gate
+// from its endpoints, so the setter is forward declared here too.
+void ctm_rebind_set_config_mode(bool on);
+bool ctm_rebind_config_mode();
+
 void ctm_rebind_apply(const void *deviceKey,
                       const std::vector<unsigned char> &descriptor,
                       const std::string &linkedConfig,

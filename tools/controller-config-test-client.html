@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.45.0 -- see the changelog at the bottom of this comment.
+  VERSION 2.47.2 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -295,7 +295,9 @@
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
-  body { margin:0; padding:0 20px 0; min-height:100vh; background:#15161a; color:#e8e8ea;
+  /* ⓘ Bottom padding leaves room for the fixed status bar, or it would cover
+     the last control on the page. */
+  body { margin:0; padding:0 20px 64px; min-height:100vh; background:#15161a; color:#e8e8ea;
          font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
   h1 { font-size:17px; margin:0 0 2px; font-weight:600; }
   h2 { font-size:14px; margin:22px 0 8px; color:#b9bbc4; font-weight:600;
@@ -444,16 +446,21 @@
      scrolls a row "into view" and the bar sits on top of it. Sticky occupies
      space, so the page can scroll far enough to clear it. */
   /* One status strip: health left, controller legend right. */
-  #gpbar { position:sticky; bottom:0; padding:8px 14px; font-size:12px;
+  /* ⭐ FIXED, not sticky. Sticky sits at the end of the content, so on a short
+     page it floated in the middle of empty space. Fixed pins it to the window
+     where a status bar belongs. */
+  #gpbar { position:fixed; left:0; right:0; bottom:0; z-index:20; padding:8px 14px; font-size:12px;
            background:#1d1f26; border-top:1px solid #2c2e36; color:#71737c;
-           margin:24px -20px 0; display:flex; justify-content:space-between;
+           margin:0; display:flex; justify-content:space-between;
            gap:16px; flex-wrap:wrap; }
   /* ⓘ The hint takes the middle so the bar stays two-ended: status left, the
      button right, and the hint filling between them. Without this, adding a
      third child to a space-between row moves the hint to the centre and the
      bar reads as three unrelated things. */
   #gpbar #gphint { margin-left:auto; }
-  #fitBtn { padding:2px 8px; font-size:11px; margin-left:16px; }
+  #fitBtn, #closeBtn { padding:2px 8px; font-size:11px; margin-left:8px; }
+  #padDest { margin-left:auto; }
+  #padDest.on { color:#7fd18c; }
   #gpbar.live #gphint { color:#7fd18c; }
   #gpbar.live { color:#7fd18c; }
   .kv { display:flex; gap:10px; align-items:center; margin-bottom:9px; flex-wrap:wrap; }
@@ -525,7 +532,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.45.0</span>
+  <span class="muted" style="font-size:12px">v2.47.2</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -594,7 +601,14 @@
   <!-- ⭐ On demand. The load-time check only fires when the window is clearly
        wrong, so a window nudged slightly off keeps its size -- this is how you
        ask for it back without hunting for the right drag. -->
+  <!-- ⭐ Where the controller's input is going. Says it plainly rather than
+       naming the mechanism: "gated" means nothing to someone who did not build
+       it, and this is the one piece of state that changes under you. -->
+  <span id="padDest" class="muted">controller → game</span>
   <button id="fitBtn" onclick="fitWindow()" title="centre this window and set a sensible size">Fit window</button>
+  <!-- ⓘ Closing releases the gate on the way out, via the pagehide beacon, so
+       this is a safe exit rather than a way to strand yourself. -->
+  <button id="closeBtn" onclick="window.close()" title="close this window">Close</button>
 </div>
 
 <script>
@@ -2095,6 +2109,69 @@ function gpSelectEnd(commit) {
 // ⭐ CTRL+ALT is what makes ordinary letters safe. A text field ignores them, so
 // typing a config name still works and the page can tell a gate press from
 // someone typing 'd'. WASD reads as movement without a lookup table.
+// ⭐ TELL THE AGENT WHEN THIS WINDOW HAS FOCUS. The gate follows: clicking away
+// hands the pad straight back to the game, and coming back takes it again.
+//
+// ⓘ The window is NOT closed on blur. One vanishing mid-edit, with no warning,
+// is worse than the bookkeeping is good -- so focus and existence are separate
+// things, and the agent tracks both.
+//
+// ⚠️ Focus changes for reasons nobody intended -- a notification, a taskbar
+// click -- so this will fire more often than you would expect. Both states are
+// valid at any moment, so that is noise rather than a fault.
+function reportFocus(on) {
+  // ⓘ Shown in the footer rather than logged. Opening DevTools TAKES focus from
+  // this page, so the console cannot observe focus without changing it -- the
+  // measurement destroys what it measures.
+  var dbg = document.getElementById('padDest');
+  if (dbg) dbg.title = 'last focus report: ' + on + ' at ' + new Date().toLocaleTimeString();
+
+  try {
+    fetch(base() + '/api/v1/ui/focus', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ focused: on })
+    }).catch(function () {});
+  } catch (e) {}
+}
+
+// ⛔ Only report a CHANGE, and only once the page has been focused at all.
+//
+// ⚠️ Measured 2026-08-28: POST /ui/open sets the gate, but the browser window
+// takes a moment to appear -- and a page that was never in front fired blur
+// straight after, turning the gate back off before anyone could use it.
+//
+// ⓘ document.hasFocus() is the truth at any moment; the events are only hints
+// that it may have changed.
+var LAST_FOCUS_SENT = null;
+
+function syncFocus() {
+  var on = document.hasFocus();
+  if (on === LAST_FOCUS_SENT) return;
+  LAST_FOCUS_SENT = on;
+  reportFocus(on);
+}
+
+window.addEventListener('focus', syncFocus);
+window.addEventListener('blur',  syncFocus);
+
+// ⓘ Belt and braces: focus can change without either event firing -- a window
+// opened behind another, for instance. Cheap at 1 Hz, and it only sends on a
+// change.
+setInterval(syncFocus, 1000);
+
+// ⛔ sendBeacon, not fetch. A normal request is cancelled when the page goes
+// away; sendBeacon is built to survive teardown, and this is the path that
+// releases the gate when someone closes the window with the X.
+//
+// ⓘ pagehide rather than beforeunload: the latter is unreliable and
+// increasingly restricted.
+window.addEventListener('pagehide', function () {
+  try {
+    navigator.sendBeacon(base() + '/api/v1/ui/closed', '');
+  } catch (e) {}
+});
+
 var CONFIG_MODE_KEYS = {
   KeyW: function () { gpKeyMove(-1); },
   KeyS: function () { gpKeyMove(1); },
@@ -2701,6 +2778,23 @@ function deviceSignature(list) {
   }).join(';');
 }
 
+// ⭐ Where the controller's input is going, from the agent's REAL flag.
+//
+// ⛔ This lived inside loadDevices, which only runs when the DEVICE LIST
+// changes -- and focus changing does not change the device list, so it almost
+// never ran. Called from the poll instead, BEFORE the signature guard, because
+// this is exactly the state that changes without the devices changing.
+//
+// ⓘ Not from the config file: the endpoints set the flag directly and never
+// write to disk, so a ticked box there says nothing about what is happening.
+function paintPadDestination(d) {
+  var dest = document.getElementById('padDest');
+  if (!dest) return;
+  var gated = (d && d.config_mode === true);
+  dest.textContent = gated ? 'controller → page' : 'controller → game';
+  dest.classList.toggle('on', gated);
+}
+
 function pollDevices() {
   call('GET', '/api/v1/devices', undefined, true).then(function(d) {
     var list = d.devices || [];
@@ -2708,6 +2802,8 @@ function pollDevices() {
     LAST_COUNT = list.length;
     FAILS = 0;
     paintHealth();
+    paintPadDestination(d);
+
     var sig = deviceSignature(list);
     if (sig === DEVICE_SIG) return;          // nothing to do
     var first = DEVICE_SIG === null;

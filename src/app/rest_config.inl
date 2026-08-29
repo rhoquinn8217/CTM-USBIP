@@ -61,7 +61,15 @@ static std::string rest_devices_json()
         first = false;
         out += rest_device_json(d);
     }
-    return out + "]}";
+    // ⭐ The REAL gate state, alongside the devices the page already polls.
+    //
+    // ⛔ The page cannot read this from the config file: the endpoints set the
+    // flag directly and never write to disk, so a ticked or unticked box there
+    // says nothing about what is actually happening. A checkbox that lies is
+    // worse than no checkbox.
+    out += "],\"config_mode\":";
+    out += ctm_rebind_config_mode() ? "true" : "false";
+    return out + "}";
 }
 
 static std::string rest_config_json(const config_store::ConfigFile &cfg,
@@ -381,6 +389,90 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
             return true;
         }
         *out = rest_http_response(200, rest_devices_json());
+        return true;
+    }
+
+    // ---- Config mode -------------------------------------------------------
+    //
+    // ⭐ Four endpoints, all the same shape: set a flag, maybe touch a window.
+    //
+    // ⛔ RELEASE THE GATE BEFORE TOUCHING THE WINDOW, in every path. If the
+    // window work throws or hangs, the release has already happened -- the gate
+    // is what can strand someone mid-game; a leftover window is only untidy.
+    //
+    // ⓘ The TV drives these. Until the TV side exists they are called by hand
+    // with curl, which is deliberate: it lets both halves be proven separately.
+    if (req.path.rfind("/api/v1/ui/", 0) == 0) {
+        if (req.method != "POST") {
+            *out = rest_error_response(405, "method not allowed", "Allow: POST, OPTIONS\r\n");
+            return true;
+        }
+
+        const std::string what = req.path.substr(11);
+
+        // Opening the OVERLAY resets everything: gate off, window gone. It is
+        // the recovery path, so it must not depend on anything else working.
+        if (what == "reset") {
+            ctm_rebind_set_config_mode(false);
+            ctm_open_ui::close_existing();
+            *out = rest_http_response(200, R"({"ok":true,"config_mode":false})");
+            return true;
+        }
+
+        // The overlay's BUTTON: gate on, fresh window.
+        //
+        // ⚠️ Kill and recreate rather than focusing an existing one -- every
+        // open is then a known state, with nothing carried over from a window
+        // that may have been left in the middle of something.
+        if (what == "open") {
+            ctm_open_ui::close_existing();
+            ctm_rebind_set_config_mode(true);
+            ctm_open_ui::open_new(g_rest_port);
+            *out = rest_http_response(200, R"({"ok":true,"config_mode":true})");
+            return true;
+        }
+
+        // ⭐ The page reporting FOCUS. The gate follows it, so clicking away
+        // hands the pad straight back to the game -- and the window stays,
+        // because one vanishing mid-edit is worse than the bookkeeping is good.
+        if (what == "focus") {
+            RestJson json;
+            std::string parseError;
+            if (!rest_parse_flat_json(req.body, &json, &parseError)) {
+                // ⚠️ Says so rather than failing quietly. The page sends this
+                // with a .catch that swallows errors, so a 400 here would
+                // vanish entirely and look like the request was never made.
+                device_log::input(device_log::msg()
+                    << "ui/focus: body did not parse -- " << parseError
+                    << " (body was: " << req.body << ")");
+                *out = rest_error_response(400, parseError);
+                return true;
+            }
+            device_log::input(device_log::msg()
+                << "ui/focus: " << req.body);
+            // ⓘ RestJson keeps parsed booleans in their own map, so a JSON
+            // `true` arrives as a bool -- no string comparison needed.
+            //
+            // ⚠️ Absent means FALSE, deliberately: a malformed body should
+            // release the gate rather than engage it. Releasing wrongly is a
+            // nuisance; gating wrongly leaves someone unable to play.
+            auto it = json.bools.find("focused");
+            const bool on = (it != json.bools.end()) && it->second;
+            ctm_rebind_set_config_mode(on);
+            *out = rest_http_response(200, on ? R"({"ok":true,"config_mode":true})"
+                                              : R"({"ok":true,"config_mode":false})");
+            return true;
+        }
+
+        // The page reporting its own teardown, sent with navigator.sendBeacon
+        // so it survives the page being torn down.
+        if (what == "closed") {
+            ctm_rebind_set_config_mode(false);
+            *out = rest_http_response(200, R"({"ok":true,"config_mode":false})");
+            return true;
+        }
+
+        *out = rest_error_response(404, "unknown ui action");
         return true;
     }
 

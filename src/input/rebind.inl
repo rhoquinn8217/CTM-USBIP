@@ -316,18 +316,29 @@ inline void apply(const void *deviceKey,
     // configured: nobody is playing while the settings page is up, including
     // co-op players on the same screen, and gating one pad while leaving
     // another live would suggest the other person could carry on.
-    // ⓘ A config key turns it on for now, so the gate can be tested before any
-    // of the plumbing around it exists -- set it, press select, watch the game
-    // not react. The REST endpoint replaces this; the key stays as an escape
-    // hatch when the page itself is the thing that is broken.
+    // ⛔ THE CONFIG KEY ACTS ON CHANGE, NOT CONTINUOUSLY.
     //
-    // ⚠️ Read per device but applied GLOBALLY: setting it on one controller
-    // gates them all, which is the intended behaviour and worth knowing when
-    // reading the config.
+    // ⚠️ Measured 2026-08-28: it used to assert the file's value on every input
+    // report -- 250 times a second -- so /api/v1/ui/focus set the gate and the
+    // very next report read `false` from disk and turned it straight back off.
+    // The endpoint appeared to do nothing.
+    //
+    // ⓘ It looked fine in an earlier test only because the config key was
+    // ticked at the time, so both sources agreed and the conflict was invisible.
+    //
+    // ➡️ Remembering the last value seen makes the two sources coexist: ticking
+    // the box turns it on, the endpoints can turn it off, and ticking again
+    // turns it back on. That is what an escape hatch has to do.
+    //
+    // ⚠️ Read per device but applied GLOBALLY -- setting it on one controller
+    // gates them all, which is intended and worth knowing when reading a config.
     {
         const std::string s0 = device_settings_section(kind, linkedConfig);
-        if (device_config_bool(s0.c_str(), "config_mode", false) != config_mode()) {
-            set_config_mode(device_config_bool(s0.c_str(), "config_mode", false));
+        const bool fromFile = device_config_bool(s0.c_str(), "config_mode", false);
+        static bool lastFromFile = false;
+        if (fromFile != lastFromFile) {
+            lastFromFile = fromFile;
+            set_config_mode(fromFile);
         }
     }
 
@@ -452,6 +463,16 @@ inline void apply(const void *deviceKey,
 
 // Defined out here for main.cpp's forward declaration -- device.inl calls this
 // on the input path, and is included long before this file.
+bool ctm_rebind_config_mode()
+{
+    return ctm_rebind::config_mode();
+}
+
+void ctm_rebind_set_config_mode(bool on)
+{
+    ctm_rebind::set_config_mode(on);
+}
+
 void ctm_rebind_apply(const void *deviceKey,
                       const std::vector<unsigned char> &descriptor,
                       const std::string &linkedConfig,

@@ -93,6 +93,27 @@ inline std::wstring find_browser()
     return std::wstring();
 }
 
+// ⭐ Closes the settings page if one is open. Returns true when it did.
+//
+// Same lookup as focus_existing -- by window title -- with a close message
+// instead of a focus one.
+//
+// ⓘ WM_CLOSE rather than terminating anything: the browser owns the window, and
+// asking it to close lets it tear the page down properly, which is what fires
+// the page's own "I am going away" beacon.
+//
+// ⚠️ Best effort by design. A window that will not close is untidy; a gate that
+// will not release is what strands someone. So callers release the gate FIRST
+// and treat this as cleanup.
+inline bool close_existing()
+{
+    FindState state;
+    EnumWindows(find_window_proc, reinterpret_cast<LPARAM>(&state));
+    if (state.found == nullptr) return false;
+    PostMessageW(state.found, WM_CLOSE, 0, 0);
+    return true;
+}
+
 // Opens the settings page, or focuses the one already open.
 //
 // !! Never fatal. A missing page or browser is logged and the agent carries on
