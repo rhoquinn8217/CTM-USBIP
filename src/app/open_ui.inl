@@ -105,6 +105,14 @@ inline std::wstring find_browser()
 // ⚠️ Best effort by design. A window that will not close is untidy; a gate that
 // will not release is what strands someone. So callers release the gate FIRST
 // and treat this as cleanup.
+// Is a settings window up right now? Same lookup, no side effects.
+inline bool window_exists()
+{
+    FindState state;
+    EnumWindows(find_window_proc, reinterpret_cast<LPARAM>(&state));
+    return state.found != nullptr;
+}
+
 inline bool close_existing()
 {
     FindState state;
@@ -113,6 +121,16 @@ inline bool close_existing()
     PostMessageW(state.found, WM_CLOSE, 0, 0);
     return true;
 }
+
+// ⭐ Show the settings window and take the controllers. One implementation for
+// the REST endpoint and the chord, so they cannot drift apart.
+//
+// ⛔ Kill and recreate rather than focusing an existing window: every call then
+// lands in a known state, with nothing carried over from one left mid-edit.
+//
+// ⚠️ Declared here and defined in main.cpp, because this needs the gate --
+// which lives in rebind.inl, included long after this file.
+void ctm_show_settings_window();
 
 // Opens the settings page, or focuses the one already open.
 //

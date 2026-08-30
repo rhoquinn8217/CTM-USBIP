@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.50.0 -- see the changelog at the bottom of this comment.
+  VERSION 2.55.0 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -467,6 +467,8 @@
   #holdBtn.on { background:#3a3320; border-color:#e0c07a; color:#e8cf92; }
   #padDest { margin-left:auto; }
   #padDest.on { color:#7fd18c; }
+  /* Lit while ○ has backed out into it, so it is clear where focus went. */
+  #gpbar.gp-zone { background:#22252e; border-top-color:#6c8cff; }
   #gpbar.live #gphint { color:#7fd18c; }
   #gpbar.live { color:#7fd18c; }
   .kv { display:flex; gap:10px; align-items:center; margin-bottom:9px; flex-wrap:wrap; }
@@ -538,7 +540,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.50.0</span>
+  <span class="muted" style="font-size:12px">v2.55.0</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -624,7 +626,8 @@
        naming the mechanism: "gated" means nothing to someone who did not build
        it, and this is the one piece of state that changes under you. -->
   <span id="padDest" class="muted">controllers → game</span>
-  <button id="fitBtn" onclick="fitWindow()" title="centre this window and set a sensible size">Fit window</button>
+  <button id="fitBtn" onclick="fitWindow(); setFooterMode(false);"
+          title="centre this window and set a sensible size">Fit window</button>
   <!-- ⓘ Closing releases the gate on the way out, via the pagehide beacon, so
        this is a safe exit rather than a way to strand yourself. -->
   <button id="closeBtn" onclick="window.close()" title="close this window">Close</button>
@@ -1784,6 +1787,23 @@ function renameConfig(name) {
   var btn = null;
   document.querySelectorAll('[data-rename="' + name.replace(/"/g, '') + '"]')
     .forEach(function(b) { if (!btn && b.offsetParent !== null) btn = b; });
+  // ⭐ Remember what opened this, so ○ returns focus to it rather than to
+  // whatever happens to sit at the old index once the row is gone.
+  //
+  // ⛔ NOT just the table button. On a controller tab there is no configs
+  // table -- that pane is hidden -- so `btn` is null there and focus had
+  // nowhere to go back to. The visible Rename button is found by its handler
+  // instead, which works on either screen.
+  RENAME_OPENER = btn || null;
+  if (!RENAME_OPENER) {
+    document.querySelectorAll('button').forEach(function (b) {
+      if (RENAME_OPENER) return;
+      if (b.offsetParent === null) return;                  // not on screen
+      var h = b.getAttribute('onclick') || '';
+      if (h.indexOf('renameConfig(') === 0) RENAME_OPENER = b;
+    });
+  }
+
   var row = btn && btn.closest('tr');
   if (row) {
     var cell = document.createElement('tr');
@@ -1821,12 +1841,29 @@ function renameConfig(name) {
 function cancelRename() {
   var host = document.getElementById('renameRow');
   if (host) host.innerHTML = '';
-  // ⚠️ The holder row is ours and would otherwise linger as an empty row in
-  // the table after the editor closes.
+
+  // ⛔ PUT #renameRow BACK FIRST. Opening the editor MOVES it into a cell of
+  // the configs table, and removing the holder row with it still inside deleted
+  // the element from the page entirely -- so every later Rename had nowhere to
+  // render and the buttons went dead.
   var holder = document.getElementById('renameHolder');
-  if (holder) holder.parentNode.removeChild(holder);
+  if (holder) {
+    var home = document.getElementById('stickyTop');
+    if (host && home) home.appendChild(host);
+    holder.parentNode.removeChild(holder);
+  }
+
   RENAMING = false;
   gpCollect();
+
+  // ⭐ Back to the button that opened it. gpCollect rebuilds the list, and the
+  // old index now points at whatever moved up into that slot -- the Archive
+  // button on Overview, the first audio setting on a controller tab.
+  if (RENAME_OPENER) {
+    var at = GP_FOCUS.indexOf(RENAME_OPENER);
+    if (at >= 0) { GP_INDEX = at; gpPaint(); }
+    RENAME_OPENER = null;
+  }
 }
 
 function commitRename(oldName) {
@@ -1882,7 +1919,23 @@ function setAutoLink(ordinal, configName, serial, currentlyClaimedBy) {
 // ⭐ TITLED WITH THE BUTTON THAT OPENED IT. "Controller config" was the same
 // on every dialog, so it said nothing -- and a confirmation exists precisely to
 // tell you which action you are about to take.
+// ⚠️ Deferred by a tick: the caller's own onYes may redraw the page, and
+// restoring before that would put focus on an element about to be replaced.
+function restoreOpener(el) {
+  if (!el) return;
+  gpCollect();
+  var at = GP_FOCUS.indexOf(el);
+  if (at >= 0) { GP_INDEX = at; gpPaint(); }
+}
+
 function askConfirm(title, message, onYes) {
+  // ⭐ Whatever had focus when this opened. Archive, Remove auto link and Reset
+  // all landed somewhere arbitrary on cancel, because gpCollect rebuilds the
+  // list and the old index then points at whatever moved into that slot.
+  //
+  // ⓘ Captured here rather than in each caller, so anything that opens a
+  // dialog gets it without remembering to ask.
+  OVERLAY_OPENER = GP_FOCUS[GP_INDEX] || null;
   CONFIRM_CB = onYes;
   document.getElementById('confirmTitle').textContent = title;
   document.getElementById('confirmText').textContent = message;
@@ -1897,12 +1950,18 @@ function askConfirm(title, message, onYes) {
 }
 
 function confirmYes() {
+  var opener = OVERLAY_OPENER;
+  OVERLAY_OPENER = null;
+  setTimeout(function () { restoreOpener(opener); }, 0);
   var cb = CONFIRM_CB;
   confirmNo();
   if (cb) cb();
 }
 
 function confirmNo() {
+  var opener = OVERLAY_OPENER;
+  OVERLAY_OPENER = null;
+  setTimeout(function () { restoreOpener(opener); }, 0);
   CONFIRM_CB = null;
   document.getElementById('confirmBox').style.display = 'none';
   gpCollect();
@@ -1962,6 +2021,32 @@ function gpCollect() {
   // were visible and unreachable, leaving ○ as the only way out.
   // ⛔ When the dialog is open it is the ONLY thing focusable. A D-pad that can
   // still reach the page behind a modal is worse than one that cannot move.
+  // ⭐ The footer zone, same trap as the dialog: only these buttons exist while
+  // it is on, so ▲▼ cannot wander back into the page behind it.
+  if (FOOTER_MODE) {
+    document.querySelectorAll('#gpbar button').forEach(function(e) { list.push(e); });
+    GP_FOCUS = list;
+    if (GP_INDEX >= list.length) GP_INDEX = 0;
+    gpPaint();
+    return;
+  }
+
+  // ⭐ The rename editor is modal too: while it is open, only its own field and
+  // buttons exist. Wandering into the page behind while half-way through naming
+  // something is a good way to lose the name.
+  if (RENAMING) {
+    var rr = document.getElementById('renameRow');
+    if (rr) {
+      rr.querySelectorAll('input, button').forEach(function(e) { list.push(e); });
+      if (list.length) {
+        GP_FOCUS = list;
+        if (GP_INDEX >= list.length) GP_INDEX = 0;
+        gpPaint();
+        return;
+      }
+    }
+  }
+
   if (CONFIRM_CB) {
     document.querySelectorAll('#confirmBox button').forEach(function(e) { list.push(e); });
     GP_FOCUS = list;
@@ -2416,7 +2501,130 @@ function gpKeyBack() {
   }
   if (GP_SELECTING) { gpSelectEnd(false); return; }
   if (RENAMING) { cancelRename(); return; }
-  showTab('overview'); GP_INDEX = 0; gpCollect();
+
+  // ⭐ ○ GOES STRAIGHT TO THE FOOTER, from anywhere.
+  //
+  // ⛔ A back-out chain was tried first -- section, header, Overview, footer --
+  // and it worked, but it made the way out four presses deep from where you
+  // usually are. One press from anywhere is the right shape for a pad.
+  //
+  // ⓘ The guards above still run first, so ○ still cancels a dialog, leaves a
+  // value box, closes a dropdown and aborts a rename. It only means "show me
+  // the way out" once none of those is open.
+  //
+  // ⛔ TOGGLES. Lost when the back-out chain was replaced: pressing ○ inside
+  // the footer called setFooterMode(true) again, which does nothing, so there
+  // was no way back to the page.
+  setFooterMode(!FOOTER_MODE);
+}
+
+// ⭐ The footer as a focus ZONE, reached only by backing out of Overview.
+//
+// ⓘ Same shape as the dialog trap: while it is on, gpCollect offers the footer
+// buttons and nothing else, so ▲▼ cannot wander back into the page.
+var FOOTER_MODE = false;
+
+// ⭐ Where you were before ○, so leaving the footer puts you back rather than
+// dumping you at the top of Overview.
+//
+// ⓘ Tab AND position: coming back to the right tab but the wrong end of it
+// would still mean scrolling to find your place.
+// The button that opened the rename editor, so ○ can go back to it.
+// Whatever had focus when a dialog or editor opened, so cancelling goes back
+// to it rather than to whatever now sits at that index.
+var OVERLAY_OPENER = null;
+
+var RENAME_OPENER = null;
+
+var FOOTER_RETURN = null;
+
+// ⭐ Put the person back where they were, after a reload or a fresh window.
+//
+// ⚠️ sessionStorage, not localStorage: it belongs to this window, so a second
+// one opened deliberately does not inherit somewhere you were an hour ago.
+//
+// ⓘ Waits for the devices to arrive, or the tab it wants may not exist yet.
+function restorePlace() {
+  var raw = null;
+  try { raw = sessionStorage.getItem('ctm_place'); } catch (e) { return; }
+  if (!raw) return;
+  var want;
+  try { want = JSON.parse(raw); } catch (e) { return; }
+  if (!want || !want.tab) return;
+
+  setTimeout(function () {
+    var tab = want.tab;
+
+    // ⭐ Find the controller by SERIAL, wherever it landed this time. Falls
+    // back to the ordinal only when nothing was stored -- and gives up rather
+    // than guessing if that pad is not here.
+    if (want.serial) {
+      tab = null;
+      (LAST_DEVICES || []).forEach(function (d) {
+        if (d.serial === want.serial) tab = d.ordinal;
+      });
+      if (!tab) return;             // that controller is gone; stay on Overview
+    }
+
+    if (tab !== 'overview' && TABS.indexOf(tab) < 0) return;
+    if (tab !== ACTIVE) showTab(tab);
+    gpCollect();
+    GP_INDEX = Math.min(want.index || 0, Math.max(0, GP_FOCUS.length - 1));
+    window.scrollTo(0, want.scroll || 0);
+    gpPaint();
+  }, 900);
+}
+
+function setFooterMode(on) {
+  if (on && !FOOTER_MODE) {
+    // ⭐ The SERIAL, not just the ordinal.
+    //
+    // ⛔ Ordinals are reused: unbridge, plug in a DIFFERENT pad, and it is
+    // ds5_usb_1 again -- so an ordinal match would land you in someone else's
+    // settings while looking entirely correct.
+    //
+    // ⭐ And it is the same pad on either transport, so unplugging a wired
+    // controller and reconnecting over Bluetooth brings you back to it even
+    // though the ordinal changed.
+    var mySerial = '';
+    (LAST_DEVICES || []).forEach(function (d) {
+      if (d.ordinal === ACTIVE) mySerial = d.serial || '';
+    });
+
+    FOOTER_RETURN = { tab: ACTIVE, index: GP_INDEX,
+                      scroll: window.scrollY || 0, serial: mySerial };
+    // ⭐ Also kept across a reload. Every chord kills and recreates the window,
+    // so without this you land on Overview each time and hunt for your place
+    // again -- the inconvenience that made closing feel expensive.
+    try {
+      sessionStorage.setItem('ctm_place', JSON.stringify(FOOTER_RETURN));
+    } catch (e) {}
+  }
+  FOOTER_MODE = on;
+  var bar = document.getElementById('gpbar');
+  if (bar) bar.classList.toggle('gp-zone', on);
+
+  if (on) {
+    GP_INDEX = 0;
+    gpCollect();
+    return;
+  }
+
+  // ⚠️ Restore the TAB first -- gpCollect builds its list from the visible
+  // pane, so setting the index before the tab would index into the wrong one.
+  if (FOOTER_RETURN) {
+    if (FOOTER_RETURN.tab && FOOTER_RETURN.tab !== ACTIVE) {
+      showTab(FOOTER_RETURN.tab);
+    }
+    gpCollect();
+    GP_INDEX = Math.min(FOOTER_RETURN.index, Math.max(0, GP_FOCUS.length - 1));
+    window.scrollTo(0, FOOTER_RETURN.scroll);
+    gpPaint();
+    FOOTER_RETURN = null;
+    return;
+  }
+  GP_INDEX = 0;
+  gpCollect();
 }
 
 document.addEventListener('keydown', function (ev) {
@@ -2882,6 +3090,7 @@ function pollDevices() {
     FAILS = 0;
     paintHealth();
     paintPadDestination(d);
+    LAST_DEVICES = list;
 
     var sig = deviceSignature(list);
     if (sig === DEVICE_SIG) return;          // nothing to do
@@ -3052,6 +3261,7 @@ if (location.search.indexOf('selftest') >= 0) {
   // in use; the interesting failures need real data shapes, not empty ones.
   fitWindowIfOversized();
   refreshAll();
+  restorePlace();
   setTimeout(selfTest, 1200);
 } else {
   fitWindowIfOversized();

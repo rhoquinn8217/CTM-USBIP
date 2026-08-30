@@ -243,6 +243,10 @@ inline std::atomic_bool g_configMode{false};
 // say so again.
 inline std::atomic_bool g_gateHold{false};
 
+// ⭐ Set while the chord's own Options press is still held, so the gate below
+// leaves that one button alone and the game can pause itself.
+inline bool g_passOptions = false;
+
 inline bool gate_hold() { return g_gateHold.load(std::memory_order_relaxed); }
 
 inline void set_config_mode(bool on);
@@ -325,6 +329,73 @@ inline void apply(const void *deviceKey,
                   uint8_t *data, size_t len)
 {
     if (data == nullptr || len < 11) return;
+
+    // ⭐ THE CHORD: two fingers resting on the touchpad, then Options.
+    //
+    // ⛔ This is the missing link. Config mode works once the settings window is
+    // in front -- and without this there is no CONTROLLER-ONLY way to get it
+    // there, which makes everything after that point moot. "Just alt-tab"
+    // assumes a keyboard in the room, which is the thing this project exists to
+    // remove.
+    //
+    // ⭐ OPTIONS IS PASSED THROUGH, deliberately. It already pauses the game, so
+    // the chord does not need to: the game pauses itself and the window comes up
+    // over something already stopped. One gesture, and the game handles its half.
+    //
+    // ⓘ Two-finger TOUCH, not press: no click means no button event, so there is
+    // nothing for a game to misread -- it is pure touch data, which games do not
+    // read. And two fingers resting while pressing Options is not something
+    // anyone does by accident.
+    //
+    // ⚠️ Offsets measured 2026-08-29, not guessed:
+    //     [33] finger 1, [37] finger 2 -- DOWN when bit 0x80 is CLEAR
+    //     [9] bit 0x20   Options
+    // Three clean repetitions showed both fingers held steady for the whole
+    // press with no flicker, landing 8-16ms apart. So an instant check is enough
+    // and no memory window is needed.
+    if (len > 40) {
+        const bool f1 = (data[33] & 0x80) == 0;
+        const bool f2 = (data[37] & 0x80) == 0;
+        const bool options = (data[9] & 0x20) != 0;
+
+        // ⛔ EDGE, not level. Options is held for about 300ms and this runs at
+        // 250Hz, so a level check would fire seventy times for one press.
+        static bool lastOptions = false;
+        const bool optionsPressedNow = options && !lastOptions;
+        lastOptions = options;
+
+        // ⛔ LET OPTIONS THROUGH FOR THIS PRESS.
+        //
+        // Measured 2026-08-29: the chord fires, config mode turns on, and then
+        // the SAME report reaches the gate below -- which wipes byte 9,
+        // including Options. So the game never saw the button and never paused,
+        // which is the one thing the pass-through exists for.
+        //
+        // ⓘ Held until Options is RELEASED, not for a fixed time: the game needs
+        // the whole press, and its length is the person's to decide.
+        static bool passOptionsThrough = false;
+        if (!options) passOptionsThrough = false;
+
+        if (f1 && f2 && optionsPressedNow) {
+            device_log::input(device_log::msg()
+                << "chord: two fingers + Options -- showing the settings window");
+            passOptionsThrough = true;
+            ctm_chord_show_ui();
+        }
+        g_passOptions = passOptionsThrough;
+
+        if (device_config_bool("global", "chord_debug", false)) {
+            static int lastState = -1;
+            const int state = (f1 ? 4 : 0) | (f2 ? 2 : 0) | (options ? 1 : 0);
+            if (state != lastState) {
+                lastState = state;
+                device_log::input(device_log::msg()
+                    << "chord: finger1=" << (f1 ? "down" : "up")
+                    << " finger2=" << (f2 ? "down" : "up")
+                    << " options=" << (options ? "down" : "up"));
+            }
+        }
+    }
 
     const char *kind = device_section_for(descriptor);
     if (kind == nullptr) return;
@@ -409,7 +480,9 @@ inline void apply(const void *deviceKey,
         // ⓘ Sticks go to CENTRE (0x80) -- zero is full deflection, not neutral.
         data[1] = data[2] = data[3] = data[4] = 0x80;   // LX LY RX RY
         data[5] = data[6] = 0x00;                       // L2 R2 analog
-        data[9] = 0x00;                                 // shoulders, start, stick clicks
+        // ⓘ Options (0x20) survives while the chord's own press is held --
+        // otherwise the button that triggered this would be eaten by it.
+        data[9] = g_passOptions ? static_cast<uint8_t>(data[9] & 0x20) : 0x00;
         data[10] = static_cast<uint8_t>(data[10] & ~0x07);   // PS, touchpad, mute
         data[8] = 0x08;                                 // faces clear, hat centred
 
