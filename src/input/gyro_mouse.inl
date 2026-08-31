@@ -637,6 +637,20 @@ inline void on_ds5_input(const void *deviceKey,
     //
     // ⓘ device_section_for now answers for controllers this path cannot handle,
     // which is why it is no longer the right question to ask here.
+    // ⛔ NOT WHILE THE PAD IS DRIVING THE SETTINGS PAGE.
+    //
+    // ⚠️ A pointer that moves while its buttons do nothing is a BROKEN mouse,
+    // not a suspended one -- you would waggle the pad, watch the cursor drift,
+    // press select, get nothing, and conclude the feature was broken. Partial is
+    // worse than either extreme.
+    //
+    // ⓘ And "controller inputs locked to page" has to mean all of them. A cursor
+    // crossing the screen while the footer says that is the same class of lie as
+    // the footer showing green while nothing was gated.
+    if (ctm_rebind_config_mode_effective()) {
+        return;
+    }
+
     if (!device_has_ds5_motion(descriptor)) {
         return;
     }

@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.61.3 -- see the changelog at the bottom of this comment.
+  VERSION 2.62.0 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -540,7 +540,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.61.3</span>
+  <span class="muted" style="font-size:12px">v2.62.0</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -2266,6 +2266,30 @@ function gpPaint() {
 // ⭐ The test is exact, not a guess: while the gate is ON, a bridged pad sends
 // KEYSTROKES. So any GAMEPAD input arriving here must be from a pad the agent
 // cannot see.
+// ⓘ Says the remaps COME BACK. "Disabled" on its own reads as broken rather
+// than suspended -- a worry instead of a status.
+//
+// ⚠️ Shown once per window, not per press: it is a reminder, and one that
+// reappeared every time you pressed a button would be noise.
+var SAID_SUSPENDED = false;
+
+function noteRemapsSuspended() {
+  if (SAID_SUSPENDED) return;
+  SAID_SUSPENDED = true;
+
+  var box = document.createElement('div');
+  box.style.cssText = 'position:fixed;right:16px;bottom:56px;z-index:40;max-width:340px;' +
+    'padding:10px 12px;border:1px solid #6c8cff;border-radius:10px;background:#1e2333;' +
+    'color:#c9d4ff;font-size:12px;line-height:1.6';
+  box.innerHTML = '<strong>Your remaps and gyro are paused here.</strong><br>' +
+    'While this window is in front the controller drives it directly, so button ' +
+    'remaps and gyro-to-mouse are suspended. They come back when you close it.';
+  document.body.appendChild(box);
+  setTimeout(function () {
+    if (box.parentNode) box.parentNode.removeChild(box);
+  }, 6000);
+}
+
 function noteUngatedPad() {
   if (!GATE_ON) return;
 
@@ -2850,6 +2874,11 @@ document.addEventListener('keydown', function (ev) {
   // nothing to do otherwise.
   var warn = document.getElementById('ungatedWarn');
   if (warn) warn.parentNode.removeChild(warn);
+
+  // ⭐ A gate keystroke means a REBOUND pad is driving this page, so say why its
+  // remaps are not doing their usual thing. The help text said so, but that is
+  // read while configuring and never while it matters.
+  noteRemapsSuspended();
   var fn = CONFIG_MODE_KEYS[ev.code];
   if (!fn) return;
   ev.preventDefault();

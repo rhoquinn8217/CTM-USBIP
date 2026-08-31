@@ -56,6 +56,10 @@ namespace {
 #include "config/device_config.inl"
 #include "audio/ds5_output_overrides.inl"
 #include "input/gyro_calibration.inl"   // read before gyro_mouse.inl uses it
+// ⓘ gyro_mouse.inl gates on this, and it is defined in rebind.inl which comes
+// later -- so it is declared here, above its user.
+bool ctm_rebind_config_mode_effective();
+
 #include "input/gyro_mouse.inl"          // needs device_config_* and device_section_for
 #include "backend/backend.inl"
 #include "backend/bt.inl"

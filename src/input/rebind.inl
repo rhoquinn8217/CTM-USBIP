@@ -181,6 +181,26 @@ inline const KeyName kKeys[] = {
 // literal comparison never matched and every rebind silently did nothing. The
 // config layer's lowercasing is fine for hex and for words like "touchpad";
 // it is not fine for a vocabulary that carries meaning in its capitals.
+// ⭐ Mouse targets. Not keys, so they are handled separately -- the device is a
+// different one and the wheel is a delta rather than a state.
+//
+// ⓘ The virtual mouse already declares three buttons and a signed wheel byte,
+// so nothing about that device changes.
+enum MouseAction { kMouseNone = 0, kMouseLeft, kMouseRight, kMouseMiddle,
+                   kMouseWheelUp, kMouseWheelDown };
+
+inline MouseAction mouse_action_for(const std::string &code)
+{
+    std::string want;
+    for (char c : code) want.push_back(static_cast<char>(tolower(static_cast<unsigned char>(c))));
+    if (want == "mouseleft")      return kMouseLeft;
+    if (want == "mouseright")     return kMouseRight;
+    if (want == "mousemiddle")    return kMouseMiddle;
+    if (want == "mousewheelup")   return kMouseWheelUp;
+    if (want == "mousewheeldown") return kMouseWheelDown;
+    return kMouseNone;
+}
+
 inline const KeyName *key_for(const std::string &code)
 {
     if (code.empty()) return nullptr;
@@ -600,6 +620,8 @@ inline void apply(const void *deviceKey,
     uint8_t keys[6] = {0, 0, 0, 0, 0, 0};
     size_t keyCount = 0;
     bool anyBound = false;
+    uint8_t mouseButtons = 0;
+    bool anyMouse = false;
 
     for (int i = 0; i < kButtonCount; ++i) {
         char keyName[32];
@@ -663,6 +685,26 @@ inline void apply(const void *deviceKey,
         // rebind would double up with the original.
         clear_button(data, len, i);
 
+        // ⭐ Mouse first: a wheel click is a DELTA, sent once per press, or the
+        // page would scroll forever while the button was held.
+        const MouseAction ma = mouse_action_for(code);
+        if (ma != kMouseNone) {
+            if (ma == kMouseWheelUp || ma == kMouseWheelDown) {
+                static std::map<std::pair<const void *, int>, bool> wheelHeld;
+                const bool wasHeld = wheelHeld[{deviceKey, i}];
+                if (active && !wasHeld) {
+                    ctm_mouse_device::add_wheel(ma == kMouseWheelUp ? 1 : -1);
+                }
+                wheelHeld[{deviceKey, i}] = active;
+            } else if (active) {
+                mouseButtons = static_cast<uint8_t>(
+                    mouseButtons | (ma == kMouseLeft ? 0x01 :
+                                    ma == kMouseRight ? 0x02 : 0x04));
+            }
+            anyMouse = true;
+            continue;
+        }
+
         if (!active) continue;
         const KeyName *k = key_for(code);
         if (k == nullptr) continue;          // unknown name: bound to nothing
@@ -675,6 +717,12 @@ inline void apply(const void *deviceKey,
 
     if (anyBound) {
         ctm_keyboard_device::set_state(modifiers, keys, keyCount);
+    }
+    // ⓘ Only when something is bound to a mouse button, so a controller with no
+    // mouse bindings never touches the shared state.
+    if (anyMouse) {
+        ctm_mouse_device::set_buttons(mouseButtons);
+        ctm_gyro_mouse_ensure_mouse_started();
     }
 }
 
@@ -690,6 +738,14 @@ bool ctm_rebind_config_mode()
 void ctm_rebind_clear_provisional()
 {
     ctm_rebind::g_gateProvisionalUntil.store(0);
+}
+
+// ⭐ The gate as it is ACTUALLY APPLYING -- the flag AND our window being in
+// front. Other input paths need the same answer the report path uses, or one of
+// them keeps working while the rest are gated.
+bool ctm_rebind_config_mode_effective()
+{
+    return ctm_rebind::config_mode() && ctm_ui_has_foreground();
 }
 
 bool ctm_rebind_gate_hold()

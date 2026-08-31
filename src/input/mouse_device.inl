@@ -40,6 +40,20 @@ inline std::wstring mouse_map_path()
 }
 
 // Drains the mailbox and pushes 4-byte boot-mouse reports. Runs until stop().
+// ⭐ Buttons and wheel, set by the rebinder and read by the pump.
+//
+// ⓘ The device already declares all of this -- three buttons and a signed wheel
+// byte -- so nothing about the profile changes. Only the pump was hardcoding
+// zero for both.
+//
+// ⚠️ The wheel is a DELTA, not a state: it must be sent once and cleared, or the
+// page would scroll forever after one press.
+inline std::atomic<uint8_t> g_buttons{0};
+inline std::atomic<int> g_wheelPending{0};
+
+inline void set_buttons(uint8_t mask) { g_buttons.store(mask, std::memory_order_relaxed); }
+inline void add_wheel(int clicks) { g_wheelPending.fetch_add(clicks, std::memory_order_relaxed); }
+
 inline void pump_loop()
 {
     // The mouse endpoint from the profile. Kept in one place so it matches the
@@ -48,7 +62,20 @@ inline void pump_loop()
 
     while (g_running.load() && !g_stop.load()) {
         int8_t dx = 0, dy = 0;
-        if (ctm_gyro_mouse::shared_mailbox().drain(&dx, &dy)) {
+        const bool moved = ctm_gyro_mouse::shared_mailbox().drain(&dx, &dy);
+
+        // ⭐ A button or a wheel click is worth a report on its own -- waiting
+        // for movement would mean a click did nothing while the pad was still.
+        const uint8_t buttons = g_buttons.load(std::memory_order_relaxed);
+        int wheel = g_wheelPending.exchange(0, std::memory_order_relaxed);
+        if (wheel > 127) wheel = 127;
+        if (wheel < -127) wheel = -127;
+
+        static uint8_t lastButtons = 0;
+        const bool buttonsChanged = buttons != lastButtons;
+        lastButtons = buttons;
+
+        if (moved || buttonsChanged || wheel != 0) {
             std::shared_ptr<CtmUsbipDevice> dev;
             {
                 std::lock_guard<std::mutex> lock(g_mutex);
@@ -58,10 +85,10 @@ inline void pump_loop()
                 CTM_INPUT_REPORT report = {};
                 report.endpoint_address = kMouseInEndpoint;
                 report.length = 4;
-                report.data[0] = 0x00;                       // no buttons
+                report.data[0] = buttons;                    // left/right/middle
                 report.data[1] = static_cast<uint8_t>(dx);   // relative X
                 report.data[2] = static_cast<uint8_t>(dy);   // relative Y
-                report.data[3] = 0x00;                       // wheel
+                report.data[3] = static_cast<uint8_t>(wheel);
                 dev->inject_synthetic_input(report);
             }
         } else {
