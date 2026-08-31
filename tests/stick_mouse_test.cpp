@@ -25,9 +25,11 @@ bool g_configModeEffective = false;
 int32_t g_pushedX = 0;
 int32_t g_pushedY = 0;
 int g_pushCount = 0;
+int g_wheelSum = 0;
 
 void reset_stubs()
 {
+    g_wheelSum = 0;
     g_cfg.clear();
     g_configModeEffective = false;
     g_pushedX = 0;
@@ -55,6 +57,12 @@ static std::string device_settings_section(const char *kind, const std::string &
     return "cfg:" + linkedConfig + "/" + kind;
 }
 static const char *device_section_for(const std::vector<unsigned char> &) { return "ds5"; }
+static bool device_config_bool(const char *, const char *key, bool fallback)
+{
+    auto it = g_cfg.find(key);
+    if (it == g_cfg.end()) return fallback;
+    return it->second == "true";
+}
 static bool ctm_rebind_config_mode_effective() { return g_configModeEffective; }
 static void ctm_gyro_mouse_ensure_mouse_started() {}
 
@@ -70,6 +78,12 @@ static void ctm_gyro_mouse_ensure_mouse_started() {}
 // checks failed reporting no movement at all while the code was correct.
 // Nesting in an unnamed namespace gives them internal linkage; qualified names
 // still resolve inside this file, and nothing can be folded across files.
+namespace ctm_mouse_device {
+namespace {   // internal linkage, same reason as the note above
+inline void add_wheel(int ticks) { g_wheelSum += ticks; }
+}
+} // namespace ctm_mouse_device
+
 namespace ctm_gyro_mouse {
 namespace {
 
@@ -137,6 +151,16 @@ void run_step(std::vector<uint8_t> &r, long long nowMs)
 }
 
 void fresh_device() { ctm_stick_mouse::forget(kDev); }
+
+// ⚠️ Scroll must be driven at a REPORT CADENCE, not in one long jump: a single
+// step of 500ms is clamped to 50ms by design (the stall guard), so a test that
+// leaps produces one twentieth of the travel and looks like a broken feature.
+void scroll_for(std::vector<uint8_t> &r, long long ms, long long everyMs = 8)
+{
+    for (long long at = 0; at <= ms; at += everyMs) {
+        ctm_stick_mouse::scroll_step(kDev, "ds5", r.data(), r.size(), at);
+    }
+}
 
 } // namespace
 
@@ -370,6 +394,105 @@ int run_stick_mouse_tests()
         run_step(r, 0);
         run_step(r, 50);
         CTM_CHECK(g_pushedX != 0);
+    }
+
+    section("stick scroll: nothing configured scrolls nothing");
+    {
+        reset_stubs();
+        fresh_device();
+        auto r = rest_report();
+        r[2] = 0;                       // left stick hard up
+        scroll_for(r, 500);
+        CTM_CHECK_EQ(g_wheelSum, 0);
+    }
+
+    section("stick scroll: pushing up scrolls up, at the configured rate");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["stick_to_scroll"] = "left";
+        g_cfg["stick_scroll_speed"] = "10";        // 10 clicks a second
+        g_cfg["stick_scroll_deadzone"] = "0";
+        auto r = rest_report();
+        r[2] = 0;                                  // hard up
+        scroll_for(r, 500);
+        CTM_CHECK(g_wheelSum >= 4 && g_wheelSum <= 6);
+    }
+
+    section("stick scroll: pushing down scrolls the other way");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["stick_to_scroll"] = "left";
+        g_cfg["stick_scroll_speed"] = "10";
+        g_cfg["stick_scroll_deadzone"] = "0";
+        auto r = rest_report();
+        r[2] = 255;                                // hard down
+        scroll_for(r, 500);
+        CTM_CHECK(g_wheelSum <= -4);
+    }
+
+    section("stick scroll: a resting stick and the deadzone produce nothing");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["stick_to_scroll"] = "left";
+        g_cfg["stick_scroll_speed"] = "20";
+        auto r = rest_report();                    // centred
+        scroll_for(r, 500);
+        CTM_CHECK_EQ(g_wheelSum, 0);
+
+        r[2] = 110;                                // ~14% up, inside 25%
+        ctm_stick_mouse::scroll_step(kDev, "ds5", r.data(), r.size(), 1000);
+        CTM_CHECK_EQ(g_wheelSum, 0);
+    }
+
+    section("stick scroll: natural inverts, and a gate can hold it off");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["stick_to_scroll"] = "left";
+        g_cfg["stick_scroll_speed"] = "10";
+        g_cfg["stick_scroll_deadzone"] = "0";
+        g_cfg["stick_scroll_natural"] = "true";
+        auto r = rest_report();
+        r[2] = 0;                                  // hard up
+        scroll_for(r, 500);
+        CTM_CHECK(g_wheelSum <= -4);      // inverted
+
+        reset_stubs();
+        fresh_device();
+        g_cfg["stick_to_scroll"] = "left";
+        g_cfg["stick_to_scroll_gate"] = "L2";
+        g_cfg["stick_scroll_speed"] = "10";
+        g_cfg["stick_scroll_deadzone"] = "0";
+        auto r2 = rest_report();
+        r2[2] = 0;
+        scroll_for(r2, 500);
+        CTM_CHECK_EQ(g_wheelSum, 0);      // gate shut
+    }
+
+    section("stick scroll: the cursor stick and the scroll stick are separate");
+    {
+        // ⭐ The pairing the presets need: right stick moves the cursor, left
+        // stick scrolls, neither disturbing the other.
+        reset_stubs();
+        fresh_device();
+        g_cfg["stick_to_mouse"] = "right";
+        g_cfg["stick_mouse_speed"] = "1000";
+        g_cfg["stick_mouse_curve"] = "linear";
+        g_cfg["stick_to_scroll"] = "left";
+        g_cfg["stick_scroll_speed"] = "10";
+        g_cfg["stick_scroll_deadzone"] = "0";
+        auto r = rest_report();
+        r[3] = 255;                                // right stick hard right
+        r[2] = 0;                                  // left stick hard up
+        for (long long at = 0; at <= 500; at += 8) {
+            run_step(r, at);
+            ctm_stick_mouse::scroll_step(kDev, "ds5", r.data(), r.size(), at);
+        }
+        CTM_CHECK(g_pushedX > 0);                              // cursor moved
+        CTM_CHECK(g_wheelSum >= 4);          // and it scrolled
     }
 
     section("stick: config mode stands it down");

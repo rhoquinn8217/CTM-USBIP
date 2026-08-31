@@ -89,6 +89,11 @@ struct StickState {
     bool haveLast = false;
     float carryX = 0.0f;
     float carryY = 0.0f;
+    // Scroll keeps its own clock and remainder: it can be on while the cursor
+    // is off, and the two are driven by different sticks.
+    long long scrollLastMs = 0;
+    bool scrollHaveLast = false;
+    float scrollCarry = 0.0f;
 };
 
 inline std::mutex g_stickMutex;
@@ -212,6 +217,92 @@ inline void step(const void *deviceKey, const std::string &section,
     }
 }
 
+// ⭐ A STICK THAT SCROLLS (rhoquinn8217, 2026-08-31). The touchpad already
+// scrolls with two fingers, but in gyro or stick mode both thumbs are
+// committed and reaching the pad means regripping -- so a stick has to be able
+// to do it.
+//
+// ⓘ The d-pad can already scroll today via rebind_12/13 to MouseWheelUp and
+// MouseWheelDown. It is not the answer for the presets because they bind the
+// d-pad to the arrow keys, and it cannot be both.
+//
+// Wheel ticks are DISCRETE, so this accumulates travel and emits a tick each
+// time a whole one is owed -- speed is ticks per second at full deflection,
+// measured against elapsed time exactly like the cursor.
+inline void scroll_step(const void *deviceKey, const std::string &section,
+                        const uint8_t *data, size_t len, long long nowMs)
+{
+    if (data == nullptr || len <= kRightY) return;
+
+    const Which which = parse_which(device_config_str(section.c_str(), "stick_to_scroll"));
+    if (which == Which::Off) {
+        std::lock_guard<std::mutex> lock(g_stickMutex);
+        auto it = g_sticks.find(deviceKey);
+        if (it != g_sticks.end()) {
+            it->second.scrollHaveLast = false;
+            it->second.scrollCarry = 0.0f;
+        }
+        return;
+    }
+    if (ctm_rebind_config_mode_effective()) return;
+
+    const std::string gateRaw = device_config_str(section.c_str(), "stick_to_scroll_gate");
+    const ctm_gyro_mouse::Gate gate =
+        gateRaw.empty() ? ctm_gyro_mouse::Gate::Always : ctm_gyro_mouse::parse_gate(gateRaw);
+
+    std::lock_guard<std::mutex> lock(g_stickMutex);
+    StickState &st = g_sticks[deviceKey];
+
+    long long dt = st.scrollHaveLast ? (nowMs - st.scrollLastMs) : 0;
+    st.scrollLastMs = nowMs;
+    st.scrollHaveLast = true;
+    if (dt <= 0) return;
+    if (dt > kMaxStepMs) dt = kMaxStepMs;
+
+    if (!ctm_gyro_mouse::gate_open(gate, data, len)) {
+        st.scrollCarry = 0.0f;
+        return;
+    }
+
+    // Vertical only, like the touchpad's scroll. ⓘ Horizontal scrolling is a
+    // separate thing to decide on rather than a free extra: few windows honour
+    // it, and it would fight the cursor stick in `both`.
+    float y = 0.0f;
+    if (which == Which::Both) {
+        const float ly = axis_unit(data[kLeftY]);
+        const float ry = axis_unit(data[kRightY]);
+        y = (ry * ry >= ly * ly) ? ry : ly;
+    } else {
+        y = axis_unit((which == Which::Right) ? data[kRightY] : data[kLeftY]);
+    }
+
+    const float deadzone =
+        static_cast<float>(device_config_int(section.c_str(), "stick_scroll_deadzone", 25)) / 100.0f;
+    float mag = y < 0.0f ? -y : y;
+    if (mag <= deadzone) {
+        st.scrollCarry = 0.0f;
+        return;
+    }
+    if (mag > 1.0f) mag = 1.0f;
+    float amount = (mag - deadzone) / (1.0f - deadzone);
+    if (amount > 1.0f) amount = 1.0f;
+
+    const int speed = device_config_int(section.c_str(), "stick_scroll_speed", 10);
+    const float perSecond = static_cast<float>(speed <= 0 ? 10 : speed) * amount;
+    // ⓘ Pushing UP scrolls the content up, which is wheel-up: the stick's Y is
+    // negative when pushed up, so the sign is flipped here.
+    const float direction = (y < 0.0f) ? 1.0f : -1.0f;
+    st.scrollCarry += perSecond * (static_cast<float>(dt) / 1000.0f) * direction;
+
+    int ticks = static_cast<int>(st.scrollCarry);
+    if (ticks != 0) {
+        st.scrollCarry -= static_cast<float>(ticks);
+        const bool natural = device_config_bool(section.c_str(), "stick_scroll_natural", false);
+        ctm_mouse_device::add_wheel(natural ? -ticks : ticks);
+        ctm_gyro_mouse_ensure_mouse_started();
+    }
+}
+
 inline long long stick_now_ms()
 {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -225,7 +316,10 @@ inline void on_ds5_input(const void *deviceKey,
 {
     const char *kind = device_section_for(descriptor);
     if (kind == nullptr) return;
-    step(deviceKey, device_settings_section(kind, linkedConfig), data, len, stick_now_ms());
+    const std::string section = device_settings_section(kind, linkedConfig);
+    const long long now = stick_now_ms();
+    step(deviceKey, section, data, len, now);
+    scroll_step(deviceKey, section, data, len, now);
 }
 
 } // namespace ctm_stick_mouse
