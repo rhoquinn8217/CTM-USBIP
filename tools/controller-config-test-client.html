@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.55.0 -- see the changelog at the bottom of this comment.
+  VERSION 2.58.1 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -540,7 +540,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.55.0</span>
+  <span class="muted" style="font-size:12px">v2.58.1</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -763,9 +763,9 @@ function call(method, path, body, quiet) {
       if (status === 0 && !quiet) {
         // Reaching nothing at all is a different problem from a rejected call,
         // and the usual cause is the agent not running with --rest.
-        log(method, path, 0, 'could not reach the agent: ' + e.message +
-            '\n\nIs it running?  ctm-usbip.exe agent 48054 --rest 48055');
+        log(method, path, 0, 'could not reach the agent: ' + e.message);
         setConn('cannot reach agent', 'bad');
+        showOfflineHelp();
       }
       throw e;
     });
@@ -797,6 +797,98 @@ function fitWindow() {
 // ⓘ On load, but only when the window is WRONG -- too wide or too tall by a
 // clear margin. A window you deliberately sized should stay as you left it, and
 // one you moved should stay where you put it.
+// ⭐ What to do when the agent cannot be reached.
+//
+// ⛔ This existed and stopped appearing at some point -- only a log line and a
+// status word were left, which say something is wrong without saying what to do.
+//
+// ⚠️ The old version suggested opening the address in a browser. That advice is
+// GONE: a plain tab cannot close, resize or move itself, and would leave the pad
+// gated with no way out. It was pointing people at the worst place to be.
+function showOfflineHelp() {
+  if (document.getElementById('offlineHelp')) return;
+  var box = document.createElement('div');
+  box.id = 'offlineHelp';
+  box.style.cssText = 'margin:14px 0;padding:12px 14px;border:1px solid #b5564f;' +
+    'border-radius:10px;background:#2b1b1b';
+  box.innerHTML =
+    '<strong>The listener is not answering.</strong>' +
+    '<div class="muted" style="margin-top:8px;line-height:1.7">' +
+    '&bull; It may not be running &mdash; start it with ' +
+    '<code>ctm-usbip.exe agent 48054 --ui</code><br>' +
+    '&bull; It may have been rebuilt and not restarted<br>' +
+    '&bull; The address above may be wrong for this machine<br>' +
+    '&bull; A firewall may be blocking the port' +
+    '</div>';
+  var host = document.getElementById('stickyTop');
+  if (host) host.appendChild(box);
+}
+
+// ⭐ IS THIS AN ORDINARY BROWSER TAB rather than our own window?
+//
+// ⛔ A tab is a bad place for this page. window.close() is refused there, so the
+// footer's Close does nothing; resize and move are ignored, so Fit window does
+// nothing; and the chord would set the gate, fail to close anything and fail to
+// open anything -- leaving the pad gated with no way out.
+//
+// ⚠️ Worse, close_existing() matches windows by TITLE, so a tab could make the
+// agent close the person's whole browser.
+//
+// ⓘ Detected by CHROME HEIGHT: an app window has no toolbar or tab strip, so
+// outer and inner heights are within a few pixels. A tab carries 80-150px of
+// browser furniture.
+function inPlainTab() {
+  // ⭐ The AGENT marks the window it opened, with ?app on the URL.
+  //
+  // ⛔ Two attempts to detect this from inside the browser both failed, and both
+  // blanked the page: chrome height was a guessed threshold the app window
+  // exceeded, and a resize probe cannot work because resizeTo is ASYNCHRONOUS --
+  // outerWidth still reads the old value on the next line.
+  //
+  // ⓘ Someone can type ?app by hand. That is fine: it means "I know what I am
+  // doing", not "this is definitely an app window".
+  return location.search.indexOf('app') < 0;
+}
+
+
+// ⭐ Ask the AGENT to open a proper window -- it can do what a tab cannot. Then
+// say so, rather than leaving a half-working page.
+function offerRealWindow() {
+  var bar = document.createElement('div');
+  bar.style.cssText = 'position:fixed;inset:0;z-index:99;background:#15161a;' +
+    'display:flex;align-items:center;justify-content:center;text-align:center;padding:40px';
+  bar.innerHTML =
+    '<div style="max-width:520px">' +
+    '<h2 style="margin:0 0 10px">This page needs its own window</h2>' +
+    '<p class="muted" style="line-height:1.6">' +
+    'In a browser tab it cannot close, resize or move itself, and the controller ' +
+    'chord would leave the pad locked with no way out.</p>' +
+    '<button id="openReal" style="margin-top:14px">Open it properly</button>' +
+    '<p id="openedNote" class="muted" style="display:none;margin-top:14px">' +
+    'Opened. You can close this tab.</p></div>';
+  document.body.appendChild(bar);
+
+  // ⛔ AND STOP. A tab that keeps polling and keeps listening for the gate keys
+  // is a dead page that has not stopped moving -- do the chord while it is in
+  // front and a proper window opens, but the TAB still receives the keystrokes,
+  // because it is what has focus. Half-working is worse than plainly refusing.
+  STOPPED = true;
+
+  document.getElementById('openReal').onclick = function () {
+    // ⛔ spawn, NOT reset. Reset closes any window matching our title first --
+    // and the browser window holding THIS tab matches, so it closed the whole
+    // browser. This one only opens.
+    // ⓘ Once. Pressing again only makes a second window, and two of them both
+    // report focus -- so the gate flickers and the last one to speak wins.
+    this.disabled = true;
+    fetch(base() + '/api/v1/ui/spawn', { method: 'POST' })
+      .then(function () {
+        document.getElementById('openedNote').style.display = 'block';
+      })
+      .catch(function () {});
+  };
+}
+
 function fitWindowIfOversized() {
   var wantW = Math.min(1400, screen.availWidth * 0.55);
   var wantH = screen.availHeight * 0.66;
@@ -2266,6 +2358,9 @@ function reportFocus(on) {
 var LAST_FOCUS_SENT = null;
 
 function syncFocus() {
+  // ⛔ A tab never claims the controllers. Gating with no way to close is worse
+  // than not gating at all -- reach for the mouse instead.
+  if (inPlainTab()) return;
   var on = document.hasFocus();
   if (on === LAST_FOCUS_SENT) return;
   LAST_FOCUS_SENT = on;
@@ -2286,11 +2381,30 @@ setInterval(syncFocus, 1000);
 //
 // ⓘ pagehide rather than beforeunload: the latter is unreliable and
 // increasingly restricted.
-window.addEventListener('pagehide', function () {
+// ⛔ Measured 2026-08-29: no ui/closed ever reached the agent. An EMPTY beacon
+// body is rejected by Chrome, and sendBeacon returns a boolean nobody was
+// checking -- so a refused send was completely silent.
+//
+// ⚠️ It worked anyway only because closing a window also BLURS it, and the blur
+// report released the gate. That is coincidence, not design: a window killed
+// without a blur -- task manager, a crash -- would leave the gate on.
+//
+// ⓘ Both events, because pagehide does not always fire when a process is torn
+// down, and a duplicate release costs nothing.
+function reportClosing() {
   try {
-    navigator.sendBeacon(base() + '/api/v1/ui/closed', '');
+    var body = new Blob(['{"closed":true}'], { type: 'application/json' });
+    if (!navigator.sendBeacon(base() + '/api/v1/ui/closed', body)) {
+      // ⓘ Last resort. keepalive lets a fetch outlive the page, which is the
+      // same promise sendBeacon makes.
+      fetch(base() + '/api/v1/ui/closed', { method: 'POST', keepalive: true })
+        .catch(function () {});
+    }
   } catch (e) {}
-});
+}
+
+window.addEventListener('pagehide', reportClosing);
+window.addEventListener('beforeunload', reportClosing);
 
 var CONFIG_MODE_KEYS = {
   KeyW: function () { gpKeyMove(-1); },
@@ -2354,7 +2468,13 @@ function gpKeySelect() {
     gpPaint();
     return;
   }
-  if (CONFIRM_CB) { confirmYes(); return; }
+  // ⛔ PRESS WHAT IS FOCUSED. This called confirmYes() outright, so ✕ on Cancel
+  // confirmed the action -- the exact opposite of what the button says. Clicking
+  // with a mouse worked, which is what made it look like a pad problem rather
+  // than a wrong call here.
+  //
+  // ⓘ gpActivate clicks the focused element, so OK confirms and Cancel cancels.
+  if (CONFIRM_CB) { gpActivate(); return; }
   gpActivate();
 }
 
@@ -2536,6 +2656,13 @@ var OVERLAY_OPENER = null;
 
 var RENAME_OPENER = null;
 
+// Set when this page has given up -- a tab that cannot do its job. Everything
+// that runs on a timer checks it.
+var STOPPED = false;
+
+// Whether this is a plain tab. Measured once, because the test resizes.
+var IN_TAB = null;
+
 var FOOTER_RETURN = null;
 
 // ⭐ Put the person back where they were, after a reload or a fresh window.
@@ -2628,6 +2755,7 @@ function setFooterMode(on) {
 }
 
 document.addEventListener('keydown', function (ev) {
+  if (STOPPED) return;
   // ⛔ BOTH MODIFIERS REQUIRED. Without this check a plain 'd' typed into a
   // config name would move the halo, and Enter would press whatever is focused
   // instead of committing a rename.
@@ -2660,6 +2788,7 @@ function gpTab(delta) {
 }
 
 function gpPoll() {
+  if (STOPPED) return;
   // ⛔ IGNORE THE PAD WHEN THIS WINDOW IS NOT IN FRONT.
   //
   // The gamepad API reports a controller regardless of which window has focus,
@@ -3083,9 +3212,12 @@ function toggleGateHold() {
 }
 
 function pollDevices() {
+  if (STOPPED) return;
   call('GET', '/api/v1/devices', undefined, true).then(function(d) {
     var list = d.devices || [];
     LAST_OK = Date.now();
+    var oh = document.getElementById('offlineHelp');
+    if (oh) oh.parentNode.removeChild(oh);
     LAST_COUNT = list.length;
     FAILS = 0;
     paintHealth();
@@ -3256,16 +3388,38 @@ function selfTest() {
   return fail === 0;
 }
 
-if (location.search.indexOf('selftest') >= 0) {
-  // ⓘ After refreshAll so KEYS and CONFIGS are populated the way they would be
-  // in use; the interesting failures need real data shapes, not empty ones.
+// ⭐ ONE startup path, guarded properly.
+//
+// ⛔ This was `if (inPlainTab()) { ...; return; }` written at TOP LEVEL, where
+// return is a SYNTAX ERROR -- it killed the whole script, so the page rendered
+// nothing at all. Three rounds were spent changing the tab DETECTION while the
+// console had said "Illegal return statement" the entire time.
+//
+// ⚠️ The lesson is the one already in the handoff: read the error before
+// changing the thing you assume is at fault.
+function startPage() {
+  if (inPlainTab()) { offerRealWindow(); return; }
+
+  // ⭐ Brand this window so the agent can find OURS and nothing else. The title
+  // alone was "Controller config", which any window showing this page carries --
+  // including a browser with it open in a tab, which is how closing "the
+  // settings window" took someone's whole browser with it.
+  document.title = document.title + ' [ctm-app]';
   fitWindowIfOversized();
   refreshAll();
   restorePlace();
+}
+
+if (location.search.indexOf('selftest') >= 0) {
+  // ⓘ After refreshAll so KEYS and CONFIGS are populated the way they would be
+  // in use; the interesting failures need real data shapes, not empty ones.
+  startPage();
   setTimeout(selfTest, 1200);
 } else {
-  fitWindowIfOversized();
-  refreshAll();
+  // ⛔ This branch was still calling the old lines directly, so startPage and
+  // its tab check were skipped on every normal load -- which is why a browser
+  // tab rendered the full settings page instead of the warning.
+  startPage();
 }
 </script>
 </body>

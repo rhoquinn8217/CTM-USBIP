@@ -462,6 +462,9 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
             // nuisance; gating wrongly leaves someone unable to play.
             auto it = json.bools.find("focused");
             const bool on = (it != json.bools.end()) && it->second;
+            // ⭐ A page claiming focus CONFIRMS a provisional gate -- the
+            // window came forward, so the failsafe can stand down.
+            if (on) ctm_rebind_clear_provisional();
             ctm_rebind_set_config_mode(on);
             *out = rest_http_response(200, on ? R"({"ok":true,"config_mode":true})"
                                               : R"({"ok":true,"config_mode":false})");
@@ -494,7 +497,25 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
             return true;
         }
 
+        // ⭐ OPEN ONLY, never close. For a page that has found itself in an
+        // ordinary browser tab and wants a proper window.
+        //
+        // ⛔ It must NOT use reset: close_existing matches windows by TITLE, and
+        // the browser window holding that tab has the same title -- so reset
+        // closed the person's entire browser. Measured 2026-08-29.
+        if (what == "spawn") {
+            ctm_open_ui::open_new(g_rest_port);
+            *out = rest_http_response(200, R"({"ok":true})");
+            return true;
+        }
+
         if (what == "closed") {
+            // ⓘ Logged because it was silent: a close produced a focus report
+            // but no beacon line, so there was no way to tell whether the
+            // beacon fired at all. Focus happening to fire on close is luck --
+            // this is the path meant to be reliable.
+            device_log::input(device_log::msg()
+                << "ui/closed: the page reported its own teardown");
             ctm_rebind_set_config_mode(false);
             *out = rest_http_response(200, R"({"ok":true,"config_mode":false})");
             return true;

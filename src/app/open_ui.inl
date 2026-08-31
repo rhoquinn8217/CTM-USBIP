@@ -28,7 +28,15 @@ inline bool g_open_ui = false;              // set by --ui
 inline bool g_ui_already_focused = false;   // main focused one before starting
 
 // A distinctive fragment of the page's <title>. See the warning above.
-inline const wchar_t *kTitleMarker = L"Controller config";
+// ⛔ NOT the page title. "Controller config" appears in the <title>, so any
+// window showing this page matched -- including an ordinary browser window with
+// the page in a TAB, which is how "Open it properly" closed someone entire
+// browser.
+//
+// ⭐ The page appends this marker to its own title ONLY when it was opened by
+// us, which it knows from ?app on the URL. A tab never does, so it is never
+// matched.
+inline const wchar_t *kTitleMarker = L"[ctm-app]";
 
 inline const wchar_t *kRelativePage = L"tools\\controller-config-test-client.html";
 
@@ -76,7 +84,14 @@ inline bool focus_existing()
 // is the whole reason a released exe works with no files beside it.
 inline std::wstring page_url(uint16_t restPort)
 {
-    return L"http://127.0.0.1:" + std::to_wstring(restPort) + L"/";
+    // ⭐ ?app marks a window WE opened. The page cannot tell an app window from
+    // an ordinary tab by asking the browser -- resizeTo is asynchronous, so a
+    // resize probe reads the old size and reports a false answer, and chrome
+    // height is a guess that blanked the page when it was wrong.
+    //
+    // ⓘ Someone can of course type the parameter by hand. That is fine: it means
+    // "I know what I am doing", not "this is definitely an app window".
+    return L"http://127.0.0.1:" + std::to_wstring(restPort) + L"/?app";
 }
 
 inline std::wstring find_browser()
@@ -106,6 +121,24 @@ inline std::wstring find_browser()
 // will not release is what strands someone. So callers release the gate FIRST
 // and treat this as cleanup.
 // Is a settings window up right now? Same lookup, no side effects.
+// ⭐ Does OUR window have the keyboard right now? Asked of Windows, not of the
+// page.
+//
+// ⛔ The page's own document.hasFocus() cannot be trusted here: after the window
+// is raised it is VISIBLE and reports focus, while the game still owns the
+// keyboard -- so the gate stayed on and the keystrokes went to the game.
+//
+// ⓘ This is the only question that actually matters: keystrokes follow the
+// foreground window, so gate exactly when that window is ours.
+inline bool window_has_foreground()
+{
+    const HWND fg = GetForegroundWindow();
+    if (fg == nullptr) return false;
+    wchar_t title[512] = {};
+    if (GetWindowTextW(fg, title, 511) <= 0) return false;
+    return wcsstr(title, kTitleMarker) != nullptr;
+}
+
 inline bool window_exists()
 {
     FindState state;
@@ -113,11 +146,52 @@ inline bool window_exists()
     return state.found != nullptr;
 }
 
+// ⭐ Bring our window ABOVE a borderless game.
+//
+// ⛔ Measured 2026-08-29: the window opened, took focus and HELD it for nine
+// seconds -- while being completely invisible behind a borderless game. Focus
+// and drawing order are different things, which is why an earlier attempt at
+// SetForegroundWindow changed nothing: it was already foreground.
+//
+// ⓘ TOPMOST then back to NOTOPMOST. Setting it topmost lifts it above a
+// full-screen game; dropping it again immediately means it does not then sit
+// over everything else forever, which would be its own annoyance.
+//
+// ⚠️ Runs on a thread because the window does not exist yet when the browser is
+// launched -- it has to be waited for.
+inline void raise_when_ready()
+{
+    std::thread([]() {
+        for (int i = 0; i < 60; ++i) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            FindState state;
+            EnumWindows(find_window_proc, reinterpret_cast<LPARAM>(&state));
+            if (state.found == nullptr) continue;
+
+            SetWindowPos(state.found, HWND_TOPMOST, 0, 0, 0, 0,
+                         SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+            SetWindowPos(state.found, HWND_NOTOPMOST, 0, 0, 0, 0,
+                         SWP_NOMOVE | SWP_NOSIZE);
+            // ⛔ And take the KEYBOARD too. Raising changes drawing order only,
+            // so without this the window sat in front while the game still
+            // owned input -- and the gate's keystrokes went to the game.
+            focus_existing();
+            device_log::input_w() << L"ui: raised the window above the game";
+            return;
+        }
+        device_log::input_w() << L"ui: no window appeared to raise";
+    }).detach();
+}
+
 inline bool close_existing()
 {
     FindState state;
     EnumWindows(find_window_proc, reinterpret_cast<LPARAM>(&state));
-    if (state.found == nullptr) return false;
+    if (state.found == nullptr) {
+        device_log::input_w() << L"ui: close_existing found no window";
+        return false;
+    }
+    device_log::input_w() << L"ui: close_existing closing a window";
     PostMessageW(state.found, WM_CLOSE, 0, 0);
     return true;
 }

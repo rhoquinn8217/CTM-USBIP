@@ -77,6 +77,9 @@ static void mic_ring_reset(const CtmBackend *owner);
 void ctm_rebind_set_config_mode(bool on);
 bool ctm_rebind_config_mode();
 bool ctm_rebind_gate_hold();
+void ctm_rebind_clear_provisional();
+// ⓘ rebind.inl runs on the input path and needs the window check from open_ui.
+bool ctm_ui_has_foreground();
 // ⓘ The chord calls this from the input path; the REST endpoint calls it too.
 void ctm_chord_show_ui();
 void ctm_rebind_set_gate_hold(bool hold);
@@ -118,6 +121,11 @@ void ctm_rebind_ensure_keyboard_started();
 #include "app/rest_config_sessions.inl"   // defines what rest_config.inl declares; needs agent.inl's sessions
 #include "app/service.inl"
 
+bool ctm_ui_has_foreground()
+{
+    return ctm_open_ui::window_has_foreground();
+}
+
 
 // ⭐ Show the settings window and take the controllers.
 //
@@ -145,14 +153,22 @@ void ctm_chord_show_ui()
     // ⓘ Polls rather than sleeping a fixed time: a window that closes quickly
     // should not cost anyone 300ms.
     if (ctm_open_ui::close_existing()) {
-        for (int waited = 0; waited < 40; ++waited) {
+        int waited = 0;
+        for (; waited < 40; ++waited) {
             std::this_thread::sleep_for(std::chrono::milliseconds(25));
             if (!ctm_open_ui::window_exists()) break;
         }
+        device_log::input_w() << L"ui: waited " << (waited * 25)
+                              << L"ms for the old window to go";
     }
 
     ctm_rebind_set_config_mode(true);
+    device_log::input_w() << L"ui: launching a new window";
     ctm_open_ui::open_new(g_rest_port);
+    // ⭐ Focus is not visibility. A borderless game paints over a focused
+    // window, so it has to be lifted in the DRAWING order as well.
+    ctm_open_ui::raise_when_ready();
+
 }
 } // namespace
 

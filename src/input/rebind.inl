@@ -259,10 +259,48 @@ inline void set_gate_hold(bool hold)
     }
 }
 
+// ⭐ Buttons still held when the gate releases must not reach the game.
+//
+// ⛔ Measured 2026-08-29: pressing cross to close the window released the gate
+// while cross was STILL DOWN -- so the game saw it the moment the pad came
+// back, and a press meant for the settings page arrived in the game.
+//
+// ⓘ Cleared per button as each is released, not on a timer: a button held
+// deliberately across the transition should start working when it is next
+// pressed, not after an arbitrary wait.
+inline uint32_t g_swallowUntilReleased = 0;
+
+// ⭐ THE GATE IS PROVISIONAL UNTIL THE PAGE CONFIRMS IT.
+//
+// ⛔ Observed: sometimes the chord opens the window BEHIND the game. The gate is
+// on, the keystrokes go to whatever has focus, and the pad is locked with no way
+// out except a keyboard or mouse -- which is exactly the situation this whole
+// feature exists to avoid.
+//
+// ⭐ So the chord turns the gate on HOPEFULLY. If no page has said "I have
+// focus" within a few seconds, it did not come forward, and the gate releases
+// itself.
+//
+// ⚠️ Agent-side on purpose. A page-side timer cannot help when the page never
+// loaded, or crashed on the way up -- and those are the cases that strand you.
+inline std::atomic<long long> g_gateProvisionalUntil{0};
+
+inline long long chord_now_ms()
+{
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
 inline void set_config_mode(bool on)
 {
     // ⛔ Nothing turns the gate on while it is held off.
     if (on && g_gateHold.load(std::memory_order_relaxed)) return;
+
+    // Leaving the gate: whatever is down now must be released before the game
+    // hears it.
+    if (!on && g_configMode.load(std::memory_order_relaxed)) {
+        g_swallowUntilReleased = 0xffffffffu;
+    }
 
     const bool was = g_configMode.exchange(on);
     if (was && !on) {
@@ -376,10 +414,19 @@ inline void apply(const void *deviceKey,
         static bool passOptionsThrough = false;
         if (!options) passOptionsThrough = false;
 
-        if (f1 && f2 && optionsPressedNow) {
+        // ⛔ NOT WHILE THE GATE IS ALREADY ON. If the window is up and in front,
+        // the chord has nothing to do -- and firing anyway closed and reopened
+        // it while passing Options through to the game behind, so the game
+        // paused for no reason.
+        //
+        // ⓘ Options is then gated normally, like every other button.
+        if (f1 && f2 && optionsPressedNow && !config_mode()) {
             device_log::input(device_log::msg()
                 << "chord: two fingers + Options -- showing the settings window");
             passOptionsThrough = true;
+            // ⓘ Four seconds: long enough for a browser to start cold, short
+            // enough that being locked out is a blip rather than a problem.
+            g_gateProvisionalUntil.store(chord_now_ms() + 4000);
             ctm_chord_show_ui();
         }
         g_passOptions = passOptionsThrough;
@@ -444,6 +491,38 @@ inline void apply(const void *deviceKey,
         }
     }
 
+    // ⛔ Provisional and unconfirmed? Let go. The window never came forward.
+    {
+        const long long until = g_gateProvisionalUntil.load();
+        if (until != 0 && chord_now_ms() > until) {
+            g_gateProvisionalUntil.store(0);
+            if (config_mode()) {
+                device_log::input(device_log::msg()
+                    << "config mode: no page took focus within 4s -- releasing"
+                    << " so the pad is not stranded");
+                set_config_mode(false);
+            }
+        }
+    }
+
+    // ⛔ GATE ONLY WHILE OUR WINDOW HAS THE KEYBOARD. Asked of Windows every
+    // report, rather than trusting the page to notice it lost focus.
+    //
+    // ⚠️ Measured 2026-08-29: after being RAISED the window is visible and
+    // reports focus it does not have -- the game still owns the keyboard, so
+    // the gate stayed on and every keystroke went to the game as a remapped
+    // button. Raising changes drawing order; it does not move input.
+    if (config_mode() && !ctm_ui_has_foreground()) {
+        static long long lastSaid = 0;
+        const long long now = chord_now_ms();
+        if (now - lastSaid > 2000) {
+            lastSaid = now;
+            device_log::input(device_log::msg()
+                << "config mode: our window is not in front -- not gating");
+        }
+        return;
+    }
+
     if (config_mode()) {
         uint8_t gateKeys[6] = {0, 0, 0, 0, 0, 0};
         size_t gateCount = 0;
@@ -494,6 +573,21 @@ inline void apply(const void *deviceKey,
 
         ctm_keyboard_device::set_state(gateMods, gateKeys, gateCount);
         return;                       // ⭐ user rebinds do not run in this mode
+    }
+
+    // ⭐ Swallow anything still held from before the gate released. Each button
+    // clears as it is let go, so the pad becomes live piece by piece rather than
+    // all at once with a stale press in flight.
+    if (g_swallowUntilReleased != 0 && len > 10) {
+        for (int i = 0; i < kButtonCount; ++i) {
+            const uint32_t bit = 1u << i;
+            if ((g_swallowUntilReleased & bit) == 0) continue;
+            if (is_pressed(data, len, i)) {
+                clear_button(data, len, i);
+            } else {
+                g_swallowUntilReleased &= ~bit;
+            }
+        }
     }
 
     const std::string section = device_settings_section(kind, linkedConfig);
@@ -587,6 +681,11 @@ inline void apply(const void *deviceKey,
 bool ctm_rebind_config_mode()
 {
     return ctm_rebind::config_mode();
+}
+
+void ctm_rebind_clear_provisional()
+{
+    ctm_rebind::g_gateProvisionalUntil.store(0);
 }
 
 bool ctm_rebind_gate_hold()
