@@ -321,14 +321,33 @@ int wmain(int argc, wchar_t **argv)
                 device_log::config_w() << L"--ui needs the settings API; enabling it on port "
                            << g_rest_port ;
             }
-            const bool focused = ctm_open_ui::focus_only();
+            // ⛔ ASK WHO ELSE IS RUNNING FIRST.
+            //
+            // This focused any existing window BEFORE checking for another
+            // listener -- so a window left behind by a DEAD one was adopted,
+            // and this listener never opened its own. The adopted window then
+            // closed itself on the token check, because its token belonged to a
+            // listener that no longer exists. Result: no window at all.
+            //
+            // ⓘ A window only counts as "already open" when the listener that
+            // opened it is still there. Otherwise it is a leftover, and closing
+            // it is the right thing to do.
             if (ctm_open_ui::agent_already_running(static_cast<uint16_t>(port))) {
+                const bool focused = ctm_open_ui::focus_only();
                 if (!focused) ctm_open_ui::open_new(g_rest_port);
                 std::wcout << L"a listener is already running on port " << port
                            << L" -- left it alone\n";
                 return 0;
             }
-            ctm_open_ui::g_ui_already_focused = focused;
+
+            // ⭐ Nobody else is running, so any window out there is stale.
+            if (ctm_open_ui::close_existing()) {
+                for (int waited = 0; waited < 40; ++waited) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(25));
+                    if (!ctm_open_ui::window_exists()) break;
+                }
+            }
+            ctm_open_ui::g_ui_already_focused = false;
         }
         return run_agent(static_cast<uint16_t>(port));
     }

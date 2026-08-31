@@ -82,6 +82,37 @@ inline bool focus_existing()
 //
 // The agent serves the page, so there is nothing on disk to point at -- which
 // is the whole reason a released exe works with no files beside it.
+// ⭐ WHICH window is the current one.
+//
+// Two settings windows should never exist, but Ctrl+Shift+T reopens a closed
+// one and that is the browser's key, not ours. So rather than trying to prevent
+// it, the agent decides which window is real and the others stand down.
+//
+// ⓘ A fresh token every time one is opened. A page carrying an older one is
+// stale and closes itself -- no message to read, no decision to make.
+//
+// ⚠️ Empty until the first window is opened, and a restart empties it again.
+// That means every window from before a restart is stale, which is a convenient
+// way to clear leftovers after a rebuild.
+inline std::mutex g_tokenMutex;
+inline std::wstring g_uiToken;
+
+inline std::string current_ui_token()
+{
+    std::lock_guard<std::mutex> lock(g_tokenMutex);
+    std::string out;
+    out.reserve(g_uiToken.size());
+    for (wchar_t c : g_uiToken) out.push_back(static_cast<char>(c));
+    return out;
+}
+
+inline std::wstring new_ui_token()
+{
+    std::lock_guard<std::mutex> lock(g_tokenMutex);
+    g_uiToken = std::to_wstring(GetTickCount64());
+    return g_uiToken;
+}
+
 inline std::wstring page_url(uint16_t restPort)
 {
     // ⭐ ?app marks a window WE opened. The page cannot tell an app window from
@@ -91,7 +122,8 @@ inline std::wstring page_url(uint16_t restPort)
     //
     // ⓘ Someone can of course type the parameter by hand. That is fine: it means
     // "I know what I am doing", not "this is definitely an app window".
-    return L"http://127.0.0.1:" + std::to_wstring(restPort) + L"/?app";
+    return L"http://127.0.0.1:" + std::to_wstring(restPort) + L"/?app=" +
+           new_ui_token();
 }
 
 inline std::wstring find_browser()
@@ -244,8 +276,42 @@ inline void open_new(uint16_t restPort)
     // --app strips the address bar, tabs and bookmarks: this is a control
     // surface, not a page being browsed, and on a TV that furniture is a row of
     // things to hit by accident.
-    const std::wstring args = L"--app=" + url + L" --window-size=1150,820";
-    ShellExecuteW(nullptr, L"open", browser.c_str(), args.c_str(), nullptr, SW_SHOWNORMAL);
+    // ⛔ --user-data-dir IS WHAT MAKES --app WORK.
+    //
+    // Measured 2026-08-29: with Chrome already running, our process handed the
+    // URL to the existing instance and exited -- and that instance opened it as
+    // an ORDINARY TAB, dropping --app entirely. The page reported toolbar=true,
+    // menubar=true and 119px of browser furniture.
+    //
+    // ⚠️ That was the root of a day of window problems: it could not reliably be
+    // raised, focused, closed or told apart from a tab, because it WAS a tab.
+    //
+    // ⭐ A private profile forces a separate instance, which honours --app. It
+    // also means killing our window can never touch the person's own browsing --
+    // no shared cookies, no shared session, nothing of theirs in it.
+    wchar_t profile[MAX_PATH] = {};
+    GetTempPathW(MAX_PATH, profile);
+    const std::wstring dataDir = std::wstring(profile) + L"ctm-usbip-ui";
+
+    const std::wstring args = L"--app=" + url +
+                              L" --user-data-dir=\"" + dataDir + L"\"" +
+                              L" --no-first-run --no-default-browser-check" +
+                              L" --window-size=1150,820";
+    // ⛔ CHECK THE RESULT. This logged "settings page opened" unconditionally,
+    // so a launch that never happened looked identical to one that did --
+    // measured 2026-08-29, when no Chrome process and no profile folder
+    // appeared but the log said it had opened.
+    //
+    // ⓘ ShellExecuteW returns a value above 32 on success; anything at or below
+    // is an error code.
+    const HINSTANCE rc = ShellExecuteW(nullptr, L"open", browser.c_str(),
+                                       args.c_str(), nullptr, SW_SHOWNORMAL);
+    const auto code = reinterpret_cast<INT_PTR>(rc);
+    if (code <= 32) {
+        device_log::session_w() << L"settings page FAILED to open, code=" << code
+                                << L" args=" << args;
+        return;
+    }
     device_log::session_w() << L"settings page opened";
 }
 

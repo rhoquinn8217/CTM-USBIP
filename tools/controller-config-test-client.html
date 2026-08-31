@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.58.1 -- see the changelog at the bottom of this comment.
+  VERSION 2.59.2 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -540,7 +540,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.58.1</span>
+  <span class="muted" style="font-size:12px">v2.59.2</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -847,9 +847,29 @@ function inPlainTab() {
   //
   // ⓘ Someone can type ?app by hand. That is fine: it means "I know what I am
   // doing", not "this is definitely an app window".
+  // ⛔ THE MARKER ALONE, for now. window.toolbar.visible was supposed to be
+  // false in an app window and is NOT -- measured 2026-08-29, it reported true
+  // and the real window told itself to be opened properly. That is the third
+  // detection attempt to blank this page.
+  //
+  // ⓘ So a tab reopened with Ctrl+Shift+T still believes it is an app window,
+  // because the URL travels with it. That is a narrower problem than the page
+  // refusing to load, and the token check below still closes duplicates.
   return location.search.indexOf('app') < 0;
 }
 
+// ⭐ What this window actually reports about itself, in the footer tooltip so it
+// can be read without opening DevTools -- which takes focus and changes what is
+// being measured.
+function describeWindow() {
+  var bits = [];
+  try { bits.push('toolbar=' + (window.toolbar && window.toolbar.visible)); } catch (e) {}
+  try { bits.push('menubar=' + (window.menubar && window.menubar.visible)); } catch (e) {}
+  try { bits.push('locationbar=' + (window.locationbar && window.locationbar.visible)); } catch (e) {}
+  bits.push('outer=' + window.outerHeight + ' inner=' + window.innerHeight);
+  bits.push('opener=' + (window.opener ? 'yes' : 'no'));
+  return bits.join('  ');
+}
 
 // ⭐ Ask the AGENT to open a proper window -- it can do what a tab cannot. Then
 // say so, rather than leaving a half-working page.
@@ -2336,7 +2356,10 @@ function reportFocus(on) {
   // this page, so the console cannot observe focus without changing it -- the
   // measurement destroys what it measures.
   var dbg = document.getElementById('padDest');
-  if (dbg) dbg.title = 'last focus report: ' + on + ' at ' + new Date().toLocaleTimeString();
+  if (dbg) {
+    dbg.title = 'last focus report: ' + on + ' at ' +
+                new Date().toLocaleTimeString() + '\n' + describeWindow();
+  }
 
   try {
     fetch(base() + '/api/v1/ui/focus', {
@@ -2662,6 +2685,12 @@ var STOPPED = false;
 
 // Whether this is a plain tab. Measured once, because the test resizes.
 var IN_TAB = null;
+
+// The token this window was opened with, from ?app=<token>.
+var MY_TOKEN = (function () {
+  var m = /[?&]app=([^&]*)/.exec(location.search);
+  return m ? m[1] : '';
+})();
 
 var FOOTER_RETURN = null;
 
@@ -3223,6 +3252,22 @@ function pollDevices() {
     paintHealth();
     paintPadDestination(d);
     LAST_DEVICES = list;
+
+    // ⭐ AM I STILL THE CURRENT WINDOW? Two settings windows should never
+    // exist, but Ctrl+Shift+T reopens a closed one and that is the browser's
+    // key, not ours. So the agent decides which is real and the rest stand
+    // down -- no message to read, no decision to make.
+    //
+    // ⚠️ Only when the agent HAS a token. An empty one means it has restarted
+    // and knows of no window, in which case every page is stale -- which is a
+    // convenient way to clear leftovers after a rebuild.
+    if (d && typeof d.ui_token === 'string' && MY_TOKEN) {
+      if (d.ui_token !== MY_TOKEN) {
+        STOPPED = true;
+        window.close();
+        return;
+      }
+    }
 
     var sig = deviceSignature(list);
     if (sig === DEVICE_SIG) return;          // nothing to do

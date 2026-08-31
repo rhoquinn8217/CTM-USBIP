@@ -69,6 +69,9 @@ static std::string rest_devices_json()
     // worse than no checkbox.
     out += "],\"config_mode\":";
     out += ctm_rebind_config_mode() ? "true" : "false";
+    // ⭐ Which window the agent considers current. A page carrying a different
+    // token is stale.
+    out += ",\"ui_token\":\"" + rest_json_escape(ctm_open_ui::current_ui_token()) + "\"";
     out += ",\"gate_hold\":";
     out += ctm_rebind_gate_hold() ? "true" : "false";
     return out + "}";
