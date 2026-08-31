@@ -1,0 +1,369 @@
+// Touchpad-to-mouse tests: cursor anchoring and carry, scroll ticks and
+// direction, tap detection with a synthetic clock, and the off-control.
+//
+// touch_mouse.inl relies on its includer for its dependencies -- main.cpp has
+// them; this translation unit brings its own stand-ins, the same pattern as
+// gyro_mouse_test.cpp and rebind_test.cpp. Tests drive ctm_touch_mouse::step
+// directly so time is a parameter, not a race.
+
+#include "harness.h"
+
+#include <chrono>
+#include <cstdint>
+#include <cstdlib>
+#include <map>
+#include <mutex>
+#include <string>
+#include <vector>
+
+using namespace ctmtest;
+
+// ---- Stand-ins for what touch_mouse.inl calls -------------------------------
+
+namespace {
+
+std::map<std::string, std::string> g_cfg;
+bool g_configModeEffective = false;
+
+int32_t g_pushedX = 0;      // summed cursor deltas pushed to the mailbox
+int32_t g_pushedY = 0;
+int g_pushCount = 0;
+int g_wheelSum = 0;
+uint8_t g_lastClick = 0;
+int g_clickCount = 0;
+int g_ensureCalls = 0;
+
+void reset_stubs()
+{
+    g_cfg.clear();
+    g_configModeEffective = false;
+    g_pushedX = 0;
+    g_pushedY = 0;
+    g_pushCount = 0;
+    g_wheelSum = 0;
+    g_lastClick = 0;
+    g_clickCount = 0;
+    g_ensureCalls = 0;
+}
+
+} // namespace
+
+static int device_config_int(const char *, const char *key, int fallback)
+{
+    auto it = g_cfg.find(key);
+    if (it == g_cfg.end() || it->second.empty()) return fallback;
+    return std::atoi(it->second.c_str());
+}
+static bool device_config_bool(const char *, const char *key, bool fallback)
+{
+    auto it = g_cfg.find(key);
+    if (it == g_cfg.end()) return fallback;
+    return it->second == "true";
+}
+static std::string device_settings_section(const char *kind, const std::string &linkedConfig)
+{
+    if (kind == nullptr) return std::string();
+    if (linkedConfig.empty()) return std::string(kind);
+    return "cfg:" + linkedConfig + "/" + kind;
+}
+static const char *device_section_for(const std::vector<unsigned char> &)
+{
+    return "ds5";
+}
+static bool ctm_rebind_config_mode_effective() { return g_configModeEffective; }
+
+namespace device_log {
+struct msg {
+    template <typename T> msg &operator<<(const T &) { return *this; }
+};
+inline void input(const msg &) {}
+} // namespace device_log
+static void ctm_gyro_mouse_ensure_mouse_started() { ++g_ensureCalls; }
+
+namespace ctm_gyro_mouse {
+struct MouseDelta {
+    int32_t dx = 0;
+    int32_t dy = 0;
+};
+struct MailboxStub {
+    void push(const MouseDelta &d)
+    {
+        g_pushedX += d.dx;
+        g_pushedY += d.dy;
+        ++g_pushCount;
+    }
+};
+inline MailboxStub &shared_mailbox()
+{
+    static MailboxStub m;
+    return m;
+}
+} // namespace ctm_gyro_mouse
+
+namespace ctm_mouse_device {
+inline void add_wheel(int ticks) { g_wheelSum += ticks; }
+inline void add_click(uint8_t mask) { g_lastClick = mask; ++g_clickCount; }
+} // namespace ctm_mouse_device
+
+#include "input/touch_mouse.inl"
+
+// ---- Report scaffolding -----------------------------------------------------
+
+namespace {
+
+std::vector<uint8_t> rest_report()
+{
+    std::vector<uint8_t> r(64, 0);
+    r[0] = 0x01;
+    r[8] = 0x08;
+    r[33] = 0x80;    // point 1 up
+    r[37] = 0x80;    // point 2 up
+    return r;
+}
+
+void set_point(std::vector<uint8_t> &r, int slot, bool down, int id, int x, int y)
+{
+    const size_t base = (slot == 0) ? 33 : 37;
+    r[base] = static_cast<uint8_t>((down ? 0x00 : 0x80) | (id & 0x7f));
+    r[base + 1] = static_cast<uint8_t>(x & 0xff);
+    r[base + 2] = static_cast<uint8_t>(((x >> 8) & 0x0f) | ((y & 0x0f) << 4));
+    r[base + 3] = static_cast<uint8_t>((y >> 4) & 0xff);
+}
+
+const void *kDev = reinterpret_cast<const void *>(0x2);
+
+void run_step(std::vector<uint8_t> &r, long long nowMs)
+{
+    ctm_touch_mouse::step(kDev, "ds5", r.data(), r.size(), nowMs);
+}
+
+void fresh_device()
+{
+    ctm_touch_mouse::forget(kDev);
+}
+
+} // namespace
+
+int run_touch_mouse_tests()
+{
+    section("touch: point encoding round-trips");
+    {
+        auto r = rest_report();
+        set_point(r, 0, true, 42, 1900, 1000);
+        const auto p = ctm_touch_mouse::read_point(r.data(), 33);
+        CTM_CHECK(p.down);
+        CTM_CHECK_EQ(p.id, 42);
+        CTM_CHECK_EQ(p.x, 1900);
+        CTM_CHECK_EQ(p.y, 1000);
+    }
+
+    section("touch: nothing configured pushes nothing");
+    {
+        reset_stubs();
+        fresh_device();
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 100, 100);
+        run_step(r, 0);
+        set_point(r, 0, true, 1, 500, 500);
+        run_step(r, 16);
+        CTM_CHECK_EQ(g_pushCount, 0);
+        CTM_CHECK_EQ(g_wheelSum, 0);
+        CTM_CHECK_EQ(g_clickCount, 0);
+    }
+
+    section("touch: first contact anchors, movement moves");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_to_mouse"] = "true";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 100, 100);
+        run_step(r, 0);
+        CTM_CHECK_EQ(g_pushCount, 0);          // anchor only, no jump
+        set_point(r, 0, true, 1, 150, 130);
+        run_step(r, 8);
+        CTM_CHECK_EQ(g_pushedX, 50);
+        CTM_CHECK_EQ(g_pushedY, 30);
+    }
+
+    section("touch: lift and retouch re-anchors instead of jumping");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_to_mouse"] = "true";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 100, 100);
+        run_step(r, 0);
+        set_point(r, 0, false, 1, 100, 100);   // lift
+        run_step(r, 8);
+        set_point(r, 0, true, 2, 900, 900);    // retouch far away, new id
+        run_step(r, 400);
+        CTM_CHECK_EQ(g_pushCount, 0);          // no jump across the lift
+        set_point(r, 0, true, 2, 910, 905);
+        run_step(r, 408);
+        CTM_CHECK_EQ(g_pushedX, 10);
+        CTM_CHECK_EQ(g_pushedY, 5);
+    }
+
+    section("touch: slow movement carries the sub-pixel remainder");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_to_mouse"] = "true";
+        g_cfg["touchpad_mouse_speed"] = "10";  // 0.1 px per unit
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 100, 100);
+        run_step(r, 0);
+        set_point(r, 0, true, 1, 105, 100);    // 0.5 px -- below one pixel
+        run_step(r, 8);
+        CTM_CHECK_EQ(g_pushCount, 0);
+        set_point(r, 0, true, 1, 110, 100);    // now 1.0 px accumulated
+        run_step(r, 16);
+        CTM_CHECK_EQ(g_pushedX, 1);
+    }
+
+    section("touch: two-finger travel becomes wheel ticks, classic direction");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_scroll"] = "true";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 400, 200);
+        set_point(r, 1, true, 2, 600, 200);
+        run_step(r, 0);                        // anchor
+        set_point(r, 0, true, 1, 400, 320);    // both down 120 units
+        set_point(r, 1, true, 2, 600, 320);
+        run_step(r, 16);
+        CTM_CHECK_EQ(g_wheelSum, -2);          // fingers down = wheel down
+    }
+
+    section("touch: natural scroll inverts");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_scroll"] = "true";
+        g_cfg["touchpad_scroll_natural"] = "true";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 400, 200);
+        set_point(r, 1, true, 2, 600, 200);
+        run_step(r, 0);
+        set_point(r, 0, true, 1, 400, 320);
+        set_point(r, 1, true, 2, 600, 320);
+        run_step(r, 16);
+        CTM_CHECK_EQ(g_wheelSum, 2);
+    }
+
+    section("touch: a quick still tap is a left click");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_tap_click"] = "true";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 300, 300);
+        run_step(r, 0);
+        set_point(r, 0, false, 1, 300, 300);
+        run_step(r, 100);
+        CTM_CHECK_EQ(g_clickCount, 1);
+        CTM_CHECK_EQ(static_cast<int>(g_lastClick), 0x01);
+    }
+
+    section("touch: a two-finger tap is a right click, even with scroll on");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_tap_click"] = "true";
+        g_cfg["touchpad_scroll"] = "true";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 300, 300);
+        run_step(r, 0);
+        set_point(r, 1, true, 2, 400, 300);    // second finger joins
+        run_step(r, 30);
+        set_point(r, 0, false, 1, 300, 300);   // both lift
+        set_point(r, 1, false, 2, 400, 300);
+        run_step(r, 110);
+        CTM_CHECK_EQ(g_clickCount, 1);
+        CTM_CHECK_EQ(static_cast<int>(g_lastClick), 0x02);
+        CTM_CHECK_EQ(g_wheelSum, 0);           // resting fingers never scroll
+    }
+
+    section("touch: a slow hold is not a tap");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_tap_click"] = "true";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 300, 300);
+        run_step(r, 0);
+        set_point(r, 0, false, 1, 300, 300);
+        run_step(r, 600);                      // past kTapMaxMs
+        CTM_CHECK_EQ(g_clickCount, 0);
+    }
+
+    section("touch: a moving finger is not a tap");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_tap_click"] = "true";
+        g_cfg["touchpad_to_mouse"] = "true";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 300, 300);
+        run_step(r, 0);
+        set_point(r, 0, true, 1, 420, 300);    // well past the slop
+        run_step(r, 40);
+        set_point(r, 0, false, 1, 420, 300);
+        run_step(r, 80);
+        CTM_CHECK_EQ(g_clickCount, 0);
+        CTM_CHECK(g_pushedX > 0);              // it was cursor movement instead
+    }
+
+    section("touch: a tap never nudges the cursor");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_to_mouse"] = "true";
+        g_cfg["touchpad_tap_click"] = "true";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 300, 300);
+        run_step(r, 0);
+        set_point(r, 0, true, 1, 305, 302);    // the twitch a real tap makes
+        run_step(r, 30);
+        set_point(r, 0, false, 1, 305, 302);
+        run_step(r, 90);
+        CTM_CHECK_EQ(g_pushCount, 0);          // the hardware finding, fixed
+        CTM_CHECK_EQ(g_clickCount, 1);         // and the tap still clicks
+    }
+
+    section("touch: a drag unlocks at the slop and moves from there");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_to_mouse"] = "true";
+        g_cfg["touchpad_tap_click"] = "true";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 300, 300);
+        run_step(r, 0);
+        set_point(r, 0, true, 1, 310, 300);    // inside the slop: held still
+        run_step(r, 16);
+        CTM_CHECK_EQ(g_pushCount, 0);
+        set_point(r, 0, true, 1, 322, 300);    // past the slop: unlocked
+        run_step(r, 32);
+        CTM_CHECK_EQ(g_pushedX, 12);           // this report's step only --
+        CTM_CHECK_EQ(g_pushedY, 0);            // no replayed 22-unit jump
+    }
+
+    section("touch: config mode stands the whole feature down");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_to_mouse"] = "true";
+        g_configModeEffective = true;
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 100, 100);
+        run_step(r, 0);
+        set_point(r, 0, true, 1, 500, 500);
+        run_step(r, 16);
+        CTM_CHECK_EQ(g_pushCount, 0);
+    }
+
+    return 0;
+}

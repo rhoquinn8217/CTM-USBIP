@@ -224,6 +224,7 @@ public:
         // Drop this controller's gyro motion state so a reconnect starts with
         // clean calibration and the per-device map does not grow forever.
         ctm_gyro_mouse::forget_device(this);
+        ctm_touch_mouse_forget(this);
         stop_audio_stream();
     }
 
@@ -453,6 +454,11 @@ public:
         // No-op for non-DualSense devices and when no gate is configured.
         ctm_gyro_mouse::on_ds5_input(this, profile_.device_descriptor, linked_config(),
                                      report.data, report.length);
+
+        // Touchpad-to-mouse: same shape as the gyro hook -- read-only, feeds
+        // the same synthetic mouse. No-op unless a touchpad_* key is set.
+        ctm_touch_mouse_apply(this, profile_.device_descriptor, linked_config(),
+                              report.data, report.length);
 
         // ⭐ Button rebinding. ⚠️ Unlike the gyro hook above, this MODIFIES the
         // report -- a rebound button is cleared before Windows sees it, so the

@@ -22,8 +22,11 @@ namespace {
 
 namespace cs = units::config_store;
 
-// The runner executes from the build output directory, so configs/ here is
-// scratch space and never the repo's.
+// ⚠️ This comment used to claim configs/ here was scratch space. It was not:
+// the runner executes from the build output directory, which is where a
+// running agent keeps the USER's configs, and this suite wiped them (fixed
+// 2026-08-31 -- tests_main.cpp now moves into a scratch directory first, so
+// every relative path below is genuinely scratch).
 void wipe_configs()
 {
     std::error_code ignored;

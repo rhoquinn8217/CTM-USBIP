@@ -54,6 +54,14 @@ inline std::atomic<int> g_wheelPending{0};
 inline void set_buttons(uint8_t mask) { g_buttons.store(mask, std::memory_order_relaxed); }
 inline void add_wheel(int clicks) { g_wheelPending.fetch_add(clicks, std::memory_order_relaxed); }
 
+// ⭐ A momentary click, for tap-to-click. The buttons above are a LEVEL owned
+// by the rebinder (it writes the whole mask every report); a tap needs a
+// press-then-release the pad itself never produces. The pump ORs a pending
+// click over the level mask, holds it ~30ms (two host polls), then drops it --
+// so the two writers can never stomp each other.
+inline std::atomic<uint8_t> g_clickPending{0};
+inline void add_click(uint8_t mask) { g_clickPending.fetch_or(mask, std::memory_order_relaxed); }
+
 inline void pump_loop()
 {
     // The mouse endpoint from the profile. Kept in one place so it matches the
@@ -66,10 +74,27 @@ inline void pump_loop()
 
         // ⭐ A button or a wheel click is worth a report on its own -- waiting
         // for movement would mean a click did nothing while the pad was still.
-        const uint8_t buttons = g_buttons.load(std::memory_order_relaxed);
+        uint8_t buttons = g_buttons.load(std::memory_order_relaxed);
         int wheel = g_wheelPending.exchange(0, std::memory_order_relaxed);
         if (wheel > 127) wheel = 127;
         if (wheel < -127) wheel = -127;
+
+        // Momentary clicks from tap-to-click: take one pending click when none
+        // is in flight, hold it ~30ms, then release. Sequential taps become
+        // sequential clicks, which is what makes a double-tap a double-click
+        // with no special case.
+        static uint8_t clickDown = 0;
+        static long long clickDownAtMs = 0;
+        const long long nowMs =
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+        if (clickDown == 0) {
+            clickDown = g_clickPending.exchange(0, std::memory_order_relaxed);
+            if (clickDown != 0) clickDownAtMs = nowMs;
+        } else if (nowMs - clickDownAtMs >= 30) {
+            clickDown = 0;
+        }
+        buttons = static_cast<uint8_t>(buttons | clickDown);
 
         static uint8_t lastButtons = 0;
         const bool buttonsChanged = buttons != lastButtons;

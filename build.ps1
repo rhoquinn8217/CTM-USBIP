@@ -146,6 +146,11 @@ Copy-Item -Force -Path (Join-Path $Root 'maps\ds4_usb_over_ds4_bt.map') -Destina
 Copy-Item -Force -Path (Join-Path $Root 'profiles\descriptors\steam_puck.profile') -Destination (Join-Path $out 'profiles\descriptors\steam_puck.profile')
 Copy-Item -Force -Path (Join-Path $Root 'maps\steam_puck_identity.map') -Destination (Join-Path $out 'maps\steam_puck_identity.map')
 Copy-Item -Force -Path (Join-Path $Root 'maps\hid_identity.map') -Destination (Join-Path $out 'maps\hid_identity.map')
+# The synthetic mouse that gyro and the touchpad both drive. Staged here
+# because forgetting it by hand looks exactly like the feature being broken:
+# the device fails to start and nothing moves.
+Copy-Item -Force -Path (Join-Path $Root 'profiles\descriptors\virtual_mouse.profile') -Destination (Join-Path $out 'profiles\descriptors\virtual_mouse.profile')
+Copy-Item -Force -Path (Join-Path $Root 'maps\virtual_mouse.map') -Destination (Join-Path $out 'maps\virtual_mouse.map')
 Copy-Item -Force -Path (Join-Path $Root 'profiles\descriptors\xbox_gip_usb.profile') -Destination (Join-Path $out 'profiles\descriptors\xbox_gip_usb.profile')
 Copy-Item -Force -Path (Join-Path $Root 'maps\xbox_gip_usb_over_xbox_bt.map') -Destination (Join-Path $out 'maps\xbox_gip_usb_over_xbox_bt.map')
 Copy-Item -Force -Path (Join-Path $Root 'third_party\ffmpeg\x64\release\bin\*.dll') -Destination $out

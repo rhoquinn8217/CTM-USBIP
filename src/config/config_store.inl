@@ -413,6 +413,16 @@ inline bool create_config(const std::string &name, const std::string &kind, std:
          << "auto_link =\r\n\r\n"
          << "[" << settingsKind << "]\r\n";
     file.close();
+    {
+        // ⛔ The ABSOLUTE path, logged at every create -- the other half of
+        // the working-directory line, so a created file can always be found
+        // by grep instead of theory.
+        wchar_t abs[MAX_PATH] = L"?";
+        const std::string rel = path_for(name);
+        const std::wstring wrel(rel.begin(), rel.end());
+        GetFullPathNameW(wrel.c_str(), MAX_PATH, abs, nullptr);
+        device_log::session_w() << L"config created: " << abs;
+    }
     reload_all();
     notify_changed();
     return true;
@@ -452,6 +462,12 @@ inline bool rename_config(const std::string &oldName, const std::string &newName
     if (!MoveFileExW(wFrom.c_str(), wTo.c_str(), 0)) {
         *error = "could not rename " + cfg.path;
         return false;
+    }
+    {
+        wchar_t absTo[MAX_PATH] = L"?";
+        GetFullPathNameW(wTo.c_str(), MAX_PATH, absTo, nullptr);
+        device_log::session_w() << L"config renamed: " << wFrom.c_str()
+                                << L" -> " << absTo;
     }
     // The name is written into the file's own header comment, which is now
     // wrong. Cosmetic, but it is the first thing a person reads when they open
@@ -502,6 +518,14 @@ inline bool archive_config(const std::string &name, std::string *error, std::str
     const std::wstring wTo(target.begin(), target.end());
     if (!MoveFileExW(wFrom.c_str(), wTo.c_str(), 0)) {
         *error = "could not move " + cfg.path; return false;
+    }
+    {
+        // Same trail as create: every mutation logs its absolute paths, so a
+        // file's absence is always explained by a line, never by a theory.
+        wchar_t absTo[MAX_PATH] = L"?";
+        GetFullPathNameW(wTo.c_str(), MAX_PATH, absTo, nullptr);
+        device_log::session_w() << L"config archived: " << wFrom.c_str()
+                                << L" -> " << absTo;
     }
     *movedTo = target;
     reload_all();

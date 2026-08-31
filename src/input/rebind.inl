@@ -452,14 +452,24 @@ inline void apply(const void *deviceKey,
         g_passOptions = passOptionsThrough;
 
         if (device_config_bool("global", "chord_debug", false)) {
+            // ⚠️ TOUCH-ERA NARROWING (2026-08-31): fingers are a CURSOR now,
+            // so logging every finger transition narrated all of touchpad use
+            // -- dozens of lines a minute of pure churn. Only chord-relevant
+            // states speak: Options involved, or both fingers down -- entering
+            // OR leaving them, so a chord attempt still traces end to end.
             static int lastState = -1;
             const int state = (f1 ? 4 : 0) | (f2 ? 2 : 0) | (options ? 1 : 0);
+            const bool was = lastState >= 0 &&
+                ((lastState & 1) != 0 || (lastState & 6) == 6);
+            const bool is = (state & 1) != 0 || (state & 6) == 6;
             if (state != lastState) {
+                if (was || is) {
+                    device_log::input(device_log::msg()
+                        << "chord: finger1=" << (f1 ? "down" : "up")
+                        << " finger2=" << (f2 ? "down" : "up")
+                        << " options=" << (options ? "down" : "up"));
+                }
                 lastState = state;
-                device_log::input(device_log::msg()
-                    << "chord: finger1=" << (f1 ? "down" : "up")
-                    << " finger2=" << (f2 ? "down" : "up")
-                    << " options=" << (options ? "down" : "up"));
             }
         }
     }
@@ -536,15 +546,25 @@ inline void apply(const void *deviceKey,
     // reports focus it does not have -- the game still owns the keyboard, so
     // the gate stayed on and every keystroke went to the game as a remapped
     // button. Raising changes drawing order; it does not move input.
+    // ⚠️ EDGE-TRIGGERED (2026-08-31): this was a 2-second heartbeat, and any
+    // config session that left the flag set had it drumming into the log
+    // indefinitely. Transitions speak; steady state is silent.
+    static bool g_saidNotInFront = false;
     if (config_mode() && !ctm_ui_has_foreground()) {
-        static long long lastSaid = 0;
-        const long long now = chord_now_ms();
-        if (now - lastSaid > 2000) {
-            lastSaid = now;
+        if (!g_saidNotInFront) {
+            g_saidNotInFront = true;
             device_log::input(device_log::msg()
-                << "config mode: our window is not in front -- not gating");
+                << "config mode: our window is not in front -- not gating"
+                << " (silent until that changes)");
         }
         return;
+    }
+    if (g_saidNotInFront) {
+        g_saidNotInFront = false;
+        if (config_mode()) {
+            device_log::input(device_log::msg()
+                << "config mode: window is back in front -- gating again");
+        }
     }
 
     if (config_mode()) {

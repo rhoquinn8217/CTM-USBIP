@@ -806,6 +806,16 @@ static int run_agent(uint16_t port)
     }
 
     device_log::session_w() << L"ctm agent listening udp/tcp port " << port;
+    {
+        // ⛔ EVERY RELATIVE PATH RESOLVES HERE -- configs/, device.log, the
+        // shared settings file. Added 2026-08-31 after configs created in one
+        // session were unfindable in the next: the answer to "where did that
+        // file go" must be a grep of this line, never a theory.
+        wchar_t cwd[MAX_PATH] = L"?";
+        GetCurrentDirectoryW(MAX_PATH, cwd);
+        device_log::session_w() << L"working directory: " << cwd
+            << L" (configs/, logs and settings resolve here)";
+    }
 
     // ⭐ Open the page HERE, once the agent is actually listening.
     //

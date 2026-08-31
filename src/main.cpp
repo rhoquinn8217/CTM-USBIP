@@ -92,6 +92,14 @@ void ctm_rebind_apply(const void *deviceKey,
                       const std::vector<unsigned char> &descriptor,
                       const std::string &linkedConfig,
                       uint8_t *data, size_t len);
+// ℹ Same shape for the touchpad hook and its forget: device.inl calls both
+// on the input path, and touch_mouse.inl is included far later because it
+// needs the mouse device and the gyro mailbox.
+void ctm_touch_mouse_apply(const void *deviceKey,
+                           const std::vector<unsigned char> &descriptor,
+                           const std::string &linkedConfig,
+                           const uint8_t *data, size_t len);
+void ctm_touch_mouse_forget(const void *deviceKey);
 #include "usbip/device.inl"
 #include "audio/iso_in_pacing.inl"
 #include "usbip/server.inl"
@@ -121,6 +129,7 @@ void ctm_rebind_ensure_keyboard_started();
 // defined first. And after gyro_mouse, for device_section_for and the config
 // helpers.
 #include "input/rebind.inl"
+#include "input/touch_mouse.inl"   // touchpad cursor/scroll/taps; needs the mouse device and the gyro mailbox
 #include "app/rest_sessions.inl"
 #include "app/rest_config_sessions.inl"   // defines what rest_config.inl declares; needs agent.inl's sessions
 #include "app/service.inl"

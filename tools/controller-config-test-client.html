@@ -1339,6 +1339,7 @@ function inertReason(key, sessionKind) {
 }
 
 function sectionOf(key) {
+  if (key.indexOf('touchpad') === 0) return 'Touchpad';
   if (key.indexOf('gyro') === 0) return 'Gyro';
   if (key.indexOf('rumble') === 0 || key.indexOf('master_rumble') === 0) return 'Rumble';
   if (key.indexOf('audio') === 0 || key.indexOf('speaker') === 0 ||
@@ -1402,7 +1403,10 @@ function renderConfigEditor(hostId, configName, prefix, ordinal) {
 
     // ⭐ Ordered by how often a setting is touched, not alphabetically. Audio
     // leads because latency is tuned constantly; gyro is set once and left.
-    ['Audio', 'Rumble', 'Gyro', 'Other'].forEach(function(g) {
+    // ⛔ A group not named here is not drawn AT ALL -- sectionOf routing a key
+    // to a missing name makes the key vanish, not land in Other. Keep this
+    // list and sectionOf in step.
+    ['Audio', 'Rumble', 'Gyro', 'Touchpad', 'Other'].forEach(function(g) {
       if (!groups[g]) return;
       html += '<div class="sect"><h3>' + g + '</h3>';
       groups[g].forEach(function(meta) {

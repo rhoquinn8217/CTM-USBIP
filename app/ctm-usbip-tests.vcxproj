@@ -80,6 +80,7 @@
     <ClCompile Include="..\tests\host_audio_settings_test.cpp" />
     <ClCompile Include="..\tests\config_store_test.cpp" />
     <ClCompile Include="..\tests\gyro_mouse_test.cpp" />
+    <ClCompile Include="..\tests\touch_mouse_test.cpp" />
     <ClCompile Include="..\tests\tests_main.cpp" />
   </ItemGroup>
   <ItemGroup>
