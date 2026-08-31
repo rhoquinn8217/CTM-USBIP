@@ -946,8 +946,53 @@ var TABS = ['overview'];
 var ACTIVE = 'overview';
 var LAST_DEVICES = [];
 
+// ⭐ THE WINDOW OPENING DOES NOT MEAN A PAD CAN BRIDGE YET.
+// (rhoquinn8217, 2026-08-31: bridging is refused a few times on a cold start
+// before it takes, and the settings window appearing reads as "ready now".)
+//
+// ⚠️ WE DO NOT KNOW WHY YET. Two candidates with opposite fixes: the TV has
+// not noticed the listener (discovery timing, TV-side) or something host-side
+// is not usable yet (the attach path). So this says only what is certainly
+// true and claims no cause.
+//
+// ⛔ STARTUP ONLY. Shown once when the page loads with nothing bridged, and
+// never again -- "nothing is bridged" is the ordinary resting state of this
+// page, and a message that returned every time a pad unbridged would be noise
+// rather than a warning about a cold start.
+//
+// ⛔ Torn down by the first bridged controller, NOT by a timer. A timer would
+// be a guess at how long the wait is, which is the thing nobody knows.
+//
+// ℹ A refused bridge gives the REFUSAL SIGNAL on the pad -- the gesture is
+// never silent -- so the message says what to expect rather than "nothing
+// happens".
+var BRIDGE_WAIT_DONE = false;
+
+function noteBridgeMayNeedAMoment() {
+  if (BRIDGE_WAIT_DONE) return;
+  if (document.getElementById('bridgeWait')) return;
+  var box = document.createElement('div');
+  box.id = 'bridgeWait';
+  box.style.cssText = 'position:fixed;right:16px;bottom:56px;z-index:40;max-width:340px;' +
+    'padding:10px 12px;border:1px solid #7aa7e0;border-radius:10px;background:#20293a;' +
+    'color:#bcd4f2;font-size:12px;line-height:1.6';
+  box.innerHTML = '<strong>The listener is running.</strong><br>' +
+    'Bridging can take a moment to become available after a fresh start. If ' +
+    'the gesture gives the refusal signal, wait a few seconds and try again.';
+  document.body.appendChild(box);
+}
+
+function clearBridgeWait() {
+  BRIDGE_WAIT_DONE = true;          // startup only -- it does not come back
+  var box = document.getElementById('bridgeWait');
+  if (box && box.parentNode) box.parentNode.removeChild(box);
+}
+
 function renderTabs(devices) {
   LAST_DEVICES = devices || [];
+  // The event, not an expiry: a device in the list means bridging works now.
+  if (LAST_DEVICES.length) clearBridgeWait();
+  else noteBridgeMayNeedAMoment();
   var bar = document.getElementById('tabs');
   TABS = ['overview'];
   var html = '';
