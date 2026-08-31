@@ -298,6 +298,42 @@ int run_config_store_tests()
         CTM_CHECK(contains(read_config("newname"), "# newname"));
     }
 
+    section("config store: \u2b50 copy keeps the settings and DROPS the claim");
+    {
+        std::string error;
+        write_config("original",
+            "# original\r\n"
+            "# a hand-written note that must survive\r\n"
+            "[config]\r\nkind = ds5\r\nauto_link = 001122334455\r\n\r\n"
+            "[ds5]\r\nspeaker_volume = 55\r\n# commented_key = 1\r\n");
+        CTM_CHECK(cs::copy_config("original", "duplicate", &error));
+
+        cs::ConfigFile orig, dup;
+        CTM_CHECK(cs::find_config("original", &orig));
+        CTM_CHECK(cs::find_config("duplicate", &dup));
+
+        // Settings ride across, under the copy's own namespaced section.
+        CTM_CHECK_EQ(units::device_config_int("cfg:duplicate/ds5", "speaker_volume", -1), 55);
+        // ...and the original is untouched.
+        CTM_CHECK_EQ(units::device_config_int("cfg:original/ds5", "speaker_volume", -1), 55);
+
+        // \u26d4 THE CLAIM DOES NOT COME ALONG. Two configs claiming one serial is
+        // exactly the ambiguity add_auto_link refuses; a copy must not create it.
+        CTM_CHECK_EQ(cs::auto_link_for("001122334455", "ds5"), std::string("original"));
+        CTM_CHECK(contains(read_config("duplicate"), "auto_link ="));
+        CTM_CHECK(!contains(read_config("duplicate"), "auto_link = 001122334455"));
+
+        // Comments and layout survive -- it is a file copy, not a regeneration.
+        CTM_CHECK(contains(read_config("duplicate"), "a hand-written note that must survive"));
+        CTM_CHECK(contains(read_config("duplicate"), "# commented_key = 1"));
+        // The header names the copy, not the original it came from.
+        CTM_CHECK(contains(read_config("duplicate"), "# duplicate"));
+
+        // And a name already in use is refused rather than overwriting.
+        CTM_CHECK(!cs::copy_config("original", "duplicate", &error));
+        CTM_CHECK(!cs::copy_config("nosuch", "somewhere", &error));
+    }
+
     section("config store: rename refuses to overwrite or take a reserved name");
     {
         std::string error;

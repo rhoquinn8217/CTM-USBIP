@@ -727,6 +727,23 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
             return true;
         }
 
+        if (action == "copy") {
+            auto nameIt = json.strings.find("name");
+            if (nameIt == json.strings.end()) {
+                *out = rest_error_response(400, "name is required");
+                return true;
+            }
+            if (!config_store::copy_config(name, nameIt->second, &error)) {
+                *out = rest_error_response(409, error);
+                return true;
+            }
+            // \u24d8 The copy is NOT linked here. Linking is a separate verb the
+            // UI can call, and a copy made from Overview belongs to no
+            // controller -- deciding for it would be guessing.
+            *out = rest_http_response(200, rest_configs_json());
+            return true;
+        }
+
         if (action == "archive") {
             std::string movedTo;
             if (!config_store::archive_config(name, &error, &movedTo)) {

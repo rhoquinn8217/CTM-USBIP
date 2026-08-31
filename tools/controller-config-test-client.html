@@ -964,12 +964,24 @@ var SECT_ACTIVE = 'Audio';
 
 // The controls that make up the settings view, found rather than remembered --
 // the pane is re-rendered often enough that a held reference goes stale.
+//
+// ⛔⛔ SCOPED TO THE PANE IN VIEW, and that is the whole correctness of it.
+// Overview renders its own settings editor -- its own strip, its own sections
+// -- so a document-wide querySelector finds OVERVIEW'S hidden button first.
+// That element is not in the focus list (hidden things are not focusable), so
+// every boundary rule below silently gave up and fell back to plain document
+// order: ▲ walked backwards through the strip and ended on Remove auto link.
+// Measured 2026-08-31 in a two-pane DOM; a one-pane test passed happily.
+function activePane() {
+  return document.getElementById('pane-' + ACTIVE) || document;
+}
+
 function sectBarButton(name) {
-  return document.querySelector('.sectbar button[data-sect="' + name + '"]');
+  return activePane().querySelector('.sectbar button[data-sect="' + name + '"]');
 }
 
 function firstControlInSection() {
-  var sect = document.querySelector('.sect[data-sect="' + SECT_ACTIVE + '"]');
+  var sect = activePane().querySelector('.sect[data-sect="' + SECT_ACTIVE + '"]');
   if (!sect) return null;
   var found = null;
   sect.querySelectorAll('button, select, input').forEach(function(e) {
@@ -983,6 +995,52 @@ function firstControlInSection() {
 // and every rule below simply does not fire there.
 function configPicker() {
   return document.getElementById('pick-' + ACTIVE);
+}
+
+// ⭐ The controller's header is a ROW -- picker, New, Rename, Copy, auto link --
+// so ◄ ► walk it, the same axis it is drawn on. (rhoquinn8217, 2026-08-31:
+// they became unreachable when ▼ from the picker started jumping to the
+// section strip.)
+//
+// ⓘ Taken from GP_FOCUS rather than the DOM, so it is exactly the set that can
+// be focused: anything hidden or disabled is already gone.
+// ⚠️ THE HEADER IS TWO ROWS, not one (corrected 2026-08-31): the device table
+// -- serial, auto-linked config, Reset, Remove auto link -- sits ABOVE the
+// config row of picker, New, Rename, Copy and the claim button. Treating them
+// as one row sent ▼ from Reset straight past the picker to the sections.
+//
+// ⓘ The table is the divider, and it is a real one in the markup rather than a
+// guess: `.devrow` is the header table's own class.
+function headerRowOf(el) {
+  if (!el || !el.closest || !el.closest('#stickyTop')) return null;
+  return el.closest('.devrow') ? 'device' : 'config';
+}
+
+// The controls of ONE header row, in focus order. ⓘ From GP_FOCUS rather than
+// the DOM, so hidden and disabled controls are already gone.
+function headerControls(row) {
+  var out = [];
+  GP_FOCUS.forEach(function(e) {
+    if (headerRowOf(e) === row) out.push(e);
+  });
+  return out;
+}
+
+function inHeader(el) {
+  return headerRowOf(el) !== null;
+}
+
+// ◄ ► within the header row. Stops at each end rather than wrapping: wrapping
+// from Remove auto link back to the picker would put a destructive button one
+// press from a routine one.
+function stepHeader(dir) {
+  var row = headerControls(headerRowOf(GP_FOCUS[GP_INDEX]));
+  if (row.length < 2) return false;
+  var at = row.indexOf(GP_FOCUS[GP_INDEX]);
+  if (at < 0) return false;
+  var next = at + dir;
+  if (next < 0 || next >= row.length) return true;   // absorbed, not wrapped
+  return focusElement(row[next]);
 }
 
 function focusElement(el) {
@@ -1000,6 +1058,9 @@ function focusElement(el) {
 // stepping through sections stays one axis rather than needing a step back up.
 function showSection(name, focusFirst) {
   SECT_ACTIVE = name;
+  // ⓘ Every pane, not just the one in view: the section choice is one value for
+  // the page, so a hidden pane must already be showing the right section when
+  // you switch to it -- otherwise it renders correct but displays stale.
   document.querySelectorAll('.sect[data-sect]').forEach(function(el) {
     el.style.display = (el.getAttribute('data-sect') === name) ? '' : 'none';
   });
@@ -1018,7 +1079,7 @@ function showSection(name, focusFirst) {
 // ◄ ► step through the sections in the order they are shown. Returns false
 // when there are none, so left/right can fall back to moving the halo.
 function stepSection(dir) {
-  var bar = document.querySelector('.sectbar');
+  var bar = activePane().querySelector('.sectbar');   // scoped, see activePane
   if (!bar) return false;
   var names = [];
   bar.querySelectorAll('button[data-sect]').forEach(function(b) {
@@ -1214,15 +1275,48 @@ function claimAutoLink(ordinal, configName, serial) {
 // Creates the next free <kind>_config and links it. The device is named rather
 // than the kind, so the agent works out which kind it needs and links it in the
 // same call.
-function newConfigFor(ordinal) {
-  var dev = LAST_DEVICES.filter(function(x) { return x.ordinal === ordinal; })[0];
-  if (!dev) return;
-  var base = settingsKindOf(dev.kind) + '_config';
+// ⭐ ONE naming rule, used by New and by Copy. Two copies of "next available
+// ds5_config" is how they end up disagreeing about what is taken.
+function nextConfigName(sessionKind) {
+  var base = settingsKindOf(sessionKind) + '_config';
   var name = base;
   var n = 2;
   while (CONFIGS.some(function(c) { return c.name.toLowerCase() === name.toLowerCase(); })) {
     name = base + '_' + (n++);
   }
+  return name;
+}
+
+// ⭐ Copy the config this controller is reading, and link the copy to it.
+//
+// ⓘ The API's copy verb deliberately does NOT link -- a copy made from
+// Overview belongs to no controller. Linking here is the UI's decision,
+// because copying from a controller's own header means "give me my own
+// version of this", and leaving it on the original would be a surprise.
+//
+// ⛔ The auto-link claim is dropped by the server, not here: two configs
+// claiming one serial is the ambiguity the claim verb exists to refuse.
+function copyConfigFor(ordinal) {
+  var dev = LAST_DEVICES.filter(function(x) { return x.ordinal === ordinal; })[0];
+  if (!dev || !dev.linked_config) return;
+  var name = nextConfigName(dev.kind);
+  call('POST', '/api/v1/configs/' + encodeURIComponent(dev.linked_config) + '/copy',
+       { name: name })
+    .then(function() {
+      return call('POST', '/api/v1/devices/' + encodeURIComponent(ordinal) + '/link',
+                  { config: name });
+    })
+    .then(function() {
+      setConn('copied to ' + name + ' and linked', 'good');
+      loadConfigs(); loadDevices();
+    })
+    .catch(function(){});
+}
+
+function newConfigFor(ordinal) {
+  var dev = LAST_DEVICES.filter(function(x) { return x.ordinal === ordinal; })[0];
+  if (!dev) return;
+  var name = nextConfigName(dev.kind);
   call('POST', '/api/v1/configs', { name: name, device: ordinal })
     .then(function() { setConn('created ' + name, 'good'); loadConfigs(); loadDevices(); })
     .catch(function(){});
@@ -1417,7 +1511,10 @@ function buildDevicePane(d) {
           'title="create the next ds5_config and link it">New</button>' +
           (d.linked_config
             ? '<button onclick="renameConfig(\'' + esc(d.linked_config) + '\')" ' +
-              'title="rename this config">Rename</button>'
+              'title="rename this config">Rename</button>' +
+              '<button onclick="copyConfigFor(\'' + esc(d.ordinal) + '\')" ' +
+              'title="make your own copy of this config and link it to this ' +
+              'controller">Copy</button>'
             : '') +
           claimBtn +
           (kindOk.length ? '' :
@@ -2539,16 +2636,33 @@ function gpBoundary(delta) {
   var el = GP_FOCUS[GP_INDEX];
   if (!el || CONFIRM_CB || RENAMING || FOOTER_MODE) return false;
 
+  // ⓘ closest() walks up from the element itself, so this is already the strip
+  // the focused button belongs to -- no scoping needed here, unlike the
+  // lookups above which start from a selector.
   var onStrip = el.closest && el.closest('.sectbar');
   var picker = configPicker();
 
   if (delta < 0) {
     if (onStrip) return focusElement(picker);
     if (el === firstControlInSection()) return focusElement(sectBarButton(SECT_ACTIVE));
+    // ▲ from the config row reaches the device row above it -- the mirror of
+    // the ▼ rules below, so the two rows are traversable both ways.
+    if (headerRowOf(el) === 'config') {
+      var above = headerControls('device');
+      if (above.length) return focusElement(above[0]);
+    }
     return false;
   }
   if (onStrip) return focusElement(firstControlInSection());
-  if (picker && el === picker) return focusElement(sectBarButton(SECT_ACTIVE));
+  // ▼ moves DOWN ONE ROW, which is what the layout looks like:
+  //   device row  ▼ →  the config picker
+  //   config row  ▼ →  the section strip
+  // ⛔ Not straight to the sections from anywhere in the header: Reset sits in
+  // the row above the picker, and skipping a whole row of controls on the way
+  // past is how they become unreachable.
+  var row = headerRowOf(el);
+  if (row === 'device') return focusElement(picker);
+  if (row === 'config') return focusElement(sectBarButton(SECT_ACTIVE));
   return false;
 }
 
@@ -2844,9 +2958,15 @@ function gpKeyStep(dir) {
   //
   // ⚠️ Falls through to moving the halo where there are no sections -- a
   // dialog, a rename row -- so the axis is never dead.
-  if (CONFIRM_CB || RENAMING || FOOTER_MODE || !stepSection(dir)) {
-    gpMove(dir);
+  if (CONFIRM_CB || RENAMING || FOOTER_MODE) { gpMove(dir); return; }
+  // ⓘ Two meanings for one axis, decided by where focus is: the header row is
+  // horizontal, the sections are a strip. Both are "step sideways through the
+  // thing you are in", which is why one axis carries both.
+  if (inHeader(GP_FOCUS[GP_INDEX])) {
+    if (!stepHeader(dir)) gpMove(dir);
+    return;
   }
+  if (!stepSection(dir)) gpMove(dir);
 }
 
 // ○ in order of what is open, matching the pad's own precedence.
@@ -3594,7 +3714,7 @@ function selfTest() {
   ['renderTabs','buildDevicePane','setStickyHead','paintStickyHead','measureSticky',
    'nameFor','pruneNames','deviceLabel','deviceLabelShort','settingsKindOf',
    'askConfirm','confirmYes','confirmNo','whoIs','setAutoLink','claimAutoLink',
-   'stopAutoLink','archive','unlink','renameConfig','loadConfigs','loadDevices',
+   'stopAutoLink','archive','unlink','renameConfig','copyConfigFor','loadConfigs','loadDevices',
    'openConfig','applyPick','newConfigFor','preserveScroll','setDown','gpCollect'
   ].forEach(function(n) {
     ok('function ' + n, typeof window[n] === 'function');

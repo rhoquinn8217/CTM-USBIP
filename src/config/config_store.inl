@@ -492,6 +492,76 @@ inline bool rename_config(const std::string &oldName, const std::string &newName
     return true;
 }
 
+// ⭐ COPY: the same settings under a new name, with the auto-link claim DROPPED.
+//
+// ⛔ The claim is the one thing that must not come along. auto_link says "this
+// physical controller reads this config at bridge time", and two configs
+// claiming one serial is the ambiguity add_auto_link exists to refuse. A copy
+// that inherited it would create exactly that, silently, from a button.
+//
+// ⓘ Everything else rides across byte for byte -- comments, layout, ordering,
+// hand-written keys -- because it is a file copy with two lines rewritten, not
+// a regeneration from parsed values. Whatever someone wrote in their config is
+// still there in the copy.
+inline bool copy_config(const std::string &fromName, const std::string &toName,
+                        std::string *error)
+{
+    ConfigFile src;
+    if (!find_config(fromName, &src)) { *error = "no config named " + fromName; return false; }
+    if (!valid_name(toName)) {
+        *error = "name must be letters, digits, _ or - (max 48), and not a reserved name";
+        return false;
+    }
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        if (g_files.count(lower(toName))) { *error = toName + " already exists"; return false; }
+    }
+    if (!ensure_dir(kDir)) { *error = "could not create " + std::string(kDir); return false; }
+
+    std::vector<std::string> lines;
+    {
+        std::ifstream in(src.path);
+        if (!in.is_open()) { *error = "could not read " + src.path; return false; }
+        std::string line;
+        while (std::getline(in, line)) {
+            if (!line.empty() && line.back() == '\r') line.pop_back();
+            lines.push_back(line);
+        }
+    }
+
+    bool clearedClaim = false;
+    for (std::string &line : lines) {
+        const std::string t = trim(line);
+        if (!lines.empty() && &line == &lines[0] && t == "# " + src.name) {
+            line = "# " + toName;                 // the name it opens with
+            continue;
+        }
+        if (t.rfind("auto_link", 0) == 0 && t.find('=') != std::string::npos) {
+            line = "auto_link =";                 // see the note above
+            clearedClaim = true;
+        }
+    }
+    // A hand-edited file may have no auto_link line at all; absent is already
+    // "claims nothing", so there is nothing to add.
+    (void) clearedClaim;
+
+    const std::string target = path_for(toName);
+    {
+        std::ofstream out(target, std::ios::binary | std::ios::trunc);
+        if (!out.is_open()) { *error = "could not write " + target; return false; }
+        for (const std::string &l : lines) out << l << "\r\n";
+    }
+    {
+        wchar_t abs[MAX_PATH] = L"?";
+        const std::wstring wtarget(target.begin(), target.end());
+        GetFullPathNameW(wtarget.c_str(), MAX_PATH, abs, nullptr);
+        device_log::session_w() << L"config copied: " << abs;
+    }
+    reload_all();
+    notify_changed();
+    return true;
+}
+
 // ⭐ ARCHIVE, NOT DELETE. Moving the file to configs/archive/ means nothing is
 // ever destroyed, the watcher's existing "file vanished" path handles the
 // fallback for free, and restoring is a drag in Explorer rather than a verb
