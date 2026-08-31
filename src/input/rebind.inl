@@ -705,7 +705,18 @@ inline void apply(const void *deviceKey,
         // rebind would double up with the original.
         clear_button(data, len, i);
 
-        // ⭐ Mouse first: a wheel click is a DELTA, sent once per press, or the
+        // ⭐ The on-screen keyboard, before the mouse and key paths: it is
+        // neither, and like a wheel click it fires ONCE per press -- a toggle
+        // repeated at 250Hz would open and close the keyboard continuously.
+        if (code == "OSKeyboard" || code == "oskeyboard") {
+            static std::map<std::pair<const void *, int>, bool> oskHeld;
+            const bool wasHeld = oskHeld[{deviceKey, i}];
+            if (active && !wasHeld) ctm_osk_toggle(section);
+            oskHeld[{deviceKey, i}] = active;
+            continue;
+        }
+
+        // ⭐ Mouse next: a wheel click is a DELTA, sent once per press, or the
         // page would scroll forever while the button was held.
         const MouseAction ma = mouse_action_for(code);
         if (ma != kMouseNone) {

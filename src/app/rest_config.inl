@@ -259,6 +259,7 @@ static std::string rest_keys_json()
     // and the failure is a silently truncated list rather than a loud error at
     // the point of use. Split again at the next boundary if one nears 16,000.
     const std::string settings = R"({"keys":[
+{"key":"osk_program","type":"choice","choices":["steam","osk"],"default":"steam","help":"Which on-screen keyboard the OSKeyboard binding opens. Steam's is navigable with the controller and closes cleanly, but needs Steam running. Windows' own osk.exe always works, but its keys must be clicked with the cursor -- the d-pad cannot walk them."},
 {"key":"rebind_debug","type":"bool","default":false,"help":"Logs what each bound button is doing, twice a second: whether it was seen as pressed, and the raw button bytes. For working out why a rebind does nothing."},
 {"key":"rebind_0","type":"string","default":"","help":"Cross / A (bottom face) -- send a keyboard key or a mouse action instead of this button. Keys are KeyboardEvent.code: KeyR, Enter, ArrowUp. Mouse: MouseLeft, MouseRight, MouseMiddle, MouseWheelUp, MouseWheelDown. The game stops seeing the button entirely."},
 {"key":"turbo_0","type":"int","min":0,"max":1000,"default":0,"help":"Cross / A (bottom face) -- milliseconds between presses while held. 0 is off. Works with or without a rebind: on its own the button repeats itself."},
@@ -359,7 +360,8 @@ static std::string rest_keys_json()
 "F13","F14","F15","F16","F17","F18","F19","F20","F21","F22","F23","F24",
 "ControlLeft","ShiftLeft","AltLeft","MetaLeft",
 "ControlRight","ShiftRight","AltRight","MetaRight",
-"MouseLeft","MouseRight","MouseMiddle","MouseWheelUp","MouseWheelDown"
+"MouseLeft","MouseRight","MouseMiddle","MouseWheelUp","MouseWheelDown",
+"OSKeyboard"
 ]})";
     return settings + pointers + names;
 }

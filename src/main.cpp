@@ -105,6 +105,9 @@ void ctm_stick_mouse_apply(const void *deviceKey,
                            const std::string &linkedConfig,
                            const uint8_t *data, size_t len);
 void ctm_stick_mouse_forget(const void *deviceKey);
+// ⓘ rebind.inl fires the on-screen keyboard toggle, and osk.inl is included
+// after it because it reads config through the same accessors.
+void ctm_osk_toggle(const std::string &section);
 #include "usbip/device.inl"
 #include "audio/iso_in_pacing.inl"
 #include "usbip/server.inl"
@@ -136,6 +139,7 @@ void ctm_rebind_ensure_keyboard_started();
 #include "input/rebind.inl"
 #include "input/touch_mouse.inl"   // touchpad cursor/scroll/taps; needs the mouse device and the gyro mailbox
 #include "input/stick_mouse.inl"   // stick cursor; needs the gyro gate and mailbox
+#include "input/osk.inl"          // the on-screen keyboard toggle
 #include "app/rest_sessions.inl"
 #include "app/rest_config_sessions.inl"   // defines what rest_config.inl declares; needs agent.inl's sessions
 #include "app/service.inl"
