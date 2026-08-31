@@ -67,8 +67,18 @@ static std::string rest_devices_json()
     // flag directly and never write to disk, so a ticked or unticked box there
     // says nothing about what is actually happening. A checkbox that lies is
     // worse than no checkbox.
+    // ⛔ THE EFFECTIVE GATE, not the flag.
+    //
+    // Measured 2026-08-29: with the window behind, the flag was on and the
+    // footer read "controllers to page" -- while the agent was NOT gating,
+    // because it checks the foreground on every report. The footer said one
+    // thing and the pad did another.
+    //
+    // ⭐ Reporting what is actually happening also fixes the ungated warning for
+    // free: it keys off this, so it stops firing in a state where nothing is
+    // gated anyway.
     out += "],\"config_mode\":";
-    out += ctm_rebind_config_mode() ? "true" : "false";
+    out += (ctm_rebind_config_mode() && ctm_ui_has_foreground()) ? "true" : "false";
     // ⭐ Which window the agent considers current. A page carrying a different
     // token is stale.
     out += ",\"ui_token\":\"" + rest_json_escape(ctm_open_ui::current_ui_token()) + "\"";

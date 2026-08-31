@@ -483,6 +483,10 @@ inline void apply(const void *deviceKey,
         // settings page. It exists for the one case nothing else catches -- the
         // page frozen but still holding focus, so no blur fires and no beacon
         // sends. A control inside a frozen page cannot rescue anything.
+        // ⓘ [global] only. It is a GLOBAL state -- it gates every bridged pad --
+        // so a per-controller checkbox misrepresented it, and the chord and the
+        // page's own focus handle the normal cases anyway. This stays purely as
+        // the way out when neither can be reached.
         const bool fromFile = device_config_bool("global", "config_mode", false);
         static bool lastFromFile = false;
         if (fromFile != lastFromFile) {

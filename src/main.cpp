@@ -334,7 +334,9 @@ int wmain(int argc, wchar_t **argv)
             // it is the right thing to do.
             if (ctm_open_ui::agent_already_running(static_cast<uint16_t>(port))) {
                 const bool focused = ctm_open_ui::focus_only();
-                if (!focused) ctm_open_ui::open_new(g_rest_port);
+                // ⓘ No token: the OTHER listener serves the API and would not
+                // recognise one minted here, so the window would close itself.
+                if (!focused) ctm_open_ui::open_new(g_rest_port, false);
                 std::wcout << L"a listener is already running on port " << port
                            << L" -- left it alone\n";
                 return 0;

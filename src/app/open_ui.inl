@@ -113,6 +113,21 @@ inline std::wstring new_ui_token()
     return g_uiToken;
 }
 
+// ⛔ A window opened by a listener that will NOT be serving the API must not
+// carry a token.
+//
+// Measured 2026-08-29: starting the exe while another listener was running
+// opened a window and minted a token here -- but the OTHER listener serves
+// /api/v1/devices and knows nothing of it, so the page saw a mismatch and
+// closed itself immediately.
+//
+// ⓘ A page with no token never closes itself, which is exactly right: nothing
+// is claiming to be a newer window.
+inline std::wstring page_url_untokened(uint16_t restPort)
+{
+    return L"http://127.0.0.1:" + std::to_wstring(restPort) + L"/?app";
+}
+
 inline std::wstring page_url(uint16_t restPort)
 {
     // ⭐ ?app marks a window WE opened. The page cannot tell an app window from
@@ -260,9 +275,10 @@ inline bool focus_only()
 // start would leave a browser window reporting an unreachable agent -- a
 // confusing thing to hand someone whose real problem is that the exe did not
 // start.
-inline void open_new(uint16_t restPort)
+inline void open_new(uint16_t restPort, bool withToken = true)
 {
-    const std::wstring url = page_url(restPort);
+    const std::wstring url = withToken ? page_url(restPort)
+                                       : page_url_untokened(restPort);
 
     const std::wstring browser = find_browser();
     if (browser.empty()) {

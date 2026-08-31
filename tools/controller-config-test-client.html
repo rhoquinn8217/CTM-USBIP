@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.59.2 -- see the changelog at the bottom of this comment.
+  VERSION 2.61.3 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -540,7 +540,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.59.2</span>
+  <span class="muted" style="font-size:12px">v2.61.3</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -2256,6 +2256,49 @@ function gpPaint() {
 // of the LAST section, and pressing down on that threw you back to the header.
 // A long list has ends; arriving at one should feel like an end, not like being
 // teleported.
+// ⭐ WARN WHEN AN UNGATED PAD IS DRIVING THIS PAGE.
+//
+// ⛔ A controller that is not bridged never crosses the listener, so the agent
+// cannot gate it -- its buttons reach the game whatever this page says. The
+// footer would read "controllers locked to page" while that pad was still
+// playing.
+//
+// ⭐ The test is exact, not a guess: while the gate is ON, a bridged pad sends
+// KEYSTROKES. So any GAMEPAD input arriving here must be from a pad the agent
+// cannot see.
+function noteUngatedPad() {
+  if (!GATE_ON) return;
+
+  // ⭐ Raised by GAMEPAD input, torn down by a KEYSTROKE.
+  //
+  // A gated pad reaches this page only as keystrokes -- its report is cleared
+  // before Windows ever sees it. So gamepad input here can only be from a
+  // controller the agent cannot gate, and a keystroke arriving proves the pad
+  // in use is gated after all.
+  //
+  // ⓘ No timing window: the teardown is an event, not an expiry.
+  var box = document.getElementById('ungatedWarn');
+  if (box) { box.dataset.seen = Date.now(); return; }
+
+  box = document.createElement('div');
+  box.id = 'ungatedWarn';
+  box.dataset.seen = Date.now();
+  box.style.cssText = 'position:fixed;right:16px;bottom:56px;z-index:40;max-width:340px;' +
+    'padding:10px 12px;border:1px solid #e0c07a;border-radius:10px;background:#3a3320;' +
+    'color:#e8cf92;font-size:12px;line-height:1.6';
+  box.innerHTML = '<strong>This controller is not bridged.</strong><br>' +
+    'Only bridged controllers are locked to this page. Everything you press on ' +
+    'this one is also reaching the game.';
+  document.body.appendChild(box);
+}
+
+// ⓘ Also clears when the gate goes off entirely -- nothing is locked to the
+// page then, so the warning has nothing to warn about.
+setInterval(function () {
+  var box = document.getElementById('ungatedWarn');
+  if (box && !GATE_ON) box.parentNode.removeChild(box);
+}, 1000);
+
 function gpMove(delta) {
   if (!GP_FOCUS.length) return;
   var next = GP_INDEX + delta;
@@ -2526,7 +2569,11 @@ function gpKeyCoarse(dir) {
 // Overview, and inside a dialog, left/right should behave like up/down rather
 // than doing nothing.
 function gpJumpSection(dir) {
-  if (ACTIVE === 'overview' || CONFIRM_CB || RENAMING) return false;
+  // ⛔ NOT "not on Overview". Selecting a config there renders the same .sect
+  // blocks as a controller tab, so left/right should jump them in both places.
+  // The guard below -- focus must be INSIDE a section -- already covers the
+  // case where none exist.
+  if (CONFIRM_CB || RENAMING) return false;
 
   // ⛔ And only when focus is INSIDE a section. The controller tab's header --
   // the device row, the config picker, New and Rename -- sits above them, and
@@ -2578,8 +2625,13 @@ function gpJumpSection(dir) {
       var el = GP_FOCUS[h];
       if (el.closest && el.closest('.sect')) continue;   // in a section: skip
       if (firstHeader === null) firstHeader = h;
+      // ⭐ On Overview the way back in is the CONFIG PICKER -- that is what you
+      // came up here to change. Rename is next to it and was being landed on
+      // instead, which is a destructive-ish button and not the point.
+      if (el.tagName === 'SELECT' && ACTIVE === 'overview') { want = h; }
+
       var label = (el.textContent || '').trim();
-      if (label === 'Set auto link' && !el.disabled) want = h;
+      if (want === null && label === 'Set auto link' && !el.disabled) want = h;
       else if (label === 'Rename') fallback = h;
     }
     var landOn = (want !== null) ? want
@@ -2792,6 +2844,12 @@ document.addEventListener('keydown', function (ev) {
   // Windows Sound panel -- so Shift is required too. Three modifiers is a far
   // smaller target, and it let KeyS come back so WASD reads properly.
   if (!ev.ctrlKey || !ev.altKey || !ev.shiftKey) return;
+
+  // ⓘ A gate keystroke means the pad in use IS gated, so any warning about an
+  // ungated one is stale. Only touched when the bubble exists -- there is
+  // nothing to do otherwise.
+  var warn = document.getElementById('ungatedWarn');
+  if (warn) warn.parentNode.removeChild(warn);
   var fn = CONFIG_MODE_KEYS[ev.code];
   if (!fn) return;
   ev.preventDefault();
@@ -2993,16 +3051,30 @@ function gpPoll() {
 
   if (edge(4)) gpTab(-1);
   if (edge(5)) gpTab(1);
-  if (edge(0)) gpActivate();
-  // ○ backs out of a rename first -- that is what it is for while one is open.
-  if (edge(1)) {
-    // ⭐ ○ backs out of the dialog first -- it is modal, so nothing behind it
-    // should be reachable while it is open.
-    if (CONFIRM_CB) { confirmNo(); }
-    else if (RENAMING) { cancelRename(); }
-    else { showTab('overview'); GP_INDEX = 0; gpCollect(); }
-  }
+  // ⛔ THE SAME FUNCTIONS THE GATE'S KEYS CALL, not a second copy.
+  //
+  // The pad had its own ○ handling and never learned about the footer, so
+  // backing out worked with the gate on and not with a pad used directly.
+  // These two paths have now drifted three times -- select, back, and the
+  // section jump -- each time because a behaviour was added to one of them.
+  //
+  // ⓘ gpKeySelect and gpKeyBack already know every case: dialog, value box,
+  // dropdown, rename, then the footer.
+  if (edge(0)) gpKeySelect();
+  if (edge(1)) gpKeyBack();
   if (edge(2)) gpToggleManaged();    // square: managed / unmanaged
+
+  // ⛔ pressed(), NOT edge(). edge() WRITES GP_PREV as it reads, so calling it
+  // here consumed the press and everything below saw nothing -- cross stopped
+  // working and the d-pad doubled, because the repeat path took over from the
+  // edge path.
+  //
+  // ⓘ This only needs to know a button is down, so the non-consuming read is
+  // also the correct one.
+  if (pressed(0) || pressed(1) || pressed(2) || pressed(3) ||
+      pressed(12) || pressed(13) || pressed(14) || pressed(15)) {
+    noteUngatedPad();
+  }
 
   // ◄ ► step a focused number. Repeats while held, like the D-pad, because
   // crossing a large range one press at a time is not usable.
@@ -3189,11 +3261,14 @@ function deviceSignature(list) {
 // ⓘ Not from the config file: the endpoints set the flag directly and never
 // write to disk, so a ticked box there says nothing about what is happening.
 var GATE_HELD = false;
+var GATE_ON = false;   // the agent's real gate state, from the poll
+
 
 function paintPadDestination(d) {
   var dest = document.getElementById('padDest');
   if (!dest) return;
   var gated = (d && d.config_mode === true);
+  GATE_ON = gated;
   GATE_HELD = (d && d.gate_hold === true);
 
   // ⓘ Three states, not two: held off reads differently from simply not gated,
