@@ -1338,7 +1338,24 @@ function inertReason(key, sessionKind) {
   return 'no effect over ' + how + ' — ' + only + ' only';
 }
 
+// ⭐ The button index groups, from the table in rebind.inl. 34 button settings
+// in one list was a wall to scroll past; these are the three clusters a hand
+// actually reaches for.
+// ⚠️ Mute and touchpad-click are NOT here because they are not rebindable --
+// the index table stops at PS. Adding them is a change to rebind.inl, not to
+// this list.
+var BTN_GROUP = {
+  0: 'Face buttons', 1: 'Face buttons', 2: 'Face buttons', 3: 'Face buttons',
+  12: 'Face buttons', 13: 'Face buttons', 14: 'Face buttons', 15: 'Face buttons',
+  4: 'Shoulders & sticks', 5: 'Shoulders & sticks',
+  6: 'Shoulders & sticks', 7: 'Shoulders & sticks',
+  10: 'Shoulders & sticks', 11: 'Shoulders & sticks',
+  8: 'System buttons', 9: 'System buttons', 16: 'System buttons'
+};
+
 function sectionOf(key) {
+  var btn = /^(?:rebind|turbo)_(\d+)$/.exec(key);
+  if (btn) return BTN_GROUP[Number(btn[1])] || 'Other';
   if (key.indexOf('touchpad') === 0) return 'Touchpad';
   if (key.indexOf('gyro') === 0) return 'Gyro';
   if (key.indexOf('rumble') === 0 || key.indexOf('master_rumble') === 0) return 'Rumble';
@@ -1406,7 +1423,9 @@ function renderConfigEditor(hostId, configName, prefix, ordinal) {
     // ⛔ A group not named here is not drawn AT ALL -- sectionOf routing a key
     // to a missing name makes the key vanish, not land in Other. Keep this
     // list and sectionOf in step.
-    ['Audio', 'Rumble', 'Gyro', 'Touchpad', 'Other'].forEach(function(g) {
+    ['Audio', 'Rumble', 'Gyro', 'Touchpad',
+     'Face buttons', 'Shoulders & sticks', 'System buttons',
+     'Other'].forEach(function(g) {
       if (!groups[g]) return;
       html += '<div class="sect"><h3>' + g + '</h3>';
       groups[g].forEach(function(meta) {
@@ -1472,8 +1491,15 @@ function renderConfigEditor(hostId, configName, prefix, ordinal) {
                    (String(shown) === c ? ' selected' : '') + '>' + esc(label) + '</option>';
           }).join('') + '</select>';
         } else if (meta.type === 'bool') {
+          // ⭐ AN UNMANAGED BOOL SHOWS true, whatever its default.
+          // (rhoquinn8217, 2026-08-31.) Ticking the box next to a switch means
+          // "I want this setting", and every one of them is off until managed
+          // -- so landing on false made it a two-step to turn anything on, for
+          // the rare case of managing a switch in order to hold it off. That
+          // case still works: pick false, then tick.
+          var boolShown = managed ? String(shown) : 'true';
           control = '<select id="' + id + '"' + onchange + dis + '>' + ['true','false'].map(function(c) {
-            return '<option value="' + c + '"' + (String(shown) === c ? ' selected' : '') +
+            return '<option value="' + c + '"' + (boolShown === c ? ' selected' : '') +
                    '>' + c + '</option>';
           }).join('') + '</select>';
         } else {
