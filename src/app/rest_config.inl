@@ -246,7 +246,19 @@ static std::string rest_config_detail_json(const config_store::ConfigFile &cfg)
 // build its own form without hard-coding what this fork happens to support.
 static std::string rest_keys_json()
 {
-    return R"({"keys":[
+    // ⛔ TWO LITERALS, JOINED AT RUNTIME. MSVC caps a single string literal at
+    // 16,380 bytes -- NOT the 65,535 quoted elsewhere -- and this list crossed
+    // it on 2026-08-31 when the stick keys landed -- "string too big, trailing characters truncated", which would
+    // have shipped a keys list cut off mid-entry and a settings page missing
+    // whatever came after the cut. Same limit build.ps1 already works around
+    // for the embedded page, which is why that one is a byte array.
+    //
+    // ⚠️ Three pieces, split at structural boundaries -- buttons, pointer
+    // settings, key names -- so each stays a whole readable thing. Two pieces
+    // left under 400 bytes of headroom, which two more keys would have eaten,
+    // and the failure is a silently truncated list rather than a loud error at
+    // the point of use. Split again at the next boundary if one nears 16,000.
+    const std::string settings = R"({"keys":[
 {"key":"rebind_debug","type":"bool","default":false,"help":"Logs what each bound button is doing, twice a second: whether it was seen as pressed, and the raw button bytes. For working out why a rebind does nothing."},
 {"key":"rebind_0","type":"string","default":"","help":"Cross / A (bottom face) -- send a keyboard key or a mouse action instead of this button. Keys are KeyboardEvent.code: KeyR, Enter, ArrowUp. Mouse: MouseLeft, MouseRight, MouseMiddle, MouseWheelUp, MouseWheelDown. The game stops seeing the button entirely."},
 {"key":"turbo_0","type":"int","min":0,"max":1000,"default":0,"help":"Cross / A (bottom face) -- milliseconds between presses while held. 0 is off. Works with or without a rebind: on its own the button repeats itself."},
@@ -282,6 +294,18 @@ static std::string rest_keys_json()
 {"key":"turbo_15","type":"int","min":0,"max":1000,"default":0,"help":"D-pad right -- milliseconds between presses while held. 0 is off. Works with or without a rebind: on its own the button repeats itself."},
 {"key":"rebind_16","type":"string","default":"","help":"PS / Home -- send a keyboard key or a mouse action instead of this button. Keys are KeyboardEvent.code: KeyR, Enter, ArrowUp. Mouse: MouseLeft, MouseRight, MouseMiddle, MouseWheelUp, MouseWheelDown. The game stops seeing the button entirely."},
 {"key":"turbo_16","type":"int","min":0,"max":1000,"default":0,"help":"PS / Home -- milliseconds between presses while held. 0 is off. Works with or without a rebind: on its own the button repeats itself."},
+)";
+    // The button rebinds and turbos are the bulk of the list, so they are
+    // their own piece -- the next-largest structural boundary after the key
+    // names.
+    const std::string pointers = R"(
+{"key":"stick_to_mouse","type":"choice","choices":["","right","left","both"],"default":"","help":"Which stick moves the mouse cursor. Blank is off. With both, whichever stick is pushed further drives, so the two never fight. The cursor moves at a speed while the stick is held, unlike gyro and the touchpad which follow movement."},
+{"key":"stick_to_mouse_gate","type":"choice","choices":["always","L2","R2","L1","R1","touchpad","!touchpad","touchpad_click","PS"],"default":"always","help":"What must be held for the stick to move the cursor. Blank means always -- the stick works whenever it is enabled. Useful when the touchpad or gyro is also driving the cursor."},
+{"key":"stick_mouse_speed","type":"int","min":50,"max":5000,"default":1200,"help":"Cursor pixels per second at full stick deflection. Time-based, so the speed does not change with the controller's report rate."},
+{"key":"stick_mouse_deadzone","type":"int","min":0,"max":50,"default":15,"help":"Percent of stick travel ignored around the centre, so a resting stick does not drift the cursor. Movement grows from zero at the edge of it rather than jumping."},
+{"key":"stick_mouse_curve","type":"choice","choices":["linear","quadratic","cubic"],"default":"quadratic","help":"How deflection maps to speed. Linear is direct. Quadratic slows the low end for precision. Cubic slows it further, so small pushes are very fine and the edge is still fast."},
+{"key":"stick_mouse_invert","type":"int","min":0,"max":3,"default":0,"help":"1 inverts horizontal, 2 inverts vertical, 3 inverts both."},
+{"key":"touchpad_to_mouse_gate","type":"choice","choices":["always","L2","R2","L1","R1","touchpad_click","PS"],"default":"always","help":"What must be held for the touchpad to move the cursor, scroll or tap. Blank means always -- the touchpad settings have their own switches, so an absent gate is not off."},
 {"key":"touchpad_to_mouse","type":"bool","default":false,"help":"One finger on the touchpad moves the cursor, laptop-trackpad style. Relative: lift and reposition without the cursor jumping. Feeds the same virtual mouse as gyro."},
 {"key":"touchpad_mouse_speed","type":"int","min":1,"max":400,"default":100,"help":"Touchpad cursor speed, percent. At 100 a full-pad swipe crosses roughly a full screen width."},
 {"key":"touchpad_scroll","type":"bool","default":false,"help":"Two fingers on the touchpad scroll, like a laptop trackpad. Vertical only."},
@@ -311,7 +335,8 @@ static std::string rest_keys_json()
 {"key":"master_rumble_gain","type":"int","min":0,"max":500,"default":100,"help":"Scales all rumble. 100 is unchanged."},
 {"key":"rumble_gain_heavy","type":"int","min":0,"max":500,"default":100,"help":"Heavy weight only. Multiplies with master."},
 {"key":"rumble_gain_soft","type":"int","min":0,"max":500,"default":100,"help":"Soft weight only. Multiplies with master."}
-],
+])";
+    const std::string names = R"(,
 "key_names":[
 "KeyA","KeyB","KeyC","KeyD","KeyE","KeyF","KeyG","KeyH","KeyI","KeyJ","KeyK",
 "KeyL","KeyM","KeyN","KeyO","KeyP","KeyQ","KeyR","KeyS","KeyT","KeyU","KeyV",
@@ -331,6 +356,7 @@ static std::string rest_keys_json()
 "ControlRight","ShiftRight","AltRight","MetaRight",
 "MouseLeft","MouseRight","MouseMiddle","MouseWheelUp","MouseWheelDown"
 ]})";
+    return settings + pointers + names;
 }
 
 // Resolves a body that may name either a device or a raw value.

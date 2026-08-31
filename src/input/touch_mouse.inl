@@ -101,6 +101,15 @@ inline void step(const void *deviceKey, const std::string &section,
 {
     if (data == nullptr || len <= 40) return;
 
+    // ⭐ THE SAME GATE VOCABULARY AS GYRO AND THE STICK, parsed by the same
+    // function (rhoquinn8217, 2026-08-31). ⚠️ DEFAULT IS ALWAYS, not off:
+    // gyro's gate defaults to off because naming a gate is what turns gyro on,
+    // but the touchpad features have their own switches -- so an absent gate
+    // here means "no extra condition", never "disabled".
+    const std::string gateRaw = device_config_str(section.c_str(), "touchpad_to_mouse_gate");
+    const ctm_gyro_mouse::Gate gate =
+        gateRaw.empty() ? ctm_gyro_mouse::Gate::Always : ctm_gyro_mouse::parse_gate(gateRaw);
+
     const bool cursorOn = device_config_bool(section.c_str(), "touchpad_to_mouse", false);
     const bool scrollOn = device_config_bool(section.c_str(), "touchpad_scroll", false);
     const bool tapsOn = device_config_bool(section.c_str(), "touchpad_tap_click", false);
@@ -119,6 +128,14 @@ inline void step(const void *deviceKey, const std::string &section,
     // as the gyro, for the same reason: a cursor that moves while its buttons
     // are gated is a broken mouse, not a suspended one.
     if (ctm_rebind_config_mode_effective()) {
+        st = TouchState();
+        return;
+    }
+
+    // ⛔ A SHUT GATE DROPS THE STATE, so re-opening it starts from a clean
+    // anchor rather than measuring movement against where a finger was before
+    // the gate closed -- which would arrive as one jump.
+    if (!ctm_gyro_mouse::gate_open(gate, data, len)) {
         st = TouchState();
         return;
     }

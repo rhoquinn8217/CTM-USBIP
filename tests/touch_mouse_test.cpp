@@ -48,6 +48,11 @@ void reset_stubs()
 
 } // namespace
 
+static std::string device_config_str(const char *, const char *key)
+{
+    auto it = g_cfg.find(key);
+    return it == g_cfg.end() ? std::string() : it->second;
+}
 static int device_config_int(const char *, const char *key, int fallback)
 {
     auto it = g_cfg.find(key);
@@ -80,7 +85,38 @@ inline void input(const msg &) {}
 } // namespace device_log
 static void ctm_gyro_mouse_ensure_mouse_started() { ++g_ensureCalls; }
 
+// ⛔ THE STUBS BELOW LIVE IN AN UNNAMED NAMESPACE, and that is load-bearing.
+// Each test file defines its own stand-in ctm_gyro_mouse::shared_mailbox() and
+// friends. As plain inline functions those have EXTERNAL linkage with identical
+// signatures across files -- a one-definition-rule violation -- so the linker
+// keeps one and every suite silently shares it. On 2026-08-31 that sent the
+// stick suite's movement into the touch suite's counters, and eight stick
+// checks failed reporting no movement at all while the code was correct.
+// Nesting in an unnamed namespace gives them internal linkage; qualified names
+// still resolve inside this file, and nothing can be folded across files.
 namespace ctm_gyro_mouse {
+namespace {
+
+// The gate the touchpad now shares with gyro and the stick. Enough of it to
+// exercise the touch paths; the real parser has its own suite.
+enum class Gate { Off, Always, L2, R2, L1, R1, Touchpad, NotTouchpad, TouchpadClick, PS };
+
+inline Gate parse_gate(const std::string &raw)
+{
+    if (raw == "always") return Gate::Always;
+    if (raw == "L2" || raw == "l2") return Gate::L2;
+    return Gate::Off;
+}
+
+inline bool gate_open(Gate gate, const uint8_t *d, size_t len)
+{
+    switch (gate) {
+        case Gate::Always: return true;
+        case Gate::L2: return len > 5 && d[5] >= 30;
+        default: return false;
+    }
+}
+
 struct MouseDelta {
     int32_t dx = 0;
     int32_t dy = 0;
@@ -98,11 +134,14 @@ inline MailboxStub &shared_mailbox()
     static MailboxStub m;
     return m;
 }
+}  // unnamed -- internal linkage, see the note above
 } // namespace ctm_gyro_mouse
 
 namespace ctm_mouse_device {
+namespace {   // internal linkage, same reason as above
 inline void add_wheel(int ticks) { g_wheelSum += ticks; }
 inline void add_click(uint8_t mask) { g_lastClick = mask; ++g_clickCount; }
+}
 } // namespace ctm_mouse_device
 
 #include "input/touch_mouse.inl"
@@ -349,6 +388,27 @@ int run_touch_mouse_tests()
         run_step(r, 32);
         CTM_CHECK_EQ(g_pushedX, 12);           // this report's step only --
         CTM_CHECK_EQ(g_pushedY, 0);            // no replayed 22-unit jump
+    }
+
+    section("touch: a gate can hold the touchpad off, absent means always");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_to_mouse"] = "true";
+        g_cfg["touchpad_to_mouse_gate"] = "L2";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 100, 100);
+        run_step(r, 0);
+        set_point(r, 0, true, 1, 400, 400);
+        run_step(r, 16);
+        CTM_CHECK_EQ(g_pushCount, 0);          // gate shut, nothing moves
+
+        r[5] = 200;                            // L2 pulled
+        set_point(r, 0, true, 1, 400, 400);
+        run_step(r, 32);                       // re-anchors here
+        set_point(r, 0, true, 1, 410, 400);
+        run_step(r, 48);
+        CTM_CHECK_EQ(g_pushedX, 10);           // from the re-anchor, no jump
     }
 
     section("touch: config mode stands the whole feature down");

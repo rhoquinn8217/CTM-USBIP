@@ -225,6 +225,7 @@ public:
         // clean calibration and the per-device map does not grow forever.
         ctm_gyro_mouse::forget_device(this);
         ctm_touch_mouse_forget(this);
+        ctm_stick_mouse_forget(this);
         stop_audio_stream();
     }
 
@@ -458,6 +459,11 @@ public:
         // Touchpad-to-mouse: same shape as the gyro hook -- read-only, feeds
         // the same synthetic mouse. No-op unless a touchpad_* key is set.
         ctm_touch_mouse_apply(this, profile_.device_descriptor, linked_config(),
+                              report.data, report.length);
+
+        // Stick-to-mouse: same shape again -- read-only, same synthetic mouse.
+        // No-op unless stick_to_mouse names a stick.
+        ctm_stick_mouse_apply(this, profile_.device_descriptor, linked_config(),
                               report.data, report.length);
 
         // ⭐ Button rebinding. ⚠️ Unlike the gyro hook above, this MODIFIES the

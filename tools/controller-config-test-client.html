@@ -476,8 +476,15 @@
   .kv .help { color:#71737c; font-size:12px; flex:1 1 100%; margin:0 0 4px 0; }
   /* Two columns when there is room. Settings rows are short and independent,
      so a wide window otherwise wastes most of itself. */
+  /* ⛔ ONE COLUMN, always (rhoquinn8217, 2026-08-31). Two columns meant the
+     pad could be halfway down the left column while the right one scrolled
+     past unseen, and only one section is shown at a time now anyway. */
   .cols { display:grid; grid-template-columns:1fr; gap:16px; }
-  @media (min-width:1100px) { .cols { grid-template-columns:1fr 1fr; } }
+  /* The section strip reads like the controller tabs above it, on purpose:
+     the same shape means the same gesture, and ◄ ► here mirrors L1/R1 there. */
+  .sectbar { display:flex; flex-wrap:wrap; gap:6px; margin:10px 0 6px; }
+  .sectbar button { padding:4px 10px; font-size:12px; }
+  .sectbar button.on { outline:2px solid #7aa7e0; }
   /* ⛔ WITHOUT THIS the sticky header swallows a jumped-to section. Every
      control already has the same margin; the section wrapper did not, so
      scrollIntoView put it at the very top of the viewport -- underneath the
@@ -946,6 +953,84 @@ var TABS = ['overview'];
 var ACTIVE = 'overview';
 var LAST_DEVICES = [];
 
+// ⭐ Which settings section is on show. One value for the whole page rather
+// than one per controller tab: switching pads and finding yourself in a
+// different section than the one you were just reading would be its own
+// surprise, and the sections are the same everywhere.
+// ⚠️ Validated on every render -- a section that no longer exists (a config
+// with no keys of that family) falls back to the first rather than showing an
+// empty pane.
+var SECT_ACTIVE = 'Audio';
+
+// The controls that make up the settings view, found rather than remembered --
+// the pane is re-rendered often enough that a held reference goes stale.
+function sectBarButton(name) {
+  return document.querySelector('.sectbar button[data-sect="' + name + '"]');
+}
+
+function firstControlInSection() {
+  var sect = document.querySelector('.sect[data-sect="' + SECT_ACTIVE + '"]');
+  if (!sect) return null;
+  var found = null;
+  sect.querySelectorAll('button, select, input').forEach(function(e) {
+    if (found || e.offsetParent === null || e.disabled || e.type === 'checkbox') return;
+    found = e;
+  });
+  return found;
+}
+
+// The linked-config picker for the tab in view. ⓘ On Overview there is none,
+// and every rule below simply does not fire there.
+function configPicker() {
+  return document.getElementById('pick-' + ACTIVE);
+}
+
+function focusElement(el) {
+  if (!el) return false;
+  var at = GP_FOCUS.indexOf(el);
+  if (at < 0) return false;
+  GP_INDEX = at;
+  gpPaint();
+  el.scrollIntoView({ block: 'nearest' });
+  return true;
+}
+
+// ⓘ focusFirst is what a CLICK on a section title does: you named a section
+// because you want to be in it. ◄ ► leave focus on the strip instead, so
+// stepping through sections stays one axis rather than needing a step back up.
+function showSection(name, focusFirst) {
+  SECT_ACTIVE = name;
+  document.querySelectorAll('.sect[data-sect]').forEach(function(el) {
+    el.style.display = (el.getAttribute('data-sect') === name) ? '' : 'none';
+  });
+  document.querySelectorAll('.sectbar button[data-sect]').forEach(function(b) {
+    b.className = (b.getAttribute('data-sect') === name) ? 'on' : '';
+  });
+  // The focusable set changed shape entirely -- rebuild it before choosing
+  // where to land, or the index would point into the old list.
+  gpCollect();
+  if (!focusElement(focusFirst ? firstControlInSection() : sectBarButton(name))) {
+    GP_INDEX = 0;
+    gpPaint();
+  }
+}
+
+// ◄ ► step through the sections in the order they are shown. Returns false
+// when there are none, so left/right can fall back to moving the halo.
+function stepSection(dir) {
+  var bar = document.querySelector('.sectbar');
+  if (!bar) return false;
+  var names = [];
+  bar.querySelectorAll('button[data-sect]').forEach(function(b) {
+    names.push(b.getAttribute('data-sect'));
+  });
+  if (names.length < 2) return false;
+  var at = names.indexOf(SECT_ACTIVE);
+  if (at < 0) at = 0;
+  showSection(names[(at + dir + names.length) % names.length], false);
+  return true;
+}
+
 // ⭐ THE WINDOW OPENING DOES NOT MEAN A PAD CAN BRIDGE YET.
 // (rhoquinn8217, 2026-08-31: bridging is refused a few times on a cold start
 // before it takes, and the settings window appearing reads as "ready now".)
@@ -1392,15 +1477,16 @@ function inertReason(key, sessionKind) {
 var BTN_GROUP = {
   0: 'Face buttons', 1: 'Face buttons', 2: 'Face buttons', 3: 'Face buttons',
   12: 'Face buttons', 13: 'Face buttons', 14: 'Face buttons', 15: 'Face buttons',
-  4: 'Shoulders & sticks', 5: 'Shoulders & sticks',
-  6: 'Shoulders & sticks', 7: 'Shoulders & sticks',
-  10: 'Shoulders & sticks', 11: 'Shoulders & sticks',
+  4: 'Shoulder/stick buttons', 5: 'Shoulder/stick buttons',
+  6: 'Shoulder/stick buttons', 7: 'Shoulder/stick buttons',
+  10: 'Shoulder/stick buttons', 11: 'Shoulder/stick buttons',
   8: 'System buttons', 9: 'System buttons', 16: 'System buttons'
 };
 
 function sectionOf(key) {
   var btn = /^(?:rebind|turbo)_(\d+)$/.exec(key);
   if (btn) return BTN_GROUP[Number(btn[1])] || 'Other';
+  if (key.indexOf('stick_') === 0) return 'Stick';
   if (key.indexOf('touchpad') === 0) return 'Touchpad';
   if (key.indexOf('gyro') === 0) return 'Gyro';
   if (key.indexOf('rumble') === 0 || key.indexOf('master_rumble') === 0) return 'Rumble';
@@ -1468,11 +1554,42 @@ function renderConfigEditor(hostId, configName, prefix, ordinal) {
     // ⛔ A group not named here is not drawn AT ALL -- sectionOf routing a key
     // to a missing name makes the key vanish, not land in Other. Keep this
     // list and sectionOf in step.
-    ['Audio', 'Rumble', 'Gyro', 'Touchpad',
-     'Face buttons', 'Shoulders & sticks', 'System buttons',
-     'Other'].forEach(function(g) {
-      if (!groups[g]) return;
-      html += '<div class="sect"><h3>' + g + '</h3>';
+    // ⓘ A group with nothing VISIBLE in it is not offered. Other holds only
+    // rebind_debug today, and debug keys are filtered out of the rows below --
+    // so it was an empty section with a button of its own.
+    //
+    // ⛔ Other is kept in the list rather than deleted: it is where a key that
+    // matches no family lands, and dropping it outright would make a future
+    // key invisible instead of merely oddly placed. Emptiness is what hides
+    // it, not a hardcoded exclusion.
+    var shows = function(g) {
+      return (groups[g] || []).some(function(meta) {
+        return !/_debug(_|$)/.test(meta.key);
+      });
+    };
+    var order = ['Audio', 'Rumble', 'Gyro', 'Touchpad', 'Stick',
+                 'Face buttons', 'Shoulder/stick buttons', 'System buttons',
+                 'Other'].filter(shows);
+
+    // ⭐ ONE SECTION AT A TIME. The others are not scrolled past, they are not
+    // rendered visible at all -- which also means the D-pad cannot wander into
+    // them, because gpCollect already skips anything with no offsetParent. The
+    // lock falls out of the hiding; there is no second mechanism to keep in
+    // step with it.
+    if (order.indexOf(SECT_ACTIVE) < 0) SECT_ACTIVE = order[0] || '';
+    html += '<div class="sectbar">';
+    order.forEach(function(g) {
+      html += '<button data-sect="' + esc(g) + '"' +
+              (g === SECT_ACTIVE ? ' class="on"' : '') +
+              ' onclick="showSection(\'' + esc(g).replace(/'/g, "\\'") + '\', true)">' +
+              esc(g) + '</button>';
+    });
+    html += '</div>';
+
+    order.forEach(function(g) {
+      html += '<div class="sect" data-sect="' + esc(g) + '"' +
+              (g === SECT_ACTIVE ? '' : ' style="display:none"') +
+              '><h3>' + g + '</h3>';
       groups[g].forEach(function(meta) {
         // ⛔ Debug keys are for someone reading the log, not for the person
         // adjusting a controller -- and every row is one more to scroll past.
@@ -2398,8 +2515,46 @@ setInterval(function () {
   if (box && !GATE_ON) box.parentNode.removeChild(box);
 }, 1000);
 
+// ⭐ THE THREE BOUNDARIES OF THE SETTINGS VIEW (rhoquinn8217, 2026-08-31).
+//
+// Document order alone gets these wrong, because the section strip sits above
+// every section and the sticky header above that: ▲ from the first setting
+// landed on the LAST strip button rather than the one you are in, and ▲ from
+// the strip landed on whatever the header happened to end with -- Remove auto
+// link. So the vertical axis is given explicit boundaries at the three points
+// where document order and intent disagree:
+//
+//   first setting  ▲ →  the strip button for the section you are in
+//   strip button   ▲ →  the linked-config picker
+//   strip button   ▼ →  the first setting of that section
+//   config picker  ▼ →  the strip button for the ACTIVE section
+//
+// ⭐ The last one is what makes ▲ then ▼ return you where you were: the active
+// section IS the one whose button you were on, because ◄ ► change both
+// together. No remembered "last section" to fall out of step.
+//
+// ⓘ Everything else steps normally, and all of it is skipped on Overview and
+// in dialogs, where these elements do not exist.
+function gpBoundary(delta) {
+  var el = GP_FOCUS[GP_INDEX];
+  if (!el || CONFIRM_CB || RENAMING || FOOTER_MODE) return false;
+
+  var onStrip = el.closest && el.closest('.sectbar');
+  var picker = configPicker();
+
+  if (delta < 0) {
+    if (onStrip) return focusElement(picker);
+    if (el === firstControlInSection()) return focusElement(sectBarButton(SECT_ACTIVE));
+    return false;
+  }
+  if (onStrip) return focusElement(firstControlInSection());
+  if (picker && el === picker) return focusElement(sectBarButton(SECT_ACTIVE));
+  return false;
+}
+
 function gpMove(delta) {
   if (!GP_FOCUS.length) return;
+  if (gpBoundary(delta)) return;
   var next = GP_INDEX + delta;
   if (next < 0 || next >= GP_FOCUS.length) return;   // already at the end
   GP_INDEX = next;
@@ -2667,105 +2822,10 @@ function gpKeyCoarse(dir) {
 // back to moving up and down. Sections only exist on a controller tab -- on
 // Overview, and inside a dialog, left/right should behave like up/down rather
 // than doing nothing.
-function gpJumpSection(dir) {
-  // ⛔ NOT "not on Overview". Selecting a config there renders the same .sect
-  // blocks as a controller tab, so left/right should jump them in both places.
-  // The guard below -- focus must be INSIDE a section -- already covers the
-  // case where none exist.
-  if (CONFIRM_CB || RENAMING) return false;
-
-  // ⛔ And only when focus is INSIDE a section. The controller tab's header --
-  // the device row, the config picker, New and Rename -- sits above them, and
-  // jumping from there would throw you into the settings unasked. Up/down is
-  // what left/right should do while you are still in the header.
-  var focused = GP_FOCUS[GP_INDEX];
-  if (!focused || !focused.closest || !focused.closest('.sect')) return false;
-  var heads = [];
-  var pane = document.getElementById('pane-' + ACTIVE);
-  if (!pane) return false;
-  // ⓘ Each section is a <div class="sect"> holding an <h3> and its rows -- see
-  // where the groups are emitted. The DIV is the anchor, not the heading.
-  pane.querySelectorAll('.sect').forEach(function (h) { heads.push(h); });
-  if (!heads.length) return false;
-
-  // Where are we now? The first heading at or before the focused control.
-  var here = GP_FOCUS[GP_INDEX];
-  var at = 0;
-  if (here) {
-    for (var i = 0; i < heads.length; i++) {
-      if (heads[i].compareDocumentPosition(here) & Node.DOCUMENT_POSITION_FOLLOWING) {
-        at = i;
-      }
-    }
-  }
-  // ⭐ WRAP THROUGH THE HEADER, not straight round the sections.
-  //
-  // Going forward past the last section, or back before the first, lands on the
-  // device row and config picker above them -- which is where you came in from
-  // and where New, Rename and the config picker live. Skipping over it would
-  // make the header reachable only by scrolling up through a whole section.
-  var next = at + dir;
-
-  // ⛔ FORWARD PAST THE LAST SECTION STOPS. Cycling back to the header made the
-  // end of the list feel like a loop rather than an end.
-  if (next >= heads.length) return true;
-
-  // ⭐ BACK FROM THE FIRST SECTION lands in the header -- but on the CONFIG
-  // ROW, not the first focusable thing there.
-  //
-  // ⓘ The first focusable is "Remove auto link", which is a destructive button
-  // in the device row and an awkward place to arrive. "Set auto link" sits with
-  // New and Rename in the config row, which is what you came up here for.
-  // Falls back to Rename when Set auto link is disabled, and to the first
-  // header control if neither exists.
-  if (next < 0) {
-    var want = null, fallback = null, firstHeader = null;
-    for (var h = 0; h < GP_FOCUS.length; h++) {
-      var el = GP_FOCUS[h];
-      if (el.closest && el.closest('.sect')) continue;   // in a section: skip
-      if (firstHeader === null) firstHeader = h;
-      // ⭐ On Overview the way back in is the CONFIG PICKER -- that is what you
-      // came up here to change. Rename is next to it and was being landed on
-      // instead, which is a destructive-ish button and not the point.
-      if (el.tagName === 'SELECT' && ACTIVE === 'overview') { want = h; }
-
-      var label = (el.textContent || '').trim();
-      if (want === null && label === 'Set auto link' && !el.disabled) want = h;
-      else if (label === 'Rename') fallback = h;
-    }
-    var landOn = (want !== null) ? want
-               : (fallback !== null) ? fallback
-               : firstHeader;
-    if (landOn === null) return true;
-    GP_INDEX = landOn;
-    gpPaint();
-    window.scrollTo(0, 0);
-    return true;
-  }
-
-  // Focus the first control after that heading.
-  var found = null;
-  for (var j = 0; j < GP_FOCUS.length; j++) {
-    var pos = heads[next].compareDocumentPosition(GP_FOCUS[j]);
-    if (pos & Node.DOCUMENT_POSITION_FOLLOWING) { found = j; break; }
-  }
-  if (found !== null) {
-    GP_INDEX = found;
-    // ⚠️ Scroll to the SECTION first so its heading is visible, then let
-    // gpPaint bring the focused control into view. Scrolling to the heading
-    // alone left the halo somewhere else on screen, and the next press
-    // snapped the page back -- which read as the jump not having worked.
-    // ⚠️ PAINT FIRST, THEN SCROLL. gpPaint scrolls the focused control into
-    // view, so scrolling the section first meant gpPaint immediately undid it,
-    // and a nudge afterwards just fought both. Painting first lets the halo
-    // land, then one scroll puts the HEADING at the top with the focused
-    // control just below it.
-    gpPaint();
-    heads[next].scrollIntoView({ block: 'start' });
-    return true;
-  }
-  return false;
-}
+// ⛔ gpJumpSection was REMOVED 2026-08-31. It scrolled the halo to the next
+// section heading on a page that showed all of them; with one section visible
+// at a time, ◄ ► change which section that is instead -- see stepSection. Two
+// functions meaning almost the same thing is how they drift apart.
 
 function gpKeyStep(dir) {
   if (GP_EDITING) { gpEditStep(dir, 10); return; }
@@ -2775,10 +2835,16 @@ function gpKeyStep(dir) {
     GP_SELECTING.selectedIndex = Math.max(0, Math.min(n - 1, next));
     return;
   }
-  // ⭐ Sections only exist on a controller tab. Everywhere else -- Overview, a
-  // dialog, a rename row -- left/right behave like up/down, so the axis is
-  // never dead.
-  if (!gpJumpSection(dir)) {
+  // ⭐ ◄ ► SWITCH SECTIONS (rhoquinn8217, 2026-08-31). Only one section is
+  // shown at a time now, so this changes which one that is rather than jumping
+  // the halo down the page to the next heading.
+  //
+  // ⓘ L1/R1 still switch controllers, unchanged: pads across the top, sections
+  // within a pad, which is the same shape one level down.
+  //
+  // ⚠️ Falls through to moving the halo where there are no sections -- a
+  // dialog, a rename row -- so the axis is never dead.
+  if (CONFIRM_CB || RENAMING || FOOTER_MODE || !stepSection(dir)) {
     gpMove(dir);
   }
 }
@@ -3210,8 +3276,11 @@ function gpPoll() {
   // ⚠️ This was added to the CONFIG MODE key handler first and not here, so it
   // worked with a gated pad and not with one used directly. Same behaviour on
   // both paths now.
-  if (edge(14)) { if (!gpJumpSection(-1)) gpMove(-1); GP_REPEAT_AT = now + 400; }
-  else if (edge(15)) { if (!gpJumpSection(1)) gpMove(1); GP_REPEAT_AT = now + 400; }
+  // ⓘ Routed through gpKeyStep so the pad and the gate keystrokes cannot drift
+  // apart -- ◄ ► mean "switch section" in both, and there is one place that
+  // decides what that means.
+  if (edge(14)) { gpKeyStep(-1); GP_REPEAT_AT = now + 400; }
+  else if (edge(15)) { gpKeyStep(1); GP_REPEAT_AT = now + 400; }
 
   // D-pad: fire on the edge, then repeat while held after a short delay.
   else if (edge(12)) { gpMove(-1); GP_REPEAT_AT = now + 400; }
