@@ -126,6 +126,10 @@ struct sink {
 inline sink input_s() { return sink(); }
 }  // namespace device_log
 
+// Config-mode stand-in: the real one lives in rebind.inl, which this binary
+// does not compile. Tests run with the gate permanently off.
+static bool ctm_rebind_config_mode_effective() { return false; }
+
 #include "input/gyro_calibration.inl"
 #include "input/gyro_mouse.inl"
 
