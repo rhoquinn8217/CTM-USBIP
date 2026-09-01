@@ -84,6 +84,9 @@ static std::string rest_devices_json()
     // ⭐ Which window the agent considers current. A page carrying a different
     // token is stale.
     out += ",\"ui_token\":\"" + rest_json_escape(ctm_open_ui::current_ui_token()) + "\"";
+    // ⓘ Constant for this listener run; the page keeps its remembered place
+    // only while this value is unchanged.
+    out += ",\"run_id\":\"" + rest_json_escape(ctm_open_ui::agent_run_id()) + "\"";
     out += ",\"gate_hold\":";
     out += ctm_rebind_gate_hold() ? "true" : "false";
     return out + "}";

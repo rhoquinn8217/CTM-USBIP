@@ -1094,6 +1094,7 @@ function focusElement(el) {
   var at = GP_FOCUS.indexOf(el);
   if (at < 0) return false;
   GP_INDEX = at;
+  GP_WANT = focusKeyOf(el);
   gpPaint();
   el.scrollIntoView({ block: 'nearest' });
   return true;
@@ -2003,6 +2004,9 @@ function renderConfigEditor(hostId, configName, prefix, ordinal) {
         // empty string is documented as "not configured".
         var managed = val !== undefined && val !== '';
         var id = 'dv-' + prefix + '-' + meta.key;
+        // Set only for the two buttons this page is driven by; emitted in the
+        // name cell below, where there is width to wrap against.
+        var pageButtonWarning = '';
         var shown = managed ? val : (meta.default !== undefined ? meta.default : '');
         // Every control writes on change. For a text or number field that is
         // blur or Enter, not every keystroke -- typing "64000" must not send
@@ -2041,8 +2045,17 @@ function renderConfigEditor(hostId, configName, prefix, ordinal) {
           // a game is not wrong, and this is their controller. ⚠️ Config mode
           // removes the problem entirely -- it gates every button and drives
           // the page with keystrokes, so a rebind cannot reach it.
+          // ⛔ IT GOES IN THE NAME CELL, not here (rhoquinn8217, 2026-09-01:
+          // it rendered ONE WORD PER LINE). The row is a grid of
+          // `18px 1fr auto`, and `control` is the auto column -- sized to its
+          // content, so a whole sentence in it gets squeezed to its narrowest
+          // possible width. Twenty lines tall for one sentence, pushing every
+          // setting below it off the screen.
+          //
+          // ⓘ The name cell is the 1fr column and already carries the help
+          // text, which is what this warning qualifies.
           if ((meta.key === 'rebind_0' || meta.key === 'rebind_1') && shown) {
-            control += '<div class="warnc" style="font-size:11px;margin-top:3px">' +
+            pageButtonWarning = '<div class="warnc" style="font-size:11px;margin-top:3px">' +
                     (meta.key === 'rebind_0'
                       ? 'Cross selects on this page. While this is bound you will need a mouse or keyboard to change it back.'
                       : 'Circle backs out on this page. While this is bound you will need a mouse or keyboard to change it back.') +
@@ -2104,7 +2117,7 @@ function renderConfigEditor(hostId, configName, prefix, ordinal) {
                 ' onchange="toggleManaged(\'' + id + '\',\'' + esc(prefix) +
                 '\',\'' + esc(configName) + '\',\'' + esc(meta.key) + '\')" ' +
                 'title="unchecked: the listener leaves this alone and the game controls it">' +
-                '<div class="name">' + esc(shownKey) + note + '</div>' +
+                '<div class="name">' + esc(shownKey) + note + pageButtonWarning + '</div>' +
                 control + '</div>';
       });
       html += '</div>';
@@ -2716,6 +2729,33 @@ var GP_EDITING = null;   // a value box the pad is inside
 var GP_SELECT_WAS = 0;
 
 // Everything focusable in the ACTIVE pane, in document order, plus the tab bar.
+// ⭐⭐ WHAT THE HALO IS ON, as a name rather than a position.
+//
+// ⛔ THE BUG THIS FIXES (rhoquinn8217, 2026-09-01): GP_INDEX is a NUMBER, and
+// gpCollect used to carry it across rebuilds. A config refresh renders
+// "loading settings…" in the pane before the controls arrive, so for a moment
+// the focus list is the sticky header ALONE -- the number falls out of range,
+// resets to zero, and lands on the device row where Reset and Remove auto link
+// are. Any rebuild with the halo deep in the list did it, not just a restore.
+//
+// ⓘ Settings controls have stable ids (dv-<ordinal>-<key>) and section buttons
+// carry data-sect, so most things can be named. Anything with neither keeps the
+// old positional behaviour, which is no worse than before.
+function focusKeyOf(el) {
+  if (!el) return '';
+  if (el.id) return el.id;
+  if (el.getAttribute) {
+    var sect = el.getAttribute('data-sect');
+    if (sect) return 'sect:' + sect;
+  }
+  return '';
+}
+
+// ⭐ The halo's INTENDED target, remembered even while it is briefly absent --
+// which is the whole point: the control disappears mid-refresh and comes back a
+// moment later, and the halo should still be waiting for it.
+var GP_WANT = '';
+
 function gpCollect() {
   var scope = document.getElementById('pane-' + ACTIVE);
   var list = [];
@@ -2805,7 +2845,16 @@ function gpCollect() {
     });
   }
   GP_FOCUS = list;
-  if (GP_INDEX >= GP_FOCUS.length) GP_INDEX = 0;
+  // ⭐ Re-acquire by NAME first. Only when the wanted control is genuinely not
+  // in the list does the index matter, and then it is clamped as before.
+  var found = -1;
+  if (GP_WANT) {
+    for (var i = 0; i < list.length; i++) {
+      if (focusKeyOf(list[i]) === GP_WANT) { found = i; break; }
+    }
+  }
+  if (found >= 0) GP_INDEX = found;
+  else if (GP_INDEX >= GP_FOCUS.length) GP_INDEX = 0;
   gpPaint();
 }
 
@@ -2819,7 +2868,7 @@ document.addEventListener('click', function (ev) {
   var el = ev.target;
   while (el && el !== document.body) {
     var at = GP_FOCUS.indexOf(el);
-    if (at >= 0) { GP_INDEX = at; gpPaint(); return; }
+    if (at >= 0) { GP_INDEX = at; GP_WANT = focusKeyOf(el); gpPaint(); return; }
     el = el.parentElement;
   }
 }, true);
@@ -2999,6 +3048,7 @@ function gpMove(delta) {
   var next = GP_INDEX + delta;
   if (next < 0 || next >= GP_FOCUS.length) return;   // already at the end
   GP_INDEX = next;
+  GP_WANT = focusKeyOf(GP_FOCUS[GP_INDEX]);
   gpPaint();
 }
 
@@ -3362,21 +3412,37 @@ var MY_TOKEN = (function () {
   return m ? m[1] : '';
 })();
 
+// ⭐ The listener's run id, from the devices poll. One value for as long as the
+// listener lives, unlike MY_TOKEN which is minted per WINDOW.
+//
+// ⓘ This is what lets a remembered place survive the window being CLOSED: a
+// new window gets a new token but the same run id, so the place is still ours.
+// A listener restart changes it, and that is exactly when a stale place should
+// be forgotten.
+var AGENT_RUN = '';
+
 var FOOTER_RETURN = null;
 
 // ⭐ Put the person back where they were, after a reload or a fresh window.
 //
-// ⚠️ sessionStorage, not localStorage: it belongs to this window, so a second
-// one opened deliberately does not inherit somewhere you were an hour ago.
+// ⛔ WAS sessionStorage, "so a second window does not inherit somewhere you
+// were an hour ago" -- true, and it also threw the place away when the window
+// was CLOSED, which is the case this exists for. localStorage keeps it; the
+// RUN ID does the job the old choice was making: a place saved under a
+// previous listener is refused.
 //
 // ⓘ Waits for the devices to arrive, or the tab it wants may not exist yet.
 function restorePlace() {
   var raw = null;
-  try { raw = sessionStorage.getItem('ctm_place'); } catch (e) { return; }
+  try { raw = localStorage.getItem('ctm_place'); } catch (e) { return; }
   if (!raw) return;
   var want;
   try { want = JSON.parse(raw); } catch (e) { return; }
   if (!want || !want.tab) return;
+  // ⛔ A place from a PREVIOUS listener run is not ours. Without this, opening
+  // the page tomorrow would drop you wherever you were tonight -- which is what
+  // sessionStorage used to prevent, and what the run id replaces.
+  if (!want.run || (AGENT_RUN && want.run !== AGENT_RUN)) return;
 
   setTimeout(function () {
     var tab = want.tab;
@@ -3394,10 +3460,41 @@ function restorePlace() {
 
     if (tab !== 'overview' && TABS.indexOf(tab) < 0) return;
     if (tab !== ACTIVE) showTab(tab);
-    gpCollect();
-    GP_INDEX = Math.min(want.index || 0, Math.max(0, GP_FOCUS.length - 1));
-    window.scrollTo(0, want.scroll || 0);
-    gpPaint();
+
+    // ⭐ The section first: with one shown at a time, the focus list is built
+    // from the visible one, so restoring the halo before the section would
+    // index into the wrong list entirely.
+    if (want.sect && want.sect !== SECT_ACTIVE) showSection(want.sect, false);
+
+    var settle = function () {
+      gpCollect();
+      // ⭐ By id where there is one -- a rebuild moves elements, and a number
+      // survives a rebuild while meaning something else.
+      var byId = want.id ? document.getElementById(want.id) : null;
+      if (byId && focusElement(byId)) {
+        window.scrollTo(0, want.scroll || 0);
+        return true;
+      }
+      return false;
+    };
+
+    if (!settle()) {
+      // ⚠️ Nothing rendered yet, or a refresh landed mid-restore. Try a few
+      // more times rather than settling on the wrong control -- and fall back
+      // to the index only after giving the real target a chance.
+      var tries = 0;
+      var again = setInterval(function () {
+        if (settle() || ++tries >= 6) {
+          clearInterval(again);
+          if (tries >= 6) {
+            gpCollect();
+            GP_INDEX = Math.min(want.index || 0, Math.max(0, GP_FOCUS.length - 1));
+            window.scrollTo(0, want.scroll || 0);
+            gpPaint();
+          }
+        }
+      }, 250);
+    }
   }, 900);
 }
 
@@ -3417,13 +3514,39 @@ function setFooterMode(on) {
       if (d.ordinal === ACTIVE) mySerial = d.serial || '';
     });
 
+    // ⭐ THE ELEMENT, NOT ITS POSITION (rhoquinn8217 saw the halo jump to
+    // "Remove auto link", 2026-09-01).
+    //
+    // ⛔ A numeric index is only true until the next render. The config list
+    // refreshes on a timer and the device poll rebuilds panes, and either one
+    // rebuilds the focus list -- so the same number then points at a different
+    // control. The sticky header is first in that list, which is why it landed
+    // on Remove auto link rather than somewhere random.
+    //
+    // ⓘ Settings controls carry a stable id (dv-<ordinal>-<key>), so the id is
+    // what survives a rebuild. The index is still stored as a fallback for
+    // anything without one.
+    var focused = GP_FOCUS[GP_INDEX];
     FOOTER_RETURN = { tab: ACTIVE, index: GP_INDEX,
+                      id: (focused && focused.id) ? focused.id : '',
+                      // ⭐ And the SECTION: only one is visible at a time now,
+                      // so restoring into the wrong one puts the halo in a list
+                      // that does not contain what you were looking at.
+                      sect: SECT_ACTIVE,
                       scroll: window.scrollY || 0, serial: mySerial };
-    // ⭐ Also kept across a reload. Every chord kills and recreates the window,
-    // so without this you land on Overview each time and hunt for your place
-    // again -- the inconvenience that made closing feel expensive.
+    // ⭐ KEPT ACROSS A CLOSE, not just a reload (rhoquinn8217, 2026-09-01).
+    //
+    // ⛔ This was sessionStorage, which belongs to one window -- so a reload
+    // kept your place and pressing Close threw it away. localStorage survives
+    // the window, and the RUN ID is what stops it going stale: a place saved
+    // under a previous listener is ignored, which is the boundary where
+    // "somewhere you were an hour ago" stops meaning anything.
     try {
-      sessionStorage.setItem('ctm_place', JSON.stringify(FOOTER_RETURN));
+      var keep = { tab: FOOTER_RETURN.tab, index: FOOTER_RETURN.index,
+                   id: FOOTER_RETURN.id, sect: FOOTER_RETURN.sect,
+                   scroll: FOOTER_RETURN.scroll, serial: FOOTER_RETURN.serial,
+                   run: AGENT_RUN };
+      localStorage.setItem('ctm_place', JSON.stringify(keep));
     } catch (e) {}
   }
   FOOTER_MODE = on;
@@ -3480,6 +3603,20 @@ document.addEventListener('keydown', function (ev) {
 }, true);
 
 function gpTab(delta) {
+  // ⛔ NOT WHILE SOMETHING IS OPEN (rhoquinn8217, 2026-09-01: L1/R1 still
+  // switched controllers from inside the footer).
+  //
+  // ⭐ The guard lives HERE rather than at the two call sites, because the pad
+  // and the gate's keys both come through this function and the comment beside
+  // the pad's own handling records that those paths have drifted THREE times --
+  // select, back, and the section jump -- each time because a behaviour was
+  // added to one and not the other.
+  //
+  // ⓘ Value editing already returns before reaching either caller, so it is not
+  // listed: adding it would imply the others were checked when they were not.
+  if (FOOTER_MODE || CONFIRM_CB || RENAMING || PRESET_OPEN || PRESET_INFO_OPEN) {
+    return;
+  }
   var at = TABS.indexOf(ACTIVE);
   if (at < 0) at = 0;
   showTab(TABS[(at + delta + TABS.length) % TABS.length]);
@@ -3970,6 +4107,8 @@ function pollDevices() {
     // ⚠️ Only when the agent HAS a token. An empty one means it has restarted
     // and knows of no window, in which case every page is stale -- which is a
     // convenient way to clear leftovers after a rebuild.
+    if (d && typeof d.run_id === 'string') AGENT_RUN = d.run_id;
+
     if (d && typeof d.ui_token === 'string' && MY_TOKEN) {
       if (d.ui_token !== MY_TOKEN) {
         STOPPED = true;

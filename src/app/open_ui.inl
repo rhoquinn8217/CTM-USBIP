@@ -97,6 +97,20 @@ inline bool focus_existing()
 inline std::mutex g_tokenMutex;
 inline std::wstring g_uiToken;
 
+// ⭐ THE RUN ID -- one value for the whole life of this listener, unlike the
+// window token above which is minted per window.
+//
+// ⓘ Added 2026-09-01 for remembering where you were. The place a person left
+// off has to survive the settings window being CLOSED and reopened -- the
+// window token cannot carry that, because the new window gets a new one. A
+// listener restart is the right boundary to forget at: it is exactly when
+// "somewhere you were an hour ago" stops being meaningful.
+inline std::string agent_run_id()
+{
+    static const std::string id = std::to_string(GetTickCount64());
+    return id;
+}
+
 inline std::string current_ui_token()
 {
     std::lock_guard<std::mutex> lock(g_tokenMutex);
