@@ -77,6 +77,16 @@ struct TouchState {
     // judged from the AVERAGE of the active fingers, re-anchored whenever the
     // finger count changes -- otherwise the second finger of a two-finger tap
     // would read as a huge jump and no two-finger tap could ever land.
+    // ⭐ DRAG (rhoquinn8217, 2026-08-31). Click the pad in to grab, move with
+    // the finger still down, LIFT THE FINGER to drop -- the physical click can
+    // be released immediately, which is what makes a long drag comfortable.
+    //
+    // ⓘ This is the "drag lock" a trackpad offers, with a clearer trigger. The
+    // usual two-touch convention is tap-then-touch-and-move, which is a timing
+    // guess; a physical click is not. Three-finger drag is not available to us
+    // at all -- the pad reports two touch points.
+    bool dragging = false;
+
     bool sessionActive = false;
     long long sessionStart = 0;
     int sessionMaxFingers = 0;
@@ -92,6 +102,10 @@ inline std::map<const void *, TouchState> g_touch;
 inline void forget(const void *deviceKey)
 {
     std::lock_guard<std::mutex> lock(g_touchMutex);
+    auto it = g_touch.find(deviceKey);
+    // ⛔ A controller that unbridges mid-drag must not leave the mouse button
+    // held down on the desktop with nothing able to release it.
+    if (it != g_touch.end() && it->second.dragging) ctm_mouse_device::set_drag(0x00);
     g_touch.erase(deviceKey);
 }
 
@@ -119,7 +133,9 @@ inline void step(const void *deviceKey, const std::string &section,
 
     // ⭐ Everything off: keep no state, so turning a feature on later starts
     // clean rather than against a stale anchor.
-    if (!cursorOn && !scrollOn && !tapsOn) {
+    if (!cursorOn && !scrollOn && !tapsOn &&
+        !device_config_bool(section.c_str(), "touchpad_click_drag", false)) {
+        if (st.dragging) ctm_mouse_device::set_drag(0x00);
         st = TouchState();
         return;
     }
@@ -128,6 +144,7 @@ inline void step(const void *deviceKey, const std::string &section,
     // as the gyro, for the same reason: a cursor that moves while its buttons
     // are gated is a broken mouse, not a suspended one.
     if (ctm_rebind_config_mode_effective()) {
+        if (st.dragging) ctm_mouse_device::set_drag(0x00);
         st = TouchState();
         return;
     }
@@ -136,8 +153,39 @@ inline void step(const void *deviceKey, const std::string &section,
     // anchor rather than measuring movement against where a finger was before
     // the gate closed -- which would arrive as one jump.
     if (!ctm_gyro_mouse::gate_open(gate, data, len)) {
+        if (st.dragging) ctm_mouse_device::set_drag(0x00);
         st = TouchState();
         return;
+    }
+
+    // ---- Drag ---------------------------------------------------------------
+    // Read before anything else so a drag survives whatever the cursor and tap
+    // paths decide to do with the same touch.
+    if (device_config_bool(section.c_str(), "touchpad_click_drag", false)) {
+        const bool padPressed = len > 10 && (data[10] & 0x02) != 0;
+        const TouchPoint d1 = read_point(data, 33);
+        const TouchPoint d2 = read_point(data, 37);
+        const bool anyFinger = d1.down || d2.down;
+
+        if (!st.dragging) {
+            // Grab: the pad clicked in WITH a finger on it. A click with no
+            // finger is an ordinary click and is left alone.
+            if (padPressed && anyFinger) {
+                st.dragging = true;
+                ctm_mouse_device::set_drag(0x01);
+                ctm_gyro_mouse_ensure_mouse_started();
+            }
+        } else if (!anyFinger) {
+            // Drop: every finger has left the pad. ⓘ NOT when the click is
+            // released -- holding a button down for the length of a drag is
+            // the thing this exists to avoid.
+            st.dragging = false;
+            ctm_mouse_device::set_drag(0x00);
+        }
+    } else if (st.dragging) {
+        // Turned off mid-drag: never leave the button held.
+        st.dragging = false;
+        ctm_mouse_device::set_drag(0x00);
     }
 
     const TouchPoint p1 = read_point(data, 33);

@@ -16,6 +16,10 @@
 #include "harness.h"
 #include "units.h"
 
+// Presets are plain data -- no Windows, no config file -- so the suite reads
+// them directly rather than through the agent.
+#include "config/config_presets.inl"
+
 using namespace ctmtest;
 
 namespace {
@@ -298,7 +302,136 @@ int run_config_store_tests()
         CTM_CHECK(contains(read_config("newname"), "# newname"));
     }
 
-    section("config store: \u2b50 copy keeps the settings and DROPS the claim");
+    section("presets: every one is well formed and suits a real controller");
+    {
+        CTM_CHECK(ctm_presets::preset_count() >= 4);
+        for (size_t i = 0; i < ctm_presets::preset_count(); ++i) {
+            const ctm_presets::Preset &p = ctm_presets::kPresets[i];
+            CTM_CHECK(p.name != nullptr && p.name[0] != '\0');
+            CTM_CHECK(p.help != nullptr && p.help[0] != '\0');
+            CTM_CHECK(p.count > 0);
+            // Every key and value must survive the writer's own rules, or the
+            // preset would fail halfway through creating a config.
+            for (size_t k = 0; k < p.count; ++k) {
+                CTM_CHECK(cs::valid_setting_key(p.settings[k].key));
+                CTM_CHECK(cs::valid_setting_value(p.settings[k].value));
+            }
+            CTM_CHECK(p.ds5 || p.ds5_edge);
+        }
+    }
+
+    section("presets: L2-gyro-mouse-aiming binds NOTHING but the gate");
+    {
+        // The one preset used WHILE PLAYING. Rebinding a face button here
+        // would take it away from the game, which is why this preset is one
+        // line and must stay one line.
+        const ctm_presets::Preset *p = ctm_presets::find("L2-gyro-mouse-aiming");
+        CTM_CHECK(p != nullptr);
+        CTM_CHECK_EQ(static_cast<int>(p->count), 1);
+        CTM_CHECK(std::string(p->settings[0].key) == "gyro_to_mouse_gate");
+        CTM_CHECK(std::string(p->settings[0].value) == "L2");
+    }
+
+    section("presets: found by name, and only where they suit the controller");
+    {
+        CTM_CHECK(ctm_presets::find("gyro-to-mouse") != nullptr);
+        CTM_CHECK(ctm_presets::find("GYRO-TO-MOUSE") != nullptr);
+        CTM_CHECK(ctm_presets::find("stick-to-mouse") != nullptr);
+        CTM_CHECK(ctm_presets::find("touchpad-mouse") != nullptr);
+        CTM_CHECK(ctm_presets::find("nonsense") == nullptr);
+
+        const ctm_presets::Preset *gyro = ctm_presets::find("gyro-to-mouse");
+        CTM_CHECK(ctm_presets::suits(*gyro, "ds5"));
+        CTM_CHECK(ctm_presets::suits(*gyro, "ds5_edge"));
+        // A kind that carries no preset is refused rather than quietly
+        // accepted: a preset that cannot act is a config that does nothing.
+        CTM_CHECK(!ctm_presets::suits(*gyro, "ds4"));
+    }
+
+    section("presets: every mouse mode shares the desktop bindings");
+    {
+        const char *const names[] = { "gyro-to-mouse", "touchpad-mouse",
+                                      "stick-to-mouse" };
+        for (const char *name : names) {
+            const ctm_presets::Preset *p = ctm_presets::find(name);
+            CTM_CHECK(p != nullptr);
+            bool enter = false, escape = false, keyboard = false;
+            bool arrows = false, click = false;
+            for (size_t k = 0; k < p->count; ++k) {
+                const std::string key = p->settings[k].key;
+                const std::string value = p->settings[k].value;
+                if (key == "rebind_0" && value == "Enter") enter = true;
+                if (key == "rebind_1" && value == "Escape") escape = true;
+                // ⓘ Square is intentionally unbound now -- see the note in
+                // config_presets.inl. The check that it stays that way is
+                // below, rather than a check that it is bound.
+                if (key == "rebind_2") keyboard = true;
+                if (key == "rebind_12" && value == "ArrowUp") arrows = true;
+                if (key == "rebind_7" && value == "MouseLeft") click = true;
+            }
+            CTM_CHECK(enter);
+            CTM_CHECK(escape);
+            CTM_CHECK(!keyboard);        // Square stays free
+            CTM_CHECK(arrows);
+            CTM_CHECK(click);
+        }
+    }
+
+    section("presets: each mouse mode drives the cursor its own way");
+    {
+        auto has = [](const char *presetName, const char *key, const char *value) {
+            const ctm_presets::Preset *p = ctm_presets::find(presetName);
+            if (p == nullptr) return false;
+            for (size_t k = 0; k < p->count; ++k) {
+                if (std::string(p->settings[k].key) == key &&
+                    std::string(p->settings[k].value) == value) return true;
+            }
+            return false;
+        };
+        auto mentions = [](const char *presetName, const char *key) {
+            const ctm_presets::Preset *p = ctm_presets::find(presetName);
+            if (p == nullptr) return false;
+            for (size_t k = 0; k < p->count; ++k) {
+                if (std::string(p->settings[k].key) == key) return true;
+            }
+            return false;
+        };
+
+        CTM_CHECK(has("gyro-to-mouse", "gyro_to_mouse_gate", "always"));
+        CTM_CHECK(has("gyro-to-mouse", "stick_to_scroll", "left"));
+        // Not the touchpad: with the pad aiming, reaching it means regripping.
+        CTM_CHECK(!mentions("gyro-to-mouse", "touchpad_scroll"));
+
+        CTM_CHECK(has("touchpad-mouse", "touchpad_to_mouse", "true"));
+        CTM_CHECK(has("touchpad-mouse", "touchpad_scroll", "true"));
+        CTM_CHECK(has("touchpad-mouse", "touchpad_tap_click", "true"));
+        // The hand is on the pad here, so the sticks are left alone.
+        CTM_CHECK(!mentions("touchpad-mouse", "stick_to_scroll"));
+
+        CTM_CHECK(has("stick-to-mouse", "stick_to_mouse", "right"));
+        CTM_CHECK(has("stick-to-mouse", "stick_to_scroll", "left"));
+    }
+
+    section("presets: no tuning numbers, on purpose");
+    {
+        // Speeds, curves and sensitivities are left to the measured defaults;
+        // a number written here would be a guess competing with them.
+        const char *const tuning[] = {
+            "gyro_mouse_px_per_360", "gyro_mouse_min_sens", "gyro_mouse_max_sens",
+            "stick_mouse_speed", "stick_mouse_curve", "stick_mouse_deadzone",
+            "stick_scroll_speed", "touchpad_mouse_speed", "touchpad_scroll_speed"
+        };
+        for (size_t i = 0; i < ctm_presets::preset_count(); ++i) {
+            const ctm_presets::Preset &p = ctm_presets::kPresets[i];
+            for (size_t k = 0; k < p.count; ++k) {
+                for (const char *bad : tuning) {
+                    CTM_CHECK(std::string(p.settings[k].key) != bad);
+                }
+            }
+        }
+    }
+
+    section("config store: copy keeps the settings and DROPS the claim");
     {
         std::string error;
         write_config("original",

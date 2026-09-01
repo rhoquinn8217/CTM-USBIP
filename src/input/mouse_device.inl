@@ -62,6 +62,13 @@ inline void add_wheel(int clicks) { g_wheelPending.fetch_add(clicks, std::memory
 inline std::atomic<uint8_t> g_clickPending{0};
 inline void add_click(uint8_t mask) { g_clickPending.fetch_or(mask, std::memory_order_relaxed); }
 
+// ⭐ A HELD button, for dragging. Distinct from both of the above: the rebinder
+// owns a level it rewrites every report, and add_click is a momentary pulse.
+// A drag is neither -- it is held across many reports by something that is not
+// the rebinder, so it needs its own level to be OR'd in beside the others.
+inline std::atomic<uint8_t> g_dragMask{0};
+inline void set_drag(uint8_t mask) { g_dragMask.store(mask, std::memory_order_relaxed); }
+
 inline void pump_loop()
 {
     // The mouse endpoint from the profile. Kept in one place so it matches the
@@ -94,7 +101,8 @@ inline void pump_loop()
         } else if (nowMs - clickDownAtMs >= 30) {
             clickDown = 0;
         }
-        buttons = static_cast<uint8_t>(buttons | clickDown);
+        buttons = static_cast<uint8_t>(buttons | clickDown |
+                                       g_dragMask.load(std::memory_order_relaxed));
 
         static uint8_t lastButtons = 0;
         const bool buttonsChanged = buttons != lastButtons;

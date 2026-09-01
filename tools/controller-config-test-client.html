@@ -485,6 +485,30 @@
   .sectbar { display:flex; flex-wrap:wrap; gap:6px; margin:10px 0 6px; }
   .sectbar button { padding:4px 10px; font-size:12px; }
   .sectbar button.on { outline:2px solid #7aa7e0; }
+  #presetBox { position:fixed; inset:0; z-index:60; display:none;
+               align-items:center; justify-content:center; background:#0009; }
+  #presetList button { display:block; width:100%; text-align:left;
+                       margin:6px 0; padding:8px 10px; }
+  /* ⭐ A LIST, not a stack of buttons (rhoquinn8217, 2026-08-31). Boxed buttons
+     with gaps between them read as five separate things to press; these are
+     five entries in one list of profiles, so they are flat rows divided by a
+     hairline, the way the tab bar treats its own entries. */
+  #presetList { border-top:1px solid #2c2e36; margin:10px 0 4px; }
+  #presetList .prow { display:flex; margin:0;
+                      border-bottom:1px solid #2c2e36; }
+  #presetList .prow > button:first-child {
+      flex:1; text-align:left; padding:11px 12px; font-size:14px;
+      background:transparent; border:none; border-radius:0; color:#c9cbd3; }
+  #presetList .prow > button:first-child:hover { background:#1c1e26; color:#e8e8ea; }
+  #presetList small { display:block; color:#9aa4b2; margin-top:3px;
+                      white-space:normal; }
+  #presetInfoBox { position:fixed; inset:0; z-index:61; display:none;
+                   align-items:center; justify-content:center; background:#0009; }
+  #presetInfoTables h4 { margin:12px 0 4px; font-size:11px; letter-spacing:.08em;
+                         color:#9aa4b2; text-transform:uppercase; }
+  #presetInfoTables table { width:100%; border-collapse:collapse; }
+  #presetInfoTables td { padding:2px 0; vertical-align:top; }
+  #presetInfoTables td:last-child { color:#cfe0f5; text-align:right; }
   /* ⛔ WITHOUT THIS the sticky header swallows a jumped-to section. Every
      control already has the same margin; the section wrapper did not, so
      scrollIntoView put it at the very top of the viewport -- underneath the
@@ -612,6 +636,28 @@
 
 <!-- ⛔ In-page, so it can carry a real title and be dismissed by a controller.
      A native confirm() is titled with the origin and ignores the pad. -->
+<div id="presetInfoBox" style="display:none">
+  <div class="confirmCard">
+    <h2 id="presetInfoTitle">Preset</h2>
+    <p id="presetInfoText" class="muted"></p>
+    <div id="presetInfoTables"></div>
+    <div class="confirmBtns">
+      <button id="presetInfoUse" class="go">Use this</button>
+      <button onclick="closePresetInfo()">Back</button>
+    </div>
+  </div>
+</div>
+
+<div id="presetBox" style="display:none">
+  <div class="confirmCard">
+    <h2>Select pre-set</h2>
+    <div id="presetList"></div>
+    <div class="confirmBtns">
+      <button onclick="presetCancel()">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <div id="confirmBox" style="display:none">
   <div class="confirmCard">
     <h2 id="confirmTitle">Controller config</h2>
@@ -1276,15 +1322,35 @@ function claimAutoLink(ordinal, configName, serial) {
 // than the kind, so the agent works out which kind it needs and links it in the
 // same call.
 // ⭐ ONE naming rule, used by New and by Copy. Two copies of "next available
-// ds5_config" is how they end up disagreeing about what is taken.
-function nextConfigName(sessionKind) {
-  var base = settingsKindOf(sessionKind) + '_config';
+// name" is how they end up disagreeing about what is taken.
+function nextNameFrom(base) {
   var name = base;
   var n = 2;
   while (CONFIGS.some(function(c) { return c.name.toLowerCase() === name.toLowerCase(); })) {
     name = base + '_' + (n++);
   }
   return name;
+}
+
+// ⭐ THE NAME SAYS WHAT THE CONFIG DOES (rhoquinn8217, 2026-08-31). A list of
+// ds5_config_2, ds5_config_3, ds5_config_4 tells you nothing about which is
+// which, so a preset names its own configs: gyro-to-mouse makes
+// gyro_to_mouse_config, then _2, _3.
+//
+// ⓘ Hyphens become underscores because a config name is also a FILENAME and a
+// section name; the preset keeps the hyphens because it is only ever a label.
+function nextConfigName(sessionKind, presetName) {
+  var base = presetName
+    ? presetName.replace(/-/g, '_') + '_config'
+    : settingsKindOf(sessionKind) + '_config';
+  return nextNameFrom(base);
+}
+
+// A copy keeps its source's base name and takes the next number, so copying
+// gyro_to_mouse_config_2 gives gyro_to_mouse_config_3 rather than something
+// that has lost track of what it is.
+function nextCopyName(sourceName) {
+  return nextNameFrom(String(sourceName).replace(/_[0-9]+$/, ''));
 }
 
 // ⭐ Copy the config this controller is reading, and link the copy to it.
@@ -1299,7 +1365,7 @@ function nextConfigName(sessionKind) {
 function copyConfigFor(ordinal) {
   var dev = LAST_DEVICES.filter(function(x) { return x.ordinal === ordinal; })[0];
   if (!dev || !dev.linked_config) return;
-  var name = nextConfigName(dev.kind);
+  var name = nextCopyName(dev.linked_config);
   call('POST', '/api/v1/configs/' + encodeURIComponent(dev.linked_config) + '/copy',
        { name: name })
     .then(function() {
@@ -1313,12 +1379,245 @@ function copyConfigFor(ordinal) {
     .catch(function(){});
 }
 
+// ⭐ New asks what to start from. ⓘ Blank is first and is what New always did,
+// so the old behaviour is one press away and nothing is taken from anyone.
+//
+// ⛔ MODAL, and it uses the same overlay shape as the confirm dialog on
+// purpose: gpCollect already treats PRESET_OPEN like the other overlays, so
+// the pad cannot wander into the page behind it, and that comes for free
+// rather than as a second mechanism to keep in step.
+var PRESET_OPEN = false;
+var PRESETS = [];
+
 function newConfigFor(ordinal) {
   var dev = LAST_DEVICES.filter(function(x) { return x.ordinal === ordinal; })[0];
   if (!dev) return;
-  var name = nextConfigName(dev.kind);
-  call('POST', '/api/v1/configs', { name: name, device: ordinal })
-    .then(function() { setConn('created ' + name, 'good'); loadConfigs(); loadDevices(); })
+  // ⓘ The list comes from the agent, not from here: two places naming the same
+  // presets is two places to disagree about them.
+  call('GET', '/api/v1/presets').then(function(d) {
+    PRESETS = (d && d.presets) || [];
+    openPresetPicker(ordinal, dev);
+  }).catch(function() {
+    PRESETS = [];
+    openPresetPicker(ordinal, dev);      // still offers Blank
+  });
+}
+
+// ⭐ WHAT A PRESET DOES, as mouse controls only (rhoquinn8217, 2026-08-31).
+//
+// Four lines: how the cursor moves, the two clicks, and how to scroll. Nothing
+// else. ⓘ The presets still BIND the rest -- Enter, Escape, Space, the
+// keyboard, the arrows -- but listing ten identical lines on three cards said
+// nothing about which one you were choosing. These four are the difference.
+var PRESET_CURSOR_FROM = {
+  'gyro_to_mouse_gate': 'Gyro',
+  'stick_to_mouse': null,          // named by its value: left or right stick
+  'touchpad_to_mouse': 'Touchpad, one finger'
+};
+
+// ⚠️ RESTORED 2026-08-31. This was deleted with the old card layout while
+// presetInfoRows still used it, so opening the details window threw before it
+// could render -- which looked exactly like a button that did nothing.
+var PRESET_VALUE_LABELS = {
+  'OSKeyboard': 'on-screen keyboard',
+  'MouseLeft': 'left click', 'MouseRight': 'right click',
+  'MouseMiddle': 'middle click',
+  'MouseWheelUp': 'scroll up', 'MouseWheelDown': 'scroll down',
+  'ArrowUp': 'arrow up', 'ArrowDown': 'arrow down',
+  'ArrowLeft': 'arrow left', 'ArrowRight': 'arrow right'
+};
+
+var PRESET_SCROLL_FROM = {
+  'stick_to_scroll': null,
+  'touchpad_scroll': 'Touchpad, two fingers'
+};
+
+// ⓘ Button labels come from /api/v1/keys, whose help opens with the button's
+// own name ("Cross / A (bottom face) -- ..."), so the picker cannot drift from
+// the settings page.
+function buttonLabel(key) {
+  var meta = (KEYS || []).filter(function(k) { return k.key === key; })[0];
+  if (!meta || !meta.help) return key;
+  return meta.help.split(' -- ')[0].split(' (')[0];
+}
+
+function stickNamed(value) {
+  return value.charAt(0).toUpperCase() + value.slice(1) + ' stick';
+}
+
+function presetMappings(settings) {
+  var cursor = '', scroll = '', left = '', right = '';
+  (settings || []).forEach(function(s) {
+    if (PRESET_CURSOR_FROM.hasOwnProperty(s.key)) {
+      cursor = PRESET_CURSOR_FROM[s.key] || stickNamed(s.value);
+    } else if (PRESET_SCROLL_FROM.hasOwnProperty(s.key)) {
+      scroll = PRESET_SCROLL_FROM[s.key] || stickNamed(s.value);
+    } else if (s.key.indexOf('rebind_') === 0) {
+      if (s.value === 'MouseLeft') left = buttonLabel(s.key);
+      if (s.value === 'MouseRight') right = buttonLabel(s.key);
+    }
+  });
+  var lines = [];
+  if (cursor) lines.push(cursor + ' → cursor');
+  if (left) lines.push(left + ' → left click');
+  if (right) lines.push(right + ' → right click');
+  if (scroll) lines.push(scroll + ' → scroll');
+  return lines;
+}
+
+function openPresetPicker(ordinal, dev) {
+  OVERLAY_OPENER = GP_FOCUS[GP_INDEX] || null;
+  var kind = settingsKindOf(dev.kind);
+  // ⭐ TITLES ONLY, and choosing one OPENS ITS DETAILS rather than creating it
+  // straight away (rhoquinn8217, 2026-08-31). An ⓘ button beside each row was
+  // tried first and dropped: it needed its own navigation axis, and every
+  // press that reached it was a press that could have shown the same thing.
+  //
+  // ⓘ Blank gets a details page too, so "nothing is set" is confirmed rather
+  // than assumed from an empty row.
+  var html = '<div class="prow">' +
+             '<button onclick="openPresetInfo(\'' + esc(ordinal) + '\',\'\')">' +
+             'Blank</button></div>';
+  PRESETS.forEach(function(p) {
+    // ⛔ Only presets that suit THIS controller. One that cannot act on it
+    // would be a config that silently does nothing.
+    if ((p.kinds || []).indexOf(kind) < 0) return;
+    html += '<div class="prow">' +
+            '<button data-preset="' + esc(p.name) + '" ' +
+            'onclick="openPresetInfo(\'' + esc(ordinal) + '\',\'' +
+            esc(p.name) + '\')">' + esc(p.name) + '</button></div>';
+  });
+  document.getElementById('presetList').innerHTML = html;
+  document.getElementById('presetBox').style.display = 'flex';
+  PRESET_OPEN = true;
+  gpCollect();
+  GP_INDEX = 0;
+  gpPaint();
+}
+
+// ⭐ The info window: why you would pick this one, then what it binds.
+//
+// ⓘ Two tables rather than arrow lines: a long list reads better in columns,
+// and the picker keeps arrows because those rows are short.
+var PRESET_INFO_OPEN = '';       // the preset being read, or ''
+
+function presetInfoRows(settings) {
+  var mouse = [];
+  var buttons = [];
+  var dpad = 0;
+  (settings || []).forEach(function(s) {
+    // The four d-pad rows are one line: a preset only ever binds them to the
+    // arrows, and four near-identical rows push the rest of the table down.
+    if (['rebind_12','rebind_13','rebind_14','rebind_15'].indexOf(s.key) >= 0 &&
+        String(s.value).indexOf('Arrow') === 0) { dpad++; return; }
+    if (PRESET_CURSOR_FROM.hasOwnProperty(s.key)) {
+      mouse.push([PRESET_CURSOR_FROM[s.key] || stickNamed(s.value), 'cursor']);
+    } else if (PRESET_SCROLL_FROM.hasOwnProperty(s.key)) {
+      mouse.push([PRESET_SCROLL_FROM[s.key] || stickNamed(s.value), 'scroll']);
+    } else if (s.key === 'touchpad_tap_click') {
+      mouse.push(['Touchpad tap', 'click']);
+    } else if (s.key === 'gyro_mouse_recenter_button') {
+      mouse.push(['Touchpad click', 'recentre the cursor']);
+    } else if (s.key === 'touchpad_click_drag') {
+      mouse.push(['Touchpad click', 'grab and drag, lift to drop']);
+    } else if (s.key.indexOf('rebind_') === 0) {
+      var label = PRESET_VALUE_LABELS[s.value] || s.value;
+      // The clicks are mouse controls even though they are button bindings.
+      if (s.value === 'MouseLeft' || s.value === 'MouseRight' ||
+          s.value === 'MouseMiddle') mouse.push([buttonLabel(s.key), label]);
+      else buttons.push([buttonLabel(s.key), label]);
+    } else {
+      // ⚠️ Anything without a friendly name still shows, as key = value:
+      // visible and ugly beats silently missing.
+      buttons.push([s.key, s.value]);
+    }
+  });
+  if (dpad === 4) buttons.push(['D-pad', 'arrow keys']);
+  // ⓘ Cursor first, then the clicks, then scrolling, then the rest -- the
+  // order someone reads them in when deciding whether this is the preset they
+  // want. Config order is the order they happened to be written in.
+  var rank = { 'cursor': 0, 'left click': 1, 'right click': 2, 'click': 3,
+               'scroll': 4 };
+  mouse.sort(function(a, b) {
+    var ra = rank.hasOwnProperty(a[1]) ? rank[a[1]] : 9;
+    var rb = rank.hasOwnProperty(b[1]) ? rank[b[1]] : 9;
+    return ra - rb;
+  });
+  return { mouse: mouse, buttons: buttons };
+}
+
+function presetTable(title, rows) {
+  if (!rows.length) return '';
+  var html = '<h4>' + esc(title) + '</h4><table>';
+  rows.forEach(function(r) {
+    html += '<tr><td>' + esc(r[0]) + '</td><td>' + esc(r[1]) + '</td></tr>';
+  });
+  return html + '</table>';
+}
+
+function openPresetInfo(ordinal, presetName) {
+  // ⓘ Blank is not in the list from the agent -- it is the absence of a
+  // preset -- so it is described here.
+  var p = presetName
+    ? PRESETS.filter(function(x) { return x.name === presetName; })[0]
+    : { name: 'Blank',
+        help: 'Nothing is set. Every setting stays at its default, and the ' +
+              'controller behaves exactly as it does now until you change ' +
+              'something.',
+        settings: [] };
+  if (!p) return;
+  var rows = presetInfoRows(p.settings);
+  document.getElementById('presetInfoTitle').textContent = p.name;
+  document.getElementById('presetInfoText').textContent = p.help || '';
+  document.getElementById('presetInfoTables').innerHTML =
+    presetTable('Mouse', rows.mouse) + presetTable('Buttons', rows.buttons);
+  // ⓘ Reading about a preset and choosing it is one press, not back-then-pick.
+  document.getElementById('presetInfoUse').onclick = function() {
+    createFromPreset(ordinal, presetName);
+  };
+  document.getElementById('presetInfoBox').style.display = 'flex';
+  PRESET_INFO_OPEN = presetName || 'Blank';
+  PRESET_LAST_INFO = presetName;
+  gpCollect();
+  GP_INDEX = 0;
+  gpPaint();
+}
+
+function closePresetInfo() {
+  document.getElementById('presetInfoBox').style.display = 'none';
+  PRESET_INFO_OPEN = '';
+  gpCollect();
+  // Back to the row that opened it, rather than the top of the list.
+  var back = PRESET_LAST_INFO
+    ? document.querySelector('#presetList button[data-preset="' + PRESET_LAST_INFO + '"]')
+    : document.querySelector('#presetList button');      // Blank is the first
+  if (!focusElement(back)) { GP_INDEX = 0; gpPaint(); }
+}
+
+var PRESET_LAST_INFO = '';
+
+function presetCancel() {
+  document.getElementById('presetInfoBox').style.display = 'none';
+  PRESET_INFO_OPEN = '';
+  document.getElementById('presetBox').style.display = 'none';
+  PRESET_OPEN = false;
+  gpCollect();
+  // Back to whatever opened it, rather than wherever index 0 now points.
+  if (OVERLAY_OPENER) focusElement(OVERLAY_OPENER);
+}
+
+function createFromPreset(ordinal, preset) {
+  var dev = LAST_DEVICES.filter(function(x) { return x.ordinal === ordinal; })[0];
+  if (!dev) { presetCancel(); return; }
+  var name = nextConfigName(dev.kind, preset);
+  var body = { name: name, device: ordinal };
+  if (preset) body.preset = preset;
+  presetCancel();
+  call('POST', '/api/v1/configs', body)
+    .then(function() {
+      setConn('created ' + name + (preset ? ' from ' + preset : ''), 'good');
+      loadConfigs(); loadDevices();
+    })
     .catch(function(){});
 }
 
@@ -2448,6 +2747,25 @@ function gpCollect() {
     }
   }
 
+  // The info window sits on top of the picker, so it takes focus first.
+  if (PRESET_INFO_OPEN) {
+    document.querySelectorAll('#presetInfoBox button').forEach(function(e) { list.push(e); });
+    GP_FOCUS = list;
+    if (GP_INDEX >= list.length) GP_INDEX = 0;
+    gpPaint();
+    return;
+  }
+
+  // ⭐ The preset picker, same rule as the dialogs below it: while it is open
+  // it is the ONLY thing focusable.
+  if (PRESET_OPEN) {
+    document.querySelectorAll('#presetBox button').forEach(function(e) { list.push(e); });
+    GP_FOCUS = list;
+    if (GP_INDEX >= list.length) GP_INDEX = 0;
+    gpPaint();
+    return;
+  }
+
   if (CONFIRM_CB) {
     document.querySelectorAll('#confirmBox button').forEach(function(e) { list.push(e); });
     GP_FOCUS = list;
@@ -2634,7 +2952,7 @@ setInterval(function () {
 // in dialogs, where these elements do not exist.
 function gpBoundary(delta) {
   var el = GP_FOCUS[GP_INDEX];
-  if (!el || CONFIRM_CB || RENAMING || FOOTER_MODE) return false;
+  if (!el || PRESET_OPEN || PRESET_INFO_OPEN || CONFIRM_CB || RENAMING || FOOTER_MODE) return false;
 
   // ⓘ closest() walks up from the element itself, so this is already the strip
   // the focused button belongs to -- no scoping needed here, unlike the
@@ -2958,7 +3276,11 @@ function gpKeyStep(dir) {
   //
   // ⚠️ Falls through to moving the halo where there are no sections -- a
   // dialog, a rename row -- so the axis is never dead.
-  if (CONFIRM_CB || RENAMING || FOOTER_MODE) { gpMove(dir); return; }
+  // ⓘ One axis in the picker now: ▲▼ walk the list, ✕ opens the details.
+  // ◄ ► have nothing to do there, so they are absorbed rather than moving the
+  // halo somewhere unexpected.
+  if (PRESET_OPEN && !PRESET_INFO_OPEN) return;
+  if (PRESET_INFO_OPEN || CONFIRM_CB || RENAMING || FOOTER_MODE) { gpMove(dir); return; }
   // ⓘ Two meanings for one axis, decided by where focus is: the header row is
   // horizontal, the sections are a strip. Both are "step sideways through the
   // thing you are in", which is why one axis carries both.
@@ -2971,6 +3293,8 @@ function gpKeyStep(dir) {
 
 // ○ in order of what is open, matching the pad's own precedence.
 function gpKeyBack() {
+  if (PRESET_INFO_OPEN) { closePresetInfo(); return; }
+  if (PRESET_OPEN) { presetCancel(); return; }
   if (CONFIRM_CB) { confirmNo(); return; }
   if (GP_EDITING) {
     GP_EDITING.classList.remove('gp-selecting');
@@ -3714,7 +4038,7 @@ function selfTest() {
   ['renderTabs','buildDevicePane','setStickyHead','paintStickyHead','measureSticky',
    'nameFor','pruneNames','deviceLabel','deviceLabelShort','settingsKindOf',
    'askConfirm','confirmYes','confirmNo','whoIs','setAutoLink','claimAutoLink',
-   'stopAutoLink','archive','unlink','renameConfig','copyConfigFor','loadConfigs','loadDevices',
+   'stopAutoLink','archive','unlink','renameConfig','copyConfigFor','createFromPreset','presetCancel','openPresetInfo','closePresetInfo','loadConfigs','loadDevices',
    'openConfig','applyPick','newConfigFor','preserveScroll','setDown','gpCollect'
   ].forEach(function(n) {
     ok('function ' + n, typeof window[n] === 'function');

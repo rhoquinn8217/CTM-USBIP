@@ -30,6 +30,7 @@ int32_t g_pushedY = 0;
 int g_pushCount = 0;
 int g_wheelSum = 0;
 uint8_t g_lastClick = 0;
+uint8_t g_dragMask = 0;
 int g_clickCount = 0;
 int g_ensureCalls = 0;
 
@@ -42,6 +43,7 @@ void reset_stubs()
     g_pushCount = 0;
     g_wheelSum = 0;
     g_lastClick = 0;
+    g_dragMask = 0;
     g_clickCount = 0;
     g_ensureCalls = 0;
 }
@@ -141,6 +143,7 @@ namespace ctm_mouse_device {
 namespace {   // internal linkage, same reason as above
 inline void add_wheel(int ticks) { g_wheelSum += ticks; }
 inline void add_click(uint8_t mask) { g_lastClick = mask; ++g_clickCount; }
+inline void set_drag(uint8_t mask) { g_dragMask = mask; }
 }
 } // namespace ctm_mouse_device
 
@@ -409,6 +412,78 @@ int run_touch_mouse_tests()
         set_point(r, 0, true, 1, 410, 400);
         run_step(r, 48);
         CTM_CHECK_EQ(g_pushedX, 10);           // from the re-anchor, no jump
+    }
+
+    section("touch drag: click to grab, LIFT to drop");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_to_mouse"] = "true";
+        g_cfg["touchpad_click_drag"] = "true";
+        auto r = rest_report();
+
+        set_point(r, 0, true, 1, 300, 300);
+        run_step(r, 0);
+        CTM_CHECK_EQ(static_cast<int>(g_dragMask), 0);   // finger alone: nothing
+
+        r[10] |= 0x02;                                   // pad clicked in
+        run_step(r, 16);
+        CTM_CHECK_EQ(static_cast<int>(g_dragMask), 0x01); // grabbed
+
+        r[10] &= ~0x02;                                  // click released early
+        set_point(r, 0, true, 1, 400, 380);
+        run_step(r, 32);
+        CTM_CHECK_EQ(static_cast<int>(g_dragMask), 0x01); // ⭐ still held
+        CTM_CHECK(g_pushedX > 0);                        // and still moving
+
+        set_point(r, 0, false, 1, 400, 380);             // finger lifts
+        run_step(r, 48);
+        CTM_CHECK_EQ(static_cast<int>(g_dragMask), 0);   // dropped
+    }
+
+    section("touch drag: a click with no finger is not a drag");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_to_mouse"] = "true";
+        g_cfg["touchpad_click_drag"] = "true";
+        auto r = rest_report();
+        r[10] |= 0x02;                                   // clicked, no touch
+        run_step(r, 0);
+        run_step(r, 16);
+        CTM_CHECK_EQ(static_cast<int>(g_dragMask), 0);
+    }
+
+    section("touch drag: nothing is left held when it cannot continue");
+    {
+        // ⛔ Every way out of a drag must release the button, or the desktop is
+        // left with a stuck mouse and nothing able to let go.
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_to_mouse"] = "true";
+        g_cfg["touchpad_click_drag"] = "true";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 300, 300);
+        r[10] |= 0x02;
+        run_step(r, 0);
+        CTM_CHECK_EQ(static_cast<int>(g_dragMask), 0x01);
+
+        g_configModeEffective = true;                    // settings page opens
+        run_step(r, 16);
+        CTM_CHECK_EQ(static_cast<int>(g_dragMask), 0);
+
+        // ...and an unbridge mid-drag.
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_to_mouse"] = "true";
+        g_cfg["touchpad_click_drag"] = "true";
+        auto r2 = rest_report();
+        set_point(r2, 0, true, 1, 300, 300);
+        r2[10] |= 0x02;
+        run_step(r2, 0);
+        CTM_CHECK_EQ(static_cast<int>(g_dragMask), 0x01);
+        ctm_touch_mouse::forget(kDev);
+        CTM_CHECK_EQ(static_cast<int>(g_dragMask), 0);
     }
 
     section("touch: config mode stands the whole feature down");

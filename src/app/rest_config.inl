@@ -317,6 +317,7 @@ static std::string rest_keys_json()
 {"key":"touchpad_scroll","type":"bool","default":false,"help":"Two fingers on the touchpad scroll, like a laptop trackpad. Vertical only."},
 {"key":"touchpad_scroll_speed","type":"int","min":1,"max":400,"default":100,"help":"Scroll speed, percent."},
 {"key":"touchpad_scroll_natural","type":"bool","default":false,"help":"Scroll direction. Off: fingers down scrolls the page down, the classic wheel. On: content follows your fingers, the phone convention."},
+{"key":"touchpad_click_drag","type":"bool","default":false,"help":"Click the touchpad in with a finger on it to grab, move to drag, then LIFT THE FINGER to drop -- the click itself can be released straight away. Trackpads call this drag lock; three-finger drag is not possible here because the pad reports only two touches."},
 {"key":"touchpad_tap_click","type":"bool","default":false,"help":"A quick tap clicks: one finger is left click, two fingers is right click. Double-click is just tapping twice. Turn off if taps misfire in your grip."},
 {"key":"gyro_to_mouse_gate","type":"choice","choices":["","always","L2","R2","L1","R1","touchpad","!touchpad","touchpad_click","PS"],"default":"","help":"What must be held for gyro to move the mouse. Blank is off."},
 {"key":"gyro_mouse_px_per_360","type":"int","min":1000,"max":200000,"default":1920,"help":"Pixels the cursor travels for one full turn. 1920 means one turn crosses a 1080p screen, which is the calibrated figure -- if you need far more than that, the sensitivity settings are usually what is actually wrong."},
@@ -589,6 +590,41 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
     }
 
     // GET, POST /api/v1/configs
+    // ⭐ The presets a UI can offer. ⓘ Listed by the agent rather than
+    // hardcoded in the page, for the same reason /api/v1/keys exists: two
+    // places naming the same thing is two places to disagree.
+    if (req.path == "/api/v1/presets") {
+        if (req.method != "GET") {
+            *out = rest_error_response(405, "method not allowed", "Allow: GET, OPTIONS\r\n");
+            return true;
+        }
+        std::string body = "{\"presets\":[";
+        for (size_t i = 0; i < ctm_presets::preset_count(); ++i) {
+            const ctm_presets::Preset &p = ctm_presets::kPresets[i];
+            if (i) body += ",";
+            body += "{\"name\":\"" + rest_json_escape(p.name) + "\"";
+            body += ",\"help\":\"" + rest_json_escape(p.help) + "\"";
+            // ⭐ The settings themselves, so a UI can show what the preset
+            // DOES rather than a sentence about it. ⓘ Derived display beats a
+            // written description: the two cannot drift apart.
+            body += ",\"settings\":[";
+            for (size_t s = 0; s < p.count; ++s) {
+                if (s) body += ",";
+                body += "{\"key\":\"" + rest_json_escape(p.settings[s].key) + "\"";
+                body += ",\"value\":\"" + rest_json_escape(p.settings[s].value) + "\"}";
+            }
+            body += "]";
+            body += ",\"kinds\":[";
+            bool first = true;
+            if (p.ds5) { body += "\"ds5\""; first = false; }
+            if (p.ds5_edge) { body += first ? "\"ds5_edge\"" : ",\"ds5_edge\""; }
+            body += "]}";
+        }
+        body += "]}";
+        *out = rest_http_response(200, body);
+        return true;
+    }
+
     if (req.path == "/api/v1/configs") {
         if (req.method == "GET") {
             *out = rest_http_response(200, rest_configs_json());
@@ -611,9 +647,52 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
                 *out = rest_error_response(400, error);
                 return true;
             }
+            // ⭐ An optional preset to start from. Absent means blank, which
+            // is what create has always done -- so the plain path is
+            // unchanged and a blank config is still one press away.
+            const ctm_presets::Preset *preset = nullptr;
+            auto presetIt = json.strings.find("preset");
+            if (presetIt != json.strings.end() && !presetIt->second.empty()) {
+                preset = ctm_presets::find(presetIt->second);
+                if (preset == nullptr) {
+                    *out = rest_error_response(400, "no preset named " + presetIt->second);
+                    return true;
+                }
+                const std::string settingsKind = config_store::settings_kind_for(kind);
+                if (!ctm_presets::suits(*preset, settingsKind)) {
+                    // ⛔ Named rather than ignored: a preset that cannot act on
+                    // this controller would be a config that silently does
+                    // nothing, which is the worst shape a setting can take.
+                    *out = rest_error_response(400,
+                        std::string(preset->name) + " is not for " + settingsKind);
+                    return true;
+                }
+            }
+
             if (!config_store::create_config(nameIt->second, kind, &error)) {
                 *out = rest_error_response(409, error);
                 return true;
+            }
+
+            if (preset != nullptr) {
+                // ⓘ Through set_setting, the same comment-preserving writer
+                // everything else uses -- so a preset config reads like any
+                // hand-written one and can be edited the same way.
+                for (size_t i = 0; i < preset->count; ++i) {
+                    std::string writeError;
+                    if (!config_store::set_setting(nameIt->second,
+                                                   preset->settings[i].key,
+                                                   preset->settings[i].value,
+                                                   &writeError)) {
+                        // ⚠️ The config EXISTS at this point. Reporting the
+                        // failure and leaving it is honest; deleting it behind
+                        // the user's back would be worse.
+                        *out = rest_error_response(500,
+                            "created " + nameIt->second + " but could not write " +
+                            preset->settings[i].key + ": " + writeError);
+                        return true;
+                    }
+                }
             }
             // Link the device that asked for it, if one was named -- creating a
             // config for a controller and not attaching it would surprise.
