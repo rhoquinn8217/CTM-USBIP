@@ -70,6 +70,8 @@
            Reload stays. Polling watches DEVICES; a config edited by hand
            outside this page is not noticed until something asks, so there is
            still a case for it -- it is just no longer the main path.
+           ⛔ SUPERSEDED 2026-09-01: configs are polled too now, so that case
+           is gone and the button with it.
     2.13.2 ⛔ Fix: Save and Cancel on the rename row could not be reached by the
            D-pad, leaving ○ as the only way out. The focus scan looked at
            #stickyHead by name, and the rename row is a sibling of it -- so it
@@ -485,6 +487,15 @@
   .sectbar { display:flex; flex-wrap:wrap; gap:6px; margin:10px 0 6px; }
   .sectbar button { padding:4px 10px; font-size:12px; }
   .sectbar button.on { outline:2px solid #7aa7e0; }
+  /* ⭐ ONE COLUMN FOR BUBBLES (rhoquinn8217, 2026-09-01). Both notices were
+     pinned to the same corner at the same offset, so a second one landed on
+     top of the first and hid it. They stack here instead, newest at the
+     bottom, and the column is invisible when empty. */
+  #bubbles { position:fixed; right:16px; bottom:56px; z-index:40;
+             display:flex; flex-direction:column; gap:8px; max-width:340px;
+             align-items:flex-end; pointer-events:none; }
+  #bubbles > div { pointer-events:auto; padding:10px 12px; border-radius:10px;
+                   font-size:12px; line-height:1.6; }
   #presetBox { position:fixed; inset:0; z-index:60; display:none;
                align-items:center; justify-content:center; background:#0009; }
   #presetList button { display:block; width:100%; text-align:left;
@@ -560,11 +571,9 @@
       <td>It needs <code>--rest</code>. Stop it and start it with the command
           above.</td>
     </tr>
-    <tr>
-      <td>This window is broken</td>
-      <td>Try going to <a id="downLink" href="#" target="_blank"></a> in a
-          browser.</td>
-    </tr>
+    <!-- ⛔ REMOVED 2026-09-01. A row suggesting the address be opened in a
+         browser sent people somewhere that only tells them the page cannot be
+         used that way -- advice that costs a click and answers nothing. -->
   </table>
 </div>
 
@@ -575,16 +584,23 @@
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
-  <input id="token" placeholder="only if --rest-token" size="16"
-    title="Only needed if the agent was started with --rest-token. It makes the API require this value on every call, which matters when --rest-lan exposes it to the network.">
-  <button class="go" onclick="refreshAll()"
-    title="Controllers are picked up automatically. This reloads configs too, for when a file has been edited outside this page.">Reload</button>
-  <span id="conn" class="muted">not checked</span>
+  <input id="token" placeholder="leave empty unless you set one" size="16"
+    title="A password for the listener. Leave this empty -- almost everyone should. The listener normally only answers programs on this same PC, so it needs no password. If you start it with --rest-lan it answers other machines on your network too, and then anyone on your wifi could send it commands. --rest-token sets a password to stop that, and this box is where you type the same password back so this page is still allowed in.">
+  <!-- ⛔ RELOAD REMOVED 2026-09-01. rhoquinn8217: "Using it means the page is
+       broken." Its last purpose was noticing a config edited outside this
+       page, and that is covered twice over now -- the page reloads configs
+       every 10 seconds unless you are mid-edit, and the agent watches the
+       files and applies changes to live sessions in about a second.
+       ⓘ refreshAll() itself STAYS: it is the startup path that fetches the
+       keys list every editor is built from. -->
+  <!-- ⓘ The status line moved to the Log header 2026-09-01. It reads like a
+       running log -- "created X", "renamed to Y" -- so it belongs with the
+       log rather than beside a field it has nothing to do with. -->
   <!-- ⭐ On the agent row rather than a line of its own: it is a session-wide
        switch like the agent address beside it, and a row to itself made it look
        like a heading for the table below. -->
   <button id="holdBtn" onclick="toggleGateHold()"
-          style="margin-left:18px">Controller Inputs Locked to Page</button>
+          style="margin-left:18px">Safe Edit Mode: ON &mdash; only basic controls</button>
   <span id="holdHint" class="muted" style="font-size:12px">click to unlock</span>
 </div>
 
@@ -625,6 +641,10 @@
      on a TV means scrolling past it to reach anything useful. -->
 <h2 style="cursor:pointer" onclick="toggleLog()">
   <span id="logCaret">▸</span> Log <span class="muted" id="logCount"></span>
+  <!-- ⓘ Clicking the status must not toggle the log open and shut, so it stops
+       the click here. -->
+  <span id="conn" class="muted" style="font-size:12px;font-weight:400;margin-left:10px"
+        onclick="event.stopPropagation()">not checked</span>
 </h2>
 <div id="logWrap" style="display:none">
   <div class="bar">
@@ -636,6 +656,8 @@
 
 <!-- ⛔ In-page, so it can carry a real title and be dismissed by a controller.
      A native confirm() is titled with the origin and ignores the pad. -->
+<div id="bubbles"></div>
+
 <div id="presetInfoBox" style="display:none">
   <div class="confirmCard">
     <h2 id="presetInfoTitle">Preset</h2>
@@ -1165,13 +1187,11 @@ function noteBridgeMayNeedAMoment() {
   if (document.getElementById('bridgeWait')) return;
   var box = document.createElement('div');
   box.id = 'bridgeWait';
-  box.style.cssText = 'position:fixed;right:16px;bottom:56px;z-index:40;max-width:340px;' +
-    'padding:10px 12px;border:1px solid #7aa7e0;border-radius:10px;background:#20293a;' +
-    'color:#bcd4f2;font-size:12px;line-height:1.6';
+  box.style.cssText = 'border:1px solid #7aa7e0;background:#20293a;color:#bcd4f2';
   box.innerHTML = '<strong>The listener is running.</strong><br>' +
     'Bridging can take a moment to become available after a fresh start. If ' +
     'the gesture gives the refusal signal, wait a few seconds and try again.';
-  document.body.appendChild(box);
+  document.getElementById('bubbles').appendChild(box);
 }
 
 function clearBridgeWait() {
@@ -2885,13 +2905,18 @@ function noteRemapsSuspended() {
   SAID_SUSPENDED = true;
 
   var box = document.createElement('div');
-  box.style.cssText = 'position:fixed;right:16px;bottom:56px;z-index:40;max-width:340px;' +
-    'padding:10px 12px;border:1px solid #6c8cff;border-radius:10px;background:#1e2333;' +
-    'color:#c9d4ff;font-size:12px;line-height:1.6';
-  box.innerHTML = '<strong>Your remaps and gyro are paused here.</strong><br>' +
-    'While this window is in front the controller drives it directly, so button ' +
-    'remaps and gyro-to-mouse are suspended. They come back when you close it.';
-  document.body.appendChild(box);
+  box.style.cssText = 'border:1px solid #6c8cff;background:#1e2333;color:#c9d4ff';
+  // ⭐ This is where Safe Edit Mode gets advertised, because this is the moment
+  // someone notices the cursor has stopped and wonders why. A permanent banner
+  // would become furniture; this appears exactly when it answers a question.
+  box.innerHTML = '<strong>Your remaps and cursor are paused here.</strong><br>' +
+    'While this window is in front the controller drives it directly, so ' +
+    'remaps and gyro, stick or touchpad cursor are suspended. They come back ' +
+    'when you close it.<br>' +
+    '<span style="opacity:.85">Want to keep them while you edit? Turn ' +
+    '<strong>Safe Edit Mode</strong> off, top of the page &mdash; they stay ' +
+    'active, but your inputs will mirror in an active game.</span>';
+  document.getElementById('bubbles').appendChild(box);
   setTimeout(function () {
     if (box.parentNode) box.parentNode.removeChild(box);
   }, 6000);
@@ -2914,13 +2939,11 @@ function noteUngatedPad() {
   box = document.createElement('div');
   box.id = 'ungatedWarn';
   box.dataset.seen = Date.now();
-  box.style.cssText = 'position:fixed;right:16px;bottom:56px;z-index:40;max-width:340px;' +
-    'padding:10px 12px;border:1px solid #e0c07a;border-radius:10px;background:#3a3320;' +
-    'color:#e8cf92;font-size:12px;line-height:1.6';
+  box.style.cssText = 'border:1px solid #e0c07a;background:#3a3320;color:#e8cf92';
   box.innerHTML = '<strong>This controller is not bridged.</strong><br>' +
-    'Only bridged controllers are locked to this page. Everything you press on ' +
+    'Safe Edit Mode only holds BRIDGED controllers. Everything you press on ' +
     'this one is also reaching the game.';
-  document.body.appendChild(box);
+  document.getElementById('bubbles').appendChild(box);
 }
 
 // ⓘ Also clears when the gate goes off entirely -- nothing is locked to the
@@ -3778,13 +3801,6 @@ function setDown(down) {
   // rather than a suggestion to go and compare two things from memory.
   var addr = document.getElementById('downAddr');
   if (addr && down) addr.textContent = base();
-  // ⓘ href and text both from base(), so a page pointed at a non-default port
-  // offers the address it is ACTUALLY using rather than a guess.
-  var link = document.getElementById('downLink');
-  if (link && down) {
-    link.textContent = base();
-    link.href = base();
-  }
   var pane = document.getElementById('pane-overview');
   if (cover) cover.style.display = down ? 'block' : 'none';
   // ⛔ CLEAR the inline style, never set one to show. An inline display beats
@@ -3904,12 +3920,27 @@ function paintPadDestination(d) {
     // ⭐ Colour carries the state at a glance: green while the page holds the
     // controllers, amber while the game is still seeing them. The exclamation
     // is on the amber one because that is the state you might not have meant.
-    btn.textContent = GATE_HELD ? 'Controller inputs mirrored in game!'
-                                : 'Controller Inputs Locked to Page';
+    // ⭐ SAFE EDIT MODE (rhoquinn8217, 2026-09-01). The old wording named the
+    // mechanism -- inputs locked to the page -- when what matters is what each
+    // state COSTS you. On means safe but no cursor; off means the cursor keeps
+    // working and the game sees everything you press.
+    // ⭐ rhoquinn8217's wording, 2026-09-01, and the choice of MIRROR is the
+    // point: "mirrored in game" names a problem gamepad users already know,
+    // where "also reaches the game" reads as a description of normal
+    // behaviour rather than a warning.
+    btn.textContent = GATE_HELD
+      ? 'Safe Edit Mode: OFF \u2014 \u26a0 inputs are mirrored in active game'
+      : 'Safe Edit Mode: ON \u2014 only basic controls';
+    btn.title = GATE_HELD
+      ? 'Re-mappings and gyro/stick/touchpad mouse modes are active while '
+        + 'editing however controller inputs will mirror in active game'
+      : 'Re-mappings and gyro/touchpad/stick mouse modes are disabled while '
+        + 'editing. Inputs are also locked to this window to prevent inputs '
+        + 'mirrored in games.';
   }
   var hint = document.getElementById('holdHint');
   if (hint) {
-    hint.textContent = GATE_HELD ? 'click to lock to page' : 'click to unlock';
+    hint.textContent = GATE_HELD ? 'click to turn on' : 'click to turn off';
   }
 }
 
