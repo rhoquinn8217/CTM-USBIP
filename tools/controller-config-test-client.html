@@ -421,8 +421,13 @@
   /* ⛔ The focus ring is drawn OUTSIDE the element it marks, so an element
      flush against this block's edge gets its ring clipped by that edge. The
      padding is for the RING, not the control. */
+  /* ⓘ NO BOTTOM PADDING (rhoquinn8217, 2026-09-01): the section tabs sit
+     DIRECTLY beneath the config row, as one block rather than two rows with a
+     gap between them. ⭐ Safe for everything else below the header, because
+     headings carry their own 22px top margin -- Overview's Devices table keeps
+     its separation without this. */
   #stickyTop { position:sticky; top:0; z-index:10; background:#15161a;
-               padding:0 6px 14px; margin:0 -6px; overflow:visible; }
+               padding:0 6px 0; margin:0 -6px; overflow:visible; }
   .bar { padding-top:6px; }
   /* ⭐ The controller focus ring is deliberately loud. On a TV across a room a
      subtle outline is invisible, and not knowing what is selected makes the
@@ -466,7 +471,13 @@
   /* Locked: the page has the pads. Mirrored: the game still sees them. */
   #holdBtn { background:#1b2b21; border-color:#4f9d69; color:#8fd6a4;
              font-weight:600; }
-  #holdBtn.on { background:#3a3320; border-color:#e0c07a; color:#e8cf92; }
+  /* ⭐ THE STATE IS THE COLOUR (rhoquinn8217, 2026-09-01), on every copy.
+     Green while inputs are held in this window; amber while they mirror into
+     the game, which is the state you might not have meant to be in.
+     ⓘ The same green and amber the rest of the page already uses -- .good and
+     .warnc -- rather than two more colours to keep in step. */
+  #holdBtn.on, .holdBtnCopy.on { background:#3a3320; border-color:#e0c07a; color:#e8cf92; }
+  #holdBtn.safe, .holdBtnCopy.safe { background:#1f3325; border-color:#7fd18c; color:#a9e3b5; }
   #padDest { margin-left:auto; }
   #padDest.on { color:#7fd18c; }
   /* Lit while ○ has backed out into it, so it is clear where focus went. */
@@ -484,18 +495,58 @@
   .cols { display:grid; grid-template-columns:1fr; gap:16px; }
   /* The section strip reads like the controller tabs above it, on purpose:
      the same shape means the same gesture, and ◄ ► here mirrors L1/R1 there. */
-  .sectbar { display:flex; flex-wrap:wrap; gap:6px; margin:10px 0 6px; }
-  .sectbar button { padding:4px 10px; font-size:12px; }
-  .sectbar button.on { outline:2px solid #7aa7e0; }
+  /* ⭐ STICKY UNDER THE HEADER (rhoquinn8217, 2026-09-01): a long section means
+     scrolling away from the strip you switch sections with.
+     ⛔ THE NOTE ABOVE SAYS TWO STICKY BLOCKS SLID OVER EACH OTHER, and it is
+     right -- when their offsets are picked by hand. This one uses `--stickH`,
+     which the page ALREADY measures from the header on every repaint for
+     scroll-margin, so the two cannot disagree however the header grows: a
+     rename row opening, tabs wrapping to a second line.
+     ⓘ Reusing that variable rather than adding a second one: two measurements
+     of the same thing is how they end up different.
+     ⓘ z-index below the header's 10, so the header wins where they meet, and
+     an opaque background so settings do not show through it. */
+  /* ⓘ NO TOP MARGIN (rhoquinn8217, 2026-09-01). The strip looked taller at the
+     top of the page and tighter once stuck -- it never changed size, the 10px
+     margin above it simply stopped being visible. The tight version is the one
+     worth keeping, so the spacing is the same in both states. */
+  /* ⓘ No sticky of its own: it is inside #stickyTop, which is the sticky
+     block. ⛔ Empty on Overview until a config is open, so it collapses rather
+     than leaving a stray rule across the page. */
+  .sectbar { display:flex; flex-wrap:wrap; gap:4px; margin:0; padding:0; }
+  .sectbar:not(:empty) { border-bottom:1px solid #2c2e36; }
+  /* ⭐ THE SAME SHAPE AS THE CONTROLLER TABS (rhoquinn8217, 2026-09-01), and
+     deliberately so: sections are to a controller what controllers are to the
+     page, so the row that switches them should read the same way. Boxed
+     buttons made a second, louder toolbar out of what is really a tab row.
+     ⓘ Still <button> underneath -- focus, the halo and pad navigation all
+     depend on that; only the look changes. */
+  .sectbar button { background:transparent; border:none; border-radius:0;
+                    border-bottom:2px solid transparent; color:#8b8d96;
+                    padding:9px 14px; font-size:13.5px; }
+  .sectbar button:hover { color:#c9cbd3; }
+  /* ⭐ THE EMPHASIS BELONGS TO THE STRIP WHILE YOU ARE ON IT (rhoquinn8217,
+     2026-09-01). Away from it the underline and the bold come off and only the
+     brighter text remains, so the row stops competing with whatever you are
+     actually working on. */
+  .sectbar button.on { color:#e8e8ea; outline:none; }
+  #sectBar.here button.on { border-bottom-color:#6c8cff; font-weight:600; }
   /* ⭐ ONE COLUMN FOR BUBBLES (rhoquinn8217, 2026-09-01). Both notices were
      pinned to the same corner at the same offset, so a second one landed on
      top of the first and hid it. They stack here instead, newest at the
      bottom, and the column is invisible when empty. */
-  #bubbles { position:fixed; right:16px; bottom:56px; z-index:40;
+  /* ⭐ RIGHT, SLIGHTLY ABOVE CENTRE, AND SEE-THROUGH (rhoquinn8217,
+     2026-09-01). Bottom right sat over the footer and the last rows of a
+     section; the top right corner covered the controller tabs. Above centre
+     is clear of both and still lands where the eye goes. */
+  #bubbles { position:fixed; right:16px; top:38%; z-index:40;
              display:flex; flex-direction:column; gap:8px; max-width:340px;
              align-items:flex-end; pointer-events:none; }
+  /* ⓘ Translucent rather than clear: text over an arbitrary background is
+     unreadable, so the panel keeps a wash and a blur behind it. */
   #bubbles > div { pointer-events:auto; padding:10px 12px; border-radius:10px;
-                   font-size:12px; line-height:1.6; }
+                   font-size:12px; line-height:1.6; backdrop-filter:blur(6px);
+                   -webkit-backdrop-filter:blur(6px); }
   #presetBox { position:fixed; inset:0; z-index:60; display:none;
                align-items:center; justify-content:center; background:#0009; }
   #presetList button { display:block; width:100%; text-align:left;
@@ -550,6 +601,13 @@
 <div id="stickyTop">
   <div class="tabs" id="tabs"></div>
   <div id="stickyHead"></div>
+  <!-- ⭐ ONE SECTION STRIP, AND IT LIVES IN THE HEADER (rhoquinn8217,
+       2026-09-01). It used to be rendered inside each pane and made sticky on
+       its own, which meant a second sticky block with its own offset -- and the
+       note above records that two of those slide over each other. Inside the
+       header there is only one sticky block again, and no offset to keep in
+       step. -->
+  <div id="sectBar" class="sectbar"></div>
   <div id="renameRow"></div>
 </div>
 
@@ -604,13 +662,6 @@
   <span id="holdHint" class="muted" style="font-size:12px">click to unlock</span>
 </div>
 
-<!-- ⭐ Stops the page taking the controller, whatever focus does. Two reasons
-     to want it: adjusting settings at the desk while not minding that the game
-     sees the pad, and getting out when something is stuck.
-     ⓘ On Overview rather than the footer -- it is a session-wide choice, and the
-     footer is for status rather than controls. -->
-
-
 <h2>Devices</h2>
 <div id="devices"><span class="muted">Refresh to load.</span></div>
 
@@ -622,12 +673,17 @@
 </div>
 <div id="configs"><span class="muted">Refresh to load.</span></div>
 
+
 <!-- ⭐ Its own picker. The editor used to be reachable only by clicking a
      config name in the table, which is not a place anyone looks for a way in. -->
 <h2>Editing</h2>
-<div class="kv">
+<div class="kv" style="display:flex;align-items:center;gap:8px">
   <label>config</label>
   <select id="editorPick" onchange="openConfig(this.value)"></select>
+  <span style="margin-left:auto;display:flex;align-items:center;gap:8px">
+    <span id="holdHint2" class="muted holdHintCopy" style="font-size:12px">click to turn off</span>
+    <button id="holdBtn2" class="holdBtnCopy" onclick="toggleGateHold()">Safe Edit Mode: ON &mdash; only basic controls</button>
+  </span>
 </div>
 <h2 id="editorHead" style="display:none">Editing <code id="editorName"></code></h2>
 <div id="cfgEditor"></div>
@@ -1008,6 +1064,17 @@ var LAST_DEVICES = [];
 // empty pane.
 var SECT_ACTIVE = 'Audio';
 
+// ⭐ One strip in the header, but a set of sections PER PANE -- Overview edits
+// whichever config you pick, a controller tab edits its own. Held here and
+// swapped in when the tab changes.
+var SECT_BARS = {};
+
+function paintSectBar() {
+  var host = document.getElementById('sectBar');
+  if (!host) return;
+  host.innerHTML = SECT_BARS[ACTIVE] || '';
+}
+
 // The controls that make up the settings view, found rather than remembered --
 // the pane is re-rendered often enough that a held reference goes stale.
 //
@@ -1023,7 +1090,9 @@ function activePane() {
 }
 
 function sectBarButton(name) {
-  return activePane().querySelector('.sectbar button[data-sect="' + name + '"]');
+  // ⓘ One strip now, in the header -- no pane scoping needed, and no chance of
+  // finding a hidden pane's copy, which is what scoping was added for.
+  return document.querySelector('#sectBar button[data-sect="' + name + '"]');
 }
 
 function firstControlInSection() {
@@ -1040,7 +1109,13 @@ function firstControlInSection() {
 // The linked-config picker for the tab in view. ⓘ On Overview there is none,
 // and every rule below simply does not fire there.
 function configPicker() {
-  return document.getElementById('pick-' + ACTIVE);
+  // ⭐ OVERVIEW HAS ONE TOO (rhoquinn8217, 2026-09-01), and it is a different
+  // element: a controller tab names its picker after the pad, while Overview's
+  // editor has a single one. Without this, every rule that reaches "the
+  // picker" simply did nothing on Overview and the halo fell through to
+  // document order.
+  return document.getElementById('pick-' + ACTIVE) ||
+         document.getElementById('editorPick');
 }
 
 // ⭐ The controller's header is a ROW -- picker, New, Rename, Copy, auto link --
@@ -1059,6 +1134,12 @@ function configPicker() {
 // guess: `.devrow` is the header table's own class.
 function headerRowOf(el) {
   if (!el || !el.closest || !el.closest('#stickyTop')) return null;
+  // ⭐ THREE ROWS, not two (rhoquinn8217, 2026-09-01: a keyboard had no way to
+  // reach the controller tabs). The tab bar is the top row, and like the
+  // section strip it is walked with ◄ ► rather than by stepping through every
+  // tab with ▼.
+  if (el.closest('.tabs')) return 'tabs';
+  if (el.closest('#sectBar')) return 'sections';
   return el.closest('.devrow') ? 'device' : 'config';
 }
 
@@ -1089,6 +1170,25 @@ function stepHeader(dir) {
   return focusElement(row[next]);
 }
 
+// ⭐ THE FIRST SETTING OF A SECTION BRINGS THE SECTION'S TOP WITH IT
+// (rhoquinn8217, 2026-09-01). scroll-margin keeps the CONTROL clear of the
+// strip, but the heading above it was still clipped -- you landed on the first
+// row of Face buttons with "Face buttons" half hidden behind the strip.
+//
+// ⓘ Only for the FIRST control: anywhere else in the list, dragging the view
+// back to the section heading would fight the scrolling you are doing.
+function scrollSectionIntoView(el) {
+  var sect = el.closest && el.closest('.sect');
+  if (!sect) return false;
+  var head = parseInt(getComputedStyle(document.documentElement)
+                        .getPropertyValue('--stickH'), 10) || 0;
+  var top = sect.getBoundingClientRect().top + window.scrollY - head;
+  window.scrollTo({ top: top < 0 ? 0 : top });
+  return true;
+}
+
+// ⓘ The strip no longer needs snapping into place: it is part of the sticky
+// header, so it is always where it belongs.
 function focusElement(el) {
   if (!el) return false;
   var at = GP_FOCUS.indexOf(el);
@@ -1096,6 +1196,7 @@ function focusElement(el) {
   GP_INDEX = at;
   GP_WANT = focusKeyOf(el);
   gpPaint();
+  if (el === firstControlInSection() && scrollSectionIntoView(el)) return true;
   el.scrollIntoView({ block: 'nearest' });
   return true;
 }
@@ -1104,6 +1205,18 @@ function focusElement(el) {
 // because you want to be in it. ◄ ► leave focus on the strip instead, so
 // stepping through sections stays one axis rather than needing a step back up.
 function showSection(name, focusFirst) {
+  // ⭐ KEEP THE STRIP WHERE IT IS ON SCREEN (rhoquinn8217, 2026-09-01).
+  //
+  // ⛔ Sections are wildly different lengths -- Rumble has three settings, Gyro
+  // has a dozen -- so replacing one with the other changes the page height
+  // under a scroll position that does not move, and the whole view lurches.
+  //
+  // ⓘ The strip is the thing you are looking at when you switch, so it is the
+  // thing that should not move: note where it sits, and afterwards put the
+  // scroll back so it sits there still.
+  var bar = activePane().querySelector('.sectbar');
+  var wasAt = bar ? bar.getBoundingClientRect().top : null;
+
   SECT_ACTIVE = name;
   // ⓘ Every pane, not just the one in view: the section choice is one value for
   // the page, so a hidden pane must already be showing the right section when
@@ -1114,9 +1227,17 @@ function showSection(name, focusFirst) {
   document.querySelectorAll('.sectbar button[data-sect]').forEach(function(b) {
     b.className = (b.getAttribute('data-sect') === name) ? 'on' : '';
   });
+  measureSticky();          // the strip can wrap to two lines on a narrow window
   // The focusable set changed shape entirely -- rebuild it before choosing
   // where to land, or the index would point into the old list.
   gpCollect();
+  // ⓘ Only for a MOUSE switch. When focus is going to the strip, the snap in
+  // focusElement puts it in one fixed place, which is stronger than holding it
+  // wherever it happened to be -- and running both would fight.
+  if (wasAt !== null && bar && focusFirst) {
+    var nowAt = bar.getBoundingClientRect().top;
+    if (nowAt !== wasAt) window.scrollBy(0, nowAt - wasAt);
+  }
   if (!focusElement(focusFirst ? firstControlInSection() : sectBarButton(name))) {
     GP_INDEX = 0;
     gpPaint();
@@ -1126,7 +1247,7 @@ function showSection(name, focusFirst) {
 // ◄ ► step through the sections in the order they are shown. Returns false
 // when there are none, so left/right can fall back to moving the halo.
 function stepSection(dir) {
-  var bar = activePane().querySelector('.sectbar');   // scoped, see activePane
+  var bar = document.getElementById('sectBar');   // one strip, in the header
   if (!bar) return false;
   var names = [];
   bar.querySelectorAll('button[data-sect]').forEach(function(b) {
@@ -1166,7 +1287,7 @@ function noteBridgeMayNeedAMoment() {
   if (document.getElementById('bridgeWait')) return;
   var box = document.createElement('div');
   box.id = 'bridgeWait';
-  box.style.cssText = 'border:1px solid #7aa7e0;background:#20293a;color:#bcd4f2';
+  box.style.cssText = 'border:1px solid #7aa7e0;background:rgba(32,41,58,.78);color:#bcd4f2';
   box.innerHTML = '<strong>The listener is running.</strong><br>' +
     'Bridging can take a moment to become available after a fresh start. If ' +
     'the gesture gives the refusal signal, wait a few seconds and try again.';
@@ -1435,7 +1556,10 @@ var PRESET_SCROLL_FROM = {
 // the settings page.
 function buttonLabel(key) {
   var meta = (KEYS || []).filter(function(k) { return k.key === key; })[0];
-  if (!meta || !meta.help) return key;
+  if (!meta) return key;
+  // ⓘ The name field, with the old help-prefix parse as a fallback.
+  if (meta.name) return meta.name;
+  if (!meta.help) return key;
   return meta.help.split(' -- ')[0].split(' (')[0];
 }
 
@@ -1657,7 +1781,11 @@ function paintStickyHead() {
 function measureSticky() {
   var el = document.getElementById('stickyTop');
   if (!el) return;
-  document.documentElement.style.setProperty('--stickH', (el.offsetHeight + 14) + 'px');
+  // ⓘ ONE MEASUREMENT AGAIN. --headH and --sectH existed only to position a
+  // strip that was its own sticky block and to keep settings clear of it; the
+  // strip is inside this block now, so its height is already in here.
+  document.documentElement.style
+    .setProperty('--stickH', (el.offsetHeight + 14) + 'px');
 }
 
 window.addEventListener('resize', measureSticky);
@@ -1671,6 +1799,7 @@ function showTab(name) {
     b.classList.toggle('on', b.dataset.tab === name);
   });
   paintStickyHead();
+  paintSectBar();    // ⓘ each pane has its own sections; swap them in
   gpCollect();       // the focusable set changed
 }
 
@@ -1826,6 +1955,13 @@ function buildDevicePane(d) {
           (kindOk.length ? '' :
             ' <span class="muted">no ' + esc(settingsKindOf(d.kind)) +
             ' configs yet — press New</span>') +
+          // ⭐ Safe Edit Mode at the END of the config row, pushed right. It
+          // governs what the pad may do to the settings below, so it belongs on
+          // the row that names them rather than on a line of its own.
+          '<span style="margin-left:auto;display:flex;align-items:center;gap:8px">' +
+          '<span class="muted holdHintCopy" style="font-size:12px">click to turn off</span>' +
+          '<button class="holdBtnCopy" onclick="toggleGateHold()">' +
+          'Safe Edit Mode: ON — only basic controls</button></span>' +
           '</div>';
 
   if (!d.linked_config) {
@@ -1877,6 +2013,9 @@ function inertReason(key, sessionKind) {
 // ⚠️ Mute and touchpad-click are NOT here because they are not rebindable --
 // the index table stops at PS. Adding them is a change to rebind.inl, not to
 // this list.
+// The sections whose rows are buttons, and so want the legend above.
+var BUTTON_SECTIONS = ['Face buttons', 'Shoulder/stick buttons', 'System buttons'];
+
 var BTN_GROUP = {
   0: 'Face buttons', 1: 'Face buttons', 2: 'Face buttons', 3: 'Face buttons',
   12: 'Face buttons', 13: 'Face buttons', 14: 'Face buttons', 15: 'Face buttons',
@@ -1980,19 +2119,34 @@ function renderConfigEditor(hostId, configName, prefix, ordinal) {
     // lock falls out of the hiding; there is no second mechanism to keep in
     // step with it.
     if (order.indexOf(SECT_ACTIVE) < 0) SECT_ACTIVE = order[0] || '';
-    html += '<div class="sectbar">';
+    // ⭐ THE STRIP GOES IN THE HEADER, not in this pane's markup. ⓘ Only for
+    // the pane in view: a hidden pane rendering its own sections into the one
+    // shared strip would overwrite what the visible one just put there.
+    // ⛔ KEPT PER PANE, NOT JUST PAINTED. A pane usually renders while a
+    // DIFFERENT one is in view -- the settings load in the background -- so
+    // painting only the active one left the strip empty on every tab you had
+    // not been sitting on when it loaded.
+    var barHtml = '';
     order.forEach(function(g) {
-      html += '<button data-sect="' + esc(g) + '"' +
-              (g === SECT_ACTIVE ? ' class="on"' : '') +
-              ' onclick="showSection(\'' + esc(g).replace(/'/g, "\\'") + '\', true)">' +
-              esc(g) + '</button>';
+      barHtml += '<button data-sect="' + esc(g) + '"' +
+                 (g === SECT_ACTIVE ? ' class="on"' : '') +
+                 ' onclick="showSection(\'' + esc(g).replace(/'/g, "\\'") + '\', true)">' +
+                 esc(g) + '</button>';
     });
-    html += '</div>';
+    SECT_BARS[hostId === 'cfgEditor' ? 'overview' : ordinal] = barHtml;
+    paintSectBar();
 
     order.forEach(function(g) {
       html += '<div class="sect" data-sect="' + esc(g) + '"' +
               (g === SECT_ACTIVE ? '' : ' style="display:none"') +
-              '><h3>' + g + '</h3>';
+              '><h3>' + g + '</h3>' +
+              // ⭐ A LEGEND, once per button section (rhoquinn8217,
+              // 2026-09-01). The rows read (✕) | (A), and without a word
+              // saying so the second bracket is a guess.
+              (BUTTON_SECTIONS.indexOf(g) >= 0
+                ? '<div class="muted" style="font-size:11px;margin:-2px 0 8px">' +
+                  '(PS button) | (Xbox button)</div>'
+                : '');
       groups[g].forEach(function(meta) {
         // ⛔ Debug keys are for someone reading the log, not for the person
         // adjusting a controller -- and every row is one more to scroll past.
@@ -2102,11 +2256,21 @@ function renderConfigEditor(hostId, configName, prefix, ordinal) {
         // which is what makes a config portable -- index 0 is the bottom face
         // button on any pad. But nobody navigating this page should have to
         // know that, so the label comes from the help text's own name.
+        // ⭐ THE NAME IS ITS OWN FIELD NOW (2026-09-01). It used to be the
+        // first words of the help text, which meant the help could not be
+        // shortened without every row losing its label -- and the help was 255
+        // characters of the same boilerplate on all seventeen buttons.
+        //
+        // ⓘ Still falls back to parsing the help, so an older agent that sends
+        // no name keeps its labels.
         var prettyKey = meta.key;
         var m = /^(rebind|turbo)_(\d+)$/.exec(meta.key);
-        if (m && meta.help) {
-          var name = meta.help.split(' -- ')[0];
-          prettyKey = (m[1] === 'turbo') ? (name + ' — rapid fire') : name;
+        if (m) {
+          // ⭐ THE ACTION IS IN THE TITLE (rhoquinn8217, 2026-09-01), because
+          // "what this row does" was otherwise buried in the help. The name
+          // reads as a button -- (✕) | (A) -- and the row says what happens.
+          var name = meta.name || (meta.help ? meta.help.split(' -- ')[0] : meta.key);
+          prettyKey = name + (m[1] === 'turbo' ? ' — rapid fire' : ' — remap');
         }
         var shownKey = only ? (prettyKey + ' (' + only + ' only)') : prettyKey;
 
@@ -2123,6 +2287,9 @@ function renderConfigEditor(hostId, configName, prefix, ordinal) {
       html += '</div>';
     });
     host.innerHTML = html + '</div>';
+    // ⓘ The strip only exists once this has rendered, so its height is not
+    // knowable before now -- and scroll-margin depends on it.
+    measureSticky();
     gpCollect();
   }).catch(function(){});
 }
@@ -2243,6 +2410,12 @@ function preserveScroll(fn) {
 
 function loadDevices() {
   call('GET', '/api/v1/devices').then(function(d) {
+    // ⛔ THE RUN ID IS READ HERE TOO, and that is the fix rather than a tidy-up.
+    // It was only read in the poll, which has not run yet when the page first
+    // draws -- so a place saved before the first poll stored an EMPTY run and
+    // the restore refused it forever. Measured 2026-09-01: every restore was
+    // being thrown away by the guard meant to catch stale ones.
+    if (typeof d.run_id === 'string' && d.run_id) AGENT_RUN = d.run_id;
     var list = d.devices || [];
     var host = document.getElementById('devices');
     if (!list.length) {
@@ -2539,10 +2712,15 @@ function renameConfig(name) {
   }
   host.innerHTML =
     '<div class="kv"><label>rename</label>' +
-    '<input id="renameTo" value="' + esc(name) + '" size="22">' +
+    // ⭐ ENTER SAVES, ESCAPE CANCELS, from inside the box (rhoquinn8217,
+    // 2026-09-01). The plain-key handler deliberately keeps its hands off a
+    // field being typed into, so these two have to live on the field itself --
+    // which is also where every other dialog puts them.
+    '<input id="renameTo" value="' + esc(name) + '" size="22"' +
+    ' onkeydown="renameKey(event,\'' + esc(name) + '\')">' +
     '<button onclick="commitRename(\'' + esc(name) + '\')">Save</button>' +
     '<button onclick="cancelRename()">Cancel</button>' +
-    '<span class="muted">or press ○</span></div>';
+    '<span class="muted">Enter saves, Escape cancels, or press ○</span></div>';
   RENAMING = true;
   gpCollect();
   // ⭐ Put controller focus on Save. Opening a row and leaving focus elsewhere
@@ -2555,6 +2733,26 @@ function renameConfig(name) {
   }
   var box = document.getElementById('renameTo');
   if (box) { box.focus(); box.select(); }
+}
+
+function renameKey(ev, name) {
+  if (ev.key === 'Enter') { ev.preventDefault(); commitRename(name); return; }
+  if (ev.key !== 'Escape') return;
+  // ⭐ ESCAPE LEAVES THE BOX, IT DOES NOT CANCEL (rhoquinn8217, 2026-09-01).
+  //
+  // ⛔ With a keyboard only, Escape closing the whole row from inside the field
+  // meant the rename could never be finished: every attempt to get out threw
+  // the rename away with it. ➡️ First Escape steps out to the buttons, and a
+  // SECOND one -- handled by gpKeyBack, which is reachable once focus has left
+  // the field -- closes the row.
+  ev.preventDefault();
+  // ⛔ And stop it here: the field blurs on the next line, so by the time this
+  // event reached the document handler it would no longer look like typing --
+  // and Escape would cancel the rename we just stepped out of.
+  ev.stopPropagation();
+  ev.target.blur();
+  var save = document.querySelector('#renameRow button');
+  if (save && !focusElement(save)) { gpCollect(); focusElement(save); }
 }
 
 function cancelRename() {
@@ -2906,7 +3104,15 @@ function gpPaint() {
   document.querySelectorAll('.gp-focus').forEach(function(e) { e.classList.remove('gp-focus'); });
   var el = GP_FOCUS[GP_INDEX];
   if (!el) return;
-  el.classList.add('gp-focus');
+  // ⛔ NOT ON THE SECTION STRIP. Moving along it SWITCHES the section, so the
+  // underline already marks where you are -- a halo on top of that is two
+  // markers for one thing, and they looked like they disagreed.
+  var onStripNow = !!(el.closest && el.closest('#sectBar'));
+  if (!onStripNow) el.classList.add('gp-focus');
+  // ⓘ The strip carries the emphasis only while focus is inside it -- see the
+  // CSS. Painted here because this is the one place that knows where focus is.
+  var stripHost = document.getElementById('sectBar');
+  if (stripHost) stripHost.classList.toggle('here', onStripNow);
   // Keep the focused control on screen -- on a TV the page is often scrolled
   // past what the D-pad is pointing at.
   el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
@@ -2940,7 +3146,7 @@ function noteRemapsSuspended() {
   SAID_SUSPENDED = true;
 
   var box = document.createElement('div');
-  box.style.cssText = 'border:1px solid #6c8cff;background:#1e2333;color:#c9d4ff';
+  box.style.cssText = 'border:1px solid #6c8cff;background:rgba(30,35,51,.78);color:#c9d4ff';
   // ⭐ This is where Safe Edit Mode gets advertised, because this is the moment
   // someone notices the cursor has stopped and wonders why. A permanent banner
   // would become furniture; this appears exactly when it answers a question.
@@ -2974,7 +3180,7 @@ function noteUngatedPad() {
   box = document.createElement('div');
   box.id = 'ungatedWarn';
   box.dataset.seen = Date.now();
-  box.style.cssText = 'border:1px solid #e0c07a;background:#3a3320;color:#e8cf92';
+  box.style.cssText = 'border:1px solid #e0c07a;background:rgba(58,51,32,.78);color:#e8cf92';
   box.innerHTML = '<strong>This controller is not bridged.</strong><br>' +
     'Safe Edit Mode only holds BRIDGED controllers. Everything you press on ' +
     'this one is also reaching the game.';
@@ -3019,13 +3225,19 @@ function gpBoundary(delta) {
   var picker = configPicker();
 
   if (delta < 0) {
-    if (onStrip) return focusElement(picker);
+    if (onStrip) return focusElement(picker);   // the strip IS the sections row
     if (el === firstControlInSection()) return focusElement(sectBarButton(SECT_ACTIVE));
     // ▲ from the config row reaches the device row above it -- the mirror of
     // the ▼ rules below, so the two rows are traversable both ways.
     if (headerRowOf(el) === 'config') {
       var above = headerControls('device');
+      if (!above.length) above = headerControls('tabs');
       if (above.length) return focusElement(above[0]);
+    }
+    // ▲ from the device row reaches the tabs -- the row above it.
+    if (headerRowOf(el) === 'device') {
+      var tabsRow = headerControls('tabs');
+      if (tabsRow.length) return focusElement(tabsRow[0]);
     }
     return false;
   }
@@ -3037,8 +3249,18 @@ function gpBoundary(delta) {
   // the row above the picker, and skipping a whole row of controls on the way
   // past is how they become unreachable.
   var row = headerRowOf(el);
+  if (row === 'tabs') {
+    var below = headerControls('device');
+    if (!below.length) below = headerControls('config');
+    if (below.length) return focusElement(below[0]);
+    return false;
+  }
   if (row === 'device') return focusElement(picker);
   if (row === 'config') return focusElement(sectBarButton(SECT_ACTIVE));
+  if (row === 'sections') return focusElement(firstControlInSection());
+  // ⓘ Overview's picker is not in the sticky header, so it has no row -- but
+  // ▼ from it means the same thing there as it does on a controller tab.
+  if (picker && el === picker) return focusElement(sectBarButton(SECT_ACTIVE));
   return false;
 }
 
@@ -3078,6 +3300,18 @@ function gpActivate() {
   // keystroke, and you had to reach for the mouse. A pad cannot type either
   // way, but the pad is not always the only thing on the desk.
   if (el.tagName === 'INPUT') {
+    // ⛔ A TEXT BOX IS NOT A VALUE BOX (rhoquinn8217, 2026-09-01: arrows inside
+    // the rename field were stepping it like a number).
+    //
+    // ⓘ Step editing is for the numeric settings -- up and down mean "one
+    // more, one less". A name has no such thing, and a caret needs its arrows
+    // to move through the text. So a text field is FOCUSED for typing and the
+    // page keeps its hands off, which is what typingInAField already assumes.
+    if (el.type === 'text' || el.type === '' || el.type === 'search') {
+      el.focus();
+      if (el.select) el.select();
+      return;
+    }
     // ⭐ ENTER EDIT MODE, the same shape as opening a dropdown.
     //
     // ⛔ Focusing alone let a KEYBOARD type and use up/down, but the pad's own
@@ -3343,7 +3577,24 @@ function gpKeyStep(dir) {
   // ⓘ Two meanings for one axis, decided by where focus is: the header row is
   // horizontal, the sections are a strip. Both are "step sideways through the
   // thing you are in", which is why one axis carries both.
+  // ⭐ ON THE SECTION STRIP, SIDEWAYS MEANS SWITCH (rhoquinn8217, 2026-09-01).
+  // ⛔ Since the strip moved into the header it was being walked like any other
+  // header row -- the halo stepped along the names while the section under it
+  // never changed, so Stick stayed underlined with the halo on Face buttons.
+  if (headerRowOf(GP_FOCUS[GP_INDEX]) === 'sections') {
+    stepSection(dir);
+    return;
+  }
   if (inHeader(GP_FOCUS[GP_INDEX])) {
+    // ⭐ On the TAB row, sideways means "next controller" -- the same shape as
+    // the section strip one level down, and what L1/R1 do on the pad.
+    if (headerRowOf(GP_FOCUS[GP_INDEX]) === 'tabs') {
+      var tabs = headerControls('tabs');
+      var at = tabs.indexOf(GP_FOCUS[GP_INDEX]);
+      var next = at + dir;
+      if (at >= 0 && next >= 0 && next < tabs.length) focusElement(tabs[next]);
+      return;                       // ends absorb rather than wrapping
+    }
     if (!stepHeader(dir)) gpMove(dir);
     return;
   }
@@ -3542,11 +3793,15 @@ function setFooterMode(on) {
     // under a previous listener is ignored, which is the boundary where
     // "somewhere you were an hour ago" stops meaning anything.
     try {
-      var keep = { tab: FOOTER_RETURN.tab, index: FOOTER_RETURN.index,
-                   id: FOOTER_RETURN.id, sect: FOOTER_RETURN.sect,
-                   scroll: FOOTER_RETURN.scroll, serial: FOOTER_RETURN.serial,
-                   run: AGENT_RUN };
-      localStorage.setItem('ctm_place', JSON.stringify(keep));
+      // ⛔ Refuse to save a place with no run id rather than writing one that
+      // will be silently discarded on the way back in.
+      if (AGENT_RUN) {
+        var keep = { tab: FOOTER_RETURN.tab, index: FOOTER_RETURN.index,
+                     id: FOOTER_RETURN.id, sect: FOOTER_RETURN.sect,
+                     scroll: FOOTER_RETURN.scroll, serial: FOOTER_RETURN.serial,
+                     run: AGENT_RUN };
+        localStorage.setItem('ctm_place', JSON.stringify(keep));
+      }
     } catch (e) {}
   }
   FOOTER_MODE = on;
@@ -3575,6 +3830,70 @@ function setFooterMode(on) {
   GP_INDEX = 0;
   gpCollect();
 }
+
+// ⭐ PLAIN KEYBOARD NAVIGATION (rhoquinn8217, 2026-09-01). Arrows move, Enter
+// selects, Escape backs out, Space toggles managed -- the same four the pad's
+// d-pad, ✕, ○ and □ do.
+//
+// ⛔ ONLY WHEN NOT TYPING, which is the whole reason the gate's own keys sit
+// behind three modifiers: a plain `d` typed into a config name would otherwise
+// move the halo, and Enter would press whatever is focused instead of
+// committing a rename. So a field with focus keeps every key.
+//
+// ⓘ GP_EDITING and GP_SELECTING are NOT typing -- the pad put focus there, and
+// gpKeySelect and gpKeyBack already know what those states mean.
+function typingInAField() {
+  if (GP_EDITING || GP_SELECTING) return false;
+  var el = document.activeElement;
+  if (!el) return false;
+  // ⛔ MEASURED 2026-09-01: treating ANY focused control as typing killed the
+  // keyboard entirely -- click a setting with the mouse and that select keeps
+  // focus, so every arrow, Enter and Escape was swallowed from then on.
+  //
+  // ⭐ Only REAL text entry is protected: the rename box, and a textarea. A
+  // select is not typed into, and a setting's own box is driven through
+  // GP_EDITING, which is allowed above.
+  if (el.tagName === 'TEXTAREA') return true;
+  // ⭐ A TEXT field with focus is being typed into -- a config name, a key
+  // binding -- so the arrows belong to its caret and Enter to its own handler.
+  // ⓘ Keyed on the FIELD's kind rather than on RENAMING: a rebind box is a
+  // text field too, and the halo must not wander off mid-binding.
+  if (el.tagName === 'INPUT' &&
+      (el.type === 'text' || el.type === '' || el.type === 'search')) return true;
+  // ⛔ A number box and a select are NOT typing: a number is stepped through
+  // GP_EDITING, and clicking a select used to kill the keyboard outright.
+  return false;
+}
+
+var PLAIN_KEYS = {
+  ArrowUp:    function () { gpKeyMove(-1); },
+  ArrowDown:  function () { gpKeyMove(1); },
+  ArrowLeft:  function () { gpKeyStep(-1); },
+  ArrowRight: function () { gpKeyStep(1); },
+  Enter:      function () { gpKeySelect(); },
+  Escape:     function () { gpKeyBack(); },
+  Space:      function () { gpToggleManaged(); }
+};
+
+document.addEventListener('keydown', function (ev) {
+  if (STOPPED) return;
+  if (ev.ctrlKey || ev.altKey || ev.shiftKey || ev.metaKey) return;   // the gate's keys
+  // ⓘ Typing keeps every key -- including inside the rename field, whose own
+  // handler deals with Enter and Escape.
+  if (typingInAField()) return;
+  // ⛔ But NOT the whole rename row: once focus has left the field, Escape has
+  // to be able to close it, or the second press in the sequence above has
+  // nowhere to go.
+  var plain = PLAIN_KEYS[ev.code];
+  if (!plain) return;
+  // ⚠️ Space is the exception while renaming: it toggles a setting, and the
+  // one behind the row is not what someone naming a config means to change.
+  if (RENAMING && ev.code === 'Space') return;
+  // ⛔ Stop the page scrolling under the halo: arrows and space both do by
+  // default, which makes the highlight and the view disagree.
+  ev.preventDefault();
+  plain();
+});
 
 document.addEventListener('keydown', function (ev) {
   if (STOPPED) return;
@@ -3659,7 +3978,12 @@ function gpPoll() {
   var bar = document.getElementById('gpbar');
   var hint = document.getElementById('gphint');
   if (!live.length) {
-    hint.textContent = 'controller: press any button to connect';
+    // ⭐ A KEYBOARD LEGEND when no pad is visible (rhoquinn8217, 2026-09-01).
+    // The page is fully drivable from a keyboard now, so "press any button to
+    // connect" was the only thing on offer and it described a controller the
+    // person may not be using -- leaving the keys undiscoverable.
+    hint.textContent = 'keyboard — arrows move, Enter select, Esc back, Space on/off' +
+                       '   ·   press a controller button to use a pad';
     bar.className = '';
     requestAnimationFrame(gpPoll);
     return;
@@ -4040,6 +4364,7 @@ function paintPadDestination(d) {
   var btn = document.getElementById('holdBtn');
   if (btn) {
     btn.classList.toggle('on', GATE_HELD);
+    btn.classList.toggle('safe', !GATE_HELD);
     // ⭐ Colour carries the state at a glance: green while the page holds the
     // controllers, amber while the game is still seeing them. The exclamation
     // is on the amber one because that is the state you might not have meant.
@@ -4064,6 +4389,29 @@ function paintPadDestination(d) {
   var hint = document.getElementById('holdHint');
   if (hint) {
     hint.textContent = GATE_HELD ? 'click to turn on' : 'click to turn off';
+  }
+
+  // ⭐ EVERY COPY, painted from the same values. ⛔ Controls for one state that
+  // computed their own labels would drift the first time either was reworded --
+  // and this page has had that happen.
+  //
+  // ⓘ By CLASS rather than by id, because there are three of them now: the
+  // agent row, Overview's editor, and each controller tab's settings. A fourth
+  // id would have been a fourth place to forget.
+  if (btn) {
+    document.querySelectorAll('.holdBtnCopy').forEach(function (b) {
+      b.textContent = btn.textContent;
+      b.title = btn.title;
+      // ⓘ The colour is copied from the original too, so a state and its
+      // colour cannot disagree between two controls for one switch.
+      b.classList.toggle('on', GATE_HELD);
+      b.classList.toggle('safe', !GATE_HELD);
+    });
+  }
+  if (hint) {
+    document.querySelectorAll('.holdHintCopy').forEach(function (h) {
+      h.textContent = hint.textContent;
+    });
   }
 }
 
@@ -4194,7 +4542,7 @@ function selfTest() {
   ['renderTabs','buildDevicePane','setStickyHead','paintStickyHead','measureSticky',
    'nameFor','deviceLabel','deviceLabelShort','settingsKindOf',
    'askConfirm','confirmYes','confirmNo','whoIs','setAutoLink','claimAutoLink',
-   'stopAutoLink','archive','unlink','renameConfig','copyConfigFor','createFromPreset','presetCancel','openPresetInfo','closePresetInfo','loadConfigs','loadDevices',
+   'stopAutoLink','archive','unlink','renameConfig','copyConfigFor','createFromPreset','presetCancel','openPresetInfo','closePresetInfo','renameKey','loadConfigs','loadDevices',
    'openConfig','applyPick','newConfigFor','preserveScroll','setDown','gpCollect'
   ].forEach(function(n) {
     ok('function ' + n, typeof window[n] === 'function');

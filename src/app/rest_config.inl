@@ -263,48 +263,53 @@ static std::string rest_keys_json()
     // left under 400 bytes of headroom, which two more keys would have eaten,
     // and the failure is a silently truncated list rather than a loud error at
     // the point of use. Split again at the next boundary if one nears 16,000.
-    const std::string settings = R"({"keys":[
+    // ⛔ CUSTOM DELIMITER, and it is load-bearing. A default raw string ends at
+    // the first `)"` -- so a help line reading "...held down)" or a button
+    // named "(A)" TERMINATES THE LITERAL EARLY, and the compiler then fails
+    // somewhere unrelated. Both happened on 2026-09-01. With CTMKEYS the text
+    // can contain anything except that exact delimiter.
+    const std::string settings = R"CTMKEYS({"keys":[
 {"key":"osk_program","type":"choice","choices":["steam","osk"],"default":"steam","help":"Which on-screen keyboard the OSKeyboard binding opens. Steam's is navigable with the controller and closes cleanly, but needs Steam running. Windows' own osk.exe always works, but its keys must be clicked with the cursor -- the d-pad cannot walk them."},
 {"key":"rebind_debug","type":"bool","default":false,"help":"Logs what each bound button is doing, twice a second: whether it was seen as pressed, and the raw button bytes. For working out why a rebind does nothing."},
-{"key":"rebind_0","type":"string","default":"","help":"Cross / A (bottom face) -- send a keyboard key or a mouse action instead of this button. Keys are KeyboardEvent.code: KeyR, Enter, ArrowUp. Mouse: MouseLeft, MouseRight, MouseMiddle, MouseWheelUp, MouseWheelDown. The game stops seeing the button entirely."},
-{"key":"turbo_0","type":"int","min":0,"max":1000,"default":0,"help":"Cross / A (bottom face) -- milliseconds between presses while held. 0 is off. Works with or without a rebind: on its own the button repeats itself."},
-{"key":"rebind_1","type":"string","default":"","help":"Circle / B (right face) -- send a keyboard key or a mouse action instead of this button. Keys are KeyboardEvent.code: KeyR, Enter, ArrowUp. Mouse: MouseLeft, MouseRight, MouseMiddle, MouseWheelUp, MouseWheelDown. The game stops seeing the button entirely."},
-{"key":"turbo_1","type":"int","min":0,"max":1000,"default":0,"help":"Circle / B (right face) -- milliseconds between presses while held. 0 is off. Works with or without a rebind: on its own the button repeats itself."},
-{"key":"rebind_2","type":"string","default":"","help":"Square / X (left face) -- send a keyboard key or a mouse action instead of this button. Keys are KeyboardEvent.code: KeyR, Enter, ArrowUp. Mouse: MouseLeft, MouseRight, MouseMiddle, MouseWheelUp, MouseWheelDown. The game stops seeing the button entirely."},
-{"key":"turbo_2","type":"int","min":0,"max":1000,"default":0,"help":"Square / X (left face) -- milliseconds between presses while held. 0 is off. Works with or without a rebind: on its own the button repeats itself."},
-{"key":"rebind_3","type":"string","default":"","help":"Triangle / Y (top face) -- send a keyboard key or a mouse action instead of this button. Keys are KeyboardEvent.code: KeyR, Enter, ArrowUp. Mouse: MouseLeft, MouseRight, MouseMiddle, MouseWheelUp, MouseWheelDown. The game stops seeing the button entirely."},
-{"key":"turbo_3","type":"int","min":0,"max":1000,"default":0,"help":"Triangle / Y (top face) -- milliseconds between presses while held. 0 is off. Works with or without a rebind: on its own the button repeats itself."},
-{"key":"rebind_4","type":"string","default":"","help":"L1 / LB -- send a keyboard key or a mouse action instead of this button. Keys are KeyboardEvent.code: KeyR, Enter, ArrowUp. Mouse: MouseLeft, MouseRight, MouseMiddle, MouseWheelUp, MouseWheelDown. The game stops seeing the button entirely."},
-{"key":"turbo_4","type":"int","min":0,"max":1000,"default":0,"help":"L1 / LB -- milliseconds between presses while held. 0 is off. Works with or without a rebind: on its own the button repeats itself."},
-{"key":"rebind_5","type":"string","default":"","help":"R1 / RB -- send a keyboard key or a mouse action instead of this button. Keys are KeyboardEvent.code: KeyR, Enter, ArrowUp. Mouse: MouseLeft, MouseRight, MouseMiddle, MouseWheelUp, MouseWheelDown. The game stops seeing the button entirely."},
-{"key":"turbo_5","type":"int","min":0,"max":1000,"default":0,"help":"R1 / RB -- milliseconds between presses while held. 0 is off. Works with or without a rebind: on its own the button repeats itself."},
-{"key":"rebind_6","type":"string","default":"","help":"L2 / LT -- send a keyboard key or a mouse action instead of this button. Keys are KeyboardEvent.code: KeyR, Enter, ArrowUp. Mouse: MouseLeft, MouseRight, MouseMiddle, MouseWheelUp, MouseWheelDown. The game stops seeing the button entirely."},
-{"key":"turbo_6","type":"int","min":0,"max":1000,"default":0,"help":"L2 / LT -- milliseconds between presses while held. 0 is off. Works with or without a rebind: on its own the button repeats itself."},
-{"key":"rebind_7","type":"string","default":"","help":"R2 / RT -- send a keyboard key or a mouse action instead of this button. Keys are KeyboardEvent.code: KeyR, Enter, ArrowUp. Mouse: MouseLeft, MouseRight, MouseMiddle, MouseWheelUp, MouseWheelDown. The game stops seeing the button entirely."},
-{"key":"turbo_7","type":"int","min":0,"max":1000,"default":0,"help":"R2 / RT -- milliseconds between presses while held. 0 is off. Works with or without a rebind: on its own the button repeats itself."},
-{"key":"rebind_8","type":"string","default":"","help":"Create / Select -- send a keyboard key or a mouse action instead of this button. Keys are KeyboardEvent.code: KeyR, Enter, ArrowUp. Mouse: MouseLeft, MouseRight, MouseMiddle, MouseWheelUp, MouseWheelDown. The game stops seeing the button entirely."},
-{"key":"turbo_8","type":"int","min":0,"max":1000,"default":0,"help":"Create / Select -- milliseconds between presses while held. 0 is off. Works with or without a rebind: on its own the button repeats itself."},
-{"key":"rebind_9","type":"string","default":"","help":"Options / Start -- send a keyboard key or a mouse action instead of this button. Keys are KeyboardEvent.code: KeyR, Enter, ArrowUp. Mouse: MouseLeft, MouseRight, MouseMiddle, MouseWheelUp, MouseWheelDown. The game stops seeing the button entirely."},
-{"key":"turbo_9","type":"int","min":0,"max":1000,"default":0,"help":"Options / Start -- milliseconds between presses while held. 0 is off. Works with or without a rebind: on its own the button repeats itself."},
-{"key":"rebind_10","type":"string","default":"","help":"L3 (left stick press) -- send a keyboard key or a mouse action instead of this button. Keys are KeyboardEvent.code: KeyR, Enter, ArrowUp. Mouse: MouseLeft, MouseRight, MouseMiddle, MouseWheelUp, MouseWheelDown. The game stops seeing the button entirely."},
-{"key":"turbo_10","type":"int","min":0,"max":1000,"default":0,"help":"L3 (left stick press) -- milliseconds between presses while held. 0 is off. Works with or without a rebind: on its own the button repeats itself."},
-{"key":"rebind_11","type":"string","default":"","help":"R3 (right stick press) -- send a keyboard key or a mouse action instead of this button. Keys are KeyboardEvent.code: KeyR, Enter, ArrowUp. Mouse: MouseLeft, MouseRight, MouseMiddle, MouseWheelUp, MouseWheelDown. The game stops seeing the button entirely."},
-{"key":"turbo_11","type":"int","min":0,"max":1000,"default":0,"help":"R3 (right stick press) -- milliseconds between presses while held. 0 is off. Works with or without a rebind: on its own the button repeats itself."},
-{"key":"rebind_12","type":"string","default":"","help":"D-pad up -- send a keyboard key or a mouse action instead of this button. Keys are KeyboardEvent.code: KeyR, Enter, ArrowUp. Mouse: MouseLeft, MouseRight, MouseMiddle, MouseWheelUp, MouseWheelDown. The game stops seeing the button entirely."},
-{"key":"turbo_12","type":"int","min":0,"max":1000,"default":0,"help":"D-pad up -- milliseconds between presses while held. 0 is off. Works with or without a rebind: on its own the button repeats itself."},
-{"key":"rebind_13","type":"string","default":"","help":"D-pad down -- send a keyboard key or a mouse action instead of this button. Keys are KeyboardEvent.code: KeyR, Enter, ArrowUp. Mouse: MouseLeft, MouseRight, MouseMiddle, MouseWheelUp, MouseWheelDown. The game stops seeing the button entirely."},
-{"key":"turbo_13","type":"int","min":0,"max":1000,"default":0,"help":"D-pad down -- milliseconds between presses while held. 0 is off. Works with or without a rebind: on its own the button repeats itself."},
-{"key":"rebind_14","type":"string","default":"","help":"D-pad left -- send a keyboard key or a mouse action instead of this button. Keys are KeyboardEvent.code: KeyR, Enter, ArrowUp. Mouse: MouseLeft, MouseRight, MouseMiddle, MouseWheelUp, MouseWheelDown. The game stops seeing the button entirely."},
-{"key":"turbo_14","type":"int","min":0,"max":1000,"default":0,"help":"D-pad left -- milliseconds between presses while held. 0 is off. Works with or without a rebind: on its own the button repeats itself."},
-{"key":"rebind_15","type":"string","default":"","help":"D-pad right -- send a keyboard key or a mouse action instead of this button. Keys are KeyboardEvent.code: KeyR, Enter, ArrowUp. Mouse: MouseLeft, MouseRight, MouseMiddle, MouseWheelUp, MouseWheelDown. The game stops seeing the button entirely."},
-{"key":"turbo_15","type":"int","min":0,"max":1000,"default":0,"help":"D-pad right -- milliseconds between presses while held. 0 is off. Works with or without a rebind: on its own the button repeats itself."},
-{"key":"rebind_16","type":"string","default":"","help":"PS / Home -- send a keyboard key or a mouse action instead of this button. Keys are KeyboardEvent.code: KeyR, Enter, ArrowUp. Mouse: MouseLeft, MouseRight, MouseMiddle, MouseWheelUp, MouseWheelDown. The game stops seeing the button entirely."},
-{"key":"turbo_16","type":"int","min":0,"max":1000,"default":0,"help":"PS / Home -- milliseconds between presses while held. 0 is off. Works with or without a rebind: on its own the button repeats itself."},
-)";
+{"key":"rebind_0","type":"string","name":"(✕) | (A)","default":"","help":"Remap button to keyboard key or mouse action"},
+{"key":"turbo_0","type":"int","min":0,"max":1000,"name":"(✕) | (A)","default":0,"help":"Set milliseconds between rapid fire presses, 0 means held down"},
+{"key":"rebind_1","type":"string","name":"(○) | (B)","default":"","help":"Remap button to keyboard key or mouse action"},
+{"key":"turbo_1","type":"int","min":0,"max":1000,"name":"(○) | (B)","default":0,"help":"Set milliseconds between rapid fire presses, 0 means held down"},
+{"key":"rebind_2","type":"string","name":"(□) | (X)","default":"","help":"Remap button to keyboard key or mouse action"},
+{"key":"turbo_2","type":"int","min":0,"max":1000,"name":"(□) | (X)","default":0,"help":"Set milliseconds between rapid fire presses, 0 means held down"},
+{"key":"rebind_3","type":"string","name":"(△) | (Y)","default":"","help":"Remap button to keyboard key or mouse action"},
+{"key":"turbo_3","type":"int","min":0,"max":1000,"name":"(△) | (Y)","default":0,"help":"Set milliseconds between rapid fire presses, 0 means held down"},
+{"key":"rebind_4","type":"string","name":"(L1) | (LB)","default":"","help":"Remap button to keyboard key or mouse action"},
+{"key":"turbo_4","type":"int","min":0,"max":1000,"name":"(L1) | (LB)","default":0,"help":"Set milliseconds between rapid fire presses, 0 means held down"},
+{"key":"rebind_5","type":"string","name":"(R1) | (RB)","default":"","help":"Remap button to keyboard key or mouse action"},
+{"key":"turbo_5","type":"int","min":0,"max":1000,"name":"(R1) | (RB)","default":0,"help":"Set milliseconds between rapid fire presses, 0 means held down"},
+{"key":"rebind_6","type":"string","name":"(L2) | (LT)","default":"","help":"Remap button to keyboard key or mouse action"},
+{"key":"turbo_6","type":"int","min":0,"max":1000,"name":"(L2) | (LT)","default":0,"help":"Set milliseconds between rapid fire presses, 0 means held down"},
+{"key":"rebind_7","type":"string","name":"(R2) | (RT)","default":"","help":"Remap button to keyboard key or mouse action"},
+{"key":"turbo_7","type":"int","min":0,"max":1000,"name":"(R2) | (RT)","default":0,"help":"Set milliseconds between rapid fire presses, 0 means held down"},
+{"key":"rebind_8","type":"string","name":"(Create) | (Select)","default":"","help":"Remap button to keyboard key or mouse action"},
+{"key":"turbo_8","type":"int","min":0,"max":1000,"name":"(Create) | (Select)","default":0,"help":"Set milliseconds between rapid fire presses, 0 means held down"},
+{"key":"rebind_9","type":"string","name":"(Options) | (Start)","default":"","help":"Remap button to keyboard key or mouse action"},
+{"key":"turbo_9","type":"int","min":0,"max":1000,"name":"(Options) | (Start)","default":0,"help":"Set milliseconds between rapid fire presses, 0 means held down"},
+{"key":"rebind_10","type":"string","name":"(L3)","default":"","help":"Remap button to keyboard key or mouse action"},
+{"key":"turbo_10","type":"int","min":0,"max":1000,"name":"(L3)","default":0,"help":"Set milliseconds between rapid fire presses, 0 means held down"},
+{"key":"rebind_11","type":"string","name":"(R3)","default":"","help":"Remap button to keyboard key or mouse action"},
+{"key":"turbo_11","type":"int","min":0,"max":1000,"name":"(R3)","default":0,"help":"Set milliseconds between rapid fire presses, 0 means held down"},
+{"key":"rebind_12","type":"string","name":"(↑)","default":"","help":"Remap button to keyboard key or mouse action"},
+{"key":"turbo_12","type":"int","min":0,"max":1000,"name":"(↑)","default":0,"help":"Set milliseconds between rapid fire presses, 0 means held down"},
+{"key":"rebind_13","type":"string","name":"(↓)","default":"","help":"Remap button to keyboard key or mouse action"},
+{"key":"turbo_13","type":"int","min":0,"max":1000,"name":"(↓)","default":0,"help":"Set milliseconds between rapid fire presses, 0 means held down"},
+{"key":"rebind_14","type":"string","name":"(←)","default":"","help":"Remap button to keyboard key or mouse action"},
+{"key":"turbo_14","type":"int","min":0,"max":1000,"name":"(←)","default":0,"help":"Set milliseconds between rapid fire presses, 0 means held down"},
+{"key":"rebind_15","type":"string","name":"(→)","default":"","help":"Remap button to keyboard key or mouse action"},
+{"key":"turbo_15","type":"int","min":0,"max":1000,"name":"(→)","default":0,"help":"Set milliseconds between rapid fire presses, 0 means held down"},
+{"key":"rebind_16","type":"string","name":"(PS) | (Home)","default":"","help":"Remap button to keyboard key or mouse action"},
+{"key":"turbo_16","type":"int","min":0,"max":1000,"name":"(PS) | (Home)","default":0,"help":"Set milliseconds between rapid fire presses, 0 means held down"},
+)CTMKEYS";
     // The button rebinds and turbos are the bulk of the list, so they are
     // their own piece -- the next-largest structural boundary after the key
     // names.
-    const std::string pointers = R"(
+    const std::string pointers = R"CTMKEYS(
 {"key":"stick_to_mouse","type":"choice","choices":["","right","left","both"],"default":"","help":"Which stick moves the mouse cursor. Blank is off. With both, whichever stick is pushed further drives, so the two never fight. The cursor moves at a speed while the stick is held, unlike gyro and the touchpad which follow movement."},
 {"key":"stick_to_mouse_gate","type":"choice","choices":["always","L2","R2","L1","R1","touchpad","!touchpad","touchpad_click","PS"],"default":"always","help":"What must be held for the stick to move the cursor. Blank means always -- the stick works whenever it is enabled. Useful when the touchpad or gyro is also driving the cursor."},
 {"key":"stick_mouse_speed","type":"int","min":50,"max":5000,"default":1200,"help":"Cursor pixels per second at full stick deflection. Time-based, so the speed does not change with the controller's report rate."},
@@ -347,8 +352,8 @@ static std::string rest_keys_json()
 {"key":"master_rumble_gain","type":"int","min":0,"max":500,"default":100,"help":"Scales all rumble. 100 is unchanged."},
 {"key":"rumble_gain_heavy","type":"int","min":0,"max":500,"default":100,"help":"Heavy weight only. Multiplies with master."},
 {"key":"rumble_gain_soft","type":"int","min":0,"max":500,"default":100,"help":"Soft weight only. Multiplies with master."}
-])";
-    const std::string names = R"(,
+])CTMKEYS";
+    const std::string names = R"CTMKEYS(,
 "key_names":[
 "KeyA","KeyB","KeyC","KeyD","KeyE","KeyF","KeyG","KeyH","KeyI","KeyJ","KeyK",
 "KeyL","KeyM","KeyN","KeyO","KeyP","KeyQ","KeyR","KeyS","KeyT","KeyU","KeyV",
@@ -368,7 +373,7 @@ static std::string rest_keys_json()
 "ControlRight","ShiftRight","AltRight","MetaRight",
 "MouseLeft","MouseRight","MouseMiddle","MouseWheelUp","MouseWheelDown",
 "OSKeyboard"
-]})";
+]})CTMKEYS";
     return settings + pointers + names;
 }
 
