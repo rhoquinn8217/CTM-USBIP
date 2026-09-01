@@ -19,6 +19,7 @@ int run_gyro_mouse_tests();
 int run_touch_mouse_tests();
 int run_stick_mouse_tests();
 int run_osk_tests();
+int run_nickname_tests();
 int run_host_audio_settings_tests();
 
 // ⛔⛔ THE TEST BINARY RUNS FROM THE SAME DIRECTORY AS THE AGENT.
@@ -82,6 +83,7 @@ int main(int argc, char **argv)
     run_touch_mouse_tests();
     run_stick_mouse_tests();
     run_osk_tests();
+    run_nickname_tests();
     run_host_audio_settings_tests();
     return ctmtest::summary();
 }

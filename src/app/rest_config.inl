@@ -21,6 +21,7 @@
 // same split, and for the same reason, as collect_bridge_session_snapshots().
 struct RestDeviceView {
     std::string ordinal;        // "ds5_3" -- monotonic, never reused
+    std::string nickname;       // "Titan" -- for people; never a handle
     std::string kind;
     std::string serial;
     std::string linkedConfig;   // "" = shared [kind] section
@@ -38,6 +39,7 @@ static const char *kSharedName = "shared";
 static std::string rest_device_json(const RestDeviceView &d)
 {
     std::string out = "{\"ordinal\":\"" + rest_json_escape(d.ordinal) + "\"";
+    out += ",\"nickname\":\"" + rest_json_escape(d.nickname) + "\"";
     out += ",\"kind\":\"" + rest_json_escape(d.kind) + "\"";
     out += ",\"serial\":\"" + rest_json_escape(d.serial) + "\"";
     out += ",\"linked_config\":\"" + rest_json_escape(d.linkedConfig) + "\"";

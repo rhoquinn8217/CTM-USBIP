@@ -19,6 +19,9 @@ struct AgentBridgeSession {
     // reference from an old device list fails rather than hitting the wrong
     // controller. linkedConfig empty means the shared [kind] section.
     std::string ordinal;
+    // The word a person says out loud for this controller. Assigned with the
+    // ordinal above and gone with the session, never used as a handle.
+    std::string nickname;
     std::string physicalSerial;
     std::string linkedConfig;
 };
@@ -547,15 +550,39 @@ static bool start_bridge_session(const std::string &kind, uint16_t port, const s
         static std::map<std::string, unsigned> nextOrdinal;
         session->ordinal = kind + "_" + std::to_string(++nextOrdinal[kind]);
     }
+    // ⭐ The nickname is assigned HERE, beside the ordinal, so the two share a
+    // lifetime exactly: both are born with the session and both are gone when
+    // it ends. ⓘ That is what fixes the re-rolling -- the settings window is
+    // killed and recreated by every chord, but the agent is not.
+    //
+    // ⛔ Not an identifier. The ordinal remains the handle for commands and the
+    // log; this is the word you say out loud.
+    {
+        // ⓘ g_agent_sessions_mutex is already held here -- taking it again
+        // would deadlock.
+        std::vector<std::string> taken;
+        for (const auto &s : g_agent_sessions) {
+            if (s && !s->nickname.empty()) taken.push_back(s->nickname);
+        }
+        session->nickname = ctm_nickname::pick(taken);
+    }
     session->kind = kind;
     session->busId = busId;
     session->busIdAscii = busIdAscii;
     session->port = port;
     session->device = std::make_shared<CtmUsbipDevice>();
     AgentBridgeSession *sessionPtr = session.get();
+    const std::string ordinalForLog = session->ordinal;
+    const std::string nicknameForLog = session->nickname;
     session->worker = std::thread([sessionPtr]() { bridge_session_worker(sessionPtr); });
     g_agent_sessions.push_back(std::move(session));
-    device_log::session_w() << L"agent bridge starting kind=" << widen_ascii(kind.c_str(), kind.size())
+    // ⭐ BOTH NAMES ON THE LINE, so it greps either way: the ordinal is what a
+    // command or a bug report will quote, the nickname is what the person
+    // watching actually called it.
+    device_log::session_w() << L"agent bridge starting "
+               << widen_ascii(ordinalForLog.c_str(), ordinalForLog.size())
+               << L" (" << widen_ascii(nicknameForLog.c_str(), nicknameForLog.size()) << L")"
+               << L" kind=" << widen_ascii(kind.c_str(), kind.size())
                << L" port=" << port << L" busid=" << busId;
     return true;
 }

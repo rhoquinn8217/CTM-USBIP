@@ -20,6 +20,7 @@ static std::vector<RestDeviceView> rest_collect_devices()
     for (const auto &session : g_agent_sessions) {
         RestDeviceView view;
         view.ordinal = session->ordinal;
+        view.nickname = session->nickname;
         view.kind = session->kind;
         // ⚠️ Reported rather than filtered. A session mid-startup has no serial
         // yet and a link against it may not survive -- but hiding it entirely

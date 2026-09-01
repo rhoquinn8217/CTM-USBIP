@@ -718,46 +718,24 @@
 // ⚠️ A new name each time a controller appears, by request. Names are held
 // against the ordinal only while the device is present, so unbridge and
 // rebridge gives a different one.
-var NAME_POOL = [
-  'Nexus', 'Matrix', 'Vector', 'Cipher', 'Static', 'Quark', 'Photon', 'Orbit',
-  'Cosmo', 'Helix', 'Zenith', 'Apex', 'Nova', 'Warp', 'Beacon', 'Synapse',
-  'Pulsar', 'Rift', 'Nebula', 'Strobe', 'Pixel', 'Sprite', 'Voxel', 'Combo',
-  'Buffer', 'Lag', 'Glitch', 'Macro', 'Turbo', '8-Bit', 'Chiptune', 'Analog',
-  'Raster', 'Polygon', 'Token', 'Bonus', 'Easter', 'Cheat', 'Tilt', 'Falcon',
-  'Badger', 'Viper', 'Raptor', 'Kraken', 'Grizzly', 'Coyote', 'Panther', 'Jackal',
-  'Raven', 'Cobalt', 'Mamba', 'Python', 'Boar', 'Condor', 'Lynx', 'Rhino',
-  'Stallion', 'Osprey', 'Puma', 'Ignite', 'Frost', 'Magma', 'Vortex', 'Cyclone',
-  'Quake', 'Avalanche', 'Blizzard', 'Monsoon', 'Eclipse', 'Sol', 'Luna', 'Geyser',
-  'Tundra', 'Crater', 'Cinder', 'Singe', 'Flint', 'Pyro', 'Tidal', 'Saber',
-  'Aegis', 'Titan', 'Odin', 'Zeus', 'Hades', 'Valkyrie', 'Rogue', 'Paladin',
-  'Ronin', 'Ninja', 'Shogun', 'Gladiator', 'Sentry', 'Vanguard', 'Garrison', 'Siege',
-  'Bastion', 'Enforcer', 'Ranger', 'Nugget', 'Spud', 'Pickle', 'Taco', 'Waffle',
-  'Bagel', 'Biscuit', 'Cheddar', 'Muffin', 'Bean', 'S\'more', 'Wasabi', 'Sprout',
-  'Dumpling', 'Noodle', 'Chili', 'Toast', 'Peanut', 'Mochi', 'Frito'
-];
-
-var DEVICE_NAMES = {};
-
-// ⛔ Never hands out a name already in use. Random is the point, but two
-// controllers called the same thing at once would defeat it entirely.
+// ⭐ THE AGENT NAMES CONTROLLERS NOW (2026-09-01). The pool of 119 names and
+// the picking moved to `src/app/nickname.inl`, and `/api/v1/devices` carries a
+// `nickname` for each device.
+//
+// ⛔ WHY IT HAD TO MOVE: the names were generated HERE, so two screens showed
+// different names for one controller -- and the chord kills and recreates this
+// window every time, so every chord re-rolled them. You were looking at
+// Photon, you chorded, and it was Wasabi.
+//
+// ⓘ The name still lives exactly as long as the bridge session: unbridge and
+// come back and you are someone new. That is deliberate, and it matches the
+// ordinal, which is never reused either.
 function nameFor(ordinal) {
-  if (DEVICE_NAMES[ordinal]) return DEVICE_NAMES[ordinal];
-  var taken = {};
-  Object.keys(DEVICE_NAMES).forEach(function(k) { taken[DEVICE_NAMES[k]] = true; });
-  var free = NAME_POOL.filter(function(n) { return !taken[n]; });
-  var pool = free.length ? free : NAME_POOL;      // 119 names; this cannot realistically empty
-  DEVICE_NAMES[ordinal] = pool[Math.floor(Math.random() * pool.length)];
-  return DEVICE_NAMES[ordinal];
-}
-
-// Drops names for controllers that are no longer present, so the next bridge
-// gets a fresh one and the pool does not fill up with the departed.
-function pruneNames(list) {
-  var here = {};
-  (list || []).forEach(function(d) { here[d.ordinal] = true; });
-  Object.keys(DEVICE_NAMES).forEach(function(k) {
-    if (!here[k]) delete DEVICE_NAMES[k];
-  });
+  var d = (LAST_DEVICES || []).filter(function(x) { return x.ordinal === ordinal; })[0];
+  // ⓘ Falls back to the ordinal rather than inventing anything: an older agent
+  // sends no nickname, and a made-up one here would be the exact bug that was
+  // just removed.
+  return (d && d.nickname) ? d.nickname : ordinal;
 }
 
 var KEYS = [];
@@ -1233,7 +1211,6 @@ function renderTabs(devices) {
   var host = document.getElementById('devicePanes');
   host.innerHTML = '';
   HEADS = {};
-  pruneNames(devices);
   // ⓘ A controller that left should animate again when it comes back.
   var here = {};
   (devices || []).forEach(function(d) { here[d.ordinal] = true; });
@@ -1749,7 +1726,7 @@ function buildDevicePane(d) {
     : '';
 
   var head = '<table class="devrow"><tr><th>controller</th><th>serial</th>' +
-             '<th>auto linked config</th><th></th><th>id</th><th></th></tr>' +
+             '<th>auto linked config</th><th></th><th>nickname</th><th></th></tr>' +
              // ⭐ Same status tint as Overview. The two tables show the same
              // row, so a controller that reads green there and plain here
              // would suggest the two disagreed about something.
@@ -1759,7 +1736,16 @@ function buildDevicePane(d) {
              '<td>' + serialCell + '</td>' +
              '<td>' + autoCell + '</td>' +
              '<td>' + autoBtn + '</td>' +
-             '<td><code>' + esc(d.ordinal) + '</code></td>' +
+             // ⭐ THE NAME, NOT THE ORDINAL (rhoquinn8217, 2026-09-01). The
+             // ordinal told a person nothing, and it is one-to-one with the
+             // nickname while a session lasts.
+             //
+             // ⛔ IT IS STILL THE HANDLE UNDERNEATH -- every onclick below
+             // passes d.ordinal, and the log carries both. Ordinals are never
+             // reused, so a stale command FAILS instead of landing on a
+             // different controller; a nickname can come round again once its
+             // controller has gone, and could not promise that.
+             '<td>' + esc(nameFor(d.ordinal)) + '</td>' +
              '<td><button onclick="unlink(\'' + esc(d.ordinal) +
                  '\')" title="stop reading this config NOW — falls back to the shared settings">Reset</button>' +
              '</td></tr></table>';
@@ -2257,7 +2243,7 @@ function loadDevices() {
     // same thing in different words -- 'linked' here, 'auto linked config'
     // there -- so reading one taught you nothing about the other.
     var html = '<table><tr><th>controller</th><th>serial</th>' +
-               '<th>auto linked config</th><th></th><th>id</th><th></th></tr>';
+               '<th>auto linked config</th><th></th><th>nickname</th><th></th></tr>';
     list.forEach(function(dev) {
       // ⭐ The serial is the point of this whole screen. auto_link works only
       // if it is a real per-unit value, and that has never been observed.
@@ -2305,7 +2291,7 @@ function loadDevices() {
               '<td>' + serial + '</td>' +
               '<td>' + autoCell + '</td>' +
               '<td>' + autoBtn + '</td>' +
-              '<td><code>' + esc(dev.ordinal) + '</code></td>' +
+              '<td>' + esc(nameFor(dev.ordinal)) + '</td>' +   // see the note on the controller tab
               '<td><button onclick="unlink(\'' + esc(dev.ordinal) +
                   '\')" title="clear this controller\'s config">Reset</button></td></tr>';
     });
@@ -2315,7 +2301,7 @@ function loadDevices() {
     DEVICE_SIG = deviceSignature(list);
   }).catch(function(e) {
     // ⛔ NOT SILENT. This used to be .catch(function(){}), and a one-word typo
-    // inside renderTabs -- pruneNames(list) where the parameter is `devices` --
+    // inside renderTabs, where the parameter is `devices` --
     // threw between building the tabs and building the panes. Tabs appeared,
     // content did not, and the console was clean. A blank screen with no error
     // is the hardest kind of fault there is.
@@ -4067,7 +4053,7 @@ function selfTest() {
   // 2. Every function the page calls exists. Deleting a block that sits just
   //    above its caller has happened three times.
   ['renderTabs','buildDevicePane','setStickyHead','paintStickyHead','measureSticky',
-   'nameFor','pruneNames','deviceLabel','deviceLabelShort','settingsKindOf',
+   'nameFor','deviceLabel','deviceLabelShort','settingsKindOf',
    'askConfirm','confirmYes','confirmNo','whoIs','setAutoLink','claimAutoLink',
    'stopAutoLink','archive','unlink','renameConfig','copyConfigFor','createFromPreset','presetCancel','openPresetInfo','closePresetInfo','loadConfigs','loadDevices',
    'openConfig','applyPick','newConfigFor','preserveScroll','setDown','gpCollect'
@@ -4075,12 +4061,24 @@ function selfTest() {
     ok('function ' + n, typeof window[n] === 'function');
   });
 
-  // 3. The name pool parses. One unescaped apostrophe in S'more truncated the
-  //    array and every statement after it became a syntax error.
-  ok('name pool intact', Array.isArray(NAME_POOL) && NAME_POOL.length > 100,
-     'length ' + (NAME_POOL || []).length);
-  ok("name pool survives S'more", NAME_POOL.indexOf("S'more") >= 0);
-  ok('names are unique', new Set(NAME_POOL).size === NAME_POOL.length);
+  // 3. ⓘ The name pool moved to the agent 2026-09-01, so the checks that it
+  //    parsed and held unique names went with it -- they live in
+  //    nickname_test.cpp now. What this side must still get right is USING the
+  //    agent's name, and falling back to the ordinal rather than inventing one.
+  {
+    // ⓘ Self-contained: the check must not depend on what happens to be
+    // bridged while the page is being tested.
+    var savedDevices = LAST_DEVICES;
+    LAST_DEVICES = [{ ordinal: 'ds5_1', nickname: 'Titan' },
+                    { ordinal: 'ds5_2', nickname: '' }];
+    ok('nickname comes from the device', nameFor('ds5_1') === 'Titan',
+       'got ' + nameFor('ds5_1'));
+    ok('an empty nickname falls back to the ordinal',
+       nameFor('ds5_2') === 'ds5_2');
+    ok('an unknown device falls back to the ordinal',
+       nameFor('ds5_usb_9') === 'ds5_usb_9');
+    LAST_DEVICES = savedDevices;
+  }
 
   // 4. ⭐ THE BIG ONE. renderTabs with real-shaped devices, which is what every
   //    empty-tab failure would have been caught by.
@@ -4104,10 +4102,8 @@ function selfTest() {
   });
 
   // 5. Names are assigned, distinct, and stable while the device is present.
-  var n1 = nameFor('ds5_1');
-  ok('name assigned', !!n1);
-  ok('name stable', nameFor('ds5_1') === n1);
-  ok('names differ per device', nameFor('ds5e_usb_1') !== n1);
+  // ⓘ Names are the agent's now; these checked the browser's own generator.
+  //    See nickname_test.cpp.
 
   // 6. Down and back. DEVICE_SIG = null once meant "redraw next time" AND
   //    "never loaded", so the redraw never happened.

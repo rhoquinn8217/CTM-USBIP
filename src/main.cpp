@@ -41,6 +41,7 @@
 #include <system_error>
 #include <thread>
 #include <utility>
+#include <random>      // nickname.inl picks one from a pool
 #include <vector>
 
 #pragma comment(lib, "hid.lib")
@@ -131,6 +132,7 @@ void ctm_gyro_mouse_ensure_mouse_started();
 // asset helpers, while agent.inl needs only this one symbol from it.
 void ctm_rebind_ensure_keyboard_started();
 #include "input/gyro_calibration_fetch.inl"   // needs CtmBackend; agent.inl calls it
+#include "app/nickname.inl"      // controller nicknames; agent.inl assigns one per session
 #include "app/agent.inl"
 #include "input/mouse_device.inl"      // needs g_agent_usbip_server, find_relative_asset, run_usbip_attach
 #include "input/keyboard_device.inl"   // same dependencies as the mouse above
