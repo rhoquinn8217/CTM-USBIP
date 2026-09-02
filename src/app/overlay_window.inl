@@ -88,7 +88,11 @@ inline std::atomic_bool g_fnHeld{false};
 // ⓘ 0 is invisible, 255 is solid. 140 is roughly 55% -- enough to read the
 // letters over a bright game, little enough to see what is behind it.
 // ⭐ A constant for now; it becomes a setting once the layout settles.
-inline const BYTE kAlpha = 140;
+// ⛔ SOLID. rhoquinn8217, 2026-09-02: transparency made it hard to read and
+// sometimes hard to tell it was there at all. A keyboard is a thing you look
+// AT, not through -- and it has a place of its own at the edge of the screen,
+// so there is nothing behind it worth seeing.
+inline const BYTE kAlpha = 255;
 
 // The window is owned by its own thread, so moving it is posted rather than
 // done from the controller's report thread.
@@ -163,11 +167,19 @@ inline bool button_down(const uint8_t *data, size_t len, int index)
 // itself is read from the pad directly. Steam prints them the same way, and it
 // is what turns a shoulder shortcut from folklore into something visible.
 // ⓘ KK_ESC is the backtick that becomes esc while L2 is held.
+// ⛔ DT_NOPREFIX ON EVERY LABEL. DrawTextW treats & as an accelerator marker:
+// it swallows the ampersand and underlines the next character instead, so the
+// shifted 7 simply never appeared (rhoquinn8217, 2026-09-02).
 enum KeyKind { KK_NORMAL, KK_MOD, KK_FN, KK_ACTION, KK_ESC,
                KK_SHOULDER_L1, KK_SHOULDER_R1, KK_SHOULDER_R2 };
 
 // What a KK_ACTION key does, carried in the usage field, which is unused there.
-inline const uint8_t ACT_MOVE = 1, ACT_CLOSE = 2, ACT_STEAM = 3, ACT_PASTE = 4;
+// ⛔ WELL CLEAR OF THE HID USAGES. These live in the same field as a key's
+// usage, and ACT_PASTE was 4 -- which is the usage for the letter 'a', so the
+// shift labelling turned the paste key into a capital A. Starting at 200 puts
+// them past every usage we use.
+inline const uint8_t ACT_MOVE = 200, ACT_CLOSE = 201, ACT_STEAM = 202,
+                     ACT_PASTE = 203, ACT_COPY = 204;
 
 struct Key {
     const wchar_t *label;
@@ -305,7 +317,7 @@ inline const Key kCompact4[] = {
     { L"alt", nullptr, 0, KBD_ALT, KK_MOD, 1.0f },
     { L"win", nullptr, 0, KBD_WIN, KK_MOD, 1.0f },
     { L"space", nullptr, 0x2c, 0, KK_SHOULDER_R1, 6.0f },
-    { L"paste", nullptr, ACT_PASTE, 0, KK_ACTION, 2.0f },
+    { L"paste", L"copy", ACT_PASTE, 0, KK_ACTION, 2.0f },
     { L"\u2190", nullptr, 0x50, 0, KK_NORMAL, 1.0f },
     { L"\u2193", nullptr, 0x51, 0, KK_NORMAL, 1.0f },
     { L"\u2192", nullptr, 0x4f, 0, KK_NORMAL, 1.0f },
@@ -556,9 +568,12 @@ inline void press_current(const void *who)
         if (k.usage == ACT_CLOSE) { hide(); return; }
         if (k.usage == ACT_STEAM) { ctm_overlay_open_steam(); hide(); return; }
         if (k.usage == ACT_PASTE) {
+            // ⓘ Shift turns it into copy. The shifted label already prints on
+            // the key, so it says so rather than needing to be known.
             // ⓘ Not a keystroke: ctrl+v, sent as one. The only entry on the
             // face that is a combination rather than a key.
-            uint8_t pv[6] = { 0x19, 0, 0, 0, 0, 0 };
+            const bool asCopy = shift_showing();
+            uint8_t pv[6] = { (uint8_t)(asCopy ? 0x06 : 0x19), 0, 0, 0, 0, 0 };
             ctm_keyboard_device::set_state_for(who, KBD_CTRL, pv, 1);
             return;
         }
@@ -684,7 +699,8 @@ inline void paint(HWND hwnd)
             if (idx >= 0 && idx < 12) label = kFnLabels[idx];
         } else if (shiftNow && k.shifted != nullptr) {
             label = k.shifted;
-        } else if (shiftNow && k.usage >= 0x04 && k.usage <= 0x1d) {
+        } else if (shiftNow && k.kind != KK_ACTION && k.kind != KK_MOD
+                   && k.usage >= 0x04 && k.usage <= 0x1d) {
             static wchar_t up[2];
             up[0] = (wchar_t)(L'A' + (k.usage - 0x04));
             up[1] = 0;
@@ -692,7 +708,7 @@ inline void paint(HWND hwnd)
         }
 
         SetTextColor(dc, hot ? RGB(0xff, 0xff, 0xff) : RGB(0xe8, 0xea, 0xf2));
-        DrawTextW(dc, label, -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        DrawTextW(dc, label, -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
 
         // ⭐ THE SHIFTED CHARACTER, PRINTED SMALL IN THE CORNER -- Steam does
         // this and it is the best thing on their keyboard: you never have to
@@ -704,7 +720,7 @@ inline void paint(HWND hwnd)
             s.left += 4; s.top += 2;
             SetTextColor(dc, RGB(0x8b, 0x8d, 0x96));
             HGDIOBJ prev = SelectObject(dc, small);
-            DrawTextW(dc, k.shifted, -1, &s, DT_LEFT | DT_TOP | DT_SINGLELINE);
+            DrawTextW(dc, k.shifted, -1, &s, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX);
             SelectObject(dc, prev);
         }
 
@@ -718,7 +734,7 @@ inline void paint(HWND hwnd)
             s.right -= 5; s.top += 2;
             SetTextColor(dc, RGB(0x9d, 0xb4, 0xff));
             HGDIOBJ prev = SelectObject(dc, small);
-            DrawTextW(dc, hint, -1, &s, DT_RIGHT | DT_TOP | DT_SINGLELINE);
+            DrawTextW(dc, hint, -1, &s, DT_RIGHT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX);
             SelectObject(dc, prev);
         }
     }
@@ -1091,9 +1107,12 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
         if (k.usage == ACT_CLOSE) { hide(); return true; }
         if (k.usage == ACT_STEAM) { ctm_overlay_open_steam(); hide(); return true; }
         if (k.usage == ACT_PASTE) {
+            // ⓘ Shift turns it into copy. The shifted label already prints on
+            // the key, so it says so rather than needing to be known.
             // ⓘ Not a keystroke: ctrl+v, sent as one. The only entry on the
             // face that is a combination rather than a key.
-            uint8_t pv[6] = { 0x19, 0, 0, 0, 0, 0 };
+            const bool asCopy = shift_showing();
+            uint8_t pv[6] = { (uint8_t)(asCopy ? 0x06 : 0x19), 0, 0, 0, 0, 0 };
             ctm_keyboard_device::set_state_for(deviceKey, KBD_CTRL, pv, 1);
             return true;
         }
