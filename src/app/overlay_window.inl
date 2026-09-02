@@ -413,20 +413,32 @@ inline void layout(int w, int h)
         for (int c = 0; c < rows_now()[r].count; ++c) units += rows_now()[r].keys[c].wide;
         if (units > widest) widest = units;
     }
+    // ⛔⛔ THE GAP IS PART OF THE COLUMN, NOT ADDED BETWEEN KEYS.
+    //
+    // ⚠️ This used to advance by width PLUS a gap, so a row of 8 keys got 7
+    // gaps where a row of 14 got 13 -- and the rows drifted apart by the
+    // difference. rhoquinn8217 saw it as space not reaching the keys above it
+    // (2026-09-02), on a layout that is a perfect grid in the data.
+    //
+    // ⭐ Now every key is placed at its COLUMN, computed from the units before
+    // it, and inset to leave the gap. Rows cannot drift however many keys they
+    // hold, because nothing accumulates.
     const int gap = 4;
-    const float unit = (float)(w - pad * 2 - gap * 13) / widest;
+    const float unit = (float)(w - pad * 2) / widest;
 
     int y = pad;
     for (int r = 0; r < kRowCount; ++r) {
-        float x = (float)pad;
+        float col = 0.0f;                       // in units, not pixels
         for (int c = 0; c < rows_now()[r].count; ++c) {
-            const float kw = rows_now()[r].keys[c].wide * unit;
+            const float wide = rows_now()[r].keys[c].wide;
             Placed pl;
-            pl.r.left = (int)x; pl.r.top = y;
-            pl.r.right = (int)(x + kw); pl.r.bottom = y + keyH;
+            pl.r.left  = pad + (int)(col * unit) + gap / 2;
+            pl.r.right = pad + (int)((col + wide) * unit) - gap / 2;
+            pl.r.top = y;
+            pl.r.bottom = y + keyH;
             pl.row = r; pl.col = c;
             g_placed.push_back(pl);
-            x += kw + gap;
+            col += wide;
         }
         y += keyH + rowGap;
     }
