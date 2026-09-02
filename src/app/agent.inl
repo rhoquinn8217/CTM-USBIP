@@ -111,6 +111,21 @@ static std::wstring bridge_map_for_kind(const std::string &kind)
     return find_hid_identity_map_file();
 }
 
+// ⭐ Which controller a device belongs to. The input path holds a device
+// pointer -- the chord fires there -- while the ordinal lives with the session.
+//
+// ⓘ Empty when it is not ours, and every caller treats that as "no particular
+// controller" rather than guessing at one.
+std::string ctm_ordinal_for_device(const void *deviceKey)
+{
+    if (!deviceKey) return std::string();
+    std::lock_guard<std::mutex> lock(g_agent_sessions_mutex);
+    for (const auto &s : g_agent_sessions) {
+        if (s && s->device.get() == deviceKey) return s->ordinal;
+    }
+    return std::string();
+}
+
 static AgentBridgeSession *find_bridge_session_locked(const std::wstring &busId)
 {
     for (auto &session : g_agent_sessions) {
@@ -370,6 +385,52 @@ static void bridge_session_worker(AgentBridgeSession *session)
     session->ready.store(true);
     device_log::session_w() << L"agent bridge ready kind=" << widen_ascii(session->kind.c_str(), session->kind.size())
                << L" port=" << session->port << L" busid=" << session->busId;
+
+    // ⭐⭐ THE WINDOW COMES UP ON THE CONTROLLER THAT JUST BRIDGED
+    // (rhoquinn8217, 2026-09-01). Bridging is always a deliberate act -- there
+    // is no mechanism that re-establishes a dropped connection on its own, so
+    // this cannot fire in a loop.
+    //
+    // ⛔ EXCEPT WHEN THE WINDOW IS ALREADY IN FRONT. Then the person is looking
+    // at it and using it, and destroying what they are doing to show them a tab
+    // they can reach in one press is the wrong trade. Same rule the chord
+    // already follows.
+    //
+    // ⓘ Unfocused but open counts as closed here: it is rebuilt on the new
+    // controller, which is what makes a pad picked up from the sofa land
+    // somewhere useful.
+    if (ctm_open_ui::g_open_ui && !ctm_open_ui::window_has_foreground()) {
+        device_log::session_w() << L"bridge: opening the settings window on "
+                   << widen_ascii(session->ordinal.c_str(), session->ordinal.size());
+        // ⛔⛔ ON ITS OWN THREAD, NEVER THIS ONE (rhoquinn8217, 2026-09-01:
+        // "when two controllers are bridged, all buttons are rapid firing").
+        //
+        // ⚠️ THIS IS THE REPORT RELAY THREAD. ctm_chord_show_ui closes any open
+        // window, POLLS UP TO A SECOND for it to actually go, then launches a
+        // browser -- so the controller's reports queued behind all of that and
+        // flushed in a burst afterwards, which reads as every button firing
+        // over and over. Two controllers, two stalled relays.
+        //
+        // ⓘ Detached because nothing here waits on the result: the window opens
+        // when it opens, and the session must not care.
+        // ⓘ The target is set even when another open is already running: the
+        // one in flight reads it as it builds its URL, so bridging two pads in
+        // quick succession lands on the second -- the one just picked up.
+        // ⭐ BACK ON, 2026-09-01, once the cause was understood. Bridging two
+        // pads rapid-fired every button, and switching this off was how that
+        // was traced -- but the fault was never here. It was the synthetic
+        // KEYBOARD: one shared last-writer-wins state that every gated
+        // controller wrote on every report, so an idle pad cancelled a held one
+        // hundreds of times a second. Opening the window was merely what put
+        // two gated pads on the config page at once.
+        //
+        // ⓘ ctm_chord_show_ui takes the one-at-a-time claim itself and leaves
+        // if it cannot get it -- and it sets the target first either way, so
+        // bridging two pads in quick succession lands on the second, which is
+        // the one just picked up.
+        const std::string target = session->ordinal;
+        std::thread([target]() { ctm_chord_show_ui(target); }).detach();
+    }
     // Bring up the synthetic gyro mouse the first time a DualSense session is
     // ready. Idempotent -- later sessions are no-ops. Always-present by design:
     // the gyro gate decides whether it MOVES, not whether it exists, so

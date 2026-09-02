@@ -137,6 +137,37 @@ inline std::wstring new_ui_token()
 //
 // ⓘ A page with no token never closes itself, which is exactly right: nothing
 // is claiming to be a newer window.
+// ⭐ Which controller the NEXT window should open on. Set just before opening,
+// cleared as it is used -- so a target can never leak into an unrelated open.
+inline std::wstring g_open_on_tab;
+
+inline void open_on_tab(const std::string &ordinal)
+{
+    g_open_on_tab.assign(ordinal.begin(), ordinal.end());
+}
+
+// ⛔⛔ ONE OPEN AT A TIME (rhoquinn8217, 2026-09-01: two bridged controllers
+// rapid-fired every button; bisected to this half).
+//
+// ⚠️ Opening the window CLOSES any existing one first, matching by title. Two
+// controllers bridging meant two of these running at once, each closing what
+// the other had just opened -- and every one of those transitions flips config
+// mode, which gates the pads and re-arms the swallow-until-released mask. The
+// oscillation reached the game as every button repeating.
+//
+// ⓘ The loser does not queue: it has already set the target, and the open in
+// flight reads the target when it builds its URL -- so the LAST controller to
+// bridge is the one the window comes up on, which is the one you just picked up.
+inline std::atomic_bool g_open_in_flight{false};
+
+inline bool claim_open()
+{
+    bool expected = false;
+    return g_open_in_flight.compare_exchange_strong(expected, true);
+}
+
+inline void release_open() { g_open_in_flight.store(false); }
+
 inline std::wstring page_url_untokened(uint16_t restPort)
 {
     return L"http://127.0.0.1:" + std::to_wstring(restPort) + L"/?app";
@@ -151,8 +182,19 @@ inline std::wstring page_url(uint16_t restPort)
     //
     // ⓘ Someone can of course type the parameter by hand. That is fine: it means
     // "I know what I am doing", not "this is definitely an app window".
-    return L"http://127.0.0.1:" + std::to_wstring(restPort) + L"/?app=" +
-           new_ui_token();
+    std::wstring url = L"http://127.0.0.1:" + std::to_wstring(restPort) +
+                       L"/?app=" + new_ui_token();
+    // ⭐ THE TAB TO LAND ON (rhoquinn8217, 2026-09-01). A window opened because
+    // a controller bridged, or because someone ran the chord ON a controller,
+    // should come up on THAT controller -- not on Overview, leaving them to
+    // find it.
+    //
+    // ⓘ Empty for an ordinary open, and the page then does what it always did.
+    if (!g_open_on_tab.empty()) {
+        url += L"&tab=" + g_open_on_tab;
+        g_open_on_tab.clear();      // one open, one target
+    }
+    return url;
 }
 
 inline std::wstring find_browser()

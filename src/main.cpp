@@ -86,7 +86,14 @@ void ctm_rebind_clear_provisional();
 // ⓘ rebind.inl runs on the input path and needs the window check from open_ui.
 bool ctm_ui_has_foreground();
 // ⓘ The chord calls this from the input path; the REST endpoint calls it too.
-void ctm_chord_show_ui();
+// ⓘ Takes the controller that ran the chord, so the window can come up on its
+// tab. Empty means "no particular one" -- the REST spawn path has no controller
+// in hand.
+void ctm_chord_show_ui(const std::string &ordinal);
+
+// Which controller a device belongs to, or empty if it is not bridged. The
+// input path holds a device pointer; the ordinal lives with the session.
+std::string ctm_ordinal_for_device(const void *deviceKey);
 void ctm_rebind_set_gate_hold(bool hold);
 
 void ctm_rebind_apply(const void *deviceKey,
@@ -101,6 +108,9 @@ void ctm_touch_mouse_apply(const void *deviceKey,
                            const std::string &linkedConfig,
                            const uint8_t *data, size_t len);
 void ctm_touch_mouse_forget(const void *deviceKey);
+// ⓘ Releases only THIS controller's held keys -- they are kept per device so
+// two gated pads cannot cancel each other.
+void ctm_keyboard_forget_device(const void *deviceKey);
 void ctm_stick_mouse_apply(const void *deviceKey,
                            const std::vector<unsigned char> &descriptor,
                            const std::string &linkedConfig,
@@ -161,9 +171,20 @@ bool ctm_ui_has_foreground()
 //
 // ⛔ Clears the hold FIRST. Hold beats config mode by design, so showing the
 // window with one set would gate nothing and report success anyway.
-void ctm_chord_show_ui()
+void ctm_chord_show_ui(const std::string &ordinal)
 {
     ctm_rebind_set_gate_hold(false);
+    // ⓘ Before any close: the target is read when the new URL is built.
+    if (!ordinal.empty()) ctm_open_ui::open_on_tab(ordinal);
+    // ⛔ ONE AT A TIME. Whoever takes the claim does the open; anyone who
+    // cannot has ALREADY LEFT ITS TARGET above, and the open in flight will
+    // use it. Two of these running at once close each other's windows -- see
+    // the note beside claim_open.
+    if (!ctm_open_ui::claim_open()) {
+        device_log::session_w() << L"window open already in flight -- retargeted";
+        return;
+    }
+    struct Release { ~Release() { ctm_open_ui::release_open(); } } release;
 
     // ⛔ WAIT FOR THE CLOSE. Measured 2026-08-29: with a window already open,
     // WM_CLOSE was posted and open_new ran immediately -- so the old window was

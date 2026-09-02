@@ -444,10 +444,14 @@ inline void apply(const void *deviceKey,
             device_log::input(device_log::msg()
                 << "chord: two fingers + Options -- showing the settings window");
             passOptionsThrough = true;
+            // ⓘ The chord belongs to a CONTROLLER, and this function has that
+            // device in hand -- so the window can open on its tab rather than
+            // on Overview.
+            const std::string chordOrdinal = ctm_ordinal_for_device(deviceKey);
             // ⓘ Four seconds: long enough for a browser to start cold, short
             // enough that being locked out is a blip rather than a problem.
             g_gateProvisionalUntil.store(chord_now_ms() + 4000);
-            ctm_chord_show_ui();
+            ctm_chord_show_ui(chordOrdinal);
         }
         g_passOptions = passOptionsThrough;
 
@@ -615,7 +619,10 @@ inline void apply(const void *deviceKey,
                 << std::hex << static_cast<int>(gateKeys[0]) << std::dec);
         }
 
-        ctm_keyboard_device::set_state(gateMods, gateKeys, gateCount);
+        // ⓘ PER DEVICE. Every gated controller runs this on every report; one
+        // shared last-writer-wins state made them cancel each other at report
+        // rate, which is what "instant rapid fire with two pads" was.
+        ctm_keyboard_device::set_state_for(deviceKey, gateMods, gateKeys, gateCount);
         return;                       // ⭐ user rebinds do not run in this mode
     }
 
@@ -747,7 +754,7 @@ inline void apply(const void *deviceKey,
     }
 
     if (anyBound) {
-        ctm_keyboard_device::set_state(modifiers, keys, keyCount);
+        ctm_keyboard_device::set_state_for(deviceKey, modifiers, keys, keyCount);
     }
     // ⓘ Only when something is bound to a mouse button, so a controller with no
     // mouse bindings never touches the shared state.
@@ -761,6 +768,11 @@ inline void apply(const void *deviceKey,
 
 // Defined out here for main.cpp's forward declaration -- device.inl calls this
 // on the input path, and is included long before this file.
+void ctm_keyboard_forget_device(const void *deviceKey)
+{
+    ctm_keyboard_device::forget_device(deviceKey);
+}
+
 bool ctm_rebind_config_mode()
 {
     return ctm_rebind::config_mode();

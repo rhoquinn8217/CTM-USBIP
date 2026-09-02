@@ -49,6 +49,46 @@ inline std::wstring keyboard_map_path()
 
 // Replace the whole held-key set. Six keys maximum, which is what a boot
 // keyboard carries; anything past that is dropped rather than rolled over.
+// ⭐⭐ WHAT EACH CONTROLLER IS HOLDING, kept apart (rhoquinn8217, 2026-09-01:
+// with two bridged controllers every button rapid-fired INSTANTLY).
+//
+// ⛔ set_state was last-writer-wins on ONE shared keyboard, and every gated
+// controller calls it on every report -- about 250 times a second each. So the
+// pad you were NOT touching wrote "no keys" between every report of the pad you
+// were, and the host saw key-down, key-up, key-down at report rate. No auto
+// repeat needed; it looked instant because it was.
+//
+// ⓘ The keyboard is one device to Windows and must stay so, so the answer is a
+// UNION: each controller's own keys are remembered, and what is published is
+// everything currently held across all of them.
+inline std::map<const void *, std::pair<uint8_t, std::vector<uint8_t>>> g_perDevice;
+
+inline void set_state_locked_from_devices();
+
+// ⓘ The device-aware entry point. Anything with a controller in hand uses this;
+// set_state below is kept for callers that have none.
+inline void set_state_for(const void *deviceKey, uint8_t modifiers,
+                          const uint8_t *keys, size_t count)
+{
+    {
+        std::lock_guard<std::mutex> lock(g_stateMutex);
+        auto &slot = g_perDevice[deviceKey];
+        slot.first = modifiers;
+        slot.second.assign(keys, keys + (keys ? count : 0));
+        set_state_locked_from_devices();
+    }
+}
+
+// ⛔ Forgetting a controller must release ITS keys and nobody else's -- an
+// unbridge used to be the only way a stuck key got cleared, and with two pads
+// that cleared the other one's too.
+inline void forget_device(const void *deviceKey)
+{
+    std::lock_guard<std::mutex> lock(g_stateMutex);
+    g_perDevice.erase(deviceKey);
+    set_state_locked_from_devices();
+}
+
 inline void set_state(uint8_t modifiers, const uint8_t *keys, size_t count)
 {
     // ⛔ ONLY MARK DIRTY WHEN SOMETHING ACTUALLY CHANGED.
@@ -82,11 +122,40 @@ inline void set_state(uint8_t modifiers, const uint8_t *keys, size_t count)
     }
 }
 
+// Merge every controller's held keys into the one report Windows sees.
+// ⚠️ Caller holds g_stateMutex.
+inline void set_state_locked_from_devices()
+{
+    uint8_t mods = 0;
+    uint8_t merged[6] = {0, 0, 0, 0, 0, 0};
+    size_t n = 0;
+    for (const auto &entry : g_perDevice) {
+        mods = static_cast<uint8_t>(mods | entry.second.first);
+        for (uint8_t k : entry.second.second) {
+            if (k == 0 || n >= 6) continue;
+            bool already = false;
+            for (size_t i = 0; i < n; ++i) if (merged[i] == k) already = true;
+            if (!already) merged[n++] = k;
+        }
+    }
+    bool changed = (g_modifiers != mods);
+    g_modifiers = mods;
+    for (size_t i = 0; i < 6; ++i) {
+        const uint8_t want = (i < n) ? merged[i] : 0;
+        if (g_keys[i] != want) { g_keys[i] = want; changed = true; }
+    }
+    if (changed) g_dirty.store(true, std::memory_order_relaxed);
+}
+
 // ⭐ Everything up. Called when a controller unbridges and when rebinds are
 // turned off -- a key left down would repeat forever and look like a stuck
 // keyboard, which is the same class of fault as a stuck mouse button.
 inline void release_all()
 {
+    {
+        std::lock_guard<std::mutex> lock(g_stateMutex);
+        g_perDevice.clear();
+    }
     set_state(0, nullptr, 0);
 }
 

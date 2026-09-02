@@ -226,6 +226,11 @@ public:
         ctm_gyro_mouse::forget_device(this);
         ctm_touch_mouse_forget(this);
         ctm_stick_mouse_forget(this);
+        // ⛔ And this controller's held KEYS. They are kept per device now, so
+        // leaving them behind would hold a key down forever with no controller
+        // able to release it -- and clearing everyone's would release the other
+        // pad's keys mid-press.
+        ctm_keyboard_forget_device(this);
         stop_audio_stream();
     }
 

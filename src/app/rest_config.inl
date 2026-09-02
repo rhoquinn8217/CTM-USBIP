@@ -495,7 +495,7 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
             // ⓘ This is what makes it a reset rather than an open: every path
             // into it lands in the same known state.
             // ⭐ Same call the chord makes, so the two cannot drift apart.
-            ctm_chord_show_ui();
+            ctm_chord_show_ui(std::string());   // no controller in hand here
             *out = rest_http_response(200, R"({"ok":true,"config_mode":true})");
             return true;
         }

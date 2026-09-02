@@ -299,7 +299,12 @@
   * { box-sizing: border-box; }
   /* ⓘ Bottom padding leaves room for the fixed status bar, or it would cover
      the last control on the page. */
-  body { margin:0; padding:0 20px 64px; min-height:100vh; background:#15161a; color:#e8e8ea;
+  /* ⛔ THE NOTICE STRIP TAKES SPACE FROM THE PAGE, IT DOES NOT SIT OVER IT
+     (rhoquinn8217, 2026-09-01: a notice completely covered the last setting).
+     ⓘ 64px was the pad bar alone. --noticeH is the strip's height when it is
+     up and 0px when it is down, so the room appears and disappears with it. */
+  body { margin:0; padding:0 20px calc(64px + var(--noticeH, 0px));
+         min-height:100vh; background:#15161a; color:#e8e8ea;
          font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
   h1 { font-size:17px; margin:0 0 2px; font-weight:600; }
   h2 { font-size:14px; margin:22px 0 8px; color:#b9bbc4; font-weight:600;
@@ -420,7 +425,7 @@
   /* Set from the sticky block's measured height -- a hardcoded guess is wrong
      the moment a device row wraps onto two lines. */
   button, select, input, .row { scroll-margin-top: var(--stickH, 180px);
-                                scroll-margin-bottom: 70px; }
+                                scroll-margin-bottom: calc(70px + var(--noticeH, 0px)); }
   /* ⛔ The sticky header is always on screen, so scrolling to reach it is never
      necessary -- and doing so dragged the settings list underneath it. */
   #stickyTop button, #stickyTop select, #stickyTop input { scroll-margin:0; }
@@ -570,14 +575,36 @@
      2026-09-01). Bottom right sat over the footer and the last rows of a
      section; the top right corner covered the controller tabs. Above centre
      is clear of both and still lands where the eye goes. */
-  #bubbles { position:fixed; right:16px; top:16px; z-index:40;
-             display:flex; flex-direction:column; gap:8px; max-width:340px;
-             align-items:flex-end; pointer-events:none; }
+  /* ⭐⭐ A STRIP THAT SLIDES UP FROM THE BOTTOM (rhoquinn8217, 2026-09-01),
+     rather than panels floating over the page. A notice is either there, in a
+     place of its own, or it is not -- so nothing is ever covered.
+     ⛔ It sits ABOVE the pad bar, not under it: #gpbar is fixed at the bottom
+     already, and two fixed things at bottom:0 stack on each other.
+     ⓘ Measured, not guessed -- the bar wraps to two lines on a narrow window,
+     and a hardcoded height would put the strip through it. See measureGpBar. */
+  #bubbles { position:fixed; left:0; right:0; bottom:var(--gpbarH, 38px);
+             z-index:39; display:flex; flex-direction:row; flex-wrap:wrap;
+             gap:0; align-items:stretch; pointer-events:none;
+             transform:translateY(110%); transition:transform .22s ease;
+             will-change:transform; }
+  /* ⭐ Down when empty, up when something is in it. :empty does the deciding,
+     so nothing has to remember to hide it. */
+  #bubbles:not(:empty) { transform:translateY(0); }
   /* ⓘ Translucent rather than clear: text over an arbitrary background is
-     unreadable, so the panel keeps a wash and a blur behind it. */
-  #bubbles > div { pointer-events:auto; padding:10px 12px; border-radius:10px;
-                   font-size:12px; line-height:1.6; backdrop-filter:blur(6px);
-                   -webkit-backdrop-filter:blur(6px); }
+     unreadable, so the panel keeps a wash and a blur behind it.
+     ⭐ Lighter wash and a stronger blur (rhoquinn8217, 2026-09-01) -- the blur
+     is what keeps short text legible once the fill stops doing the work. */
+  /* ⭐ MUCH lighter again (rhoquinn8217, 2026-09-01). At 18% the fill is barely
+     there, so legibility comes from the BLUR and a shadow behind the letters
+     instead -- the page shows through, but the text does not smear into it. */
+  /* ⓘ Each notice takes a share of the width and they sit side by side, so two
+     at once read as one strip rather than a stack of boxes. Opaque now: the
+     strip has a place of its own, so there is nothing behind it to see. */
+  #bubbles > div { pointer-events:auto; flex:1 1 240px; padding:9px 14px;
+                   border-radius:0; font-size:12px; line-height:1.5;
+                   border-top-width:2px; border-bottom:none;
+                   border-left:none; border-right:none; }
+  #bubbles > div + div { border-left:1px solid rgba(255,255,255,.10); }
   #presetBox { position:fixed; inset:0; z-index:60; display:none;
                align-items:center; justify-content:center; background:#0009; }
   #presetList button { display:block; width:100%; text-align:left;
@@ -1358,10 +1385,12 @@ function noteBridgeMayNeedAMoment() {
   if (document.getElementById('bridgeWait')) return;
   var box = document.createElement('div');
   box.id = 'bridgeWait';
-  box.style.cssText = 'border:1px solid #7aa7e0;background:rgba(32,41,58,.78);color:#bcd4f2';
-  box.innerHTML = '<strong>The listener is running.</strong><br>' +
-    'Bridging can take a moment to become available after a fresh start. If ' +
-    'the gesture gives the refusal signal, wait a few seconds and try again.';
+  box.style.cssText = 'border:1px solid #7aa7e0;background:#20293a;color:#bcd4f2';
+  // ⓘ Short on purpose (rhoquinn8217, 2026-09-01): a notice that covers the
+  // page is worse than one that says less. The refusal signal already tells
+  // someone to wait -- this only needs to say the wait is normal.
+  box.innerHTML = '<strong>Listener running.</strong><br>' +
+    'Bridging can need a few seconds after a fresh start.';
   document.getElementById('bubbles').appendChild(box);
 }
 
@@ -1403,6 +1432,9 @@ function renderTabs(devices) {
   // the bottom of Overview, where its header row sat above the Devices and
   // Configs tables it had nothing to do with.
   TABS.push('editor');
+  // ⓘ Tried here because this is where TABS gains the controllers -- the tab
+  // the window was opened for exists from this moment and not before.
+  setTimeout(honourOpenOnTab, 0);
   html += '<button data-tab="editor" class="editortab' +
           (ACTIVE === 'editor' ? ' on' : '') +
           '" onclick="showTab(\'editor\')">Editor</button>';
@@ -1874,6 +1906,29 @@ function paintStickyHead() {
 // ⭐ Measure the sticky block rather than hardcoding its height. A device row
 // wraps onto two lines on a narrow window, and a guessed pixel count is wrong
 // the moment it does -- which is how a focused control ends up underneath it.
+// ⭐ How tall the pad bar is, so the notice strip can sit exactly on top of it.
+// ⓘ Measured for the same reason the header is: the bar wraps to two lines on a
+// narrow window, and a hardcoded height would put the strip through it.
+// ⭐ How much room the notice strip is taking, or 0 when it is down. The page
+// reserves this at the bottom so a notice can never sit over the last setting.
+//
+// ⓘ Watched rather than called from each notice: they are added and removed
+// from several places, and one missed call would leave the room reserved with
+// nothing in it -- or worse, a notice back over the content.
+function measureNotices() {
+  var strip = document.getElementById('bubbles');
+  if (!strip) return;
+  var h = strip.children.length ? (strip.offsetHeight || 0) : 0;
+  document.documentElement.style.setProperty('--noticeH', h + 'px');
+}
+
+function measureGpBar() {
+  var bar = document.getElementById('gpbar');
+  if (!bar) return;
+  document.documentElement.style
+    .setProperty('--gpbarH', (bar.offsetHeight || 0) + 'px');
+}
+
 function measureSticky() {
   var el = document.getElementById('stickyTop');
   if (!el) return;
@@ -1882,6 +1937,8 @@ function measureSticky() {
   // strip is inside this block now, so its height is already in here.
   document.documentElement.style
     .setProperty('--stickH', (el.offsetHeight + 14) + 'px');
+  measureGpBar();          // the bar below moves with the same things
+  measureNotices();
 }
 
 window.addEventListener('resize', measureSticky);
@@ -3266,17 +3323,13 @@ function noteRemapsSuspended() {
   SAID_SUSPENDED = true;
 
   var box = document.createElement('div');
-  box.style.cssText = 'border:1px solid #6c8cff;background:rgba(30,35,51,.78);color:#c9d4ff';
+  box.style.cssText = 'border:1px solid #6c8cff;background:#1e2333;color:#c9d4ff';
   // ⭐ This is where Safe Edit Mode gets advertised, because this is the moment
   // someone notices the cursor has stopped and wonders why. A permanent banner
   // would become furniture; this appears exactly when it answers a question.
-  box.innerHTML = '<strong>Your remaps and cursor are paused here.</strong><br>' +
-    'While this window is in front the controller drives it directly, so ' +
-    'remaps and gyro, stick or touchpad cursor are suspended. They come back ' +
-    'when you close it.<br>' +
-    '<span style="opacity:.85">Want to keep them while you edit? Turn ' +
-    '<strong>Safe Edit Mode</strong> off, top of the page &mdash; they stay ' +
-    'active, but your inputs will mirror in an active game.</span>';
+  box.innerHTML = '<strong>Remaps and cursor are paused here.</strong><br>' +
+    'Turn <strong>Safe Edit Mode</strong> off to keep them &mdash; your inputs ' +
+    'then mirror in an active game.';
   document.getElementById('bubbles').appendChild(box);
   setTimeout(function () {
     if (box.parentNode) box.parentNode.removeChild(box);
@@ -3300,10 +3353,9 @@ function noteUngatedPad() {
   box = document.createElement('div');
   box.id = 'ungatedWarn';
   box.dataset.seen = Date.now();
-  box.style.cssText = 'border:1px solid #e0c07a;background:rgba(58,51,32,.78);color:#e8cf92';
+  box.style.cssText = 'border:1px solid #e0c07a;background:#3a3320;color:#e8cf92';
   box.innerHTML = '<strong>This controller is not bridged.</strong><br>' +
-    'Safe Edit Mode only holds BRIDGED controllers. Everything you press on ' +
-    'this one is also reaching the game.';
+    'Everything you press on it also reaches the game.';
   document.getElementById('bubbles').appendChild(box);
 }
 
@@ -3803,7 +3855,36 @@ var FOOTER_RETURN = null;
 // previous listener is refused.
 //
 // ⓘ Waits for the devices to arrive, or the tab it wants may not exist yet.
+// ⭐ The controller this window was opened FOR, from ?tab=<ordinal>. The agent
+// sets it when a bridge or a chord is what opened the window.
+var OPEN_ON_TAB = (function () {
+  var m = /[?&]tab=([^&]*)/.exec(location.search);
+  return m ? decodeURIComponent(m[1]) : '';
+})();
+
+// ⛔ IT WINS OVER THE REMEMBERED PLACE. Someone who just bridged a controller,
+// or ran the chord on one, is telling the window where to be -- the place they
+// left off is the older intent of the two.
+function honourOpenOnTab() {
+  if (!OPEN_ON_TAB) return false;
+  // ⛔ NOT CLEARED UNTIL IT LANDS. At startup the device list has not arrived
+  // yet, so the tab does not exist and the first attempt cannot succeed --
+  // clearing there threw the target away and the window stayed on Overview.
+  if (TABS.indexOf(OPEN_ON_TAB) < 0) return false;
+  showTab(OPEN_ON_TAB);
+  OPEN_ON_TAB = '';                 // one open, one jump
+  return true;
+}
+
 function restorePlace() {
+  // ⛔ A TARGET SUPPRESSES THE REMEMBERED PLACE ENTIRELY, whether or not the tab
+  // exists yet (rhoquinn8217, 2026-09-01: the window landed on the controller
+  // and then jumped straight back to Overview).
+  //
+  // ⚠️ It was `if (honourOpenOnTab()) return;` -- but at startup the device list
+  // has not arrived, so the jump reports failure, this carries on, and its own
+  // restore fires 900ms later and undoes the jump that lands in between.
+  if (OPEN_ON_TAB) { honourOpenOnTab(); return; }
   var raw = null;
   try { raw = localStorage.getItem('ctm_place'); } catch (e) { return; }
   if (!raw) return;
@@ -3813,9 +3894,20 @@ function restorePlace() {
   // ⛔ A place from a PREVIOUS listener run is not ours. Without this, opening
   // the page tomorrow would drop you wherever you were tonight -- which is what
   // sessionStorage used to prevent, and what the run id replaces.
-  if (!want.run || (AGENT_RUN && want.run !== AGENT_RUN)) return;
+  if (!want.run) return;
 
   setTimeout(function () {
+    // ⛔ THE RUN MUST MATCH, NOT MERELY FAIL TO CONTRADICT (rhoquinn8217,
+    // 2026-09-01: an ordinary listener start landed on the Editor).
+    //
+    // ⚠️ The check used to pass when AGENT_RUN was still EMPTY -- and at
+    // startup it is, because the first devices poll has not answered yet. So a
+    // place saved under the PREVIOUS listener run was accepted, and the window
+    // came up wherever it was left rather than on Overview.
+    //
+    // ⓘ Checked in here, after the wait, because that is when the run id has
+    // arrived. An unknown run is a refusal, not a maybe.
+    if (!AGENT_RUN || want.run !== AGENT_RUN) return;
     var tab = want.tab;
 
     // ⭐ Find the controller by SERIAL, wherever it landed this time. Falls
@@ -4015,6 +4107,12 @@ document.addEventListener('keydown', function (ev) {
   plain();
 });
 
+// ⭐ Which actions may fire from an AUTO-REPEATED key. Movement repeats,
+// because holding to scroll a long list is the point of holding; choosing,
+// backing out, toggling and switching tabs do not.
+var REPEATABLE = { ArrowUp: true, ArrowDown: true, ArrowLeft: true, ArrowRight: true,
+                   KeyW: true, KeyS: true, KeyA: true, KeyD: true };
+
 document.addEventListener('keydown', function (ev) {
   if (STOPPED) return;
   // ⛔ BOTH MODIFIERS REQUIRED. Without this check a plain 'd' typed into a
@@ -4024,6 +4122,10 @@ document.addEventListener('keydown', function (ev) {
   // Windows Sound panel -- so Shift is required too. Three modifiers is a far
   // smaller target, and it let KeyS come back so WASD reads properly.
   if (!ev.ctrlKey || !ev.altKey || !ev.shiftKey) return;
+  // ⛔ AND NOT AN AUTO-REPEAT, except for movement. This is the path a HELD pad
+  // button arrives on, and Windows repeats a held key -- so holding R1 switched
+  // tabs over and over. See REPEATABLE above.
+  if (ev.repeat && !REPEATABLE[ev.code]) return;
 
   // ⓘ A gate keystroke means the pad in use IS gated, so any warning about an
   // ungated one is stale. Only touched when the bubble exists -- there is
@@ -4111,6 +4213,7 @@ function gpPoll() {
   hint.textContent = (live.length > 1 ? live.length + ' controllers' : 'controller') +
                      ' — L1/R1 tabs, D-pad move, ✕ select, ✕ again to leave a value, □ on/off, ○ back';
   bar.className = 'live';
+  measureGpBar();
 
   var now = performance.now();
 
@@ -4588,6 +4691,9 @@ function pollDevices() {
     if (first) return;                       // the initial load already drew it
     setConn('controllers changed', 'good');
     loadDevices();
+    // ⓘ The controller that opened this window may only just have appeared in
+    // the list, so the jump is retried as the list changes.
+    honourOpenOnTab();
     loadConfigs();                           // linked_by and pickers follow
   }).catch(function(){
     // A failed poll is not worth a log line -- the agent may simply be
@@ -4623,6 +4729,25 @@ setInterval(function() {
   var busy = el && (el.tagName === 'INPUT' || el.tagName === 'SELECT');
   if (!IS_DOWN && !busy && !CONFIRM_CB && !RENAMING) loadConfigs();
 }, 10000);
+// ⭐ The strip's height is WATCHED, not reported. Notices are added and removed
+// from several places -- a timeout, a bridge, a chord -- and one missed call
+// would leave the page's bottom padding wrong in one direction or the other:
+// room reserved with nothing in it, or a notice back over the last setting.
+// ⓘ Also fires on a resize, when a notice rewraps to two lines.
+(function watchNotices() {
+  var strip = document.getElementById('bubbles');
+  if (!strip) return;
+  if (typeof MutationObserver === 'function') {
+    new MutationObserver(measureNotices).observe(strip, { childList: true });
+  }
+  if (typeof ResizeObserver === 'function') {
+    new ResizeObserver(measureNotices).observe(strip);
+  } else {
+    window.addEventListener('resize', measureNotices);
+  }
+  measureNotices();
+})();
+
 requestAnimationFrame(gpPoll);
 
 // Picking a different controller changes what the suggestion should be.
