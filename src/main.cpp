@@ -227,6 +227,23 @@ void ctm_chord_show_ui(const std::string &ordinal)
 
 int wmain(int argc, wchar_t **argv)
 {
+    // ⭐⭐ TELL WINDOWS WE UNDERSTAND HIGH-DPI, before any window exists.
+    //
+    // ⚠️ Without this the process gets VIRTUALISED screen metrics: on a 4K
+    // desktop at 300% scaling, GetSystemMetrics(SM_CXSCREEN) answers 1280
+    // rather than 3840. The overlay keyboard would size itself in those
+    // pretend pixels and Windows would then stretch the result -- the right
+    // physical size, but blurry, which is the one thing that hurts on a
+    // television across a room.
+    //
+    // ⓘ Safe for everything else here: the only other absolute screen use is
+    // warping the cursor to the CENTRE (gyro_mouse.inl), and the centre is the
+    // centre in either coordinate space. Nothing else in the listener reads
+    // screen positions -- the browser window is found by title, not location.
+    //
+    // ⓘ The capture program already does this, for DuplicateOutput1.
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+
     SetConsoleCtrlHandler(console_ctrl_handler, TRUE);
     EnetGlobalGuard enetGuard;
     if (!enetGuard.ok) {
