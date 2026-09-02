@@ -199,6 +199,10 @@ struct Key {
 // `inline const uint8_t 0x0004 = 0x02` and failed with "syntax error:
 // constant" -- an error pointing at a line that looks perfectly fine.
 inline const uint8_t KBD_CTRL = 0x01, KBD_SHIFT = 0x02, KBD_ALT = 0x04, KBD_WIN = 0x08;
+// ⓘ NOT a real modifier bit: Fn exists only in this keyboard, so it is never
+// sent. 0x80 is unused by the HID modifier byte's four left-hand keys, and it
+// is masked out before anything is transmitted.
+inline const uint8_t KBD_FN = 0x80;
 
 inline const Key kRow0[] = {
     { L"esc", nullptr, 0x29, 0, KK_NORMAL, 1.0f },
@@ -272,17 +276,18 @@ inline const Key kRow4[] = {
 // ⭐ And its rows are ALIGNED, unlike Full's stagger -- so walking it is plain
 // index arithmetic and the nearest-neighbour code never runs here.
 inline const Key kCompact0[] = {
-    { L"`", L"~", 0x35, 0, KK_ESC, 1.0f },
+    { L"esc", nullptr, 0x29, 0, KK_NORMAL, 1.0f },
+    { L"`", L"~", 0x35, 0, KK_NORMAL, 1.0f },
     { L"1", L"!", 0x1e, 0, KK_FN, 1.0f }, { L"2", L"@", 0x1f, 0, KK_FN, 1.0f },
     { L"3", L"#", 0x20, 0, KK_FN, 1.0f }, { L"4", L"$", 0x21, 0, KK_FN, 1.0f },
     { L"5", L"%", 0x22, 0, KK_FN, 1.0f }, { L"6", L"^", 0x23, 0, KK_FN, 1.0f },
     { L"7", L"&", 0x24, 0, KK_FN, 1.0f }, { L"8", L"*", 0x25, 0, KK_FN, 1.0f },
     { L"9", L"(", 0x26, 0, KK_FN, 1.0f }, { L"0", L")", 0x27, 0, KK_FN, 1.0f },
     { L"-", L"_", 0x2d, 0, KK_FN, 1.0f }, { L"=", L"+", 0x2e, 0, KK_FN, 1.0f },
-    { L"\u232b", nullptr, 0x2a, 0, KK_SHOULDER_L1, 1.0f },
+    { L"\u232b", nullptr, 0x2a, 0, KK_NORMAL, 1.0f },
 };
 inline const Key kCompact1[] = {
-    { L"tab", nullptr, 0x2b, 0, KK_NORMAL, 1.0f },
+    { L"tab", nullptr, 0x2b, 0, KK_NORMAL, 2.0f },
     { L"q", nullptr, 0x14, 0, KK_NORMAL, 1.0f }, { L"w", nullptr, 0x1a, 0, KK_NORMAL, 1.0f },
     { L"e", nullptr, 0x08, 0, KK_NORMAL, 1.0f }, { L"r", nullptr, 0x15, 0, KK_NORMAL, 1.0f },
     { L"t", nullptr, 0x17, 0, KK_NORMAL, 1.0f }, { L"y", nullptr, 0x1c, 0, KK_NORMAL, 1.0f },
@@ -292,17 +297,17 @@ inline const Key kCompact1[] = {
     { L"\\", L"|", 0x31, 0, KK_NORMAL, 1.0f },
 };
 inline const Key kCompact2[] = {
-    { L"ctrl", nullptr, 0, KBD_CTRL, KK_MOD, 1.0f },
+    { L"ctrl", nullptr, 0, KBD_CTRL, KK_MOD, 2.0f },
     { L"a", nullptr, 0x04, 0, KK_NORMAL, 1.0f }, { L"s", nullptr, 0x16, 0, KK_NORMAL, 1.0f },
     { L"d", nullptr, 0x07, 0, KK_NORMAL, 1.0f }, { L"f", nullptr, 0x09, 0, KK_NORMAL, 1.0f },
     { L"g", nullptr, 0x0a, 0, KK_NORMAL, 1.0f }, { L"h", nullptr, 0x0b, 0, KK_NORMAL, 1.0f },
     { L"j", nullptr, 0x0d, 0, KK_NORMAL, 1.0f }, { L"k", nullptr, 0x0e, 0, KK_NORMAL, 1.0f },
     { L"l", nullptr, 0x0f, 0, KK_NORMAL, 1.0f },
     { L";", L":", 0x33, 0, KK_NORMAL, 1.0f }, { L"'", L"\"", 0x34, 0, KK_NORMAL, 1.0f },
-    { L"enter", nullptr, 0x28, 0, KK_SHOULDER_R2, 2.0f },
+    { L"enter", nullptr, 0x28, 0, KK_NORMAL, 2.0f },
 };
 inline const Key kCompact3[] = {
-    { L"shift", nullptr, 0, KBD_SHIFT, KK_MOD, 1.0f },
+    { L"shift", nullptr, 0, KBD_SHIFT, KK_MOD, 2.0f },
     { L"z", nullptr, 0x1d, 0, KK_NORMAL, 1.0f }, { L"x", nullptr, 0x1b, 0, KK_NORMAL, 1.0f },
     { L"c", nullptr, 0x06, 0, KK_NORMAL, 1.0f }, { L"v", nullptr, 0x19, 0, KK_NORMAL, 1.0f },
     { L"b", nullptr, 0x05, 0, KK_NORMAL, 1.0f }, { L"n", nullptr, 0x11, 0, KK_NORMAL, 1.0f },
@@ -310,13 +315,16 @@ inline const Key kCompact3[] = {
     { L",", L"<", 0x36, 0, KK_NORMAL, 1.0f }, { L".", L">", 0x37, 0, KK_NORMAL, 1.0f },
     { L"/", L"?", 0x38, 0, KK_NORMAL, 1.0f },
     { L"\u2191", nullptr, 0x52, 0, KK_NORMAL, 1.0f },
-    { L"steam", nullptr, ACT_STEAM, 0, KK_ACTION, 1.0f },
+    // ⭐ Fn LATCHES like a modifier rather than being held on a shoulder.
+    // rhoquinn8217, 2026-09-02: the steam key was not needed -- the PS button
+    // already opens Steam, and with a mouse you would click the app itself.
+    { L"fn", nullptr, 0, KBD_FN, KK_MOD, 1.0f },
     { L"\u2328\u21f3", nullptr, ACT_MOVE, 0, KK_ACTION, 1.0f },
 };
 inline const Key kCompact4[] = {
-    { L"alt", nullptr, 0, KBD_ALT, KK_MOD, 1.0f },
-    { L"win", nullptr, 0, KBD_WIN, KK_MOD, 1.0f },
-    { L"space", nullptr, 0x2c, 0, KK_SHOULDER_R1, 6.0f },
+    { L"alt", nullptr, 0, KBD_ALT, KK_MOD, 2.0f },
+    { L"win", nullptr, 0, KBD_WIN, KK_MOD, 2.0f },
+    { L"space", nullptr, 0x2c, 0, KK_NORMAL, 5.0f },
     { L"paste", L"copy", ACT_PASTE, 0, KK_ACTION, 2.0f },
     { L"\u2190", nullptr, 0x50, 0, KK_NORMAL, 1.0f },
     { L"\u2193", nullptr, 0x51, 0, KK_NORMAL, 1.0f },
@@ -385,7 +393,15 @@ inline uint8_t active_mods()
 {
     uint8_t m = 0;
     for (const auto &e : g_mods) if (e.second != LATCH_OFF) m |= e.first;
-    return m;
+    // ⛔ Fn is ours, not the host's. It picks a layer on this keyboard and must
+    // never appear in a report.
+    return static_cast<uint8_t>(m & ~KBD_FN);
+}
+
+// ⓘ Either way of asking for the F keys.
+inline bool fn_showing()
+{
+    return g_fnHeld.load() || mod_state(KBD_FN) != LATCH_OFF;
 }
 
 inline bool shift_showing()
@@ -595,12 +611,13 @@ inline void press_current(const void *who)
         }
         if (next != LATCH_OFF) g_latchUsed = false;
         g_mods[k.mod] = next;
+        invalidate();                 // the three states are a colour each
         return;
     }
 
     uint8_t usage = k.usage;
     if (g_fnHeld.load() && usage == 0x29) usage = 0x35;
-    if (g_fnHeld.load() && k.kind == KK_FN) {
+    if (fn_showing() && k.kind == KK_FN) {
         const int idx = g_col - 1;
         if (idx >= 0 && idx < 12) usage = kFnUsages[idx];
     }
@@ -617,7 +634,14 @@ inline void release_current(const void *who)
 {
     uint8_t none[6] = { 0, 0, 0, 0, 0, 0 };
     ctm_keyboard_device::set_state_for(who, 0, none, 0);
-    // ⓘ A latch is spent by the key it modified, and this is that moment.
+    // ⛔ ONLY IF A KEY ACTUALLY USED IT. This cleared every latch on any
+    // release -- so clicking ctrl latched it and letting go of the mouse button
+    // un-latched it a moment later, which is why mouse latching never appeared
+    // to work (rhoquinn8217, 2026-09-02).
+    //
+    // ⓘ A latch is spent by the key it modified, not by the act of letting go.
+    if (!g_latchUsed) return;
+    g_latchUsed = false;
     bool changed = false;
     for (auto &e : g_mods) {
         if (e.second == LATCH_ON) { e.second = LATCH_OFF; changed = true; }
@@ -664,7 +688,8 @@ inline void paint(HWND hwnd)
     HBRUSH fillHover  = CreateSolidBrush(RGB(0x24, 0x28, 0x34));
     HBRUSH edgeHot    = CreateSolidBrush(RGB(0x8f, 0xa8, 0xff));
 
-    const bool fnNow = g_fnHeld.load();
+    // ⓘ Held on R1, or latched from the fn key -- either shows the F row.
+    const bool fnNow = g_fnHeld.load() || mod_state(KBD_FN) != LATCH_OFF;
     const bool shiftNow = shift_showing();
 
     for (const Placed &p : g_placed) {
@@ -989,10 +1014,18 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
 
     // ⭐ THE HELD LAYERS. L1 shows capitals and shifted punctuation, L2 turns
     // the digit row into F1-F12 in place.
+    // ⛔⛔ L1 AND R1 ONLY -- THE TRIGGERS ARE LEFT ALONE (rhoquinn8217,
+    // 2026-09-02). L2 and R2 are the analog triggers, and they are already
+    // spoken for by the gyro and stick mouse gates; R2 was also being caught
+    // by accident on everything in Windows. The bumpers are a deliberate press
+    // in a way a trigger is not.
+    //
+    // ⓘ And the shoulder SHORTCUTS are gone with them: L1 and R1 now shift the
+    // layers, so they cannot also be space and backspace. Both are on the face.
     const bool l1 = button_down(data, len, 4);
-    const bool l2 = button_down(data, len, 6);
+    const bool r1 = button_down(data, len, 5);
     if (l1 != g_shiftHeld.load()) { g_shiftHeld.store(l1); invalidate(); }
-    if (l2 != g_fnHeld.load())    { g_fnHeld.store(l2);   invalidate(); }
+    if (r1 != g_fnHeld.load())    { g_fnHeld.store(r1);   invalidate(); }
 
     // ⭐ THE BUTTON THAT OPENED IT ALSO CLOSES IT.
     //
@@ -1133,13 +1166,12 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
         // ⓘ Esc is the backtick while L2 is held -- the developer console in a
         // great many PC games, and nothing else on the pad produces one.
         if (g_fnHeld.load() && usage == 0x29) usage = 0x35;
-        if (g_fnHeld.load() && k.kind == KK_FN) {
+        if (fn_showing() && k.kind == KK_FN) {
             const int idx = g_col - 1;
             if (idx >= 0 && idx < 12) usage = kFnUsages[idx];
         }
     }
-    else if (button_down(data, len, 5))  usage = 0x2c;   // R1: space
-    else if (button_down(data, len, 7))  usage = 0x28;   // R2: enter
+
 
     uint8_t mods = active_mods();
     if (g_shiftHeld.load()) mods |= KBD_SHIFT;
