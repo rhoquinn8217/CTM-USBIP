@@ -118,7 +118,9 @@ void ctm_stick_mouse_apply(const void *deviceKey,
 void ctm_stick_mouse_forget(const void *deviceKey);
 // ⓘ rebind.inl fires the on-screen keyboard toggle, and osk.inl is included
 // after it because it reads config through the same accessors.
-void ctm_osk_toggle(const std::string &section);
+// ⓘ `button` is the standard index that fired it, so an overlay keyboard can be
+// dismissed by the same button that opened it.
+void ctm_osk_toggle(const std::string &section, int button);
 #include "usbip/device.inl"
 #include "audio/iso_in_pacing.inl"
 #include "usbip/server.inl"
@@ -146,6 +148,10 @@ void ctm_rebind_ensure_keyboard_started();
 #include "app/agent.inl"
 #include "input/mouse_device.inl"      // needs g_agent_usbip_server, find_relative_asset, run_usbip_attach
 #include "input/keyboard_device.inl"   // same dependencies as the mouse above
+// ⛔ AFTER keyboard_device.inl, which it types through, and BEFORE rebind.inl,
+//    which calls into it. Both directions matter: the overlay needs the
+//    keyboard to exist, and rebind needs the overlay to exist.
+#include "app/overlay_window.inl"  // --overlay-test: the always-on-top, never-focused window
 // ⚠️ AFTER keyboard_device: rebind pushes key state into it, so it must be
 // defined first. And after gyro_mouse, for device_section_for and the config
 // helpers.
@@ -331,6 +337,12 @@ int wmain(int argc, wchar_t **argv)
                 // could not check for an existing window, so every rebuild left
                 // another one behind.
                 ctm_open_ui::g_open_ui = true;
+            } else if (arg == L"--overlay-test") {
+                // ⓘ TEMPORARY, and named so. Step one of the overlay keyboard
+                // is a window with the right styles and a placeholder inside;
+                // this flag is how it gets looked at before anything is wired
+                // to it. It goes when the OSKeyboard action opens the real one.
+                ctm_overlay::show();
             } else if (arg == L"--rest-lan") {
                 g_rest_bind_lan = true;
             } else if (arg == L"--rest-token" && i + 1 < argc) {

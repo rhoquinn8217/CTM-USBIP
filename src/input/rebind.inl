@@ -718,7 +718,7 @@ inline void apply(const void *deviceKey,
         if (code == "OSKeyboard" || code == "oskeyboard") {
             static std::map<std::pair<const void *, int>, bool> oskHeld;
             const bool wasHeld = oskHeld[{deviceKey, i}];
-            if (active && !wasHeld) ctm_osk_toggle(section);
+            if (active && !wasHeld) ctm_osk_toggle(section, i);
             oskHeld[{deviceKey, i}] = active;
             continue;
         }
@@ -811,5 +811,18 @@ void ctm_rebind_apply(const void *deviceKey,
                       const std::string &linkedConfig,
                       uint8_t *data, size_t len)
 {
+    // ⭐ THE OVERLAY GETS FIRST REFUSAL, and only while it is up.
+    //
+    // ⓘ One line here on purpose: the deciding, the layout and the drawing all
+    // live in overlay_window.inl. This file is the report path, not the place
+    // to grow a second feature.
+    //
+    // ⛔ When it consumes the input, the game must see NOTHING -- so the report
+    // is blanked rather than merely left alone. A keyboard on screen that lets
+    // stray presses through to what is behind it is worse than no keyboard.
+    if (ctm_overlay::handle_report(deviceKey, data, len)) {
+        ctm_overlay::blank_report(data, len);
+        return;
+    }
     ctm_rebind::apply(deviceKey, descriptor, linkedConfig, data, len);
 }
