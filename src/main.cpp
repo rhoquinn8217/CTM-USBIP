@@ -111,6 +111,9 @@ void ctm_touch_mouse_forget(const void *deviceKey);
 // ⓘ Releases only THIS controller's held keys -- they are kept per device so
 // two gated pads cannot cancel each other.
 void ctm_keyboard_forget_device(const void *deviceKey);
+// Swallow whatever is held, so a button that dismissed the overlay cannot also
+// reach the game on the next report.
+void ctm_rebind_swallow_held();
 void ctm_stick_mouse_apply(const void *deviceKey,
                            const std::vector<unsigned char> &descriptor,
                            const std::string &linkedConfig,

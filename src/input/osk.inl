@@ -87,7 +87,11 @@ inline void do_open(Program program, int openedByButton)
     // one -- it swallows every press while it is up, so the binding cannot fire
     // a second time to close it.
     if (program == Program::Overlay) {
-        ctm_overlay::show(900, 300, openedByButton);
+        // ⛔ 0 MEANS "THE CHOSEN SIZE", not a default to fill in. This passed
+        // 900x300 -- a leftover from before the three sizes existed -- so the
+        // keyboard opened tiny on a 4K desktop and only reached a sensible size
+        // once Create had been pressed once. Found on hardware 2026-09-02.
+        ctm_overlay::show(0, 0, openedByButton);
         return;
     }
     if (program == Program::Osk) {
@@ -139,6 +143,14 @@ inline void toggle(const std::string &section, int button)
 
 // ⓘ `button` is the standard index of the button that fired this, so the
 // overlay can be dismissed by the same one. The other two keyboards ignore it.
+// ⓘ The overlay's Steam key. Defined here because this file already knows how
+// to hand a steam:// URL to the shell, and declared in overlay_window.inl,
+// which is included before it.
+void ctm_overlay_open_steam()
+{
+    ctm_osk::run_shell(L"steam://open/bigpicture");
+}
+
 void ctm_osk_toggle(const std::string &section, int button)
 {
     ctm_osk::toggle(section, button);

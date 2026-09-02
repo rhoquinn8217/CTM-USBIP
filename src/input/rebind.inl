@@ -768,6 +768,20 @@ inline void apply(const void *deviceKey,
 
 // Defined out here for main.cpp's forward declaration -- device.inl calls this
 // on the input path, and is included long before this file.
+// ⭐ Nothing held right now may reach the game.
+//
+// ⛔ Called when the overlay closes. The button that closed it is STILL DOWN,
+// and the very next report takes the ordinary path -- where a config that
+// rebinds Cross to Enter would hand the app behind an Enter nobody pressed.
+// rhoquinn8217 saw exactly that, 2026-09-02.
+//
+// ⓘ The mechanism already existed for leaving config mode, which has the same
+// problem for the same reason.
+void ctm_rebind_swallow_held()
+{
+    ctm_rebind::g_swallowUntilReleased = 0xffffffffu;
+}
+
 void ctm_keyboard_forget_device(const void *deviceKey)
 {
     ctm_keyboard_device::forget_device(deviceKey);

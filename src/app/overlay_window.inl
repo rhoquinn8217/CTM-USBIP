@@ -34,6 +34,12 @@
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "gdi32.lib")
 
+// ⓘ Defined in osk.inl, which already knows how to hand a steam:// URL to the
+// shell. ⛔ Declared at GLOBAL scope, not inside the namespace below -- put
+// inside, it becomes ctm_overlay::ctm_overlay_open_steam and never links.
+void ctm_overlay_open_steam();
+void ctm_rebind_swallow_held();
+
 namespace ctm_overlay {
 
 // ⭐ THE BUTTON THAT OPENED IT ALSO CLOSES IT.
@@ -156,13 +162,15 @@ inline bool button_down(const uint8_t *data, size_t len, int index)
 enum KeyKind { KK_NORMAL, KK_MOD, KK_FN, KK_ACTION };
 
 // What a KK_ACTION key does, carried in the usage field, which is unused there.
-inline const uint8_t ACT_MOVE = 1, ACT_CLOSE = 2;
+inline const uint8_t ACT_MOVE = 1, ACT_CLOSE = 2, ACT_STEAM = 3;
 
 struct Key {
     const wchar_t *label;
     const wchar_t *shifted;   // label while shift is on; null means the same
     uint8_t        usage;     // HID usage, or 0 for a modifier
-    uint8_t        mod;       // which modifier bit, for KK_MOD
+    uint8_t        mod;       // KK_MOD: which modifier this key IS.
+                              // KK_NORMAL: modifiers it SENDS WITH, so a key
+                              // like " can exist without latching shift.
     KeyKind        kind;
     float          wide;
 };
@@ -183,7 +191,8 @@ inline const Key kRow0[] = {
     { L"7", L"&", 0x24, 0, KK_FN, 1.0f }, { L"8", L"*", 0x25, 0, KK_FN, 1.0f },
     { L"9", L"(", 0x26, 0, KK_FN, 1.0f }, { L"0", L")", 0x27, 0, KK_FN, 1.0f },
     { L"-", L"_", 0x2d, 0, KK_FN, 1.0f }, { L"=", L"+", 0x2e, 0, KK_FN, 1.0f },
-    { L"back", nullptr, 0x2a, 0, KK_NORMAL, 2.1f },
+    { L"back", nullptr, 0x2a, 0, KK_NORMAL, 1.6f },
+    { L"\u2328\u21f3", nullptr, ACT_MOVE, 0, KK_ACTION, 1.4f },
 };
 inline const Key kRow1[] = {
     { L"tab", nullptr, 0x2b, 0, KK_NORMAL, 1.4f },
@@ -193,7 +202,8 @@ inline const Key kRow1[] = {
     { L"u", nullptr, 0x18, 0, KK_NORMAL, 1.0f }, { L"i", nullptr, 0x0c, 0, KK_NORMAL, 1.0f },
     { L"o", nullptr, 0x12, 0, KK_NORMAL, 1.0f }, { L"p", nullptr, 0x13, 0, KK_NORMAL, 1.0f },
     { L"[", L"{", 0x2f, 0, KK_NORMAL, 1.0f }, { L"]", L"}", 0x30, 0, KK_NORMAL, 1.0f },
-    { L"\\", L"|", 0x31, 0, KK_NORMAL, 1.7f },
+    { L"\\", L"|", 0x31, 0, KK_NORMAL, 1.5f },
+    { L"del", nullptr, 0x4c, 0, KK_NORMAL, 1.1f },
 };
 inline const Key kRow2[] = {
     { L"ctrl", nullptr, 0, KBD_CTRL, KK_MOD, 1.65f },
@@ -203,7 +213,8 @@ inline const Key kRow2[] = {
     { L"j", nullptr, 0x0d, 0, KK_NORMAL, 1.0f }, { L"k", nullptr, 0x0e, 0, KK_NORMAL, 1.0f },
     { L"l", nullptr, 0x0f, 0, KK_NORMAL, 1.0f },
     { L";", L":", 0x33, 0, KK_NORMAL, 1.0f }, { L"'", L"\"", 0x34, 0, KK_NORMAL, 1.0f },
-    { L"enter", nullptr, 0x28, 0, KK_NORMAL, 2.5f },
+    { L"enter", nullptr, 0x28, 0, KK_NORMAL, 2.35f },
+    { L"pgup", nullptr, 0x4b, 0, KK_NORMAL, 1.0f },
 };
 inline const Key kRow3[] = {
     { L"shift", nullptr, 0, KBD_SHIFT, KK_MOD, 2.15f },
@@ -216,8 +227,10 @@ inline const Key kRow3[] = {
     // ⓘ Up sits directly above down, and del beside it -- rhoquinn8217 asked
     // for these two swapped so the arrow cluster reads as a cluster.
     { L"\u2191", nullptr, 0x52, 0, KK_NORMAL, 1.0f },
-    { L"del", nullptr, 0x4c, 0, KK_NORMAL, 1.0f },
-    { L"top", nullptr, ACT_MOVE, 0, KK_ACTION, 1.1f },
+    // ⓘ Not a keystroke: Steam has no key. It opens Big Picture the same way
+    // the OSKeyboard binding already opens Steam's own keyboard -- through a
+    // steam:// URL -- so it is an ACTION rather than something typed.
+    { L"steam", nullptr, ACT_STEAM, 0, KK_ACTION, 1.85f },
 };
 inline const Key kRow4[] = {
     { L"alt", nullptr, 0, KBD_ALT, KK_MOD, 1.3f },
@@ -226,18 +239,88 @@ inline const Key kRow4[] = {
     { L"\u2190", nullptr, 0x50, 0, KK_NORMAL, 1.0f },
     { L"\u2193", nullptr, 0x51, 0, KK_NORMAL, 1.0f },
     { L"\u2192", nullptr, 0x4f, 0, KK_NORMAL, 1.0f },
-    { L"close", nullptr, ACT_CLOSE, 0, KK_ACTION, 1.1f },
+    { L"\u2328\u2938", nullptr, ACT_CLOSE, 0, KK_ACTION, 1.1f },
+};
+
+// ⭐⭐ THE COMPACT FACE. Everything a controller CANNOT do is still here --
+// esc, tab, shift, ctrl, alt, win, backspace, enter, space, the arrows -- and
+// L2 still gives F1-F12 and the backtick. What it drops is punctuation you need
+// for a path or a URL, not for driving Windows.
+//
+// ⛔ NOT "small". rhoquinn8217, 2026-09-02: this is a large television, not a
+// phone. Making it narrow for its own sake would remove the very things the
+// keyboard exists to reach. Compact is the EVERYDAY face; Full is the TYPING
+// face.
+//
+// ⭐ And its rows are ALIGNED, unlike Full's stagger -- so walking it is plain
+// index arithmetic and the nearest-neighbour code never runs here.
+inline const Key kCompact0[] = {
+    { L"esc", nullptr, 0x29, 0, KK_NORMAL, 1.4f },
+    { L"1", L"!", 0x1e, 0, KK_FN, 1.0f }, { L"2", L"@", 0x1f, 0, KK_FN, 1.0f },
+    { L"3", L"#", 0x20, 0, KK_FN, 1.0f }, { L"4", L"$", 0x21, 0, KK_FN, 1.0f },
+    { L"5", L"%", 0x22, 0, KK_FN, 1.0f }, { L"6", L"^", 0x23, 0, KK_FN, 1.0f },
+    { L"7", L"&", 0x24, 0, KK_FN, 1.0f }, { L"8", L"*", 0x25, 0, KK_FN, 1.0f },
+    { L"9", L"(", 0x26, 0, KK_FN, 1.0f }, { L"0", L")", 0x27, 0, KK_FN, 1.0f },
+    { L"back", nullptr, 0x2a, 0, KK_NORMAL, 1.6f },
+    { L"\u2328\u21f3", nullptr, ACT_MOVE, 0, KK_ACTION, 1.4f },
+};
+inline const Key kCompact1[] = {
+    { L"tab", nullptr, 0x2b, 0, KK_NORMAL, 1.4f },
+    { L"q", nullptr, 0x14, 0, KK_NORMAL, 1.0f }, { L"w", nullptr, 0x1a, 0, KK_NORMAL, 1.0f },
+    { L"e", nullptr, 0x08, 0, KK_NORMAL, 1.0f }, { L"r", nullptr, 0x15, 0, KK_NORMAL, 1.0f },
+    { L"t", nullptr, 0x17, 0, KK_NORMAL, 1.0f }, { L"y", nullptr, 0x1c, 0, KK_NORMAL, 1.0f },
+    { L"u", nullptr, 0x18, 0, KK_NORMAL, 1.0f }, { L"i", nullptr, 0x0c, 0, KK_NORMAL, 1.0f },
+    { L"o", nullptr, 0x12, 0, KK_NORMAL, 1.0f }, { L"p", nullptr, 0x13, 0, KK_NORMAL, 1.0f },
+    { L"enter", nullptr, 0x28, 0, KK_NORMAL, 3.0f },
+};
+inline const Key kCompact2[] = {
+    { L"shift", nullptr, 0, KBD_SHIFT, KK_MOD, 1.4f },
+    { L"a", nullptr, 0x04, 0, KK_NORMAL, 1.0f }, { L"s", nullptr, 0x16, 0, KK_NORMAL, 1.0f },
+    { L"d", nullptr, 0x07, 0, KK_NORMAL, 1.0f }, { L"f", nullptr, 0x09, 0, KK_NORMAL, 1.0f },
+    { L"g", nullptr, 0x0a, 0, KK_NORMAL, 1.0f }, { L"h", nullptr, 0x0b, 0, KK_NORMAL, 1.0f },
+    { L"j", nullptr, 0x0d, 0, KK_NORMAL, 1.0f }, { L"k", nullptr, 0x0e, 0, KK_NORMAL, 1.0f },
+    { L"l", nullptr, 0x0f, 0, KK_NORMAL, 1.0f },
+    { L";", L":", 0x33, 0, KK_NORMAL, 1.0f },
+    { L"steam", nullptr, ACT_STEAM, 0, KK_ACTION, 2.0f },
+};
+inline const Key kCompact3[] = {
+    { L"ctrl", nullptr, 0, KBD_CTRL, KK_MOD, 1.4f },
+    { L"z", nullptr, 0x1d, 0, KK_NORMAL, 1.0f }, { L"x", nullptr, 0x1b, 0, KK_NORMAL, 1.0f },
+    { L"c", nullptr, 0x06, 0, KK_NORMAL, 1.0f }, { L"v", nullptr, 0x19, 0, KK_NORMAL, 1.0f },
+    { L"b", nullptr, 0x05, 0, KK_NORMAL, 1.0f }, { L"n", nullptr, 0x11, 0, KK_NORMAL, 1.0f },
+    { L"m", nullptr, 0x10, 0, KK_NORMAL, 1.0f },
+    { L",", L"<", 0x36, 0, KK_NORMAL, 1.0f }, { L".", L">", 0x37, 0, KK_NORMAL, 1.0f },
+    { L"/", L"?", 0x38, 0, KK_NORMAL, 1.0f },
+    { L"\u2191", nullptr, 0x52, 0, KK_NORMAL, 1.0f },
+};
+inline const Key kCompact4[] = {
+    { L"alt", nullptr, 0, KBD_ALT, KK_MOD, 1.4f },
+    { L"win", nullptr, 0, KBD_WIN, KK_MOD, 1.4f },
+    { L"space", nullptr, 0x2c, 0, KK_NORMAL, 6.2f },
+    { L"\u2190", nullptr, 0x50, 0, KK_NORMAL, 1.0f },
+    { L"\u2193", nullptr, 0x51, 0, KK_NORMAL, 1.0f },
+    { L"\u2192", nullptr, 0x4f, 0, KK_NORMAL, 1.0f },
+    { L"\u2328\u2938", nullptr, ACT_CLOSE, 0, KK_ACTION, 1.4f },
 };
 
 struct Row { const Key *keys; int count; };
-inline const Row kRows[] = {
-    { kRow0, (int)(sizeof(kRow0) / sizeof(kRow0[0])) },
-    { kRow1, (int)(sizeof(kRow1) / sizeof(kRow1[0])) },
-    { kRow2, (int)(sizeof(kRow2) / sizeof(kRow2[0])) },
-    { kRow3, (int)(sizeof(kRow3) / sizeof(kRow3[0])) },
-    { kRow4, (int)(sizeof(kRow4) / sizeof(kRow4[0])) },
+#define CTM_ROW(a) { a, (int)(sizeof(a) / sizeof(a[0])) }
+
+inline const Row kFullRows[] = {
+    CTM_ROW(kRow0), CTM_ROW(kRow1), CTM_ROW(kRow2), CTM_ROW(kRow3), CTM_ROW(kRow4),
 };
-inline const int kRowCount = (int)(sizeof(kRows) / sizeof(kRows[0]));
+inline const Row kCompactRows[] = {
+    CTM_ROW(kCompact0), CTM_ROW(kCompact1), CTM_ROW(kCompact2),
+    CTM_ROW(kCompact3), CTM_ROW(kCompact4),
+};
+#undef CTM_ROW
+
+// ⓘ Compact is the DEFAULT: most typing from a couch is a search box or a
+// password, and the punctuation Full adds is a single button away.
+inline std::atomic_bool g_full{false};
+
+inline const Row *rows_now() { return g_full.load() ? kFullRows : kCompactRows; }
+inline const int kRowCount = 5;          // both faces have five rows
 
 // ⓘ F1..F12 replace the digits while L2 is held. Same positions, so the row you
 // are looking at is the row that changes -- there is no key to travel to and
@@ -262,6 +345,12 @@ inline const uint8_t kFnUsages[12] = {
 // exactly this: once latches, twice locks, a third time clears.
 enum LatchState { LATCH_OFF = 0, LATCH_ON = 1, LATCH_LOCKED = 2 };
 inline std::map<uint8_t, int> g_mods;
+
+// ⓘ Whether anything has been typed since a modifier was latched, and a tap
+// waiting to be sent. See the note where a cleared latch becomes a tap.
+inline bool g_latchUsed = false;
+inline uint8_t g_tapMod = 0;
+inline int g_tapFrames = 0;
 
 inline int mod_state(uint8_t bit)
 {
@@ -291,7 +380,7 @@ inline int g_placedW = 0, g_placedH = 0;
 
 inline const Key &key_at(int row, int col)
 {
-    return kRows[row].keys[col];
+    return rows_now()[row].keys[col];
 }
 
 // ⓘ Laid out once per size change rather than per frame: the walking needs the
@@ -310,7 +399,7 @@ inline void layout(int w, int h)
     float widest = 0;
     for (int r = 0; r < kRowCount; ++r) {
         float units = 0;
-        for (int c = 0; c < kRows[r].count; ++c) units += kRows[r].keys[c].wide;
+        for (int c = 0; c < rows_now()[r].count; ++c) units += rows_now()[r].keys[c].wide;
         if (units > widest) widest = units;
     }
     const int gap = 4;
@@ -319,8 +408,8 @@ inline void layout(int w, int h)
     int y = pad;
     for (int r = 0; r < kRowCount; ++r) {
         float x = (float)pad;
-        for (int c = 0; c < kRows[r].count; ++c) {
-            const float kw = kRows[r].keys[c].wide * unit;
+        for (int c = 0; c < rows_now()[r].count; ++c) {
+            const float kw = rows_now()[r].keys[c].wide * unit;
             Placed pl;
             pl.r.left = (int)x; pl.r.top = y;
             pl.r.right = (int)(x + kw); pl.r.bottom = y + keyH;
@@ -338,6 +427,37 @@ inline const Placed *placed_of(int row, int col)
     return nullptr;
 }
 
+// ⭐⭐ THE MOUSE DRIVES IT TOO, always -- not as a mode.
+//
+// ⛔ rhoquinn8217, 2026-09-02: switching between a mouse and a controller is a
+// PHYSICAL act, not a software one. Whichever you touched last should be the
+// one that works; having to press a button first is exactly the thing that
+// makes something feel broken.
+//
+// ⓘ -1 when the cursor is not over a key. The hover highlight is also what
+// tells someone the keyboard is clickable at all.
+inline int g_hoverRow = -1, g_hoverCol = -1;
+inline bool g_mouseTracking = false;
+
+// ⓘ A stand-in "device" for the mouse, so a clicked key goes through exactly
+// the same per-device path a pad press does -- and cannot cancel a pad that is
+// holding something down.
+inline const void *const kMouseKey = &g_hoverRow;
+
+inline void press_current(const void *who);
+inline void release_current(const void *who);
+
+inline bool key_under(int x, int y, int *row, int *col)
+{
+    for (const Placed &p : g_placed) {
+        if (x >= p.r.left && x < p.r.right && y >= p.r.top && y < p.r.bottom) {
+            *row = p.row; *col = p.col;
+            return true;
+        }
+    }
+    return false;
+}
+
 inline void invalidate()
 {
     if (g_hwnd != nullptr) InvalidateRect(g_hwnd, nullptr, FALSE);
@@ -348,7 +468,7 @@ inline void invalidate()
 // stays predictable.
 inline void move_h(int dir)
 {
-    const int n = kRows[g_row].count;
+    const int n = rows_now()[g_row].count;
     g_col = (g_col + dir + n) % n;
     const Placed *p = placed_of(g_row, g_col);
     if (p) g_anchorX = (p->r.left + p->r.right) / 2;
@@ -375,7 +495,7 @@ inline void move_v(int dir)
     // right and pressing down from z landed on win -- even though z is
     // directly above the space bar. A key you are standing over is zero away.
     int best = 0, bestDist = 1 << 30;
-    for (int c = 0; c < kRows[next].count; ++c) {
+    for (int c = 0; c < rows_now()[next].count; ++c) {
         const Placed *p = placed_of(next, c);
         if (!p) continue;
         int d = 0;
@@ -401,6 +521,63 @@ inline void move_v(int dir)
     const Placed *landed = placed_of(g_row, g_col);
     if (landed) g_anchorX = (landed->r.left + landed->r.right) / 2;
     invalidate();
+}
+
+// ⭐ What a press DOES, in one place, so the mouse and the pad cannot drift
+// apart. The pad's own path calls the same thing.
+inline void press_current(const void *who)
+{
+    const Key &k = key_at(g_row, g_col);
+
+    if (k.kind == KK_ACTION) {
+        if (k.usage == ACT_CLOSE) { hide(); return; }
+        if (k.usage == ACT_STEAM) { ctm_overlay_open_steam(); hide(); return; }
+        if (k.usage == ACT_MOVE) {
+            g_atTop.store(!g_atTop.load());
+            if (g_hwnd != nullptr) PostMessageW(g_hwnd, WM_CTM_REPOSITION, 0, 0);
+        }
+        return;
+    }
+
+    if (k.kind == KK_MOD) {
+        const int st = mod_state(k.mod);
+        const int next = (st == LATCH_OFF) ? LATCH_ON
+                       : (st == LATCH_ON && k.mod == KBD_SHIFT) ? LATCH_LOCKED
+                       : LATCH_OFF;
+        if (next == LATCH_OFF && st == LATCH_ON && !g_latchUsed) {
+            g_tapMod = k.mod;
+            g_tapFrames = 3;
+        }
+        if (next != LATCH_OFF) g_latchUsed = false;
+        g_mods[k.mod] = next;
+        return;
+    }
+
+    uint8_t usage = k.usage;
+    if (g_fnHeld.load() && usage == 0x29) usage = 0x35;
+    if (g_fnHeld.load() && k.kind == KK_FN) {
+        const int idx = g_col - 1;
+        if (idx >= 0 && idx < 12) usage = kFnUsages[idx];
+    }
+    uint8_t mods = active_mods();
+    if (g_shiftHeld.load()) mods |= KBD_SHIFT;
+    mods |= k.mod;
+
+    uint8_t keys[6] = { usage, 0, 0, 0, 0, 0 };
+    ctm_keyboard_device::set_state_for(who, mods, keys, usage != 0 ? 1 : 0);
+    if (usage != 0) g_latchUsed = true;
+}
+
+inline void release_current(const void *who)
+{
+    uint8_t none[6] = { 0, 0, 0, 0, 0, 0 };
+    ctm_keyboard_device::set_state_for(who, 0, none, 0);
+    // ⓘ A latch is spent by the key it modified, and this is that moment.
+    bool changed = false;
+    for (auto &e : g_mods) {
+        if (e.second == LATCH_ON) { e.second = LATCH_OFF; changed = true; }
+    }
+    if (changed) invalidate();
 }
 
 inline void paint(HWND hwnd)
@@ -434,6 +611,9 @@ inline void paint(HWND hwnd)
     HBRUSH fillLatch  = CreateSolidBrush(RGB(0x2a, 0x35, 0x66));
     HBRUSH fillLock   = CreateSolidBrush(RGB(0x3a, 0x33, 0x20));
     HBRUSH fillHot    = CreateSolidBrush(RGB(0x3a, 0x4d, 0x9c));
+    // ⓘ Lighter than a key, dimmer than the halo: enough to say "this is
+    // clickable" without competing with where the pad is.
+    HBRUSH fillHover  = CreateSolidBrush(RGB(0x24, 0x28, 0x34));
     HBRUSH edgeHot    = CreateSolidBrush(RGB(0x8f, 0xa8, 0xff));
 
     const bool fnNow = g_fnHeld.load();
@@ -442,6 +622,7 @@ inline void paint(HWND hwnd)
     for (const Placed &p : g_placed) {
         const Key &k = key_at(p.row, p.col);
         const bool hot = (p.row == g_row && p.col == g_col);
+        const bool hover = (p.row == g_hoverRow && p.col == g_hoverCol);
 
         HBRUSH fill = fillNormal;
         if (k.kind == KK_MOD) {
@@ -453,16 +634,18 @@ inline void paint(HWND hwnd)
             fill = fillMod;
         }
         RECT r = p.r;
-        FillRect(dc, &r, hot ? fillHot : fill);
+        FillRect(dc, &r, hot ? fillHot : hover ? fillHover : fill);
         if (hot) FrameRect(dc, &r, edgeHot);
 
         // ⓘ One label decided in one place: F-keys win over shifted, which wins
         // over the plain one.
         const wchar_t *label = k.label;
-        if (k.kind == KK_ACTION && k.usage == ACT_MOVE) {
+        if (k.usage == 0x29 && fnNow) {
+            label = L"`";                 // esc becomes the console key
+        } else if (k.kind == KK_ACTION && k.usage == ACT_MOVE) {
             // ⓘ Says where it will GO, not where it is -- a button labelled
             // with the state you are already in tells you nothing.
-            label = g_atTop.load() ? L"bottom" : L"top";
+            label = L"\u2328\u21f3";     // the same glyph either way: it moves
         } else if (k.kind == KK_FN && fnNow) {
             const int idx = p.col - 1;
             if (idx >= 0 && idx < 12) label = kFnLabels[idx];
@@ -481,6 +664,7 @@ inline void paint(HWND hwnd)
 
     DeleteObject(fillNormal); DeleteObject(fillMod); DeleteObject(fillFn);
     DeleteObject(fillLatch); DeleteObject(fillLock);
+    DeleteObject(fillHover);
     DeleteObject(fillHot); DeleteObject(edgeHot);
     SelectObject(dc, oldFont);
     DeleteObject(font);
@@ -500,6 +684,51 @@ inline LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     // it exists to send.
     case WM_MOUSEACTIVATE:
         return MA_NOACTIVATE;
+
+    case WM_MOUSEMOVE: {
+        // ⛔ ASK TO BE TOLD WHEN THE CURSOR LEAVES. Windows sends moves but no
+        // "gone" message unless requested, so the last key stayed lit after the
+        // cursor had left the window entirely.
+        if (!g_mouseTracking) {
+            TRACKMOUSEEVENT tme = { sizeof(tme), TME_LEAVE, hwnd, 0 };
+            TrackMouseEvent(&tme);
+            g_mouseTracking = true;
+        }
+        int r = -1, c = -1;
+        const int x = (int)(short)LOWORD(lp), y = (int)(short)HIWORD(lp);
+        if (!key_under(x, y, &r, &c)) { r = -1; c = -1; }
+        if (r != g_hoverRow || c != g_hoverCol) {
+            g_hoverRow = r; g_hoverCol = c;
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
+        return 0;
+    }
+
+    case WM_MOUSELEAVE:
+        g_mouseTracking = false;
+        if (g_hoverRow != -1) {
+            g_hoverRow = g_hoverCol = -1;
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
+        return 0;
+
+    case WM_LBUTTONDOWN: {
+        int r = -1, c = -1;
+        if (key_under((int)(short)LOWORD(lp), (int)(short)HIWORD(lp), &r, &c)) {
+            // ⓘ The click moves the PAD's highlight too. Two pointers
+            // disagreeing about where you are is worse than either alone.
+            g_row = r; g_col = c;
+            const Placed *pl = placed_of(r, c);
+            if (pl) g_anchorX = (pl->r.left + pl->r.right) / 2;
+            press_current(kMouseKey);
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
+        return 0;
+    }
+
+    case WM_LBUTTONUP:
+        release_current(kMouseKey);
+        return 0;
     case WM_APP + 2: {                 // WM_CTM_RESIZE
         int w = 0, h = 0;
         size_for(&w, &h);
@@ -693,6 +922,28 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
         if (g_hwnd != nullptr) PostMessageW(g_hwnd, WM_CTM_REPOSITION, 0, 0);
     }
 
+    // ⭐⭐ OPTIONS SWITCHES THE FACE. Create is how BIG; Options is how MUCH --
+    // genuinely different questions, and a big compact keyboard is as
+    // reasonable a thing to want as a small full one.
+    if (edge(deviceKey, 10, button_down(data, len, 9))) {
+        // ⓘ Keep the person where they were if that key still exists. Landing
+        // somewhere unrelated after a face change is disorienting, and most
+        // keys are in both faces.
+        const wchar_t *was = key_at(g_row, g_col).label;
+        g_full.store(!g_full.load());
+        g_placed.clear(); g_placedW = 0;          // the geometry changed
+        int fr = -1, fc = -1;
+        for (int r = 0; r < kRowCount && fr < 0; ++r) {
+            for (int c = 0; c < rows_now()[r].count; ++c) {
+                if (wcscmp(rows_now()[r].keys[c].label, was) == 0) { fr = r; fc = c; break; }
+            }
+        }
+        g_row = fr >= 0 ? fr : 1;
+        g_col = fc >= 0 ? fc : 1;
+        if (g_hwnd != nullptr) PostMessageW(g_hwnd, WM_CTM_RESIZE, 0, 0);
+        invalidate();
+    }
+
     // ⭐ CREATE CYCLES THE THREE SIZES. It is free, out of the way of typing,
     // and its own thing rather than a mode.
     if (edge(deviceKey, 7, button_down(data, len, 8))) {
@@ -711,6 +962,23 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
         const int next = (st == LATCH_OFF)     ? LATCH_ON
                        : (st == LATCH_ON && k.mod == KBD_SHIFT) ? LATCH_LOCKED
                        : LATCH_OFF;
+
+        // ⭐⭐ CLEARING AN UNUSED LATCH SENDS THE MODIFIER ON ITS OWN
+        // (rhoquinn8217, 2026-09-02: "the win key doesn't appear to work").
+        //
+        // ⛔ A latched modifier was only ever sent ALONGSIDE a key, so Win on
+        // its own never reached Windows and the Start menu never opened. On a
+        // real keyboard, pressing and releasing Win alone IS the gesture --
+        // this is the same thing: press it, press it again without using it,
+        // and it goes as a tap.
+        //
+        // ⓘ Ctrl and Alt get the same treatment because the rule should not
+        // have exceptions; Alt alone reaching the menu bar is real behaviour.
+        if (next == LATCH_OFF && st == LATCH_ON && !g_latchUsed) {
+            g_tapMod = k.mod;
+            g_tapFrames = 3;        // held for a few reports so it registers
+        }
+        if (next != LATCH_OFF) g_latchUsed = false;
         g_mods[k.mod] = next;
         invalidate();
     } else if (!cross) {
@@ -721,6 +989,7 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
     // the sending path so it cannot also type.
     if (cross && k.kind == KK_ACTION && edge(deviceKey, 9, true)) {
         if (k.usage == ACT_CLOSE) { hide(); return true; }
+        if (k.usage == ACT_STEAM) { ctm_overlay_open_steam(); hide(); return true; }
         if (k.usage == ACT_MOVE) {
             g_atTop.store(!g_atTop.load());
             if (g_hwnd != nullptr) PostMessageW(g_hwnd, WM_CTM_REPOSITION, 0, 0);
@@ -735,6 +1004,9 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
     uint8_t usage = 0;
     if (cross && k.kind != KK_MOD && k.kind != KK_ACTION) {
         usage = k.usage;
+        // ⓘ Esc is the backtick while L2 is held -- the developer console in a
+        // great many PC games, and nothing else on the pad produces one.
+        if (g_fnHeld.load() && usage == 0x29) usage = 0x35;
         if (g_fnHeld.load() && k.kind == KK_FN) {
             const int idx = g_col - 1;
             if (idx >= 0 && idx < 12) usage = kFnUsages[idx];
@@ -745,10 +1017,23 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
 
     uint8_t mods = active_mods();
     if (g_shiftHeld.load()) mods |= KBD_SHIFT;
+    // ⓘ A key can carry its own modifier -- " is shift+' -- so it types without
+    // anything being latched first.
+    if (usage != 0 && k.kind == KK_NORMAL) mods |= k.mod;
+
+    // ⓘ A tap in flight outranks everything: it is a modifier with NO key, held
+    // for a few reports so the host registers a press and a release.
+    if (g_tapFrames > 0) {
+        --g_tapFrames;
+        uint8_t none[6] = { 0, 0, 0, 0, 0, 0 };
+        ctm_keyboard_device::set_state_for(deviceKey, g_tapMod, none, 0);
+        return true;
+    }
 
     uint8_t keys[6] = { usage, 0, 0, 0, 0, 0 };
     ctm_keyboard_device::set_state_for(deviceKey, usage != 0 ? mods : 0,
                                        keys, usage != 0 ? 1 : 0);
+    if (usage != 0) g_latchUsed = true;
 
     // ⛔ A LATCH RELEASES ON THE KEY IT MODIFIED, and a LOCK does not. That is
     // the whole difference between the two, and it happens on the RELEASE so
@@ -784,6 +1069,10 @@ inline void show(int width = 0, int height = 0, int openedByButton = -1)
 inline void hide()
 {
     if (!g_running.exchange(false)) return;
+    // ⛔ The button that closed this is still held. Without swallowing it, the
+    // next report goes down the ordinary path and a rebound Cross hands the app
+    // behind an Enter nobody meant to press.
+    ctm_rebind_swallow_held();
     // ⛔ Whatever was held goes up with the window. A key left down repeats
     // forever and looks like a stuck keyboard -- the same class of fault as a
     // stuck mouse button, and the same reason unbridging releases its keys.
