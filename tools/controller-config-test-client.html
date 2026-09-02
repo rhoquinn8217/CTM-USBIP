@@ -330,6 +330,9 @@
   th { text-align:left; color:#8b8d96; font-weight:600; padding:5px 10px 5px 0;
        border-bottom:1px solid #2c2e36; font-size:12px; }
   td { padding:6px 10px 6px 0; border-bottom:1px solid #1f2128; vertical-align:top; }
+  /* ⓘ The first column sat hard against the table's left edge, which read as
+     cramped now that it carries the nickname. */
+  th:first-child, td:first-child { padding-left:10px; }
   code { font-family:Consolas,monospace; font-size:12.5px; }
   .muted { color:#71737c; }
   .good { color:#7fd18c; }
@@ -348,6 +351,9 @@
   .tabs button { background:transparent; border:none; border-bottom:2px solid transparent;
                  color:#8b8d96; padding:9px 14px; font-size:13.5px; border-radius:0; }
   .tabs button.on { color:#e8e8ea; border-bottom-color:#6c8cff; font-weight:600; }
+  /* ⓘ Pushed to the far right: it is not a controller, so it should not read as
+     one more in the row of them. */
+  .tabs button.editortab { margin-left:auto; }
   .tabdot { display:inline-block; width:7px; height:7px; border-radius:50%;
             margin-right:7px; vertical-align:middle; }
   /* Name on top, what it is underneath -- the name is for recognising the tab,
@@ -426,9 +432,22 @@
      gap between them. ⭐ Safe for everything else below the header, because
      headings carry their own 22px top margin -- Overview's Devices table keeps
      its separation without this. */
+  /* ⓘ NO SCROLLBAR (rhoquinn8217, 2026-09-01). ⚠️ It was the only cue for how
+     much of a long section is left; removing it is a look-over-affordance
+     trade, made knowingly and easy to put back. Scrolling itself is untouched. */
+  html { scrollbar-width: none; }
+  html::-webkit-scrollbar, body::-webkit-scrollbar { width:0; height:0; display:none; }
   #stickyTop { position:sticky; top:0; z-index:10; background:#15161a;
                padding:0 6px 0; margin:0 -6px; overflow:visible; }
   .bar { padding-top:6px; }
+  /* ⛔ AN EMPTY BAR TAKES UP SPACE (rhoquinn8217, 2026-09-01: "the margins in
+     the green box need to shrink"). A controller tab renders one above its
+     settings whose contents -- the picker and its buttons -- moved into the
+     sticky header, leaving 14px of nothing between the section tabs and the
+     first row. ⓘ Collapsed rather than removed from the markup: the same bar
+     still carries content on Overview, and one CSS rule cannot go stale the
+     way a second render path can. */
+  .bar:empty { display:none; }
   /* ⭐ The controller focus ring is deliberately loud. On a TV across a room a
      subtle outline is invisible, and not knowing what is selected makes the
      whole thing unusable. */
@@ -476,6 +495,9 @@
      the game, which is the state you might not have meant to be in.
      ⓘ The same green and amber the rest of the page already uses -- .good and
      .warnc -- rather than two more colours to keep in step. */
+  /* ⓘ The copies were plain while the original was bold, so one switch looked
+     like two different controls. */
+  .holdBtnCopy { font-weight:600; }
   #holdBtn.on, .holdBtnCopy.on { background:#3a3320; border-color:#e0c07a; color:#e8cf92; }
   #holdBtn.safe, .holdBtnCopy.safe { background:#1f3325; border-color:#7fd18c; color:#a9e3b5; }
   #padDest { margin-left:auto; }
@@ -513,7 +535,13 @@
   /* ⓘ No sticky of its own: it is inside #stickyTop, which is the sticky
      block. ⛔ Empty on Overview until a config is open, so it collapses rather
      than leaving a stray rule across the page. */
-  .sectbar { display:flex; flex-wrap:wrap; gap:4px; margin:0; padding:0; }
+  /* ⓘ Space spread BETWEEN the tabs rather than stretched inside them
+     (rhoquinn8217, 2026-09-01). With flex:1 every tab was the same width, so a
+     short title floated in a wide box and a long one nearly filled its own --
+     the gaps around the words came out uneven. Sizing each to its text and
+     sharing the leftover space evenly gives every title the same margin. */
+  .sectbar { display:flex; flex-wrap:wrap; gap:0; margin:0; padding:0;
+             justify-content:space-evenly; }
   .sectbar:not(:empty) { border-bottom:1px solid #2c2e36; }
   /* ⭐ THE SAME SHAPE AS THE CONTROLLER TABS (rhoquinn8217, 2026-09-01), and
      deliberately so: sections are to a controller what controllers are to the
@@ -521,9 +549,12 @@
      buttons made a second, louder toolbar out of what is really a tab row.
      ⓘ Still <button> underneath -- focus, the halo and pad navigation all
      depend on that; only the look changes. */
+  /* ⓘ flex:1 -- the tabs share the strip's width evenly rather than bunching
+     at the left, which on a wide window left most of the row empty. */
   .sectbar button { background:transparent; border:none; border-radius:0;
                     border-bottom:2px solid transparent; color:#8b8d96;
-                    padding:9px 14px; font-size:13.5px; }
+                    padding:9px 16px; font-size:13.5px; flex:0 0 auto;
+                    white-space:nowrap; }
   .sectbar button:hover { color:#c9cbd3; }
   /* ⭐ THE EMPHASIS BELONGS TO THE STRIP WHILE YOU ARE ON IT (rhoquinn8217,
      2026-09-01). Away from it the underline and the bold come off and only the
@@ -539,7 +570,7 @@
      2026-09-01). Bottom right sat over the footer and the last rows of a
      section; the top right corner covered the controller tabs. Above centre
      is clear of both and still lands where the eye goes. */
-  #bubbles { position:fixed; right:16px; top:38%; z-index:40;
+  #bubbles { position:fixed; right:16px; top:16px; z-index:40;
              display:flex; flex-direction:column; gap:8px; max-width:340px;
              align-items:flex-end; pointer-events:none; }
   /* ⓘ Translucent rather than clear: text over an arbitrary background is
@@ -575,10 +606,17 @@
      control already has the same margin; the section wrapper did not, so
      scrollIntoView put it at the very top of the viewport -- underneath the
      header -- and took the focused control with it. */
-  .sect { border:1px solid #2c2e36; border-radius:10px; padding:12px 14px;
+  /* ⓘ Less room at the TOP than the sides (rhoquinn8217, 2026-09-01: "too much
+     padding above stick_to_mouse"). The card's own 12px and the first row's 6px
+     stacked into a band of dead space before the first label -- and with the
+     section heading gone there is nothing in it. */
+  .sect { border:1px solid #2c2e36; border-radius:10px; padding:2px 14px 10px;
           scroll-margin-top: var(--stickH, 180px); }
+  .sect .row:first-child { padding-top:2px; }
   .sect h3 { margin:0 0 10px; font-size:13.5px; color:#e8e8ea; font-weight:600; }
-  .row { display:grid; grid-template-columns:18px 1fr auto; gap:11px; align-items:start;
+  /* ⓘ center, not start: the tick sat level with the FIRST line of a setting's
+     name, which on a two-line description left it floating near the top. */
+  .row { display:grid; grid-template-columns:18px 1fr auto; gap:11px; align-items:center;
          padding:6px 0; border-bottom:1px solid #1f2128; }
   .row:last-child { border-bottom:none; }
   .row .name { font-size:13px; color:#b9bbc4; padding-top:6px; }
@@ -654,12 +692,11 @@
   <!-- ⓘ The status line moved to the Log header 2026-09-01. It reads like a
        running log -- "created X", "renamed to Y" -- so it belongs with the
        log rather than beside a field it has nothing to do with. -->
-  <!-- ⭐ On the agent row rather than a line of its own: it is a session-wide
-       switch like the agent address beside it, and a row to itself made it look
-       like a heading for the table below. -->
-  <button id="holdBtn" onclick="toggleGateHold()"
-          style="margin-left:18px">Safe Edit Mode: ON &mdash; only basic controls</button>
-  <span id="holdHint" class="muted" style="font-size:12px">click to unlock</span>
+  <!-- ⛔ SAFE EDIT MODE REMOVED FROM THE AGENT ROW 2026-09-01. It lives on the
+       config row in both panes now, beside the settings it governs; here it was
+       a third copy of the same switch at the top of Overview.
+       ⓘ The label is computed in paintPadDestination rather than read off this
+       button, so nothing depended on it being here. -->
 </div>
 
 <h2>Devices</h2>
@@ -674,21 +711,19 @@
 <div id="configs"><span class="muted">Refresh to load.</span></div>
 
 
-<!-- ⭐ Its own picker. The editor used to be reachable only by clicking a
-     config name in the table, which is not a place anyone looks for a way in. -->
-<h2>Editing</h2>
-<div class="kv" style="display:flex;align-items:center;gap:8px">
-  <label>config</label>
-  <select id="editorPick" onchange="openConfig(this.value)"></select>
-  <span style="margin-left:auto;display:flex;align-items:center;gap:8px">
-    <span id="holdHint2" class="muted holdHintCopy" style="font-size:12px">click to turn off</span>
-    <button id="holdBtn2" class="holdBtnCopy" onclick="toggleGateHold()">Safe Edit Mode: ON &mdash; only basic controls</button>
-  </span>
-</div>
-<h2 id="editorHead" style="display:none">Editing <code id="editorName"></code></h2>
-<div id="cfgEditor"></div>
+<!-- ⛔ THE EDITOR LEFT OVERVIEW 2026-09-01. Its config row belongs in the
+     sticky header, and from there it sat above the Devices and Configs tables
+     it has nothing to do with. Overview is what its name says now: agent,
+     devices, configs -- things you read. -->
 
 </div><!-- /pane-overview -->
+
+<!-- ⭐ Editing a config with NO controller in hand. Same machinery as a
+     controller tab: the config row is painted into the sticky header and the
+     section strip follows it, so the row always sits above what it drives. -->
+<div class="pane" id="pane-editor">
+  <div id="cfgEditor"><span class="muted">Pick a config above to edit it.</span></div>
+</div>
 
 <div id="devicePanes"></div>
 
@@ -1177,12 +1212,37 @@ function stepHeader(dir) {
 //
 // ⓘ Only for the FIRST control: anywhere else in the list, dragging the view
 // back to the section heading would fight the scrolling you are doing.
-function scrollSectionIntoView(el) {
-  var sect = el.closest && el.closest('.sect');
-  if (!sect) return false;
+// ⭐ The top of the settings block, wherever that is: the top of the page on a
+// controller tab, the top of the editor on Overview.
+function scrollSettingsToTop() {
+  var pane = activePane();
+  var host = pane && pane.querySelector('.cols');
+  if (!host) return false;
   var head = parseInt(getComputedStyle(document.documentElement)
                         .getPropertyValue('--stickH'), 10) || 0;
-  var top = sect.getBoundingClientRect().top + window.scrollY - head;
+  var top = host.getBoundingClientRect().top + window.scrollY - head - 12;
+  window.scrollTo({ top: top < 0 ? 0 : top });
+  return true;
+}
+
+function scrollSectionIntoView(el) {
+  // ⭐ SNAP TO THE TOP OF THE SETTINGS, not to the section's own box
+  // (rhoquinn8217, 2026-09-01: "what's viewable depends on the focus. Snapping
+  // up is the only way to prevent the clipping").
+  //
+  // ⛔ Aiming at the .sect was not enough. The browser scrolls only far enough
+  // to REVEAL THE FOCUSED CONTROL, so how much of the section you could see
+  // depended on which control had focus -- and the top of the list kept ending
+  // up under the header.
+  //
+  // ⓘ The whole settings block is the target instead. On a controller tab that
+  // is the top of the page; on Overview it is the top of the editor, which is
+  // the equivalent place.
+  var host = el.closest && (el.closest('.cols') || el.closest('.pane'));
+  if (!host) return false;
+  var head = parseInt(getComputedStyle(document.documentElement)
+                        .getPropertyValue('--stickH'), 10) || 0;
+  var top = host.getBoundingClientRect().top + window.scrollY - head - 12;
   window.scrollTo({ top: top < 0 ? 0 : top });
   return true;
 }
@@ -1196,6 +1256,9 @@ function focusElement(el) {
   GP_INDEX = at;
   GP_WANT = focusKeyOf(el);
   gpPaint();
+  // ⛔ The section scroll runs INSTEAD of scrollIntoView, never after it: the
+  // browser's own scroll is what was clipping the top, so letting it run and
+  // then correcting would fight it every time.
   if (el === firstControlInSection() && scrollSectionIntoView(el)) return true;
   el.scrollIntoView({ block: 'nearest' });
   return true;
@@ -1214,8 +1277,8 @@ function showSection(name, focusFirst) {
   // ⓘ The strip is the thing you are looking at when you switch, so it is the
   // thing that should not move: note where it sits, and afterwards put the
   // scroll back so it sits there still.
-  var bar = activePane().querySelector('.sectbar');
-  var wasAt = bar ? bar.getBoundingClientRect().top : null;
+  // ⛔ The strip lookup that used to sit here asked the PANE for it; the strip
+  // has been in the header since the merge, so it always found nothing.
 
   SECT_ACTIVE = name;
   // ⓘ Every pane, not just the one in view: the section choice is one value for
@@ -1231,17 +1294,25 @@ function showSection(name, focusFirst) {
   // The focusable set changed shape entirely -- rebuild it before choosing
   // where to land, or the index would point into the old list.
   gpCollect();
-  // ⓘ Only for a MOUSE switch. When focus is going to the strip, the snap in
-  // focusElement puts it in one fixed place, which is stronger than holding it
-  // wherever it happened to be -- and running both would fight.
-  if (wasAt !== null && bar && focusFirst) {
-    var nowAt = bar.getBoundingClientRect().top;
-    if (nowAt !== wasAt) window.scrollBy(0, nowAt - wasAt);
-  }
+  // ⭐⭐ THE SECTION CHANGED, SO THE LIST STARTS AGAIN (rhoquinn8217,
+  // 2026-09-01, third attempt and the first that could work).
+  //
+  // ⛔ The two before it hung the scroll on FOCUS -- and switching sections
+  // with ◄ ► leaves focus on the tabs, so nothing ever fired. What you could
+  // see depended on where you had scrolled to in the section you just left.
+  //
+  // ⛔ The view-holding code that stood here was dead for the same reason as
+  // the lookup above, and holding the view where it was is the opposite of
+  // what is wanted -- so it is removed rather than repaired.
   if (!focusElement(focusFirst ? firstControlInSection() : sectBarButton(name))) {
     GP_INDEX = 0;
     gpPaint();
   }
+  // ⛔ LAST, after focus is painted. Painting the halo calls scrollIntoView, so
+  // a scroll that runs before it can be undone by it -- the strip is sticky and
+  // the browser should decide it is already visible, but "should" is how the
+  // first two attempts at this failed.
+  scrollSettingsToTop();
 }
 
 // ◄ ► step through the sections in the order they are shown. Returns false
@@ -1326,6 +1397,15 @@ function renderTabs(devices) {
             '<em class="tabkind">' + esc(deviceLabelShort(d)) + '</em>' +
             '</button>';
   });
+  // ⭐ THE EDITOR TAB (rhoquinn8217, 2026-09-01), last and pushed to the far
+  // right. It edits a config with NO controller in hand, which is the whole
+  // point of it -- so it belongs beside the controllers rather than buried at
+  // the bottom of Overview, where its header row sat above the Devices and
+  // Configs tables it had nothing to do with.
+  TABS.push('editor');
+  html += '<button data-tab="editor" class="editortab' +
+          (ACTIVE === 'editor' ? ' on' : '') +
+          '" onclick="showTab(\'editor\')">Editor</button>';
   bar.innerHTML = html;
 
   // Rebuild the device panes. Cheap, and it keeps them honest -- a pane for a
@@ -1481,18 +1561,31 @@ function nextCopyName(sourceName) {
 //
 // ⛔ The auto-link claim is dropped by the server, not here: two configs
 // claiming one serial is the ambiguity the claim verb exists to refuse.
+// ⓘ Two callers now: a controller tab copies what it has linked and links the
+// copy; Overview copies the config it is editing and OPENS the copy, since it
+// has no controller to link to. The copying itself is the same either way.
 function copyConfigFor(ordinal) {
   var dev = LAST_DEVICES.filter(function(x) { return x.ordinal === ordinal; })[0];
   if (!dev || !dev.linked_config) return;
-  var name = nextCopyName(dev.linked_config);
-  call('POST', '/api/v1/configs/' + encodeURIComponent(dev.linked_config) + '/copy',
+  copyConfigNamed(dev.linked_config, ordinal);
+}
+
+function copyConfigNamed(source, ordinal) {
+  if (!source) return;
+  var name = nextCopyName(source);
+  call('POST', '/api/v1/configs/' + encodeURIComponent(source) + '/copy',
        { name: name })
     .then(function() {
+      // ⛔ Only a CONTROLLER can be linked to. From Overview the copy is
+      // opened instead -- linking would need a controller picked first, which
+      // is the roundabout route the tabs exist to avoid.
+      if (!ordinal) { openConfig(name); return null; }
       return call('POST', '/api/v1/devices/' + encodeURIComponent(ordinal) + '/link',
                   { config: name });
     })
     .then(function() {
-      setConn('copied to ' + name + ' and linked', 'good');
+      setConn(ordinal ? 'copied to ' + name + ' and linked'
+                      : 'copied to ' + name, 'good');
       loadConfigs(); loadDevices();
     })
     .catch(function(){});
@@ -1772,6 +1865,9 @@ function paintStickyHead() {
   var host = document.getElementById('stickyHead');
   if (!host) return;
   host.innerHTML = HEADS[ACTIVE] ? '<div class="devhead">' + HEADS[ACTIVE] + '</div>' : '';
+  // ⓘ The row may carry a Safe Edit switch, and it is brand new -- colour it
+  // now rather than leaving it plain until the next poll.
+  paintHoldControls();
   measureSticky();
 }
 
@@ -1855,27 +1951,21 @@ function buildDevicePane(d) {
       'Remove auto link</button>'
     : '';
 
-  var head = '<table class="devrow"><tr><th>controller</th><th>serial</th>' +
-             '<th>auto linked config</th><th></th><th>nickname</th><th></th></tr>' +
+  var head = '<table class="devrow"><tr><th>nickname</th><th>controller</th><th>serial</th>' +
+             '<th>auto linked config</th><th></th><th></th></tr>' +
              // ⭐ Same status tint as Overview. The two tables show the same
              // row, so a controller that reads green there and plain here
              // would suggest the two disagreed about something.
              '<tr class="' + (!d.ready ? 'r-wait'
                             : (d.linked_config ? 'r-set' : 'r-shared')) + '">' +
+             // ⭐ NICKNAME FIRST (rhoquinn8217, 2026-09-01): it is what a person
+             // calls this controller, so it leads the row. ⓘ From the device
+             // in hand, for the same reason as Overview's copy.
+             '<td>' + esc(d.nickname || nameFor(d.ordinal)) + '</td>' +
              '<td>' + esc(deviceLabelShort(d)) + '</td>' +
              '<td>' + serialCell + '</td>' +
              '<td>' + autoCell + '</td>' +
              '<td>' + autoBtn + '</td>' +
-             // ⭐ THE NAME, NOT THE ORDINAL (rhoquinn8217, 2026-09-01). The
-             // ordinal told a person nothing, and it is one-to-one with the
-             // nickname while a session lasts.
-             //
-             // ⛔ IT IS STILL THE HANDLE UNDERNEATH -- every onclick below
-             // passes d.ordinal, and the log carries both. Ordinals are never
-             // reused, so a stale command FAILS instead of landing on a
-             // different controller; a nickname can come round again once its
-             // controller has gone, and could not promise that.
-             '<td>' + esc(nameFor(d.ordinal)) + '</td>' +
              '<td><button onclick="unlink(\'' + esc(d.ordinal) +
                  '\')" title="stop reading this config NOW — falls back to the shared settings">Reset</button>' +
              '</td></tr></table>';
@@ -2078,17 +2168,11 @@ function renderConfigEditor(hostId, configName, prefix, ordinal) {
     // number, feel it, nudge again) into three actions instead of one.
     var html = '<div class="bar">';
 
-    if (!ordinal) {
-      // ⛔ Read-only here on purpose. A claim belongs to a CONTROLLER, and
-      // Overview does not have one in hand -- changing it from a config list
-      // would mean picking a controller first, which is the roundabout route
-      // the tabs exist to avoid.
-      var claims = cfg.auto_link || [];
-      html += '<span class="muted">auto links: ' +
-              (claims.length ? '<code>' + esc(claims.join(', ')) + '</code>' +
-                               ' — change this from the controller\'s tab'
-                             : 'none') + '</span>';
-    }
+    // ⛔ The auto-links line that stood here was removed 2026-09-01. On Overview
+    // it named a controller you cannot act on from here anyway -- changing a
+    // claim needs that controller's own tab, which the line itself said.
+    //
+    // ⓘ Its `if (!ordinal)` went with it; nothing else was inside.
     html += '</div><div class="cols">';
 
     // ⭐ Ordered by how often a setting is touched, not alphabetically. Audio
@@ -2133,18 +2217,24 @@ function renderConfigEditor(hostId, configName, prefix, ordinal) {
                  ' onclick="showSection(\'' + esc(g).replace(/'/g, "\\'") + '\', true)">' +
                  esc(g) + '</button>';
     });
-    SECT_BARS[hostId === 'cfgEditor' ? 'overview' : ordinal] = barHtml;
+    SECT_BARS[hostId === 'cfgEditor' ? 'editor' : ordinal] = barHtml;
     paintSectBar();
 
     order.forEach(function(g) {
       html += '<div class="sect" data-sect="' + esc(g) + '"' +
               (g === SECT_ACTIVE ? '' : ' style="display:none"') +
-              '><h3>' + g + '</h3>' +
+              '>' +
+              // ⛔ NO HEADING (rhoquinn8217, 2026-09-01). The strip above names
+              // the section and marks it, so a title inside repeated it a
+              // centimetre lower -- the same reason the controller panes have
+              // no heading either: the tab IS the title.
+              // ⓘ The legend below STAYS: it explains the bracket notation,
+              // which nothing else does.
               // ⭐ A LEGEND, once per button section (rhoquinn8217,
               // 2026-09-01). The rows read (✕) | (A), and without a word
               // saying so the second bracket is a guess.
               (BUTTON_SECTIONS.indexOf(g) >= 0
-                ? '<div class="muted" style="font-size:11px;margin:-2px 0 8px">' +
+                ? '<div class="muted" style="font-size:11px;margin:4px 0 6px">' +
                   '(PS button) | (Xbox button)</div>'
                 : '');
       groups[g].forEach(function(meta) {
@@ -2299,10 +2389,45 @@ function loadDeviceSettings(ordinal, configName) {
   renderConfigEditor('dev-settings-' + ordinal, configName, ordinal, ordinal);
 }
 
+// The config Overview is editing, and the row that says so.
+var OV_CONFIG = '';
+
+// ⭐ Overview's config row, in the sticky header, the same shape a controller
+// tab uses: picker, then the actions on it, then Safe Edit Mode.
+//
+// ⛔ Set auto link is NOT here. It belongs to a CONTROLLER and Overview has
+// none in hand -- offering it disabled would be a button that never works.
+function paintEditorHead() {
+  var opts = (CONFIGS || []).filter(function(c) { return !c.read_only; })
+    .map(function(c) {
+      return '<option value="' + esc(c.name) + '"' +
+             (c.name === OV_CONFIG ? ' selected' : '') + '>' +
+             esc(c.name) + '</option>';
+    }).join('');
+  var acts = OV_CONFIG
+    ? '<button onclick="renameConfig(\'' + esc(OV_CONFIG) + '\')">Rename</button>' +
+      '<button onclick="copyConfigNamed(\'' + esc(OV_CONFIG) + '\')">Copy</button>'
+    : '';
+  setStickyHead('editor',
+    '<div class="f"><span class="muted">config</span>' +
+    '<select id="editorPick" onchange="openConfig(this.value)">' +
+    '<option value="">(pick a config)</option>' + opts + '</select>' +
+    '<button onclick="newConfigFor(\'\')">New</button>' + acts +
+    '<span style="margin-left:auto;display:flex;align-items:center;gap:8px">' +
+    '<span id="holdHint2" class="muted holdHintCopy" style="font-size:12px">click to turn off</span>' +
+    '<button id="holdBtn2" class="holdBtnCopy" onclick="toggleGateHold()">' +
+    'Safe Edit Mode: ON — only basic controls</button></span></div>');
+}
+
 // Overview: open any config for editing, controller or not.
 function openConfig(name) {
-  document.getElementById('editorHead').style.display = 'block';
-  document.getElementById('editorName').textContent = name;
+  OV_CONFIG = name;
+  // ⓘ Opening a config means going where configs are edited. Clicking a name in
+  // Overview's table is the obvious way in, and it used to leave you on a pane
+  // with the editor far below.
+  if (ACTIVE !== 'editor') showTab('editor');
+  paintEditorHead();
+  if (!name) { document.getElementById('cfgEditor').innerHTML = ''; return; }
   renderConfigEditor('cfgEditor', name, 'ov', null);
 }
 
@@ -2428,8 +2553,8 @@ function loadDevices() {
     // ⭐ THE SAME COLUMNS AS THE CONTROLLER TAB. The two tables described the
     // same thing in different words -- 'linked' here, 'auto linked config'
     // there -- so reading one taught you nothing about the other.
-    var html = '<table><tr><th>controller</th><th>serial</th>' +
-               '<th>auto linked config</th><th></th><th>nickname</th><th></th></tr>';
+    var html = '<table><tr><th>nickname</th><th>controller</th><th>serial</th>' +
+               '<th>auto linked config</th><th></th><th></th></tr>';
     list.forEach(function(dev) {
       // ⭐ The serial is the point of this whole screen. auto_link works only
       // if it is a real per-unit value, and that has never been observed.
@@ -2472,12 +2597,16 @@ function loadDevices() {
         : '';
 
       html += '<tr class="' + rowClass + '">' +
+              // ⛔ FROM THE DEVICE ITSELF, not looked up. This table is built
+              // BEFORE the device list is stored, so the lookup fell back to
+              // the ordinal and Overview showed ds5_usb_1 while the controller
+              // tab showed the name.
+              '<td>' + esc(dev.nickname || dev.ordinal) + '</td>' +
               '<td>' + esc(deviceLabelShort(dev)) + (dev.supports_config ? '' :
                   ' <span class="muted">(no config support)</span>') + '</td>' +
               '<td>' + serial + '</td>' +
               '<td>' + autoCell + '</td>' +
               '<td>' + autoBtn + '</td>' +
-              '<td>' + esc(nameFor(dev.ordinal)) + '</td>' +   // see the note on the controller tab
               '<td><button onclick="unlink(\'' + esc(dev.ordinal) +
                   '\')" title="clear this controller\'s config">Reset</button></td></tr>';
     });
@@ -2573,17 +2702,9 @@ function loadConfigs(isRetry) {
       apply_suggested_name(list);
       return;
     }
-    // Keep the editor's picker in step with the list.
-    var ed = document.getElementById('editorPick');
-    if (ed) {
-      var cur = ed.value;
-      ed.innerHTML = '<option value="">(pick a config)</option>' +
-        list.filter(function(c) { return !c.read_only; })
-            .map(function(c) {
-              return '<option value="' + esc(c.name) + '">' + esc(c.name) + '</option>';
-            }).join('');
-      if (cur) ed.value = cur;
-    }
+    // ⓘ The picker lives in the header now and is rebuilt with the row, so it
+    // cannot drift from the list.
+    paintEditorHead();
 
     var html = '<table><tr><th>name</th><th>kind</th><th>auto links</th>' +
                '<th></th></tr>';
@@ -2794,8 +2915,7 @@ function commitRename(oldName) {
       cancelRename();
       loadConfigs();
       loadDevices();
-      var head = document.getElementById('editorName');
-      if (head && head.textContent === oldName) openConfig(next);
+      if (OV_CONFIG === oldName) openConfig(next);
     }).catch(function(){ cancelRename(); });
 }
 
@@ -4344,6 +4464,40 @@ var GATE_HELD = false;
 var GATE_ON = false;   // the agent's real gate state, from the poll
 
 
+// ⭐ PAINTED WHEN THEY ARE CREATED, not only when the poll comes round
+// (rhoquinn8217, 2026-09-01: "why does it take a while for the safe edit mode
+// buttons to turn green").
+//
+// ⛔ The device poll runs every four seconds, and it was the only thing that
+// coloured these. Every rebuild of the header row -- switching panes, opening a
+// config, the config list refreshing -- made new buttons carrying the plain
+// text from the markup, and they sat like that until the next poll.
+function paintHoldControls() {
+  var holdLabel = GATE_HELD
+    ? 'Safe Edit Mode: OFF \u2014 \u26a0 inputs are mirrored in active game'
+    : 'Safe Edit Mode: ON \u2014 only basic controls';
+  var holdTitle = GATE_HELD
+    ? 'Re-mappings and gyro/stick/touchpad mouse modes are active while '
+      + 'editing however controller inputs will mirror in active game'
+    : 'Re-mappings and gyro/touchpad/stick mouse modes are disabled while '
+      + 'editing. Inputs are also locked to this window to prevent inputs '
+      + 'mirrored in games.';
+  var holdHintText = GATE_HELD ? 'click to turn on' : 'click to turn off';
+
+  // ⓘ Colour carries the state at a glance: green while the page holds the
+  // controllers, amber while the game is still seeing them. The warning sign
+  // is on the amber one because that is the state you might not have meant.
+  document.querySelectorAll('#holdBtn, .holdBtnCopy').forEach(function (b) {
+    b.textContent = holdLabel;
+    b.title = holdTitle;
+    b.classList.toggle('on', GATE_HELD);
+    b.classList.toggle('safe', !GATE_HELD);
+  });
+  document.querySelectorAll('#holdHint, .holdHintCopy').forEach(function (h) {
+    h.textContent = holdHintText;
+  });
+}
+
 function paintPadDestination(d) {
   var dest = document.getElementById('padDest');
   if (!dest) return;
@@ -4361,58 +4515,20 @@ function paintPadDestination(d) {
   // ⭐ The button says the STATE it is in; the line beside it says what a click
   // would do. A button labelled with its own action reads as a question about
   // what is currently true.
-  var btn = document.getElementById('holdBtn');
-  if (btn) {
-    btn.classList.toggle('on', GATE_HELD);
-    btn.classList.toggle('safe', !GATE_HELD);
-    // ⭐ Colour carries the state at a glance: green while the page holds the
-    // controllers, amber while the game is still seeing them. The exclamation
-    // is on the amber one because that is the state you might not have meant.
-    // ⭐ SAFE EDIT MODE (rhoquinn8217, 2026-09-01). The old wording named the
-    // mechanism -- inputs locked to the page -- when what matters is what each
-    // state COSTS you. On means safe but no cursor; off means the cursor keeps
-    // working and the game sees everything you press.
-    // ⭐ rhoquinn8217's wording, 2026-09-01, and the choice of MIRROR is the
-    // point: "mirrored in game" names a problem gamepad users already know,
-    // where "also reaches the game" reads as a description of normal
-    // behaviour rather than a warning.
-    btn.textContent = GATE_HELD
-      ? 'Safe Edit Mode: OFF \u2014 \u26a0 inputs are mirrored in active game'
-      : 'Safe Edit Mode: ON \u2014 only basic controls';
-    btn.title = GATE_HELD
-      ? 'Re-mappings and gyro/stick/touchpad mouse modes are active while '
-        + 'editing however controller inputs will mirror in active game'
-      : 'Re-mappings and gyro/touchpad/stick mouse modes are disabled while '
-        + 'editing. Inputs are also locked to this window to prevent inputs '
-        + 'mirrored in games.';
-  }
-  var hint = document.getElementById('holdHint');
-  if (hint) {
-    hint.textContent = GATE_HELD ? 'click to turn on' : 'click to turn off';
-  }
-
-  // ⭐ EVERY COPY, painted from the same values. ⛔ Controls for one state that
-  // computed their own labels would drift the first time either was reworded --
-  // and this page has had that happen.
+  // ⭐ THE LABEL IS COMPUTED, NOT COPIED (rhoquinn8217, 2026-09-01). Every
+  // control used to be painted from the one on the agent row -- so removing
+  // that row would have blanked the rest. One source of truth, applied to
+  // whatever exists.
   //
-  // ⓘ By CLASS rather than by id, because there are three of them now: the
-  // agent row, Overview's editor, and each controller tab's settings. A fourth
-  // id would have been a fourth place to forget.
-  if (btn) {
-    document.querySelectorAll('.holdBtnCopy').forEach(function (b) {
-      b.textContent = btn.textContent;
-      b.title = btn.title;
-      // ⓘ The colour is copied from the original too, so a state and its
-      // colour cannot disagree between two controls for one switch.
-      b.classList.toggle('on', GATE_HELD);
-      b.classList.toggle('safe', !GATE_HELD);
-    });
-  }
-  if (hint) {
-    document.querySelectorAll('.holdHintCopy').forEach(function (h) {
-      h.textContent = hint.textContent;
-    });
-  }
+  // ⭐ SAFE EDIT MODE. The old wording named the mechanism -- inputs locked to
+  // the page -- when what matters is what each state COSTS you. On means safe
+  // but no cursor; off means the cursor keeps working and the game sees
+  // everything you press.
+  //
+  // ⭐ MIRROR is rhoquinn8217's word and it is the point: "mirrored in game"
+  // names a problem gamepad users already know, where "also reaches the game"
+  // reads as a description of normal behaviour rather than a warning.
+  paintHoldControls();
 }
 
 function toggleGateHold() {
