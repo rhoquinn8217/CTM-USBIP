@@ -159,10 +159,15 @@ inline bool button_down(const uint8_t *data, size_t len, int index)
 // moving it out of the way, and closing it. They are on the face because a
 // keyboard whose only exit is a controller button nobody told you about is a
 // keyboard people get stuck in.
-enum KeyKind { KK_NORMAL, KK_MOD, KK_FN, KK_ACTION };
+// ⓘ KK_SHOULDER_* only changes what is PRINTED on the key -- the shortcut
+// itself is read from the pad directly. Steam prints them the same way, and it
+// is what turns a shoulder shortcut from folklore into something visible.
+// ⓘ KK_ESC is the backtick that becomes esc while L2 is held.
+enum KeyKind { KK_NORMAL, KK_MOD, KK_FN, KK_ACTION, KK_ESC,
+               KK_SHOULDER_L1, KK_SHOULDER_R1, KK_SHOULDER_R2 };
 
 // What a KK_ACTION key does, carried in the usage field, which is unused there.
-inline const uint8_t ACT_MOVE = 1, ACT_CLOSE = 2, ACT_STEAM = 3;
+inline const uint8_t ACT_MOVE = 1, ACT_CLOSE = 2, ACT_STEAM = 3, ACT_PASTE = 4;
 
 struct Key {
     const wchar_t *label;
@@ -255,36 +260,37 @@ inline const Key kRow4[] = {
 // ⭐ And its rows are ALIGNED, unlike Full's stagger -- so walking it is plain
 // index arithmetic and the nearest-neighbour code never runs here.
 inline const Key kCompact0[] = {
-    { L"esc", nullptr, 0x29, 0, KK_NORMAL, 1.4f },
+    { L"`", L"~", 0x35, 0, KK_ESC, 1.0f },
     { L"1", L"!", 0x1e, 0, KK_FN, 1.0f }, { L"2", L"@", 0x1f, 0, KK_FN, 1.0f },
     { L"3", L"#", 0x20, 0, KK_FN, 1.0f }, { L"4", L"$", 0x21, 0, KK_FN, 1.0f },
     { L"5", L"%", 0x22, 0, KK_FN, 1.0f }, { L"6", L"^", 0x23, 0, KK_FN, 1.0f },
     { L"7", L"&", 0x24, 0, KK_FN, 1.0f }, { L"8", L"*", 0x25, 0, KK_FN, 1.0f },
     { L"9", L"(", 0x26, 0, KK_FN, 1.0f }, { L"0", L")", 0x27, 0, KK_FN, 1.0f },
-    { L"back", nullptr, 0x2a, 0, KK_NORMAL, 1.6f },
-    { L"\u2328\u21f3", nullptr, ACT_MOVE, 0, KK_ACTION, 1.4f },
+    { L"-", L"_", 0x2d, 0, KK_FN, 1.0f }, { L"=", L"+", 0x2e, 0, KK_FN, 1.0f },
+    { L"\u232b", nullptr, 0x2a, 0, KK_SHOULDER_L1, 1.0f },
 };
 inline const Key kCompact1[] = {
-    { L"tab", nullptr, 0x2b, 0, KK_NORMAL, 1.4f },
+    { L"tab", nullptr, 0x2b, 0, KK_NORMAL, 1.0f },
     { L"q", nullptr, 0x14, 0, KK_NORMAL, 1.0f }, { L"w", nullptr, 0x1a, 0, KK_NORMAL, 1.0f },
     { L"e", nullptr, 0x08, 0, KK_NORMAL, 1.0f }, { L"r", nullptr, 0x15, 0, KK_NORMAL, 1.0f },
     { L"t", nullptr, 0x17, 0, KK_NORMAL, 1.0f }, { L"y", nullptr, 0x1c, 0, KK_NORMAL, 1.0f },
     { L"u", nullptr, 0x18, 0, KK_NORMAL, 1.0f }, { L"i", nullptr, 0x0c, 0, KK_NORMAL, 1.0f },
     { L"o", nullptr, 0x12, 0, KK_NORMAL, 1.0f }, { L"p", nullptr, 0x13, 0, KK_NORMAL, 1.0f },
-    { L"enter", nullptr, 0x28, 0, KK_NORMAL, 3.0f },
+    { L"[", L"{", 0x2f, 0, KK_NORMAL, 1.0f }, { L"]", L"}", 0x30, 0, KK_NORMAL, 1.0f },
+    { L"\\", L"|", 0x31, 0, KK_NORMAL, 1.0f },
 };
 inline const Key kCompact2[] = {
-    { L"shift", nullptr, 0, KBD_SHIFT, KK_MOD, 1.4f },
+    { L"ctrl", nullptr, 0, KBD_CTRL, KK_MOD, 1.0f },
     { L"a", nullptr, 0x04, 0, KK_NORMAL, 1.0f }, { L"s", nullptr, 0x16, 0, KK_NORMAL, 1.0f },
     { L"d", nullptr, 0x07, 0, KK_NORMAL, 1.0f }, { L"f", nullptr, 0x09, 0, KK_NORMAL, 1.0f },
     { L"g", nullptr, 0x0a, 0, KK_NORMAL, 1.0f }, { L"h", nullptr, 0x0b, 0, KK_NORMAL, 1.0f },
     { L"j", nullptr, 0x0d, 0, KK_NORMAL, 1.0f }, { L"k", nullptr, 0x0e, 0, KK_NORMAL, 1.0f },
     { L"l", nullptr, 0x0f, 0, KK_NORMAL, 1.0f },
-    { L";", L":", 0x33, 0, KK_NORMAL, 1.0f },
-    { L"steam", nullptr, ACT_STEAM, 0, KK_ACTION, 2.0f },
+    { L";", L":", 0x33, 0, KK_NORMAL, 1.0f }, { L"'", L"\"", 0x34, 0, KK_NORMAL, 1.0f },
+    { L"enter", nullptr, 0x28, 0, KK_SHOULDER_R2, 2.0f },
 };
 inline const Key kCompact3[] = {
-    { L"ctrl", nullptr, 0, KBD_CTRL, KK_MOD, 1.4f },
+    { L"shift", nullptr, 0, KBD_SHIFT, KK_MOD, 1.0f },
     { L"z", nullptr, 0x1d, 0, KK_NORMAL, 1.0f }, { L"x", nullptr, 0x1b, 0, KK_NORMAL, 1.0f },
     { L"c", nullptr, 0x06, 0, KK_NORMAL, 1.0f }, { L"v", nullptr, 0x19, 0, KK_NORMAL, 1.0f },
     { L"b", nullptr, 0x05, 0, KK_NORMAL, 1.0f }, { L"n", nullptr, 0x11, 0, KK_NORMAL, 1.0f },
@@ -292,15 +298,18 @@ inline const Key kCompact3[] = {
     { L",", L"<", 0x36, 0, KK_NORMAL, 1.0f }, { L".", L">", 0x37, 0, KK_NORMAL, 1.0f },
     { L"/", L"?", 0x38, 0, KK_NORMAL, 1.0f },
     { L"\u2191", nullptr, 0x52, 0, KK_NORMAL, 1.0f },
+    { L"steam", nullptr, ACT_STEAM, 0, KK_ACTION, 1.0f },
+    { L"\u2328\u21f3", nullptr, ACT_MOVE, 0, KK_ACTION, 1.0f },
 };
 inline const Key kCompact4[] = {
-    { L"alt", nullptr, 0, KBD_ALT, KK_MOD, 1.4f },
-    { L"win", nullptr, 0, KBD_WIN, KK_MOD, 1.4f },
-    { L"space", nullptr, 0x2c, 0, KK_NORMAL, 6.2f },
+    { L"alt", nullptr, 0, KBD_ALT, KK_MOD, 1.0f },
+    { L"win", nullptr, 0, KBD_WIN, KK_MOD, 1.0f },
+    { L"space", nullptr, 0x2c, 0, KK_SHOULDER_R1, 6.0f },
+    { L"paste", nullptr, ACT_PASTE, 0, KK_ACTION, 2.0f },
     { L"\u2190", nullptr, 0x50, 0, KK_NORMAL, 1.0f },
     { L"\u2193", nullptr, 0x51, 0, KK_NORMAL, 1.0f },
     { L"\u2192", nullptr, 0x4f, 0, KK_NORMAL, 1.0f },
-    { L"\u2328\u2938", nullptr, ACT_CLOSE, 0, KK_ACTION, 1.4f },
+    { L"\u2328\u2938", nullptr, ACT_CLOSE, 0, KK_ACTION, 1.0f },
 };
 
 struct Row { const Key *keys; int count; };
@@ -351,6 +360,8 @@ inline std::map<uint8_t, int> g_mods;
 inline bool g_latchUsed = false;
 inline uint8_t g_tapMod = 0;
 inline int g_tapFrames = 0;
+inline int g_escFrames = 0;
+inline const void *g_pasteHeld = nullptr;
 
 inline int mod_state(uint8_t bit)
 {
@@ -532,6 +543,13 @@ inline void press_current(const void *who)
     if (k.kind == KK_ACTION) {
         if (k.usage == ACT_CLOSE) { hide(); return; }
         if (k.usage == ACT_STEAM) { ctm_overlay_open_steam(); hide(); return; }
+        if (k.usage == ACT_PASTE) {
+            // ⓘ Not a keystroke: ctrl+v, sent as one. The only entry on the
+            // face that is a combination rather than a key.
+            uint8_t pv[6] = { 0x19, 0, 0, 0, 0, 0 };
+            ctm_keyboard_device::set_state_for(who, KBD_CTRL, pv, 1);
+            return;
+        }
         if (k.usage == ACT_MOVE) {
             g_atTop.store(!g_atTop.load());
             if (g_hwnd != nullptr) PostMessageW(g_hwnd, WM_CTM_REPOSITION, 0, 0);
@@ -602,6 +620,9 @@ inline void paint(HWND hwnd)
     HFONT font = CreateFontW(keyH * 5 / 9, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
                              DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                              CLEARTYPE_QUALITY, VARIABLE_PITCH, L"Segoe UI");
+    HFONT small = CreateFontW(keyH * 3 / 10, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                              DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                              CLEARTYPE_QUALITY, VARIABLE_PITCH, L"Segoe UI");
     HGDIOBJ oldFont = SelectObject(dc, font);
     SetBkMode(dc, TRANSPARENT);
 
@@ -660,6 +681,34 @@ inline void paint(HWND hwnd)
 
         SetTextColor(dc, hot ? RGB(0xff, 0xff, 0xff) : RGB(0xe8, 0xea, 0xf2));
         DrawTextW(dc, label, -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+
+        // ⭐ THE SHIFTED CHARACTER, PRINTED SMALL IN THE CORNER -- Steam does
+        // this and it is the best thing on their keyboard: you never have to
+        // hold shift to find out what a key will give you.
+        // ⓘ Skipped while shift is showing, because then the big label IS the
+        // shifted one and printing it twice says nothing.
+        if (k.shifted != nullptr && !shiftNow) {
+            RECT s = r;
+            s.left += 4; s.top += 2;
+            SetTextColor(dc, RGB(0x8b, 0x8d, 0x96));
+            HGDIOBJ prev = SelectObject(dc, small);
+            DrawTextW(dc, k.shifted, -1, &s, DT_LEFT | DT_TOP | DT_SINGLELINE);
+            SelectObject(dc, prev);
+        }
+
+        // ⭐ AND THE SHOULDER SHORTCUT, on the key it belongs to. Without this
+        // the shoulders are folklore -- discoverable only by being told.
+        const wchar_t *hint = k.kind == KK_SHOULDER_L1 ? L"L1"
+                            : k.kind == KK_SHOULDER_R1 ? L"R1"
+                            : k.kind == KK_SHOULDER_R2 ? L"R2" : nullptr;
+        if (hint != nullptr) {
+            RECT s = r;
+            s.right -= 5; s.top += 2;
+            SetTextColor(dc, RGB(0x9d, 0xb4, 0xff));
+            HGDIOBJ prev = SelectObject(dc, small);
+            DrawTextW(dc, hint, -1, &s, DT_RIGHT | DT_TOP | DT_SINGLELINE);
+            SelectObject(dc, prev);
+        }
     }
 
     DeleteObject(fillNormal); DeleteObject(fillMod); DeleteObject(fillFn);
@@ -668,6 +717,7 @@ inline void paint(HWND hwnd)
     DeleteObject(fillHot); DeleteObject(edgeHot);
     SelectObject(dc, oldFont);
     DeleteObject(font);
+    DeleteObject(small);
 
     EndPaint(hwnd, &ps);
 }
@@ -916,6 +966,44 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
     if (l1 != g_shiftHeld.load()) { g_shiftHeld.store(l1); invalidate(); }
     if (l2 != g_fnHeld.load())    { g_fnHeld.store(l2);   invalidate(); }
 
+    // ⭐ THE BUTTON THAT OPENED IT ALSO CLOSES IT.
+    //
+    // ⛔ Restored 2026-09-02: this block was lost inside an earlier rewrite, so
+    // only the on-screen key could dismiss the keyboard.
+    //
+    // ⛔ AND CIRCLE IS NOT ONE OF THEM ANY MORE (rhoquinn8217). Circle is esc,
+    // which is the back-out key everywhere else in this project and the thing
+    // you most often want when a dialog is in the way.
+    //
+    // ⓘ The close is not armed until the opening button has been released --
+    // it is still held when the window appears, and acting on that press would
+    // close what it just opened.
+    const int openedBy = g_openedBy.load();
+    const bool closeBtn = (openedBy >= 0 && button_down(data, len, openedBy));
+    if (!g_closeArmed.load()) {
+        if (!closeBtn) g_closeArmed.store(true);
+        edge(deviceKey, 4, closeBtn);
+    } else if (edge(deviceKey, 4, closeBtn)) {
+        hide();
+        return true;
+    }
+
+    // ⭐ CIRCLE IS ESC. Sent straight through rather than moving the highlight,
+    // so backing out of a dialog costs one press from wherever you are.
+    if (edge(deviceKey, 5, button_down(data, len, 1))) {
+        uint8_t escKeys[6] = { 0x29, 0, 0, 0, 0, 0 };
+        ctm_keyboard_device::set_state_for(deviceKey, 0, escKeys, 1);
+        g_escFrames = 3;
+    }
+    if (g_escFrames > 0) {
+        --g_escFrames;
+        if (g_escFrames == 0) {
+            uint8_t none[6] = { 0, 0, 0, 0, 0, 0 };
+            ctm_keyboard_device::set_state_for(deviceKey, 0, none, 0);
+        }
+        return true;
+    }
+
     // ⭐ TRIANGLE MOVES IT out of the way of whatever is being typed into.
     if (edge(deviceKey, 6, button_down(data, len, 3))) {
         g_atTop.store(!g_atTop.load());
@@ -990,6 +1078,13 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
     if (cross && k.kind == KK_ACTION && edge(deviceKey, 9, true)) {
         if (k.usage == ACT_CLOSE) { hide(); return true; }
         if (k.usage == ACT_STEAM) { ctm_overlay_open_steam(); hide(); return true; }
+        if (k.usage == ACT_PASTE) {
+            // ⓘ Not a keystroke: ctrl+v, sent as one. The only entry on the
+            // face that is a combination rather than a key.
+            uint8_t pv[6] = { 0x19, 0, 0, 0, 0, 0 };
+            ctm_keyboard_device::set_state_for(deviceKey, KBD_CTRL, pv, 1);
+            return true;
+        }
         if (k.usage == ACT_MOVE) {
             g_atTop.store(!g_atTop.load());
             if (g_hwnd != nullptr) PostMessageW(g_hwnd, WM_CTM_REPOSITION, 0, 0);
