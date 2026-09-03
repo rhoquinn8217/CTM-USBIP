@@ -118,14 +118,37 @@ inline bool g_dragHaveFrom = false;
 // want very different pixel counts and the same proportion.
 // ⓘ Cycled with Create -- every face button and shoulder was already spoken
 // for, and Create is out of the way of typing.
+// ⓘ Compact is the DEFAULT: most typing from a couch is a search box or a
+// password, and the punctuation Full adds is a single button away.
+// ⛔ Declared here rather than beside the layouts, because the SIZE depends on
+// which face is showing and size_for comes first.
+inline std::atomic_bool g_full{false};
+
 inline std::atomic_int g_size{1};                     // 0 small, 1 medium, 2 large
-inline const float kSizeShare[3] = { 0.46f, 0.62f, 0.80f };
+
+// ⭐⭐ THE FULL FACE IS WIDER, not just fuller (rhoquinn8217, 2026-09-02).
+//
+// ⛔ Both faces used to share these shares, so Full simply squeezed more
+// columns into the same width and every key got smaller. It has sixteen
+// columns to Compact's fourteen, so at equal width its keys are 12% narrower
+// before anything else.
+//
+// ⓘ Full's middle size is 4/5 of the screen, as asked. Compact stays where it
+// was, because it was right.
+inline const float kCompactShare[3] = { 0.46f, 0.62f, 0.80f };
+inline const float kFullShare[3]    = { 0.66f, 0.80f, 0.94f };
 
 inline void size_for(int *w, int *h)
 {
     const int screenW = GetSystemMetrics(SM_CXSCREEN);
-    *w = (int)(screenW * kSizeShare[g_size.load() % 3]);
-    *h = *w * 5 / 16;                                 // five rows, roughly
+    const float share = g_full.load() ? kFullShare[g_size.load() % 3]
+                                      : kCompactShare[g_size.load() % 3];
+    *w = (int)(screenW * share);
+    // ⓘ Height follows the COLUMN COUNT so the keys stay roughly square: a
+    // wider face with more columns needs proportionally more height, and a
+    // fixed ratio would have squashed Full's rows.
+    const float cols = g_full.load() ? 16.0f : 14.0f;
+    *h = (int)(*w * 5.0f / (cols * 1.15f));
 }
 
 inline int overlay_y(int height)
@@ -291,7 +314,6 @@ inline const Key kRow4[] = {
 // ⭐ And its rows are ALIGNED, unlike Full's stagger -- so walking it is plain
 // index arithmetic and the nearest-neighbour code never runs here.
 inline const Key kCompact0[] = {
-    { L"esc", nullptr, 0x29, 0, KK_NORMAL, 1.0f },
     { L"`", L"~", 0x35, 0, KK_NORMAL, 1.0f },
     { L"1", L"!", 0x1e, 0, KK_FN, 1.0f }, { L"2", L"@", 0x1f, 0, KK_FN, 1.0f },
     { L"3", L"#", 0x20, 0, KK_FN, 1.0f }, { L"4", L"$", 0x21, 0, KK_FN, 1.0f },
@@ -302,7 +324,7 @@ inline const Key kCompact0[] = {
     { L"\u232b", nullptr, 0x2a, 0, KK_NORMAL, 1.0f },
 };
 inline const Key kCompact1[] = {
-    { L"tab", nullptr, 0x2b, 0, KK_NORMAL, 2.0f },
+    { L"tab", nullptr, 0x2b, 0, KK_NORMAL, 1.0f },
     { L"q", nullptr, 0x14, 0, KK_NORMAL, 1.0f }, { L"w", nullptr, 0x1a, 0, KK_NORMAL, 1.0f },
     { L"e", nullptr, 0x08, 0, KK_NORMAL, 1.0f }, { L"r", nullptr, 0x15, 0, KK_NORMAL, 1.0f },
     { L"t", nullptr, 0x17, 0, KK_NORMAL, 1.0f }, { L"y", nullptr, 0x1c, 0, KK_NORMAL, 1.0f },
@@ -312,7 +334,7 @@ inline const Key kCompact1[] = {
     { L"\\", L"|", 0x31, 0, KK_NORMAL, 1.0f },
 };
 inline const Key kCompact2[] = {
-    { L"ctrl", nullptr, 0, KBD_CTRL, KK_MOD, 2.0f },
+    { L"ctrl", nullptr, 0, KBD_CTRL, KK_MOD, 1.0f },
     { L"a", nullptr, 0x04, 0, KK_NORMAL, 1.0f }, { L"s", nullptr, 0x16, 0, KK_NORMAL, 1.0f },
     { L"d", nullptr, 0x07, 0, KK_NORMAL, 1.0f }, { L"f", nullptr, 0x09, 0, KK_NORMAL, 1.0f },
     { L"g", nullptr, 0x0a, 0, KK_NORMAL, 1.0f }, { L"h", nullptr, 0x0b, 0, KK_NORMAL, 1.0f },
@@ -322,7 +344,7 @@ inline const Key kCompact2[] = {
     { L"enter", nullptr, 0x28, 0, KK_NORMAL, 2.0f },
 };
 inline const Key kCompact3[] = {
-    { L"shift", nullptr, 0, KBD_SHIFT, KK_MOD, 2.0f },
+    { L"shift", nullptr, 0, KBD_SHIFT, KK_MOD, 1.0f },
     { L"z", nullptr, 0x1d, 0, KK_NORMAL, 1.0f }, { L"x", nullptr, 0x1b, 0, KK_NORMAL, 1.0f },
     { L"c", nullptr, 0x06, 0, KK_NORMAL, 1.0f }, { L"v", nullptr, 0x19, 0, KK_NORMAL, 1.0f },
     { L"b", nullptr, 0x05, 0, KK_NORMAL, 1.0f }, { L"n", nullptr, 0x11, 0, KK_NORMAL, 1.0f },
@@ -330,16 +352,13 @@ inline const Key kCompact3[] = {
     { L",", L"<", 0x36, 0, KK_NORMAL, 1.0f }, { L".", L">", 0x37, 0, KK_NORMAL, 1.0f },
     { L"/", L"?", 0x38, 0, KK_NORMAL, 1.0f },
     { L"\u2191", nullptr, 0x52, 0, KK_NORMAL, 1.0f },
-    // ⭐ Fn LATCHES like a modifier rather than being held on a shoulder.
-    // rhoquinn8217, 2026-09-02: the steam key was not needed -- the PS button
-    // already opens Steam, and with a mouse you would click the app itself.
     { L"fn", nullptr, 0, KBD_FN, KK_MOD, 1.0f },
     { L"\u2328\u21f3", nullptr, ACT_MOVE, 0, KK_ACTION, 1.0f },
 };
 inline const Key kCompact4[] = {
-    { L"alt", nullptr, 0, KBD_ALT, KK_MOD, 2.0f },
-    { L"win", nullptr, 0, KBD_WIN, KK_MOD, 2.0f },
-    { L"space", nullptr, 0x2c, 0, KK_NORMAL, 5.0f },
+    { L"alt", nullptr, 0, KBD_ALT, KK_MOD, 1.0f },
+    { L"win", nullptr, 0, KBD_WIN, KK_MOD, 1.0f },
+    { L"space", nullptr, 0x2c, 0, KK_NORMAL, 6.0f },
     { L"paste", L"copy", ACT_PASTE, 0, KK_ACTION, 2.0f },
     { L"\u2190", nullptr, 0x50, 0, KK_NORMAL, 1.0f },
     { L"\u2193", nullptr, 0x51, 0, KK_NORMAL, 1.0f },
@@ -359,9 +378,6 @@ inline const Row kCompactRows[] = {
 };
 #undef CTM_ROW
 
-// ⓘ Compact is the DEFAULT: most typing from a couch is a search box or a
-// password, and the punctuation Full adds is a single button away.
-inline std::atomic_bool g_full{false};
 
 inline const Row *rows_now() { return g_full.load() ? kFullRows : kCompactRows; }
 inline const int kRowCount = 5;          // both faces have five rows
@@ -878,6 +894,12 @@ inline LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             g_row = r; g_col = c;
             const Placed *pl = placed_of(r, c);
             if (pl) g_anchorX = (pl->r.left + pl->r.right) / 2;
+            // ⛔⛔ CAPTURE THE MOUSE. Without it the button-up goes to whatever
+            // window is under the cursor, so releasing OUTSIDE the keyboard
+            // meant we never heard it and the key stayed held down forever
+            // (rhoquinn8217, 2026-09-02). Capture guarantees the release
+            // comes back here wherever the cursor ends up.
+            SetCapture(hwnd);
             press_current(kMouseKey);
             InvalidateRect(hwnd, nullptr, FALSE);
         }
@@ -885,6 +907,14 @@ inline LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     }
 
     case WM_LBUTTONUP:
+        if (GetCapture() == hwnd) ReleaseCapture();
+        release_current(kMouseKey);
+        return 0;
+
+    // ⛔ AND IF THE CAPTURE IS TAKEN AWAY -- by another window, by Alt+Tab, by
+    // anything -- the key must still come up. A stuck key is worse than a
+    // missed one, and this is the path that has no button-up at all.
+    case WM_CAPTURECHANGED:
         release_current(kMouseKey);
         return 0;
     case WM_APP + 3: {                 // WM_CTM_NUDGE
