@@ -208,7 +208,9 @@ inline bool button_down(const uint8_t *data, size_t len, int index)
 // ⛔ DT_NOPREFIX ON EVERY LABEL. DrawTextW treats & as an accelerator marker:
 // it swallows the ampersand and underlines the next character instead, so the
 // shifted 7 simply never appeared (rhoquinn8217, 2026-09-02).
-enum KeyKind { KK_NORMAL, KK_MOD, KK_FN, KK_ACTION, KK_ESC,
+// ⓘ KK_SPACER is not a key at all: it is the part of the tab you GRAB. It
+// draws as bare frame and the highlight skips straight over it.
+enum KeyKind { KK_NORMAL, KK_MOD, KK_FN, KK_ACTION, KK_ESC, KK_SPACER,
                KK_SHOULDER_L1, KK_SHOULDER_R1, KK_SHOULDER_R2 };
 
 // What a KK_ACTION key does, carried in the usage field, which is unused there.
@@ -217,7 +219,8 @@ enum KeyKind { KK_NORMAL, KK_MOD, KK_FN, KK_ACTION, KK_ESC,
 // shift labelling turned the paste key into a capital A. Starting at 200 puts
 // them past every usage we use.
 inline const uint8_t ACT_MOVE = 200, ACT_CLOSE = 201, ACT_STEAM = 202,
-                     ACT_PASTE = 203, ACT_COPY = 204;
+                     ACT_PASTE = 203, ACT_COPY = 204, ACT_SIZE = 205,
+                     ACT_LAYOUT = 206;
 
 struct Key {
     const wchar_t *label;
@@ -283,11 +286,11 @@ inline const Key kRow3[] = {
     { L",", L"<", 0x36, 0, KK_NORMAL, 1.0f }, { L".", L">", 0x37, 0, KK_NORMAL, 1.0f },
     { L"/", L"?", 0x38, 0, KK_NORMAL, 1.0f },
     { L"\u2191", nullptr, 0x52, 0, KK_NORMAL, 1.0f },
-    // ⭐ Where a right shift would be. rhoquinn8217, 2026-09-02: a second shift
-    // is a key doing nothing the left one does not, and this face has room for
-    // two that earn it.
-    { L"fn", nullptr, 0, KBD_FN, KK_MOD, 1.0f },
-    { L"\u2328\u21f3", nullptr, ACT_MOVE, 0, KK_ACTION, 1.3f },
+    // ⭐ A second shift beside the up arrow, and fn out on the edge
+    // (rhoquinn8217, 2026-09-02). The move key that used to sit here has gone
+    // to the tab, where it belongs with the other two that act on the window.
+    { L"shift", nullptr, 0, KBD_SHIFT, KK_MOD, 1.0f },
+    { L"fn", nullptr, 0, KBD_FN, KK_MOD, 1.3f },
 };
 inline const Key kRow4[] = {
     { L"ctrl", nullptr, 0, KBD_CTRL, KK_MOD, 1.3f },
@@ -301,6 +304,22 @@ inline const Key kRow4[] = {
     { L"\u2193", nullptr, 0x51, 0, KK_NORMAL, 1.0f },
     { L"\u2192", nullptr, 0x4f, 0, KK_NORMAL, 1.0f },
     { L"\u2328\u2938", nullptr, ACT_CLOSE, 0, KK_ACTION, 1.3f },
+};
+
+// ⭐⭐ THE TAB (rhoquinn8217, 2026-09-02). The window's frame is four pixels
+// wide, which is a poor thing to aim at with a remote -- so the three functions
+// that act on the KEYBOARD ITSELF get a strip of their own above it, with a
+// wide grab area beside them.
+//
+// ⓘ Shared by both faces: they are the same three buttons whichever keys are
+// below, and one table means they cannot drift apart.
+//
+// ⛔ The spacer is most of the width on purpose. It is the handle.
+inline const Key kTabRow[] = {
+    { L"", nullptr, 0, 0, KK_SPACER, 11.0f },
+    { L"\u2328\u21f3", nullptr, ACT_MOVE, 0, KK_ACTION, 1.0f },
+    { L"\u2921", nullptr, ACT_SIZE, 0, KK_ACTION, 1.0f },
+    { L"\u25a6", nullptr, ACT_LAYOUT, 0, KK_ACTION, 1.0f },
 };
 
 inline const Key kCompact0[] = {
@@ -342,8 +361,8 @@ inline const Key kCompact3[] = {
     { L",", L"<", 0x36, 0, KK_NORMAL, 1.0f }, { L".", L">", 0x37, 0, KK_NORMAL, 1.0f },
     { L"/", L"?", 0x38, 0, KK_NORMAL, 1.0f },
     { L"\u2191", nullptr, 0x52, 0, KK_NORMAL, 1.0f },
+    { L"shift", nullptr, 0, KBD_SHIFT, KK_MOD, 1.0f },
     { L"fn", nullptr, 0, KBD_FN, KK_MOD, 1.0f },
-    { L"\u2328\u21f3", nullptr, ACT_MOVE, 0, KK_ACTION, 1.0f },
 };
 inline const Key kCompact4[] = {
     { L"alt", nullptr, 0, KBD_ALT, KK_MOD, 1.0f },
@@ -360,9 +379,11 @@ struct Row { const Key *keys; int count; };
 #define CTM_ROW(a) { a, (int)(sizeof(a) / sizeof(a[0])) }
 
 inline const Row kFullRows[] = {
+    CTM_ROW(kTabRow),
     CTM_ROW(kRow0), CTM_ROW(kRow1), CTM_ROW(kRow2), CTM_ROW(kRow3), CTM_ROW(kRow4),
 };
 inline const Row kCompactRows[] = {
+    CTM_ROW(kTabRow),
     CTM_ROW(kCompact0), CTM_ROW(kCompact1), CTM_ROW(kCompact2),
     CTM_ROW(kCompact3), CTM_ROW(kCompact4),
 };
@@ -370,7 +391,10 @@ inline const Row kCompactRows[] = {
 
 
 inline const Row *rows_now() { return g_full.load() ? kFullRows : kCompactRows; }
-inline const int kRowCount = 5;          // both faces have five rows
+inline const int kRowCount = 6;          // the tab, then five rows of keys
+
+// ⓘ The tab is shorter than a key row -- it holds icons, not letters.
+inline float row_height_factor(int r) { return r == 0 ? 0.55f : 1.0f; }
 
 // ⓘ F1..F12 replace the digits while L2 is held. Same positions, so the row you
 // are looking at is the row that changes -- there is no key to travel to and
@@ -471,7 +495,12 @@ inline void layout(int w, int h)
 
     const int pad = 10;
     const int rowGap = 6;
-    const int keyH = (h - pad * 2 - rowGap * (kRowCount - 1)) / kRowCount;
+    // ⓘ Rows are no longer all the same height: the tab is shorter than a row
+    // of letters, so the unit height is worked out from the TOTAL of the
+    // factors rather than from the row count.
+    float rowsTall = 0.0f;
+    for (int r = 0; r < kRowCount; ++r) rowsTall += row_height_factor(r);
+    const int unitH = (int)((h - pad * 2 - rowGap * (kRowCount - 1)) / rowsTall);
 
     float widest = 0;
     for (int r = 0; r < kRowCount; ++r) {
@@ -494,6 +523,7 @@ inline void layout(int w, int h)
 
     int y = pad;
     for (int r = 0; r < kRowCount; ++r) {
+        const int rowH = (int)(unitH * row_height_factor(r));
         float col = 0.0f;                       // in units, not pixels
         for (int c = 0; c < rows_now()[r].count; ++c) {
             const float wide = rows_now()[r].keys[c].wide;
@@ -501,12 +531,12 @@ inline void layout(int w, int h)
             pl.r.left  = pad + (int)(col * unit) + gap / 2;
             pl.r.right = pad + (int)((col + wide) * unit) - gap / 2;
             pl.r.top = y;
-            pl.r.bottom = y + keyH;
+            pl.r.bottom = y + rowH;
             pl.row = r; pl.col = c;
             g_placed.push_back(pl);
             col += wide;
         }
-        y += keyH + rowGap;
+        y += rowH + rowGap;
     }
 }
 
@@ -555,10 +585,20 @@ inline void invalidate()
 // ⓘ Sideways WRAPS. Clamping doubled the worst journey -- p to q was twelve
 // presses and is now one -- and a row is short enough that wrapping within it
 // stays predictable.
+inline bool is_key(int row, int col)
+{
+    return rows_now()[row].keys[col].kind != KK_SPACER;
+}
+
 inline void move_h(int dir)
 {
     const int n = rows_now()[g_row].count;
-    g_col = (g_col + dir + n) % n;
+    // ⓘ Steps over the grab area rather than stopping on it -- it is padding,
+    // not a button, and landing there would look like the highlight had stuck.
+    for (int i = 0; i < n; ++i) {
+        g_col = (g_col + dir + n) % n;
+        if (is_key(g_row, g_col)) break;
+    }
     const Placed *p = placed_of(g_row, g_col);
     if (p) g_anchorX = (p->r.left + p->r.right) / 2;
     invalidate();
@@ -585,6 +625,7 @@ inline void move_v(int dir)
     // directly above the space bar. A key you are standing over is zero away.
     int best = 0, bestDist = 1 << 30;
     for (int c = 0; c < rows_now()[next].count; ++c) {
+        if (!is_key(next, c)) continue;          // never land on the grab area
         const Placed *p = placed_of(next, c);
         if (!p) continue;
         int d = 0;
@@ -614,6 +655,26 @@ inline void move_v(int dir)
 
 // ⭐ What a press DOES, in one place, so the mouse and the pad cannot drift
 // apart. The pad's own path calls the same thing.
+// ⭐ Swapping faces, in one place: the tab's button and the Options button both
+// do exactly this, so they cannot come to mean different things.
+inline void switch_face()
+{
+    const wchar_t *was = key_at(g_row, g_col).label;
+    g_full.store(!g_full.load());
+    g_placed.clear(); g_placedW = 0;
+    int fr = -1, fc = -1;
+    for (int r = 0; r < kRowCount && fr < 0; ++r) {
+        for (int c = 0; c < rows_now()[r].count; ++c) {
+            if (!is_key(r, c)) continue;
+            if (wcscmp(rows_now()[r].keys[c].label, was) == 0) { fr = r; fc = c; break; }
+        }
+    }
+    g_row = fr >= 0 ? fr : 2;
+    g_col = fc >= 0 ? fc : 1;
+    if (g_hwnd != nullptr) PostMessageW(g_hwnd, WM_CTM_RESIZE, 0, 0);
+    invalidate();
+}
+
 inline void press_current(const void *who)
 {
     const Key &k = key_at(g_row, g_col);
@@ -635,6 +696,16 @@ inline void press_current(const void *who)
             g_atTop.store(!g_atTop.load());
             if (g_hwnd != nullptr) PostMessageW(g_hwnd, WM_CTM_REPOSITION, 0, 0);
         }
+        if (k.usage == ACT_SIZE) {
+            g_size.store((g_size.load() + 1) % 3);
+            if (g_hwnd != nullptr) PostMessageW(g_hwnd, WM_CTM_RESIZE, 0, 0);
+        }
+        if (k.usage == ACT_LAYOUT) switch_face();
+        if (k.usage == ACT_SIZE) {
+            g_size.store((g_size.load() + 1) % 3);
+            if (g_hwnd != nullptr) PostMessageW(g_hwnd, WM_CTM_RESIZE, 0, 0);
+        }
+        if (k.usage == ACT_LAYOUT) switch_face();
         return;
     }
 
@@ -744,6 +815,9 @@ inline void paint(HWND hwnd)
             fill = fillMod;
         }
         RECT r = p.r;
+        // ⓘ The grab area is drawn as nothing: no fill, no label. It reads as
+        // part of the frame, which is exactly what it is for.
+        if (k.kind == KK_SPACER) continue;
         FillRect(dc, &r, hot ? fillHot : hover ? fillHover : fill);
         if (hot) FrameRect(dc, &r, edgeHot);
 
@@ -841,7 +915,10 @@ inline LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         POINT pt = { (int)(short)LOWORD(lp), (int)(short)HIWORD(lp) };
         ScreenToClient(hwnd, &pt);
         int r = -1, c = -1;
-        return key_under(pt.x, pt.y, &r, &c) ? HTCLIENT : HTCAPTION;
+        if (!key_under(pt.x, pt.y, &r, &c)) return HTCAPTION;
+        // ⓘ The tab's padding is a handle, not a key -- so dragging from it
+        // moves the window, which is the whole reason the tab exists.
+        return is_key(r, c) ? HTCLIENT : HTCAPTION;
     }
 
     // ⓘ Triangle's two positions still work; dragging is the free-form version
@@ -1226,22 +1303,7 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
     // genuinely different questions, and a big compact keyboard is as
     // reasonable a thing to want as a small full one.
     if (edge(deviceKey, 10, button_down(data, len, 9))) {
-        // ⓘ Keep the person where they were if that key still exists. Landing
-        // somewhere unrelated after a face change is disorienting, and most
-        // keys are in both faces.
-        const wchar_t *was = key_at(g_row, g_col).label;
-        g_full.store(!g_full.load());
-        g_placed.clear(); g_placedW = 0;          // the geometry changed
-        int fr = -1, fc = -1;
-        for (int r = 0; r < kRowCount && fr < 0; ++r) {
-            for (int c = 0; c < rows_now()[r].count; ++c) {
-                if (wcscmp(rows_now()[r].keys[c].label, was) == 0) { fr = r; fc = c; break; }
-            }
-        }
-        g_row = fr >= 0 ? fr : 1;
-        g_col = fc >= 0 ? fc : 1;
-        if (g_hwnd != nullptr) PostMessageW(g_hwnd, WM_CTM_RESIZE, 0, 0);
-        invalidate();
+        switch_face();               // the same thing the tab's button does
     }
 
     // ⭐ CREATE CYCLES THE THREE SIZES. It is free, out of the way of typing,
