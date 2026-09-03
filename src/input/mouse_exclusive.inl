@@ -28,9 +28,17 @@ inline const size_t kGyroLast   = 27;
 inline const size_t kTouchFirst = 33;   // [33..36] point 1, [37..40] point 2
 inline const size_t kTouchLast  = 40;
 
-inline bool wants(const std::string &section)
+// ⭐⭐ THREE SETTINGS, NOT ONE (rhoquinn8217, 2026-09-03). A single switch meant
+// a preset could not say "hide the gyro but leave my sticks alone" -- it hid
+// whatever happened to be mapped, and the gyro preset borrowed a stick, so
+// choosing gyro aiming silently cost a stick as well.
+//
+// ⓘ Each falls back to the old single key, so a config written before the split
+// keeps behaving as it did rather than quietly switching everything off.
+inline bool wants(const std::string &section, const char *key)
 {
-    return device_config_bool(section.c_str(), "mouse_exclusive", false);
+    const bool old = device_config_bool(section.c_str(), "mouse_exclusive", false);
+    return device_config_bool(section.c_str(), key, old);
 }
 
 // ⛔ The descriptor is a std::vector<unsigned char>, matching every other hook
@@ -50,14 +58,14 @@ inline void apply(const void *deviceKey,
     const char *kind = device_section_for(descriptor);
     if (kind == nullptr) return;
     const std::string section = device_settings_section(kind, config);
-    if (section.empty() || !wants(section)) return;
+    if (section.empty()) return;
 
     // ⭐ THE GYRO, when it is aiming the cursor.
     // ⓘ Accelerometer goes with it: they are one motion sensor as far as a
     // game is concerned, and leaving accel alive would still let a game read
     // the tilt we are consuming.
     const std::string gyroGate = device_config_str(section.c_str(), "gyro_to_mouse_gate");
-    if (!gyroGate.empty()) {
+    if (!gyroGate.empty() && wants(section, "mouse_exclusive_gyro")) {
         for (size_t i = kGyroFirst; i <= kGyroLast && i < len; ++i) data[i] = 0;
     }
 
@@ -65,7 +73,13 @@ inline void apply(const void *deviceKey,
     // ⛔ The high bit SET means "no finger", so this is 0x80 rather than 0 --
     // zeroing would tell the game a finger is permanently down at the top-left
     // corner, which is worse than passing the real thing through.
-    if (device_config_bool(section.c_str(), "touchpad_to_mouse", false)) {
+    // ⛔ SCROLLING COUNTS TOO. This asked only about touchpad_to_mouse, so a
+    // preset that scrolled with the touchpad without pointing still handed the
+    // game every finger movement (found 2026-09-03).
+    const bool touchDrives =
+        device_config_bool(section.c_str(), "touchpad_to_mouse", false) ||
+        device_config_bool(section.c_str(), "touchpad_scroll", false);
+    if (touchDrives && wants(section, "mouse_exclusive_touchpad")) {
         for (size_t i = kTouchFirst; i <= kTouchLast && i < len; i += 4) {
             data[i] = 0x80;
             if (i + 1 < len) data[i + 1] = 0;
@@ -81,6 +95,7 @@ inline void apply(const void *deviceKey,
     // a game would spin.
     const std::string mouseStick  = device_config_str(section.c_str(), "stick_to_mouse");
     const std::string scrollStick = device_config_str(section.c_str(), "stick_to_scroll");
+    if (!wants(section, "mouse_exclusive_stick")) return;
     for (const std::string *s : { &mouseStick, &scrollStick }) {
         if (*s == "left")  { if (len > 2) { data[1] = 0x80; data[2] = 0x80; } }
         if (*s == "right") { if (len > 4) { data[3] = 0x80; data[4] = 0x80; } }

@@ -398,9 +398,33 @@ int run_config_store_tests()
         };
 
         CTM_CHECK(has("gyro-to-mouse", "gyro_to_mouse_gate", "always"));
-        CTM_CHECK(has("gyro-to-mouse", "stick_to_scroll", "left"));
-        // Not the touchpad: with the pad aiming, reaching it means regripping.
+        // ⛔ AND NOTHING ELSE DRIVES THE CURSOR HERE (rhoquinn8217, 2026-09-03).
+        // This preset used to borrow the LEFT STICK to scroll. That was nearly
+        // free while a borrowed source still reached the game -- but hiding a
+        // source now means losing it, so aiming with the gyro would have cost a
+        // stick as well. The d-pad's arrow keys already scroll.
+        CTM_CHECK(!mentions("gyro-to-mouse", "stick_to_scroll"));
+        // Not the touchpad either: with the pad aiming, reaching it means
+        // regripping.
         CTM_CHECK(!mentions("gyro-to-mouse", "touchpad_scroll"));
+
+        // ⭐ EACH PRESET HIDES ITS OWN SOURCE AND NOBODY ELSE'S. A single
+        // setting could not say "hide the gyro but leave my sticks alone",
+        // which is why there are three (rhoquinn8217, 2026-09-03).
+        CTM_CHECK(has("gyro-to-mouse", "mouse_exclusive_gyro", "true"));
+        CTM_CHECK(!mentions("gyro-to-mouse", "mouse_exclusive_stick"));
+        CTM_CHECK(!mentions("gyro-to-mouse", "mouse_exclusive_touchpad"));
+
+        CTM_CHECK(has("touchpad-mouse", "mouse_exclusive_touchpad", "true"));
+        CTM_CHECK(!mentions("touchpad-mouse", "mouse_exclusive_gyro"));
+
+        CTM_CHECK(has("stick-to-mouse", "mouse_exclusive_stick", "true"));
+        CTM_CHECK(!mentions("stick-to-mouse", "mouse_exclusive_gyro"));
+
+        // ⛔ And the superseded single key is gone from every preset.
+        CTM_CHECK(!mentions("gyro-to-mouse", "mouse_exclusive"));
+        CTM_CHECK(!mentions("touchpad-mouse", "mouse_exclusive"));
+        CTM_CHECK(!mentions("stick-to-mouse", "mouse_exclusive"));
 
         CTM_CHECK(has("touchpad-mouse", "touchpad_to_mouse", "true"));
         CTM_CHECK(has("touchpad-mouse", "touchpad_scroll", "true"));

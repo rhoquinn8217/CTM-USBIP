@@ -82,10 +82,16 @@ struct Preset {
 // touchpad -- with the pad aiming, both thumbs are committed and reaching the
 // touchpad means regripping.
 inline const Setting kGyroMouseMode[] = {
-    { "mouse_exclusive", "true" },
+    { "mouse_exclusive_gyro", "true" },
     CTM_PRESET_SHARED_BINDINGS,
     { "gyro_to_mouse_gate", "always" },
-    { "stick_to_scroll", "left" },
+    /* ⛔ NO stick_to_scroll HERE (rhoquinn8217, 2026-09-03). It borrowed the
+       left stick to scroll, which was nearly free before -- the game still saw
+       the stick. Now that hiding a source means LOSING it, choosing gyro aiming
+       would silently cost a stick too.
+       ⓘ The d-pad is already bound to the arrow keys, which scroll most things.
+       And the convention elsewhere puts scroll on the spare POINTING surface --
+       the Steam Controller's left trackpad -- rather than on a stick. */
     // ⓘ Recentring belongs HERE and only here: it points the gyro back at the
     // middle of the screen. On a stick or touchpad cursor there is nothing to
     // recentre, so binding it there would be a button that appears to do
@@ -99,7 +105,7 @@ inline const Setting kGyroMouseMode[] = {
 // trackpad the pad already resembles. The sticks are left alone: the hand is
 // on the pad here, so scrolling is where the finger already is.
 inline const Setting kTouchpadMouseMode[] = {
-    { "mouse_exclusive", "true" },
+    { "mouse_exclusive_touchpad", "true" },
     CTM_PRESET_SHARED_BINDINGS,
     { "touchpad_to_mouse", "true" },
     { "touchpad_scroll", "true" },
@@ -115,7 +121,7 @@ inline const Setting kTouchpadMouseMode[] = {
 // regrip at all. ⓘ The right stick does nothing else while this is linked,
 // which is fine: this is a desktop config, not one to play with.
 inline const Setting kStickMouseMode[] = {
-    { "mouse_exclusive", "true" },
+    { "mouse_exclusive_stick", "true" },
     CTM_PRESET_SHARED_BINDINGS,
     { "stick_to_mouse", "right" },
     { "stick_to_scroll", "left" },
