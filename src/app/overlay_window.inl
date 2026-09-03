@@ -399,6 +399,23 @@ inline uint8_t active_mods()
 }
 
 // ⓘ Either way of asking for the F keys.
+// ⭐ WHICH F KEY THIS IS, counted among the F-capable keys in its own row.
+//
+// ⛔ This used to be derived from the COLUMN INDEX, which quietly assumed the
+// digits began at column 1. Adding esc pushed them right by one, so 1 became F2
+// and F1 disappeared entirely (rhoquinn8217, 2026-09-02). Counting cannot go
+// wrong when the layout moves.
+inline int fn_index(int row, int col)
+{
+    int n = 0;
+    for (int c = 0; c < rows_now()[row].count; ++c) {
+        if (rows_now()[row].keys[c].kind != KK_FN) continue;
+        if (c == col) return n;
+        ++n;
+    }
+    return -1;
+}
+
 inline bool fn_showing()
 {
     return g_fnHeld.load() || mod_state(KBD_FN) != LATCH_OFF;
@@ -616,9 +633,8 @@ inline void press_current(const void *who)
     }
 
     uint8_t usage = k.usage;
-    if (g_fnHeld.load() && usage == 0x29) usage = 0x35;
     if (fn_showing() && k.kind == KK_FN) {
-        const int idx = g_col - 1;
+        const int idx = fn_index(g_row, g_col);
         if (idx >= 0 && idx < 12) usage = kFnUsages[idx];
     }
     uint8_t mods = active_mods();
@@ -720,7 +736,7 @@ inline void paint(HWND hwnd)
             // with the state you are already in tells you nothing.
             label = L"\u2328\u21f3";     // the same glyph either way: it moves
         } else if (k.kind == KK_FN && fnNow) {
-            const int idx = p.col - 1;
+            const int idx = fn_index(p.row, p.col);
             if (idx >= 0 && idx < 12) label = kFnLabels[idx];
         } else if (shiftNow && k.shifted != nullptr) {
             label = k.shifted;
@@ -787,6 +803,30 @@ inline LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     // it exists to send.
     case WM_MOUSEACTIVATE:
         return MA_NOACTIVATE;
+
+    // ⭐⭐ DRAG IT BY ITS BACKGROUND (rhoquinn8217, 2026-09-02).
+    //
+    // ⓘ Telling Windows a point is the CAPTION makes it drag the window from
+    // there -- so the frame and the gaps between keys become a handle, and the
+    // keys themselves stay clickable. No drag code of our own, and no mode.
+    //
+    // ⛔ Only where there is no key. Reporting the whole surface as caption
+    // would make the keyboard undraggable in the useful sense: every click
+    // would move it instead of typing.
+    //
+    // ⚠️ And this does NOT give it focus: a caption drag on a WS_EX_NOACTIVATE
+    // window moves it without activating, which is the whole point.
+    case WM_NCHITTEST: {
+        POINT pt = { (int)(short)LOWORD(lp), (int)(short)HIWORD(lp) };
+        ScreenToClient(hwnd, &pt);
+        int r = -1, c = -1;
+        return key_under(pt.x, pt.y, &r, &c) ? HTCLIENT : HTCAPTION;
+    }
+
+    // ⓘ Triangle's two positions still work; dragging is the free-form version
+    // of the same thing, and neither cancels the other.
+    case WM_EXITSIZEMOVE:
+        return 0;
 
     case WM_MOUSEMOVE: {
         // ⛔ ASK TO BE TOLD WHEN THE CURSOR LEAVES. Windows sends moves but no
@@ -1167,7 +1207,7 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
         // great many PC games, and nothing else on the pad produces one.
         if (g_fnHeld.load() && usage == 0x29) usage = 0x35;
         if (fn_showing() && k.kind == KK_FN) {
-            const int idx = g_col - 1;
+            const int idx = fn_index(g_row, g_col);
             if (idx >= 0 && idx < 12) usage = kFnUsages[idx];
         }
     }
