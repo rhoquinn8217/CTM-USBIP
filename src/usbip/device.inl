@@ -471,13 +471,6 @@ public:
         ctm_stick_mouse_apply(this, profile_.device_descriptor, linked_config(),
                               report.data, report.length);
 
-        // ⭐ Whatever is driving the mouse is now hidden from the game -- the
-        // gyro if it is aiming, a stick if it points or scrolls, the touchpad
-        // if it is a trackpad. ⛔ AFTER the three hooks above, which must read
-        // the real values first.
-        ctm_mouse_exclusive_apply(this, profile_.device_descriptor, linked_config(),
-                                  report.data, report.length);
-
         // ⭐ Button rebinding. ⚠️ Unlike the gyro hook above, this MODIFIES the
         // report -- a rebound button is cleared before Windows sees it, so the
         // game never receives it. Placed here because `report` is a fresh local
@@ -485,6 +478,23 @@ public:
         // bytes are in the virtual device's layout.
         ctm_rebind_apply(this, profile_.device_descriptor, linked_config(),
                          report.data, report.length);
+
+        // ⭐ Whatever is driving the mouse is hidden from the game -- the gyro
+        // if it is aiming, a stick if it points or scrolls, the touchpad if it
+        // is a trackpad.
+        //
+        // ⛔⛔ LAST, IMMEDIATELY BEFORE THE REPORT LEAVES. It first sat above
+        // rebind, which broke the two-finger chord: the chord is detected
+        // inside rebind, and by then the touch bytes had already been blanked
+        // to "no finger", so the settings window could not be summoned
+        // (rhoquinn8217, 2026-09-03).
+        //
+        // ⓘ Everything that needs to READ the real report -- the three mouse
+        // hooks, the chord, the rebinds -- has now had it. Nothing runs after
+        // this but the send, which is exactly what "hidden from the game"
+        // should mean.
+        ctm_mouse_exclusive_apply(this, profile_.device_descriptor, linked_config(),
+                                  report.data, report.length);
 
         enqueue_input_report(report);
     }
