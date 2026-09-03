@@ -162,6 +162,9 @@ void ctm_rebind_ensure_keyboard_started();
 #include "input/touch_mouse.inl"   // touchpad cursor/scroll/taps; needs the mouse device and the gyro mailbox
 #include "input/stick_mouse.inl"   // stick cursor; needs the gyro gate and mailbox
 #include "input/osk.inl"          // the on-screen keyboard toggle
+// ⛔ AFTER osk.inl, which it calls to open the settings window, and after
+// overlay_window.inl, whose keyboard it toggles.
+#include "app/tray_icon.inl"       // the notification-area icon
 #include "app/rest_sessions.inl"
 #include "app/rest_config_sessions.inl"   // defines what rest_config.inl declares; needs agent.inl's sessions
 #include "app/service.inl"
@@ -357,6 +360,10 @@ int wmain(int argc, wchar_t **argv)
                 // could not check for an existing window, so every rebuild left
                 // another one behind.
                 ctm_open_ui::g_open_ui = true;
+                // ⭐ The icon comes with --ui. It is the only way to reach the
+                // on-screen keyboard without a bridged controller, which is
+                // the whole reason it exists.
+                ctm_tray::start();
             } else if (arg == L"--overlay-test") {
                 // ⓘ TEMPORARY, and named so. Step one of the overlay keyboard
                 // is a window with the right styles and a placeholder inside;
@@ -689,6 +696,7 @@ int wmain(int argc, wchar_t **argv)
     server.stop();
     device.stop();
     backend->stop();
+    ctm_tray::stop();
     SetConsoleCtrlHandler(console_ctrl_handler, FALSE);
     return 0;
 }
