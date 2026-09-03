@@ -109,6 +109,11 @@ inline const UINT WM_CTM_NUDGE      = WM_APP + 3;
 inline std::atomic_int g_nudgeX{0}, g_nudgeY{0};
 inline std::atomic_bool g_triHeld{false}, g_triMoved{false};
 
+// ⓘ Where the cursor was when the hold began, so the window follows the mouse
+// by its DELTA rather than jumping to wherever the pointer happens to be.
+inline POINT g_dragFrom = { 0, 0 };
+inline bool g_dragHaveFrom = false;
+
 // ⭐ THREE SIZES, as a share of the screen rather than pixels: 1080p and 4K
 // want very different pixel counts and the same proportion.
 // ⓘ Cycled with Create -- every face button and shoulder was already spoken
@@ -1144,8 +1149,10 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
     if (tri && !g_triHeld.load()) {
         g_triHeld.store(true);
         g_triMoved.store(false);
+        g_dragHaveFrom = (GetCursorPos(&g_dragFrom) != 0);
     } else if (!tri && g_triHeld.load()) {
         g_triHeld.store(false);
+        g_dragHaveFrom = false;
         if (!g_triMoved.load()) {
             g_atTop.store(!g_atTop.load());
             if (g_hwnd != nullptr) PostMessageW(g_hwnd, WM_CTM_REPOSITION, 0, 0);
@@ -1162,6 +1169,28 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
         int dx = 0, dy = 0;
         if (lx > dead || lx < -dead) dx = lx / 16;
         if (ly > dead || ly < -dead) dy = ly / 16;
+        // ⭐⭐ AND THE MOUSE STEERS IT TOO, on the same hold. Whichever you
+        // reach for works -- the pad or the mouse -- with no button to press
+        // first, which is the rule the hover highlight already follows.
+        //
+        // ⓘ Read from the SYSTEM rather than from mouse messages: the pointer
+        // is usually not over the keyboard while you are placing it, and a
+        // window gets no moves for a cursor outside it.
+        //
+        // ⛔ By the DELTA since the last look, not to the cursor's position --
+        // otherwise the keyboard would leap so its corner sat under the
+        // pointer the moment you held Triangle.
+        POINT now;
+        if (g_dragHaveFrom && GetCursorPos(&now)) {
+            const int mx = now.x - g_dragFrom.x;
+            const int my = now.y - g_dragFrom.y;
+            if (mx != 0 || my != 0) {
+                dx += mx;
+                dy += my;
+                g_dragFrom = now;
+            }
+        }
+
         if (dx != 0 || dy != 0) {
             g_nudgeX.fetch_add(dx);
             g_nudgeY.fetch_add(dy);
