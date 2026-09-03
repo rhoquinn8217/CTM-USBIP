@@ -3893,6 +3893,12 @@ var PLACE_LAST = 0;
 
 function savePlace(force) {
   if (!AGENT_RUN) return;              // nothing worth writing yet
+  // ⛔ NOT WHILE YOU ARE IN THE FOOTER. Escape moves the halo onto Close, and
+  // recording that would mean coming back to the Close button rather than to
+  // the setting you were working on. Freezing here is exactly what the old
+  // footer-only writer was trying to achieve, and it does it without a second
+  // copy of the same job.
+  if (FOOTER_MODE) return;
   var now = Date.now();
   if (!force && now - PLACE_LAST < 400) return;
   PLACE_LAST = now;
@@ -3920,7 +3926,25 @@ function restorePlace() {
   // ⚠️ It was `if (honourOpenOnTab()) return;` -- but at startup the device list
   // has not arrived, so the jump reports failure, this carries on, and its own
   // restore fires 900ms later and undoes the jump that lands in between.
-  if (OPEN_ON_TAB) { honourOpenOnTab(); return; }
+  // ⛔ A TARGET CHOOSES THE TAB, NOT WHERE YOU WERE IN IT (rhoquinn8217,
+  // 2026-09-03). This used to return here, throwing the remembered place away
+  // whenever the window was opened by a chord or a bridge -- which is the
+  // ordinary way to open it from a sofa, so it looked like nothing was ever
+  // remembered.
+  //
+  // ⓘ If the target names the SAME tab the place is for, the place is still
+  // right: same section, same halo, same scroll. Only a target naming a
+  // DIFFERENT tab overrides it, and then it should.
+  if (OPEN_ON_TAB) {
+    var placeRaw = null;
+    try { placeRaw = localStorage.getItem('ctm_place'); } catch (e) {}
+    var placeTab = '';
+    try { placeTab = placeRaw ? (JSON.parse(placeRaw) || {}).tab || '' : ''; } catch (e) {}
+    if (placeTab !== OPEN_ON_TAB) { honourOpenOnTab(); return; }
+    // ⓘ Same tab: let the restore below do the whole job. It calls showTab
+    // itself, so the target is honoured either way.
+    OPEN_ON_TAB = '';
+  }
   var raw = null;
   try { raw = localStorage.getItem('ctm_place'); } catch (e) { return; }
   if (!raw) return;
@@ -4053,17 +4077,13 @@ function setFooterMode(on) {
     // the window, and the RUN ID is what stops it going stale: a place saved
     // under a previous listener is ignored, which is the boundary where
     // "somewhere you were an hour ago" stops meaning anything.
-    try {
-      // ⛔ Refuse to save a place with no run id rather than writing one that
-      // will be silently discarded on the way back in.
-      if (AGENT_RUN) {
-        var keep = { tab: FOOTER_RETURN.tab, index: FOOTER_RETURN.index,
-                     id: FOOTER_RETURN.id, sect: FOOTER_RETURN.sect,
-                     scroll: FOOTER_RETURN.scroll, serial: FOOTER_RETURN.serial,
-                     run: AGENT_RUN };
-        localStorage.setItem('ctm_place', JSON.stringify(keep));
-      }
-    } catch (e) {}
+    // ⛔ THE SECOND WRITER IS GONE (rhoquinn8217, 2026-09-03). It wrote the
+    // place only here, on the way into the footer, and it captured an EMPTY
+    // element id -- so even a restore that survived had nothing to aim at.
+    //
+    // ⓘ savePlace records continuously and stops the moment FOOTER_MODE turns
+    // on, so the last thing written is where you actually were. One writer,
+    // and it cannot miss the way this one did.
   }
   FOOTER_MODE = on;
   var bar = document.getElementById('gpbar');
