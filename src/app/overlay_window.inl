@@ -147,7 +147,7 @@ inline void size_for(int *w, int *h)
     // ⓘ Height follows the COLUMN COUNT so the keys stay roughly square: a
     // wider face with more columns needs proportionally more height, and a
     // fixed ratio would have squashed Full's rows.
-    const float cols = g_full.load() ? 16.0f : 14.0f;
+    const float cols = g_full.load() ? 15.5f : 14.0f;
     *h = (int)(*w * 5.0f / (cols * 1.15f));
 }
 
@@ -244,75 +244,65 @@ inline const uint8_t KBD_FN = 0x80;
 
 inline const Key kRow0[] = {
     { L"esc", nullptr, 0x29, 0, KK_NORMAL, 1.0f },
+    { L"`", L"~", 0x35, 0, KK_NORMAL, 1.0f },
     { L"1", L"!", 0x1e, 0, KK_FN, 1.0f }, { L"2", L"@", 0x1f, 0, KK_FN, 1.0f },
     { L"3", L"#", 0x20, 0, KK_FN, 1.0f }, { L"4", L"$", 0x21, 0, KK_FN, 1.0f },
     { L"5", L"%", 0x22, 0, KK_FN, 1.0f }, { L"6", L"^", 0x23, 0, KK_FN, 1.0f },
     { L"7", L"&", 0x24, 0, KK_FN, 1.0f }, { L"8", L"*", 0x25, 0, KK_FN, 1.0f },
     { L"9", L"(", 0x26, 0, KK_FN, 1.0f }, { L"0", L")", 0x27, 0, KK_FN, 1.0f },
     { L"-", L"_", 0x2d, 0, KK_FN, 1.0f }, { L"=", L"+", 0x2e, 0, KK_FN, 1.0f },
-    { L"back", nullptr, 0x2a, 0, KK_NORMAL, 1.6f },
-    { L"\u2328\u21f3", nullptr, ACT_MOVE, 0, KK_ACTION, 1.4f },
+    { L"\u232b", nullptr, 0x2a, 0, KK_NORMAL, 1.5f },
 };
 inline const Key kRow1[] = {
-    { L"tab", nullptr, 0x2b, 0, KK_NORMAL, 1.4f },
+    { L"tab", nullptr, 0x2b, 0, KK_NORMAL, 1.5f },
     { L"q", nullptr, 0x14, 0, KK_NORMAL, 1.0f }, { L"w", nullptr, 0x1a, 0, KK_NORMAL, 1.0f },
     { L"e", nullptr, 0x08, 0, KK_NORMAL, 1.0f }, { L"r", nullptr, 0x15, 0, KK_NORMAL, 1.0f },
     { L"t", nullptr, 0x17, 0, KK_NORMAL, 1.0f }, { L"y", nullptr, 0x1c, 0, KK_NORMAL, 1.0f },
     { L"u", nullptr, 0x18, 0, KK_NORMAL, 1.0f }, { L"i", nullptr, 0x0c, 0, KK_NORMAL, 1.0f },
     { L"o", nullptr, 0x12, 0, KK_NORMAL, 1.0f }, { L"p", nullptr, 0x13, 0, KK_NORMAL, 1.0f },
     { L"[", L"{", 0x2f, 0, KK_NORMAL, 1.0f }, { L"]", L"}", 0x30, 0, KK_NORMAL, 1.0f },
-    { L"\\", L"|", 0x31, 0, KK_NORMAL, 1.5f },
-    { L"del", nullptr, 0x4c, 0, KK_NORMAL, 1.1f },
+    { L"\\", L"|", 0x31, 0, KK_NORMAL, 1.0f },
+    { L"del", nullptr, 0x4c, 0, KK_NORMAL, 1.0f },
 };
 inline const Key kRow2[] = {
-    { L"ctrl", nullptr, 0, KBD_CTRL, KK_MOD, 1.65f },
+    { L"caps", nullptr, 0x39, 0, KK_NORMAL, 1.8f },
     { L"a", nullptr, 0x04, 0, KK_NORMAL, 1.0f }, { L"s", nullptr, 0x16, 0, KK_NORMAL, 1.0f },
     { L"d", nullptr, 0x07, 0, KK_NORMAL, 1.0f }, { L"f", nullptr, 0x09, 0, KK_NORMAL, 1.0f },
     { L"g", nullptr, 0x0a, 0, KK_NORMAL, 1.0f }, { L"h", nullptr, 0x0b, 0, KK_NORMAL, 1.0f },
     { L"j", nullptr, 0x0d, 0, KK_NORMAL, 1.0f }, { L"k", nullptr, 0x0e, 0, KK_NORMAL, 1.0f },
     { L"l", nullptr, 0x0f, 0, KK_NORMAL, 1.0f },
     { L";", L":", 0x33, 0, KK_NORMAL, 1.0f }, { L"'", L"\"", 0x34, 0, KK_NORMAL, 1.0f },
-    { L"enter", nullptr, 0x28, 0, KK_NORMAL, 2.35f },
-    { L"pgup", nullptr, 0x4b, 0, KK_NORMAL, 1.0f },
+    { L"enter", nullptr, 0x28, 0, KK_NORMAL, 2.7f },
 };
 inline const Key kRow3[] = {
-    { L"shift", nullptr, 0, KBD_SHIFT, KK_MOD, 2.15f },
+    { L"shift", nullptr, 0, KBD_SHIFT, KK_MOD, 2.2f },
     { L"z", nullptr, 0x1d, 0, KK_NORMAL, 1.0f }, { L"x", nullptr, 0x1b, 0, KK_NORMAL, 1.0f },
     { L"c", nullptr, 0x06, 0, KK_NORMAL, 1.0f }, { L"v", nullptr, 0x19, 0, KK_NORMAL, 1.0f },
     { L"b", nullptr, 0x05, 0, KK_NORMAL, 1.0f }, { L"n", nullptr, 0x11, 0, KK_NORMAL, 1.0f },
     { L"m", nullptr, 0x10, 0, KK_NORMAL, 1.0f },
     { L",", L"<", 0x36, 0, KK_NORMAL, 1.0f }, { L".", L">", 0x37, 0, KK_NORMAL, 1.0f },
     { L"/", L"?", 0x38, 0, KK_NORMAL, 1.0f },
-    // ⓘ Up sits directly above down, and del beside it -- rhoquinn8217 asked
-    // for these two swapped so the arrow cluster reads as a cluster.
     { L"\u2191", nullptr, 0x52, 0, KK_NORMAL, 1.0f },
-    // ⓘ Not a keystroke: Steam has no key. It opens Big Picture the same way
-    // the OSKeyboard binding already opens Steam's own keyboard -- through a
-    // steam:// URL -- so it is an ACTION rather than something typed.
-    { L"steam", nullptr, ACT_STEAM, 0, KK_ACTION, 1.85f },
+    // ⭐ Where a right shift would be. rhoquinn8217, 2026-09-02: a second shift
+    // is a key doing nothing the left one does not, and this face has room for
+    // two that earn it.
+    { L"fn", nullptr, 0, KBD_FN, KK_MOD, 1.0f },
+    { L"\u2328\u21f3", nullptr, ACT_MOVE, 0, KK_ACTION, 1.3f },
 };
 inline const Key kRow4[] = {
-    { L"alt", nullptr, 0, KBD_ALT, KK_MOD, 1.3f },
+    { L"ctrl", nullptr, 0, KBD_CTRL, KK_MOD, 1.3f },
     { L"win", nullptr, 0, KBD_WIN, KK_MOD, 1.3f },
-    { L"space", nullptr, 0x2c, 0, KK_NORMAL, 9.3f },
+    { L"alt", nullptr, 0, KBD_ALT, KK_MOD, 1.3f },
+    { L"space", nullptr, 0x2c, 0, KK_NORMAL, 5.3f },
+    // ⭐ Where the right alt and right ctrl would be -- duplicates of keys
+    // already on this row, in the place a thumb can reach.
+    { L"paste", L"copy", ACT_PASTE, 0, KK_ACTION, 2.0f },
     { L"\u2190", nullptr, 0x50, 0, KK_NORMAL, 1.0f },
     { L"\u2193", nullptr, 0x51, 0, KK_NORMAL, 1.0f },
     { L"\u2192", nullptr, 0x4f, 0, KK_NORMAL, 1.0f },
-    { L"\u2328\u2938", nullptr, ACT_CLOSE, 0, KK_ACTION, 1.1f },
+    { L"\u2328\u2938", nullptr, ACT_CLOSE, 0, KK_ACTION, 1.3f },
 };
 
-// ⭐⭐ THE COMPACT FACE. Everything a controller CANNOT do is still here --
-// esc, tab, shift, ctrl, alt, win, backspace, enter, space, the arrows -- and
-// L2 still gives F1-F12 and the backtick. What it drops is punctuation you need
-// for a path or a URL, not for driving Windows.
-//
-// ⛔ NOT "small". rhoquinn8217, 2026-09-02: this is a large television, not a
-// phone. Making it narrow for its own sake would remove the very things the
-// keyboard exists to reach. Compact is the EVERYDAY face; Full is the TYPING
-// face.
-//
-// ⭐ And its rows are ALIGNED, unlike Full's stagger -- so walking it is plain
-// index arithmetic and the nearest-neighbour code never runs here.
 inline const Key kCompact0[] = {
     { L"`", L"~", 0x35, 0, KK_NORMAL, 1.0f },
     { L"1", L"!", 0x1e, 0, KK_FN, 1.0f }, { L"2", L"@", 0x1f, 0, KK_FN, 1.0f },
