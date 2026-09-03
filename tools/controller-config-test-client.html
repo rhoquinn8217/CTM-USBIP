@@ -1801,18 +1801,47 @@ function presetRowValue(key, value) {
   return note ? (value + '  (' + note + ')') : String(value);
 }
 
+// ⓘ Shoulders before faces inside the Buttons group: they are the ones a
+// preset changes for a reason, and the face buttons are the same four every
+// time. ⛔ Only the ORDER differs from the settings page -- the labels and the
+// values are that page's own.
+var PRESET_BUTTON_ORDER = ['Shoulder/stick buttons', 'Face buttons', 'System buttons'];
+
 function presetInfoRows(settings) {
   var groups = {};
+  var arrows = [];
+
   (settings || []).forEach(function(s) {
-    // ⭐ THE THREE BUTTON GROUPS BECOME ONE HERE (rhoquinn8217, 2026-09-03).
-    // ⓘ They are split on the settings page because that section runs to 34
-    // rows and needed breaking up. A preset touches a handful, so the split
-    // adds three headings and no clarity.
+    // ⭐ THE FOUR D-PAD ARROWS COLLAPSE TO ONE ROW. Four rows saying the same
+    // thing crowd out the ones that differ between presets.
+    // ⚠️ Only when all four are there and all four are arrows -- a preset that
+    // binds the d-pad to something else must still show what.
+    if (/^rebind_(12|13|14|15)$/.test(s.key) && String(s.value).indexOf('Arrow') === 0) {
+      arrows.push(s);
+      return;
+    }
     var sect = sectionOf(s.key);
-    if (BUTTON_SECTIONS.indexOf(sect) >= 0) sect = 'Buttons';
+    var sub = '';
+    if (BUTTON_SECTIONS.indexOf(sect) >= 0) { sub = sect; sect = 'Buttons'; }
     (groups[sect] = groups[sect] || []).push(
-      [presetRowLabel(s.key), presetRowValue(s.key, s.value)]);
+      [presetRowLabel(s.key), presetRowValue(s.key, s.value), sub]);
   });
+
+  if (arrows.length === 4) {
+    (groups['Buttons'] = groups['Buttons'] || []).push(
+      ['d-pad — remap', 'ArrowKeys', 'Face buttons']);
+  } else {
+    arrows.forEach(function(s) {
+      (groups['Buttons'] = groups['Buttons'] || []).push(
+        [presetRowLabel(s.key), presetRowValue(s.key, s.value), 'Face buttons']);
+    });
+  }
+
+  if (groups['Buttons']) {
+    groups['Buttons'].sort(function(a, b) {
+      return PRESET_BUTTON_ORDER.indexOf(a[2]) - PRESET_BUTTON_ORDER.indexOf(b[2]);
+    });
+  }
   return groups;
 }
 
