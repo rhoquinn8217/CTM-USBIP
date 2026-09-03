@@ -98,6 +98,16 @@ inline const BYTE kAlpha = 255;
 // done from the controller's report thread.
 inline const UINT WM_CTM_REPOSITION = WM_APP + 1;
 inline const UINT WM_CTM_RESIZE     = WM_APP + 2;
+inline const UINT WM_CTM_NUDGE      = WM_APP + 3;
+
+// ⭐ HOLD TRIANGLE AND STEER (rhoquinn8217, 2026-09-02). A tap still snaps it
+// top or bottom; holding turns the left stick into a way to put it anywhere.
+//
+// ⓘ The deltas are accumulated here and applied on the window's own thread,
+// because the window belongs to that thread and moving it from the report
+// thread is the kind of thing that works until it does not.
+inline std::atomic_int g_nudgeX{0}, g_nudgeY{0};
+inline std::atomic_bool g_triHeld{false}, g_triMoved{false};
 
 // ⭐ THREE SIZES, as a share of the screen rather than pixels: 1080p and 4K
 // want very different pixel counts and the same proportion.
@@ -872,6 +882,26 @@ inline LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_LBUTTONUP:
         release_current(kMouseKey);
         return 0;
+    case WM_APP + 3: {                 // WM_CTM_NUDGE
+        const int dx = g_nudgeX.exchange(0);
+        const int dy = g_nudgeY.exchange(0);
+        if (dx == 0 && dy == 0) return 0;
+        RECT rc;
+        GetWindowRect(hwnd, &rc);
+        // ⓘ Kept on screen: a keyboard dragged off the edge cannot be dragged
+        // back, and there is no title bar to grab.
+        const int w = rc.right - rc.left, h = rc.bottom - rc.top;
+        int x = rc.left + dx, y = rc.top + dy;
+        const int screenW = GetSystemMetrics(SM_CXSCREEN);
+        const int screenH = GetSystemMetrics(SM_CYSCREEN);
+        if (x < -w / 3) x = -w / 3;
+        if (y < 0) y = 0;
+        if (x > screenW - w / 3) x = screenW - w / 3;
+        if (y > screenH - h / 3) y = screenH - h / 3;
+        SetWindowPos(hwnd, HWND_TOPMOST, x, y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
+        return 0;
+    }
+
     case WM_APP + 2: {                 // WM_CTM_RESIZE
         int w = 0, h = 0;
         size_for(&w, &h);
@@ -1105,10 +1135,42 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
         return true;
     }
 
-    // ⭐ TRIANGLE MOVES IT out of the way of whatever is being typed into.
-    if (edge(deviceKey, 6, button_down(data, len, 3))) {
-        g_atTop.store(!g_atTop.load());
-        if (g_hwnd != nullptr) PostMessageW(g_hwnd, WM_CTM_REPOSITION, 0, 0);
+    // ⭐⭐ TRIANGLE: TAP TO SNAP, HOLD TO STEER.
+    //
+    // ⓘ The tap fires on RELEASE, not on press, and only when the stick was
+    // never used -- otherwise every drag would end by also snapping the window
+    // to the top or bottom, undoing the placing you just did.
+    const bool tri = button_down(data, len, 3);
+    if (tri && !g_triHeld.load()) {
+        g_triHeld.store(true);
+        g_triMoved.store(false);
+    } else if (!tri && g_triHeld.load()) {
+        g_triHeld.store(false);
+        if (!g_triMoved.load()) {
+            g_atTop.store(!g_atTop.load());
+            if (g_hwnd != nullptr) PostMessageW(g_hwnd, WM_CTM_REPOSITION, 0, 0);
+        }
+    }
+
+    if (g_triHeld.load()) {
+        // ⓘ The left stick, with a deadzone so a resting stick does not creep.
+        // ⛔ Byte 1 and 2 are LX and LY, 0x80 at centre -- the same bytes the
+        // stick mouse reads, and the same reason for the deadzone.
+        const int lx = (int)data[1] - 128;
+        const int ly = (int)data[2] - 128;
+        const int dead = 18;
+        int dx = 0, dy = 0;
+        if (lx > dead || lx < -dead) dx = lx / 16;
+        if (ly > dead || ly < -dead) dy = ly / 16;
+        if (dx != 0 || dy != 0) {
+            g_nudgeX.fetch_add(dx);
+            g_nudgeY.fetch_add(dy);
+            g_triMoved.store(true);
+            if (g_hwnd != nullptr) PostMessageW(g_hwnd, WM_CTM_NUDGE, 0, 0);
+        }
+        // ⛔ While steering, nothing else on the pad acts: the d-pad must not
+        // also be walking the keys, and Cross must not be typing.
+        return true;
     }
 
     // ⭐⭐ OPTIONS SWITCHES THE FACE. Create is how BIG; Options is how MUCH --
