@@ -4343,9 +4343,22 @@ function gpPoll() {
   for (var i = 0; i < pads.length; i++) { if (pads[i]) live.push(pads[i]); }
   var bar = document.getElementById('gpbar');
   var hint = document.getElementById('gphint');
-  if (!live.length) {
-    // ⭐ A KEYBOARD LEGEND when no pad is visible (rhoquinn8217, 2026-09-01).
-    // The page is fully drivable from a keyboard now, so "press any button to
+  // ⛔⛔ ASK THE LISTENER, NOT THE BROWSER (rhoquinn8217, 2026-09-03: the
+  // footer showed the keyboard legend while a controller was in his hands).
+  //
+  // ⚠️ navigator.getGamepads only sees a pad the BROWSER is given -- and with
+  // Safe Edit Mode on there is never one, because the listener converts the
+  // bridged pad into KEYSTROKES to drive this page. So in the very situation
+  // where someone is most obviously holding a controller, the browser could
+  // not see one, and the legend was structurally unable to be right.
+  //
+  // ⓘ GATE_ON is exactly "a bridged pad is driving this page", which is what
+  // the paused notice and Safe Edit Mode already use.
+  var padDriving = live.length > 0 || GATE_ON;
+
+  if (!padDriving) {
+    // ⭐ A KEYBOARD LEGEND when nothing is driving from a pad (2026-09-01).
+    // The page is fully drivable from a keyboard, so "press any button to
     // connect" was the only thing on offer and it described a controller the
     // person may not be using -- leaving the keys undiscoverable.
     hint.textContent = 'keyboard — arrows move, Enter select, Esc back, Space on/off' +
@@ -4354,6 +4367,8 @@ function gpPoll() {
     requestAnimationFrame(gpPoll);
     return;
   }
+  // ⓘ The count comes from the browser when it can see the pads, and falls
+  // back to the singular when only the gate knows one is there.
   hint.textContent = (live.length > 1 ? live.length + ' controllers' : 'controller') +
                      ' — L1/R1 tabs, D-pad move, ✕ select, ✕ again to leave a value, □ on/off, ○ back';
   bar.className = 'live';
