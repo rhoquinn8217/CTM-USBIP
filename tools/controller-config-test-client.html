@@ -1750,76 +1750,51 @@ function openPresetPicker(ordinal, dev) {
 // and the picker keeps arrows because those rows are short.
 var PRESET_INFO_OPEN = '';       // the preset being read, or ''
 
+// ⭐⭐ THE PREVIEW SHOWS WHAT THE PRESET ACTUALLY WRITES (rhoquinn8217,
+// 2026-09-03: "give the actual name of the settings and the value").
+//
+// ⛔ It used to translate every setting into a phrase -- "Gyro -> cursor",
+// "Touchpad click -> recentre the cursor". That reads nicely and is a second
+// vocabulary to trust: nothing in the box matched what you would then see on
+// the settings page, and anything the translator did not recognise fell into a
+// catch-all that printed it under BUTTONS as a raw key and a bare "true".
+//
+// ⓘ Now it is the key and the value, exactly as written, with a SHORT note in
+// brackets only where the value cannot speak for itself -- a bare "1" or a
+// rebind index. Everything else is already self-explanatory.
+//
+// ⭐ And it groups with sectionOf, the SAME rule the settings page uses, so a
+// setting appears under the heading you will later find it under. That is what
+// went wrong before: a second grouping rule with its own idea of "Buttons".
+
+// ⓘ Values that need a word. Anything absent is printed bare.
+var PRESET_VALUE_NOTE = {
+  'touchpad_scroll': { '0': 'off', '1': '1 finger scroll', '2': '2 finger scroll' }
+};
+
+function presetRowNote(key, value) {
+  var perValue = PRESET_VALUE_NOTE[key];
+  if (perValue && perValue.hasOwnProperty(String(value))) return perValue[String(value)];
+  var btn = /^(?:rebind|turbo)_(\d+)$/.exec(key);
+  if (btn) {
+    var name = buttonLabel(key);
+    return name && name !== key ? name : '';
+  }
+  return '';
+}
+
 function presetInfoRows(settings) {
-  var mouse = [];
-  var buttons = [];
-  var dpad = 0;
-  // ⓘ Which stick points, read before the loop so the suppression row can name
-  // it whatever order the settings arrive in.
-  var cursorStick = '';
+  var groups = {};
   (settings || []).forEach(function(s) {
-    if (s.key === 'stick_to_mouse') cursorStick = s.value;
+    var note = presetRowNote(s.key, s.value);
+    // ⓘ Button names already carry their own brackets -- "(✕) | (A)" -- so
+    // wrapping them again gives "Enter  ((✕) | (A))".
+    var wrapped = /^\(/.test(note) ? note : '(' + note + ')';
+    var shown = note ? (s.value + '  ' + wrapped) : String(s.value);
+    var sect = sectionOf(s.key);
+    (groups[sect] = groups[sect] || []).push([s.key, shown]);
   });
-  (settings || []).forEach(function(s) {
-    // The four d-pad rows are one line: a preset only ever binds them to the
-    // arrows, and four near-identical rows push the rest of the table down.
-    if (['rebind_12','rebind_13','rebind_14','rebind_15'].indexOf(s.key) >= 0 &&
-        String(s.value).indexOf('Arrow') === 0) { dpad++; return; }
-    if (PRESET_CURSOR_FROM.hasOwnProperty(s.key)) {
-      mouse.push([PRESET_CURSOR_FROM[s.key] || stickNamed(s.value), 'cursor']);
-    } else if (PRESET_SCROLL_FROM.hasOwnProperty(s.key)) {
-      var from = PRESET_SCROLL_FROM[s.key];
-      if (!from && s.key === 'touchpad_scroll') {
-        if (String(s.value) === '0') return;          // off: say nothing
-        from = 'Touchpad, ' + (String(s.value) === '1' ? 'one finger' : 'two fingers');
-      }
-      mouse.push([from || stickNamed(s.value), 'scroll']);
-    } else if (s.key === 'touchpad_tap_click') {
-      mouse.push(['Touchpad tap', 'click']);
-    } else if (s.key === 'gyro_mouse_recenter_button') {
-      mouse.push(['Touchpad click', 'recentre the cursor']);
-    } else if (s.key === 'touchpad_click_drag') {
-      mouse.push(['Touchpad click', 'grab and drag, lift to drop']);
-    } else if (s.key === 'gyro_no_passthrough') {
-      // ⭐ MOUSE, NOT BUTTONS, and phrased as an EFFECT. These landed in the
-      // catch-all below and read as "gyro_no_passthrough  true", which is a
-      // setting name and a boolean -- everything else in this box is written
-      // in plain language (rhoquinn8217, 2026-09-03).
-      // ⓘ Phrased as what the GAME loses, not repeating what the cursor gains.
-      // The row above already says "Gyro -> cursor"; saying it twice reads as
-      // two separate features.
-      mouse.push(['Gyro', 'hidden from games and everything else']);
-    } else if (s.key === 'touchpad_no_passthrough') {
-      mouse.push(['Touchpad', 'hidden from games and everything else']);
-    } else if (s.key === 'stick_no_passthrough') {
-      // ⚠️ Named, not "that stick" -- which stick is only obvious from the row
-      // above, and these are sorted, so it may not be above.
-      mouse.push([stickNamed(cursorStick) + ' (mouse)',
-                  'hidden from games and everything else']);
-    } else if (s.key.indexOf('rebind_') === 0) {
-      var label = PRESET_VALUE_LABELS[s.value] || s.value;
-      // The clicks are mouse controls even though they are button bindings.
-      if (s.value === 'MouseLeft' || s.value === 'MouseRight' ||
-          s.value === 'MouseMiddle') mouse.push([buttonLabel(s.key), label]);
-      else buttons.push([buttonLabel(s.key), label]);
-    } else {
-      // ⚠️ Anything without a friendly name still shows, as key = value:
-      // visible and ugly beats silently missing.
-      buttons.push([s.key, s.value]);
-    }
-  });
-  if (dpad === 4) buttons.push(['D-pad', 'arrow keys']);
-  // ⓘ Cursor first, then the clicks, then scrolling, then the rest -- the
-  // order someone reads them in when deciding whether this is the preset they
-  // want. Config order is the order they happened to be written in.
-  var rank = { 'cursor': 0, 'left click': 1, 'right click': 2, 'click': 3,
-               'scroll': 4 };
-  mouse.sort(function(a, b) {
-    var ra = rank.hasOwnProperty(a[1]) ? rank[a[1]] : 9;
-    var rb = rank.hasOwnProperty(b[1]) ? rank[b[1]] : 9;
-    return ra - rb;
-  });
-  return { mouse: mouse, buttons: buttons };
+  return groups;
 }
 
 function presetTable(title, rows) {
@@ -1845,8 +1820,18 @@ function openPresetInfo(ordinal, presetName) {
   var rows = presetInfoRows(p.settings);
   document.getElementById('presetInfoTitle').textContent = p.name;
   document.getElementById('presetInfoText').textContent = p.help || '';
-  document.getElementById('presetInfoTables').innerHTML =
-    presetTable('Mouse', rows.mouse) + presetTable('Buttons', rows.buttons);
+  // ⓘ In the settings page's own section order, so the preview reads in the
+  // same order as the thing it is previewing.
+  var order = ['Gyro', 'Touchpad', 'Stick', 'Audio', 'Rumble',
+               'Face buttons', 'Shoulder/stick buttons', 'System buttons', 'Other'];
+  var html = '';
+  order.forEach(function(name) {
+    if (rows[name] && rows[name].length) html += presetTable(name, rows[name]);
+  });
+  Object.keys(rows).forEach(function(name) {
+    if (order.indexOf(name) < 0) html += presetTable(name, rows[name]);
+  });
+  document.getElementById('presetInfoTables').innerHTML = html;
   // ⓘ Reading about a preset and choosing it is one press, not back-then-pick.
   document.getElementById('presetInfoUse').onclick = function() {
     createFromPreset(ordinal, presetName);
