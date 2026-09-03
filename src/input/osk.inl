@@ -135,6 +135,12 @@ inline void toggle(const std::string &section, int button, Program program)
                     : (program == Program::Osk)     ? osk_known_state()
                                                     : -1;
     const Action action = next_action(known, g_remembered.load());
+    // ⓘ One line that answers "why did nothing happen": which keyboard was
+    // asked for, whether we could tell its state, and what we decided.
+    device_log::input(device_log::msg()
+        << "osk: program=" << static_cast<int>(program)
+        << " known=" << known
+        << " action=" << (action == Action::Open ? "open" : "close"));
     if (action == Action::Open) {
         do_open(program, button);
         g_remembered.store(true);

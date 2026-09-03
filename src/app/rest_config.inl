@@ -374,7 +374,7 @@ static std::string rest_keys_json()
 "ControlLeft","ShiftLeft","AltLeft","MetaLeft",
 "ControlRight","ShiftRight","AltRight","MetaRight",
 "MouseLeft","MouseRight","MouseMiddle","MouseWheelUp","MouseWheelDown",
-"KeyboardOverlay","KeyboardSteam","KeyboardWindows"
+"KeyboardDS5_USBIP","KeyboardSteam","KeyboardWindows"
 ]})CTMKEYS";
     return settings + pointers + names;
 }

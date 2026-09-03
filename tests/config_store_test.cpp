@@ -365,7 +365,7 @@ int run_config_store_tests()
                 // ⭐ Square opens OUR on-screen keyboard (2026-09-02). It was
                 // deliberately unbound while the only option was Steam's, which
                 // a rebound pad could not drive.
-                if (key == "rebind_2" && value == "KeyboardOverlay") keyboard = true;
+                if (key == "rebind_2" && value == "KeyboardDS5_USBIP") keyboard = true;
                 if (key == "rebind_12" && value == "ArrowUp") arrows = true;
                 if (key == "rebind_7" && value == "MouseLeft") click = true;
             }

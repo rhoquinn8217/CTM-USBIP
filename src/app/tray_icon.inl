@@ -133,9 +133,30 @@ inline void thread_main()
     nid.uID = 1;
     nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
     nid.uCallbackMessage = WM_CTM_TRAY;
-    // ⚠️ The stock application icon for now: a custom one needs a resource
-    // file and a build step, and neither is worth blocking this on.
-    nid.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+    // ⭐⭐ THE KEYBOARD ICON IS BORROWED FROM osk.exe (rhoquinn8217 asked for a
+    // keyboard, 2026-09-03).
+    //
+    // ⛔ There is no stock keyboard icon to ask for: shell32's indices are
+    // undocumented and shift between releases, and Windows 11 moved the shell
+    // icons into imageres.dll.mun entirely. Picking an index would be a guess
+    // that silently becomes the wrong picture on some machine.
+    //
+    // ⭐ osk.exe is Windows' OWN on-screen keyboard. It is present on every
+    // Windows, its icon IS a keyboard, and it means exactly what we mean.
+    // ⓘ Full path rather than a bare name, so it cannot pick up something else
+    // that happens to be earlier on the PATH.
+    wchar_t oskPath[MAX_PATH] = {};
+    UINT n = GetSystemDirectoryW(oskPath, MAX_PATH);
+    if (n > 0 && n < MAX_PATH - 12) {
+        wcscat_s(oskPath, L"\\osk.exe");
+        nid.hIcon = ExtractIconW(wc.hInstance, oskPath, 0);
+    }
+    // ⓘ ExtractIcon answers 1 for "not an icon source" as well as null for
+    // none, so both count as failure.
+    bool extracted = (nid.hIcon != nullptr && nid.hIcon != (HICON)1);
+    if (!extracted) {
+        nid.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+    }
     wcscpy_s(nid.szTip, L"DS5-USBIP — click for the keyboard");
     Shell_NotifyIconW(NIM_ADD, &nid);
     device_log::session_w() << L"tray: icon added";
@@ -147,6 +168,9 @@ inline void thread_main()
     }
 
     Shell_NotifyIconW(NIM_DELETE, &nid);
+    // ⓘ ExtractIcon hands back a handle we own. LoadIcon's shared one must NOT
+    // be destroyed, so only the extracted one is.
+    if (extracted && nid.hIcon != nullptr) DestroyIcon(nid.hIcon);
     if (g_hwnd != nullptr) {
         DestroyWindow(g_hwnd);
         g_hwnd = nullptr;

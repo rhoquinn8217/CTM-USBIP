@@ -722,7 +722,7 @@ inline void apply(const void *deviceKey,
         const int oskWhich =
             (code == "KeyboardSteam")   ? 0 :
             (code == "KeyboardWindows") ? 1 :
-            (code == "KeyboardOverlay" || code == "OSKeyboard" || code == "oskeyboard") ? 2 : -1;
+            (code == "KeyboardDS5_USBIP" || code == "OSKeyboard" || code == "oskeyboard") ? 2 : -1;
         if (oskWhich >= 0) {
             static std::map<std::pair<const void *, int>, bool> oskHeld;
             const bool wasHeld = oskHeld[{deviceKey, i}];

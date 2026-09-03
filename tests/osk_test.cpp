@@ -41,7 +41,7 @@ int run_osk_tests()
     // tested. There was one OSKeyboard binding and an osk_program setting
     // naming which keyboard it meant -- a switch in one section deciding what
     // a binding in another did. Now the binding IS the choice:
-    // KeyboardOverlay, KeyboardSteam, KeyboardWindows.
+    // KeyboardDS5_USBIP, KeyboardSteam, KeyboardWindows.
     //
     // ⓘ The mapping from binding to program lives in the rebind path, where
     // it is used, rather than in a parser copied into this file.
