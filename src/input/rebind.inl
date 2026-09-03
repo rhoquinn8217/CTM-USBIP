@@ -201,6 +201,28 @@ inline MouseAction mouse_action_for(const std::string &code)
     return kMouseNone;
 }
 
+// ⛔⛔ THE CONFIG READER LOWERCASES VALUES. Every comparison against a binding
+// name must fold case, or it silently never matches -- which is exactly what
+// happened to the three keyboard bindings on 2026-09-03: the config held
+// "KeyboardDS5_USBIP", the reader returned "keyboardds5_usbip", and the button
+// did nothing at all.
+//
+// ⓘ The old single OSKeyboard check worked only because someone had added an
+// "oskeyboard" alias beside it. That alias WAS this bug, already met once and
+// papered over rather than named.
+inline bool code_is(const std::string &code, const char *name)
+{
+    if (code.size() != strlen(name)) return false;
+    for (size_t i = 0; i < code.size(); ++i) {
+        const char a = code[i];
+        const char b = name[i];
+        const char la = (a >= 'A' && a <= 'Z') ? static_cast<char>(a - 'A' + 'a') : a;
+        const char lb = (b >= 'A' && b <= 'Z') ? static_cast<char>(b - 'A' + 'a') : b;
+        if (la != lb) return false;
+    }
+    return true;
+}
+
 inline const KeyName *key_for(const std::string &code)
 {
     if (code.empty()) return nullptr;
@@ -654,9 +676,9 @@ inline void apply(const void *deviceKey,
             snprintf(kn, sizeof(kn), "rebind_%d", i);
             const std::string c = device_config_str(gateSection.c_str(), kn);
             const int which =
-                (c == "KeyboardSteam")   ? 0 :
-                (c == "KeyboardWindows") ? 1 :
-                (c == "KeyboardDS5_USBIP" || c == "OSKeyboard" || c == "oskeyboard") ? 2 : -1;
+                code_is(c, "KeyboardSteam")     ? 0 :
+                code_is(c, "KeyboardWindows")   ? 1 :
+                (code_is(c, "KeyboardDS5_USBIP") || code_is(c, "OSKeyboard")) ? 2 : -1;
             if (which < 0) continue;
 
             static std::map<std::pair<const void *, int>, bool> gateOskHeld;
@@ -762,9 +784,9 @@ inline void apply(const void *deviceKey,
         // it was the only one that could mean anything else, and it meant
         // whatever osk_program said.
         const int oskWhich =
-            (code == "KeyboardSteam")   ? 0 :
-            (code == "KeyboardWindows") ? 1 :
-            (code == "KeyboardDS5_USBIP" || code == "OSKeyboard" || code == "oskeyboard") ? 2 : -1;
+            code_is(code, "KeyboardSteam")     ? 0 :
+            code_is(code, "KeyboardWindows")   ? 1 :
+            (code_is(code, "KeyboardDS5_USBIP") || code_is(code, "OSKeyboard")) ? 2 : -1;
         if (oskWhich >= 0) {
             static std::map<std::pair<const void *, int>, bool> oskHeld;
             const bool wasHeld = oskHeld[{deviceKey, i}];
