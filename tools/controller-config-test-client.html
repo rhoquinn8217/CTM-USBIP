@@ -1772,27 +1772,46 @@ var PRESET_VALUE_NOTE = {
   'touchpad_scroll': { '0': 'off', '1': '1 finger scroll', '2': '2 finger scroll' }
 };
 
-function presetRowNote(key, value) {
-  var perValue = PRESET_VALUE_NOTE[key];
-  if (perValue && perValue.hasOwnProperty(String(value))) return perValue[String(value)];
-  var btn = /^(?:rebind|turbo)_(\d+)$/.exec(key);
-  if (btn) {
-    var name = buttonLabel(key);
-    return name && name !== key ? name : '';
+// ⭐⭐ THE SAME LABEL THE SETTINGS PAGE USES (rhoquinn8217, 2026-09-03).
+//
+// ⛔ The first attempt put the raw KEY in the label column and hung the button
+// name off the end of the VALUE -- "rebind_0 ... Enter (✕) | (A)". That is
+// backwards: the settings page shows "(✕) | (A) — remap" as the label and
+// "Enter" as the value, and the preview is supposed to be previewing THAT.
+//
+// ⓘ Copied from renderConfigEditor rather than reinvented, so the two cannot
+// drift into two different names for the same row.
+function presetRowLabel(key) {
+  var meta = (KEYS || []).filter(function(k) { return k.key === key; })[0];
+  var m = /^(rebind|turbo)_(\d+)$/.exec(key);
+  if (m) {
+    if (!meta) return key;
+    var name = meta.name || (meta.help ? meta.help.split(' -- ')[0] : key);
+    return name + (m[1] === 'turbo' ? ' — rapid fire' : ' — remap');
   }
-  return '';
+  // ⓘ Settings keep their key: it is what you will search the page for, and
+  // what the config file says.
+  return key;
+}
+
+function presetRowValue(key, value) {
+  var perValue = PRESET_VALUE_NOTE[key];
+  var note = (perValue && perValue.hasOwnProperty(String(value)))
+             ? perValue[String(value)] : '';
+  return note ? (value + '  (' + note + ')') : String(value);
 }
 
 function presetInfoRows(settings) {
   var groups = {};
   (settings || []).forEach(function(s) {
-    var note = presetRowNote(s.key, s.value);
-    // ⓘ Button names already carry their own brackets -- "(✕) | (A)" -- so
-    // wrapping them again gives "Enter  ((✕) | (A))".
-    var wrapped = /^\(/.test(note) ? note : '(' + note + ')';
-    var shown = note ? (s.value + '  ' + wrapped) : String(s.value);
+    // ⭐ THE THREE BUTTON GROUPS BECOME ONE HERE (rhoquinn8217, 2026-09-03).
+    // ⓘ They are split on the settings page because that section runs to 34
+    // rows and needed breaking up. A preset touches a handful, so the split
+    // adds three headings and no clarity.
     var sect = sectionOf(s.key);
-    (groups[sect] = groups[sect] || []).push([s.key, shown]);
+    if (BUTTON_SECTIONS.indexOf(sect) >= 0) sect = 'Buttons';
+    (groups[sect] = groups[sect] || []).push(
+      [presetRowLabel(s.key), presetRowValue(s.key, s.value)]);
   });
   return groups;
 }
@@ -1822,8 +1841,7 @@ function openPresetInfo(ordinal, presetName) {
   document.getElementById('presetInfoText').textContent = p.help || '';
   // ⓘ In the settings page's own section order, so the preview reads in the
   // same order as the thing it is previewing.
-  var order = ['Gyro', 'Touchpad', 'Stick', 'Audio', 'Rumble',
-               'Face buttons', 'Shoulder/stick buttons', 'System buttons', 'Other'];
+  var order = ['Gyro', 'Touchpad', 'Stick', 'Audio', 'Rumble', 'Buttons', 'Other'];
   var html = '';
   order.forEach(function(name) {
     if (rows[name] && rows[name].length) html += presetTable(name, rows[name]);
