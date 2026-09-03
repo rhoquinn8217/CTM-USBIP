@@ -448,6 +448,10 @@ inline bool g_latchUsed = false;
 inline uint8_t g_tapMod = 0;
 inline int g_tapFrames = 0;
 inline int g_escFrames = 0;
+// ⓘ How long a direction has been held, in reports. ⛔ Not per device: it is
+// one highlight, and two pads holding opposite directions should fight over it
+// exactly as two hands on one keyboard would.
+inline int g_dirHeld = 0;
 inline const void *g_pasteHeld = nullptr;
 
 inline int mod_state(uint8_t bit)
@@ -872,10 +876,6 @@ inline void paint(HWND hwnd)
         const wchar_t *label = k.label;
         if (k.usage == 0x29 && fnNow) {
             label = L"`";                 // esc becomes the console key
-        } else if (k.kind == KK_ACTION && k.usage == ACT_MOVE) {
-            // ⓘ Says where it will GO, not where it is -- a button labelled
-            // with the state you are already in tells you nothing.
-            label = L"\u2328\u21f3";     // the same glyph either way: it moves
         } else if (k.kind == KK_FN && fnNow) {
             const int idx = fn_index(p.row, p.col);
             if (idx >= 0 && idx < 12) label = kFnLabels[idx];
@@ -896,12 +896,16 @@ inline void paint(HWND hwnd)
         const bool latched = (k.kind == KK_MOD && mod_state(k.mod) != LATCH_OFF);
         const bool heldNow = (k.kind == KK_MOD && k.mod == KBD_SHIFT
                               && g_shiftHeld.load());
+        // ⭐ THREE APPEARANCES (rhoquinn8217, 2026-09-02):
+        //   off      "shift"
+        //   latched  bold "shift⌵"
+        //   held     bold "⌵shift⌵"
+        // ⓘ A countersink on BOTH sides for held, because held is the state
+        // that is doing something to every key you press, not just the next.
         if (heldNow) {
             int i = 0;
-            for (; label[i] != 0 && i < 20; ++i) {
-                shown[i] = (label[i] >= L'a' && label[i] <= L'z')
-                         ? (wchar_t)(label[i] - L'a' + L'A') : label[i];
-            }
+            shown[i++] = L'\u2335';
+            for (int j = 0; label[j] != 0 && i < 20; ++j) shown[i++] = label[j];
             shown[i++] = L'\u2335';
             shown[i] = 0;
             label = shown;
@@ -1268,10 +1272,28 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
     const bool down  = (hat == 3 || hat == 4 || hat == 5);
     const bool left  = (hat == 5 || hat == 6 || hat == 7);
 
-    if (edge(deviceKey, 0, up))    move_v(-1);
-    if (edge(deviceKey, 1, down))  move_v(1);
-    if (edge(deviceKey, 2, left))  move_h(-1);
-    if (edge(deviceKey, 3, right)) move_h(1);
+    // ⭐⭐ A HELD DIRECTION REPEATS (rhoquinn8217, 2026-09-02: "instinctually I
+    // expect it to repeat"). Every keyboard does, and without it crossing this
+    // grid means fourteen separate presses.
+    //
+    // ⓘ The same shape as a keyboard's own repeat: a pause first, so a single
+    // press stays single, then a steady run. ⛔ Measured in REPORTS rather than
+    // milliseconds -- they arrive at a known rate and it costs no clock.
+    const int kFirst = 90;      // ~360ms at 250Hz
+    const int kThen  = 14;      // ~56ms between repeats
+    const bool anyDir = up || down || left || right;
+    if (!anyDir) {
+        g_dirHeld = 0;
+    } else {
+        ++g_dirHeld;
+    }
+    const bool repeatNow = (g_dirHeld > kFirst)
+                        && ((g_dirHeld - kFirst) % kThen == 0);
+
+    if (edge(deviceKey, 0, up)    || (repeatNow && up))    move_v(-1);
+    if (edge(deviceKey, 1, down)  || (repeatNow && down))  move_v(1);
+    if (edge(deviceKey, 2, left)  || (repeatNow && left))  move_h(-1);
+    if (edge(deviceKey, 3, right) || (repeatNow && right)) move_h(1);
 
     // ⭐ THE HELD LAYERS. L1 shows capitals and shifted punctuation, L2 turns
     // the digit row into F1-F12 in place.
