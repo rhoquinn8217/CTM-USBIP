@@ -143,11 +143,17 @@ inline void step(const void *deviceKey, const std::string &section,
     // ⛔ NOT WHILE THE PAD IS DRIVING THE SETTINGS PAGE -- the same standdown
     // as the gyro, for the same reason: a cursor that moves while its buttons
     // are gated is a broken mouse, not a suspended one.
-    if (ctm_rebind_config_mode_effective()) {
-        if (st.dragging) ctm_mouse_device::set_drag(0x00);
-        st = TouchState();
-        return;
-    }
+    // ⛔ THE GATE NO LONGER SUSPENDS THE CURSOR (rhoquinn8217, 2026-09-02).
+    //
+    // ⚠️ Safe Edit Mode exists to stop a bridged pad MIRRORING INTO A GAME, and
+    // a cursor cannot do that: pointer movement goes to whatever has focus,
+    // which while the gate applies is our own settings window. Suspending it
+    // protected nothing and made the page look broken -- the pad appeared dead
+    // when it was simply forbidden from doing the one thing it could do safely.
+    //
+    // ⓘ Kept as a comment rather than deleted so the next person wondering why
+    // the cursor works here finds the reasoning instead of the absence.
+
 
     // ⛔ A SHUT GATE DROPS THE STATE, so re-opening it starts from a clean
     // anchor rather than measuring movement against where a finger was before

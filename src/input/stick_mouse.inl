@@ -120,11 +120,17 @@ inline void step(const void *deviceKey, const std::string &section,
     // ⛔ Not while the pad is driving the settings page -- the same standdown
     // as gyro and touch, for the same reason: a cursor that moves while its
     // buttons are gated is a broken mouse, not a suspended one.
-    if (ctm_rebind_config_mode_effective()) {
-        std::lock_guard<std::mutex> lock(g_stickMutex);
-        g_sticks.erase(deviceKey);
-        return;
-    }
+    // ⛔ THE GATE NO LONGER SUSPENDS THE CURSOR (rhoquinn8217, 2026-09-02).
+    //
+    // ⚠️ Safe Edit Mode exists to stop a bridged pad MIRRORING INTO A GAME, and
+    // a cursor cannot do that: pointer movement goes to whatever has focus,
+    // which while the gate applies is our own settings window. Suspending it
+    // protected nothing and made the page look broken -- the pad appeared dead
+    // when it was simply forbidden from doing the one thing it could do safely.
+    //
+    // ⓘ Kept as a comment rather than deleted so the next person wondering why
+    // the cursor works here finds the reasoning instead of the absence.
+
 
     // ⭐ The SAME gate vocabulary as gyro, parsed by the same function. One
     // gate concept across every pointer method, and with three of them able to
@@ -244,8 +250,8 @@ inline void scroll_step(const void *deviceKey, const std::string &section,
         }
         return;
     }
-    if (ctm_rebind_config_mode_effective()) return;
-
+    // ⓘ Scrolling is the same argument as the cursor: it goes to the focused
+    // window, which while the gate applies is ours.
     const std::string gateRaw = device_config_str(section.c_str(), "stick_to_scroll_gate");
     const ctm_gyro_mouse::Gate gate =
         gateRaw.empty() ? ctm_gyro_mouse::Gate::Always : ctm_gyro_mouse::parse_gate(gateRaw);
