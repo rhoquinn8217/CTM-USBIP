@@ -542,6 +542,15 @@ inline int g_escFrames = 0;
 // one highlight, and two pads holding opposite directions should fight over it
 // exactly as two hands on one keyboard would.
 inline int g_dirHeld = 0;
+
+// ⭐⭐ WHERE YOU ARE AND WHAT IS PRESSED ARE DIFFERENT THINGS (rhoquinn8217,
+// 2026-09-02). A filled key was being asked to mean three things at once --
+// "the cursor is here", "this is held down" and "this is latched" -- so none of
+// them read clearly.
+//
+// ⓘ Now: a HALO marks where the cursor is, a FILL means pressed, a fill that
+// stays means latched, and amber means held down on a shoulder.
+inline int g_pressRow = -1, g_pressCol = -1;
 inline const void *g_pasteHeld = nullptr;
 
 inline int mod_state(uint8_t bit)
@@ -851,13 +860,18 @@ inline void press_current(const void *who)
 
     uint8_t keys[6] = { usage, 0, 0, 0, 0, 0 };
     ctm_keyboard_device::set_state_for(who, mods, keys, usage != 0 ? 1 : 0);
-    if (usage != 0) g_latchUsed = true;
+    if (usage != 0) {
+        g_latchUsed = true;
+        g_pressRow = g_row; g_pressCol = g_col;      // this one is down
+        invalidate();
+    }
 }
 
 inline void release_current(const void *who)
 {
     uint8_t none[6] = { 0, 0, 0, 0, 0, 0 };
     ctm_keyboard_device::set_state_for(who, 0, none, 0);
+    if (g_pressRow >= 0) { g_pressRow = g_pressCol = -1; invalidate(); }
     // ⛔ ONLY IF A KEY ACTUALLY USED IT. This cleared every latch on any
     // release -- so clicking ctrl latched it and letting go of the mouse button
     // un-latched it a moment later, which is why mouse latching never appeared
@@ -953,6 +967,9 @@ inline void paint(HWND hwnd)
     // ⓘ Lighter than a key, dimmer than the halo: enough to say "this is
     // clickable" without competing with where the pad is.
     HBRUSH fillHover  = CreateSolidBrush(RGB(0x24, 0x28, 0x34));
+    // ⓘ Amber for HELD, matching Safe Edit Mode on the settings page: the
+    // same colour already means "on, and not because you latched it".
+    HBRUSH fillHeld   = CreateSolidBrush(RGB(0x5a, 0x4a, 0x1c));
     HBRUSH edgeHot    = CreateSolidBrush(RGB(0x8f, 0xa8, 0xff));
 
     // ⓘ Held on R1, or latched from the fn key -- either shows the F row.
@@ -961,8 +978,10 @@ inline void paint(HWND hwnd)
 
     for (const Placed &p : g_placed) {
         const Key &k = key_at(p.row, p.col);
-        const bool hot = (p.row == g_row && p.col == g_col);
+        // ⓘ FOUR SEPARATE FACTS, each with its own mark now.
+        const bool hot = (p.row == g_row && p.col == g_col);          // the halo
         const bool hover = (p.row == g_hoverRow && p.col == g_hoverCol);
+        const bool pressed = (p.row == g_pressRow && p.col == g_pressCol);
 
         HBRUSH fill = fillNormal;
         if (k.kind == KK_MOD) {
@@ -973,12 +992,26 @@ inline void paint(HWND hwnd)
         } else if (k.kind == KK_ACTION) {
             fill = fillMod;
         }
+        // ⭐ THE FILL SAYS WHAT THE KEY IS DOING, never where the cursor is.
+        if ((k.kind == KK_MOD && k.mod == KBD_SHIFT && g_shiftHeld.load()) ||
+            (k.kind == KK_MOD && k.mod == KBD_FN && g_fnHeld.load())) fill = fillHeld;
+        if (pressed) fill = fillHot;
         RECT r = p.r;
         // ⓘ The grab area is drawn as nothing: no fill, no label. It reads as
         // part of the frame, which is exactly what it is for.
         if (k.kind == KK_SPACER) continue;
-        FillRect(dc, &r, hot ? fillHot : hover ? fillHover : fill);
-        if (hot) FrameRect(dc, &r, edgeHot);
+        FillRect(dc, &r, (hover && !pressed) ? fillHover : fill);
+
+        // ⭐ THE HALO IS A RING, NOT A FILL. Where you ARE has to stay legible
+        // on top of whatever the key is DOING, and a ring is the only mark
+        // that does not compete with the colour underneath it.
+        if (hot) {
+            RECT ring = r;
+            for (int i = 0; i < 3; ++i) {
+                FrameRect(dc, &ring, edgeHot);
+                ring.left += 1; ring.top += 1; ring.right -= 1; ring.bottom -= 1;
+            }
+        }
 
         // ⓘ One label decided in one place: F-keys win over shifted, which wins
         // over the plain one.
@@ -1033,7 +1066,7 @@ inline void paint(HWND hwnd)
         HGDIOBJ chosen = SelectObject(dc, p.row == 0 ? tabFont
                                         : heldNow ? boldSmall
                                         : latched ? bold : font);
-        SetTextColor(dc, hot ? RGB(0xff, 0xff, 0xff) : RGB(0xe8, 0xea, 0xf2));
+        SetTextColor(dc, pressed ? RGB(0xff, 0xff, 0xff) : RGB(0xe8, 0xea, 0xf2));
         DrawTextW(dc, label, -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
         SelectObject(dc, chosen);
 
@@ -1087,6 +1120,7 @@ inline void paint(HWND hwnd)
     DeleteObject(fillNormal); DeleteObject(fillMod); DeleteObject(fillFn);
     DeleteObject(fillLatch); DeleteObject(fillLock);
     DeleteObject(fillHover);
+    DeleteObject(fillHeld);
     DeleteObject(fillHot); DeleteObject(edgeHot);
     SelectObject(dc, oldFont);
     DeleteObject(font);
@@ -1639,8 +1673,13 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
     static bool sentLast = false;
     if (usage != 0) {
         sentLast = true;
+        if (g_pressRow != g_row || g_pressCol != g_col) {
+            g_pressRow = g_row; g_pressCol = g_col;
+            invalidate();
+        }
     } else if (sentLast) {
         sentLast = false;
+        if (g_pressRow >= 0) { g_pressRow = g_pressCol = -1; invalidate(); }
         bool changed = false;
         for (auto &e : g_mods) {
             if (e.second == LATCH_ON) { e.second = LATCH_OFF; changed = true; }
