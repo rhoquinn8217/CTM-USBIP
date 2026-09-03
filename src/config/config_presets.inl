@@ -66,7 +66,7 @@ struct Preset {
        rebound button is stripped before Steam sees it, so the pad could not
        reach the keys, and clicking them with the touchpad cursor fought the
        pad's own input. Ours takes the pad directly. */                       \
-    { "rebind_2",  "OSKeyboard" },   /* square -- our on-screen keyboard   */  \
+    { "rebind_2",  "KeyboardOverlay" }, /* square -- our on-screen keyboard */  \
     { "rebind_3",  "Space" },        /* triangle -- Deck: Y = Space        */  \
     { "rebind_12", "ArrowUp" },                                                \
     { "rebind_13", "ArrowDown" },                                              \

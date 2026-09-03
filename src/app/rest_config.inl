@@ -269,7 +269,6 @@ static std::string rest_keys_json()
     // somewhere unrelated. Both happened on 2026-09-01. With CTMKEYS the text
     // can contain anything except that exact delimiter.
     const std::string settings = R"CTMKEYS({"keys":[
-{"key":"osk_program","type":"choice","choices":["steam","osk","overlay"],"default":"steam","help":"Which on-screen keyboard the OSKeyboard binding opens. Steam's is navigable with the controller and closes cleanly, but needs Steam running. Windows' own osk.exe always works, but its keys must be clicked with the cursor -- the d-pad cannot walk them. Overlay is this program's own: the d-pad walks it, it never takes focus from the game, and it needs nothing else installed."},
 {"key":"rebind_debug","type":"bool","default":false,"help":"Logs what each bound button is doing, twice a second: whether it was seen as pressed, and the raw button bytes. For working out why a rebind does nothing."},
 {"key":"rebind_0","type":"string","name":"(✕) | (A)","default":"","help":"Remap button to keyboard key or mouse action"},
 {"key":"turbo_0","type":"int","min":0,"max":1000,"name":"(✕) | (A)","default":0,"help":"Set milliseconds between rapid fire presses, 0 means held down"},
@@ -375,7 +374,7 @@ static std::string rest_keys_json()
 "ControlLeft","ShiftLeft","AltLeft","MetaLeft",
 "ControlRight","ShiftRight","AltRight","MetaRight",
 "MouseLeft","MouseRight","MouseMiddle","MouseWheelUp","MouseWheelDown",
-"OSKeyboard"
+"KeyboardOverlay","KeyboardSteam","KeyboardWindows"
 ]})CTMKEYS";
     return settings + pointers + names;
 }

@@ -715,10 +715,18 @@ inline void apply(const void *deviceKey,
         // ⭐ The on-screen keyboard, before the mouse and key paths: it is
         // neither, and like a wheel click it fires ONCE per press -- a toggle
         // repeated at 250Hz would open and close the keyboard continuously.
-        if (code == "OSKeyboard" || code == "oskeyboard") {
+        // ⓘ 0 Steam, 1 Windows' osk.exe, 2 ours. ⛔ OSKeyboard is kept as an
+        // alias for our own so configs written before the split keep working --
+        // it was the only one that could mean anything else, and it meant
+        // whatever osk_program said.
+        const int oskWhich =
+            (code == "KeyboardSteam")   ? 0 :
+            (code == "KeyboardWindows") ? 1 :
+            (code == "KeyboardOverlay" || code == "OSKeyboard" || code == "oskeyboard") ? 2 : -1;
+        if (oskWhich >= 0) {
             static std::map<std::pair<const void *, int>, bool> oskHeld;
             const bool wasHeld = oskHeld[{deviceKey, i}];
-            if (active && !wasHeld) ctm_osk_toggle(section, i);
+            if (active && !wasHeld) ctm_osk_toggle(section, i, oskWhich);
             oskHeld[{deviceKey, i}] = active;
             continue;
         }

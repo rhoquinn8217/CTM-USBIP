@@ -34,14 +34,10 @@ namespace ctm_osk {
 // through the same report path everything else uses.
 enum class Program { Steam, Osk, Overlay };
 
-inline Program parse_program(const std::string &raw)
-{
-    std::string v;
-    for (char c : raw) v.push_back(static_cast<char>((c >= 'A' && c <= 'Z') ? c - 'A' + 'a' : c));
-    if (v == "osk" || v == "windows") return Program::Osk;
-    if (v == "overlay" || v == "ctm") return Program::Overlay;
-    return Program::Steam;              // unknown or absent: the one that works
-}
+// ⛔ parse_program is GONE (2026-09-03). It read the osk_program setting, and
+// with the keyboard named by the binding there is nothing left to parse. ⓘ
+// Removed rather than left: an unused parser is the kind of thing someone later
+// wires back up, reintroducing the coupling on purpose.
 
 enum class Action { Open, Close };
 
@@ -119,9 +115,18 @@ inline void do_close(Program program)
 
 inline std::atomic<bool> g_remembered{false};
 
-inline void toggle(const std::string &section, int button)
+// ⭐⭐ THE BINDING NAMES THE KEYBOARD (rhoquinn8217, 2026-09-03).
+//
+// ⛔ There used to be one OSKeyboard action and an osk_program setting saying
+// WHICH keyboard it meant -- a switch in one section changing what a binding in
+// another section did. Same hidden coupling the exclusivity settings had: you
+// could bind the keyboard, press it, and get something you did not choose,
+// with the reason living somewhere you had no cause to look.
+//
+// ⓘ Three bindings now, and the one you picked is the one that opens.
+inline void toggle(const std::string &section, int button, Program program)
 {
-    const Program program = parse_program(device_config_str(section.c_str(), "osk_program"));
+    (void)section;
     // ⭐ Ours is the only one we can ASK. Steam's window cannot be found
     // reliably and osk.exe has to be probed; the overlay is our own window, so
     // "is it up" is a fact rather than a guess -- and the remembered flag,
@@ -151,7 +156,8 @@ void ctm_overlay_open_steam()
     ctm_osk::run_shell(L"steam://open/bigpicture");
 }
 
-void ctm_osk_toggle(const std::string &section, int button)
+void ctm_osk_toggle(const std::string &section, int button, int program)
 {
-    ctm_osk::toggle(section, button);
+    ctm_osk::toggle(section, button,
+                    static_cast<ctm_osk::Program>(program));
 }

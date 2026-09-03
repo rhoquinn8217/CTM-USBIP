@@ -126,7 +126,7 @@ void ctm_stick_mouse_forget(const void *deviceKey);
 // after it because it reads config through the same accessors.
 // ⓘ `button` is the standard index that fired it, so an overlay keyboard can be
 // dismissed by the same button that opened it.
-void ctm_osk_toggle(const std::string &section, int button);
+void ctm_osk_toggle(const std::string &section, int button, int program);
 #include "usbip/device.inl"
 #include "audio/iso_in_pacing.inl"
 #include "usbip/server.inl"

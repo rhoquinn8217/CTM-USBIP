@@ -1,5 +1,6 @@
-// On-screen keyboard tests: which keyboard a config asks for, and the toggle
-// decision.
+// On-screen keyboard tests: the toggle decision.
+//
+// ⓘ "Which keyboard" is no longer a question -- the binding names it.
 //
 // ⚠️ WHAT THIS CANNOT TEST: the Win32 half -- ShellExecute of a steam:// URL,
 // FindWindow for the classic keyboard, PostMessage to close it. Those run on a
@@ -21,15 +22,7 @@ using namespace ctmtest;
 // either changes meaning.
 namespace ctm_osk {
 
-enum class Program { Steam, Osk };
-
-inline Program parse_program(const std::string &raw)
-{
-    std::string v;
-    for (char c : raw) v.push_back(static_cast<char>((c >= 'A' && c <= 'Z') ? c - 'A' + 'a' : c));
-    if (v == "osk" || v == "windows") return Program::Osk;
-    return Program::Steam;
-}
+enum class Program { Steam, Osk, Overlay };
 
 enum class Action { Open, Close };
 
@@ -44,17 +37,14 @@ inline Action next_action(int known, bool remembered)
 
 int run_osk_tests()
 {
-    section("osk: which keyboard a config asks for");
-    {
-        CTM_CHECK(ctm_osk::parse_program("") == ctm_osk::Program::Steam);
-        CTM_CHECK(ctm_osk::parse_program("steam") == ctm_osk::Program::Steam);
-        CTM_CHECK(ctm_osk::parse_program("osk") == ctm_osk::Program::Osk);
-        CTM_CHECK(ctm_osk::parse_program("OSK") == ctm_osk::Program::Osk);
-        CTM_CHECK(ctm_osk::parse_program("windows") == ctm_osk::Program::Osk);
-        // ⭐ An unknown value falls back to the one that works, rather than
-        // failing -- the same rule every other config read here follows.
-        CTM_CHECK(ctm_osk::parse_program("nonsense") == ctm_osk::Program::Steam);
-    }
+    // ⛔ THE "WHICH KEYBOARD" TEST IS GONE (2026-09-03), and so is what it
+    // tested. There was one OSKeyboard binding and an osk_program setting
+    // naming which keyboard it meant -- a switch in one section deciding what
+    // a binding in another did. Now the binding IS the choice:
+    // KeyboardOverlay, KeyboardSteam, KeyboardWindows.
+    //
+    // ⓘ The mapping from binding to program lives in the rebind path, where
+    // it is used, rather than in a parser copied into this file.
 
     section("osk: when the state is knowable, the system wins over memory");
     {
