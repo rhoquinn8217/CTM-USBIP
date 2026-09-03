@@ -319,19 +319,29 @@ inline const Key kRow4[] = {
 //
 // ⛔ The spacer is most of the width on purpose. It is the handle.
 inline const Key kTabCompact[] = {
-    { L"", nullptr, 0, 0, KK_SPACER, 12.0f },
+    { L"", nullptr, 0, 0, KK_SPACER, 11.34f },
     { L"\u2328", nullptr, ACT_LAYOUT, 0, KK_ACTION, 0.67f },
     { L"\u21f3", nullptr, ACT_MOVE,   0, KK_ACTION, 0.67f },
     { L"\u2197", nullptr, ACT_SIZE,   0, KK_ACTION, 0.66f },
+    // ⭐ Close here TOO, not instead. rhoquinn8217, 2026-09-02:
+    // top-right is where a pointer goes to shut a window, and the
+    // key on the face is where a thumb already is. Two ways out of
+    // something is not redundancy worth removing.
+    { L"x", nullptr, ACT_CLOSE, 0, KK_ACTION, 0.66f },
 };
 
 // ⓘ One per face, because the grab area has to fill whatever width that face
 // is -- 14 units for Compact, 15.5 for Full. Only the spacer differs.
 inline const Key kTabFull[] = {
-    { L"", nullptr, 0, 0, KK_SPACER, 13.5f },
+    { L"", nullptr, 0, 0, KK_SPACER, 12.84f },
     { L"\u2328", nullptr, ACT_LAYOUT, 0, KK_ACTION, 0.67f },
     { L"\u21f3", nullptr, ACT_MOVE,   0, KK_ACTION, 0.67f },
     { L"\u2197", nullptr, ACT_SIZE,   0, KK_ACTION, 0.66f },
+    // ⭐ Close here TOO, not instead. rhoquinn8217, 2026-09-02:
+    // top-right is where a pointer goes to shut a window, and the
+    // key on the face is where a thumb already is. Two ways out of
+    // something is not redundancy worth removing.
+    { L"x", nullptr, ACT_CLOSE, 0, KK_ACTION, 0.66f },
 };
 
 inline const Key kCompact0[] = {
@@ -721,7 +731,11 @@ inline void press_current(const void *who)
         const int next = (st == LATCH_OFF) ? LATCH_ON
                        : (st == LATCH_ON && k.mod == KBD_SHIFT) ? LATCH_LOCKED
                        : LATCH_OFF;
-        if (next == LATCH_OFF && st == LATCH_ON && !g_latchUsed) {
+        // ⛔ NEVER FOR FN. Its bit is 0x80, which in a HID modifier byte is the
+        // RIGHT WINDOWS KEY -- so clearing an unused fn latch opened the Start
+        // menu (rhoquinn8217, 2026-09-02). active_mods masks fn out, but a tap
+        // sends the bit straight through.
+        if (next == LATCH_OFF && st == LATCH_ON && !g_latchUsed && k.mod != KBD_FN) {
             g_tapMod = k.mod;
             g_tapFrames = 3;
         }
@@ -794,6 +808,26 @@ inline void paint(HWND hwnd)
     HFONT small = CreateFontW(keyH * 3 / 10, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                               DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                               CLEARTYPE_QUALITY, VARIABLE_PITCH, L"Segoe UI");
+
+    // ⛔ THE TAB NEEDS ITS OWN FONT. Its buttons are half a key row tall, and
+    // drawing them with the key font meant glyphs taller than the box they sat
+    // in -- which is why they looked off-centre rather than centred
+    // (rhoquinn8217, 2026-09-02).
+    int tabH = keyH / 2;
+    for (const Placed &pl : g_placed) {
+        if (pl.row == 0) { tabH = pl.r.bottom - pl.r.top; break; }
+    }
+    HFONT tabFont = CreateFontW(tabH * 3 / 5, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+                                DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                                CLEARTYPE_QUALITY, VARIABLE_PITCH, L"Segoe UI");
+
+    // ⭐ A LATCHED KEY IS BOLD. Colour alone says which of three states a
+    // modifier is in; bold says it at a glance from across a room, which is
+    // what this keyboard is for.
+    HFONT bold = CreateFontW(keyH * 5 / 9, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+                             DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                             CLEARTYPE_QUALITY, VARIABLE_PITCH, L"Segoe UI");
+
     HGDIOBJ oldFont = SelectObject(dc, font);
     SetBkMode(dc, TRANSPARENT);
 
@@ -855,8 +889,35 @@ inline void paint(HWND hwnd)
             label = up;
         }
 
+        // ⭐ THE LABEL SAYS ITS OWN STATE. A latched modifier gains ⌵ and goes
+        // bold; a shift being HELD on the bumper goes bold and shouts, because
+        // that is what it is doing to every letter you press.
+        wchar_t shown[24];
+        const bool latched = (k.kind == KK_MOD && mod_state(k.mod) != LATCH_OFF);
+        const bool heldNow = (k.kind == KK_MOD && k.mod == KBD_SHIFT
+                              && g_shiftHeld.load());
+        if (heldNow) {
+            int i = 0;
+            for (; label[i] != 0 && i < 20; ++i) {
+                shown[i] = (label[i] >= L'a' && label[i] <= L'z')
+                         ? (wchar_t)(label[i] - L'a' + L'A') : label[i];
+            }
+            shown[i++] = L'\u2335';
+            shown[i] = 0;
+            label = shown;
+        } else if (latched) {
+            int i = 0;
+            for (; label[i] != 0 && i < 20; ++i) shown[i] = label[i];
+            shown[i++] = L'\u2335';
+            shown[i] = 0;
+            label = shown;
+        }
+
+        HGDIOBJ chosen = SelectObject(dc, p.row == 0 ? tabFont
+                                        : (latched || heldNow) ? bold : font);
         SetTextColor(dc, hot ? RGB(0xff, 0xff, 0xff) : RGB(0xe8, 0xea, 0xf2));
         DrawTextW(dc, label, -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        SelectObject(dc, chosen);
 
         // ⭐ THE SHIFTED CHARACTER, PRINTED SMALL IN THE CORNER -- Steam does
         // this and it is the best thing on their keyboard: you never have to
@@ -887,6 +948,20 @@ inline void paint(HWND hwnd)
         }
     }
 
+    // ⭐ THE TITLE, in the space that is otherwise a handle. It says what this
+    // is -- useful the first time someone meets it, and it costs a strip that
+    // was empty anyway.
+    for (const Placed &pl : g_placed) {
+        if (pl.row != 0 || key_at(0, pl.col).kind != KK_SPACER) continue;
+        RECT tr = pl.r;
+        tr.left += 8;
+        SelectObject(dc, tabFont);
+        SetTextColor(dc, RGB(0x8b, 0x8d, 0x96));
+        DrawTextW(dc, L"DS5-USBIP Virtual Keyboard", -1, &tr,
+                  DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        break;
+    }
+
     DeleteObject(fillNormal); DeleteObject(fillMod); DeleteObject(fillFn);
     DeleteObject(fillLatch); DeleteObject(fillLock);
     DeleteObject(fillHover);
@@ -894,6 +969,8 @@ inline void paint(HWND hwnd)
     SelectObject(dc, oldFont);
     DeleteObject(font);
     DeleteObject(small);
+    DeleteObject(tabFont);
+    DeleteObject(bold);
 
     EndPaint(hwnd, &ps);
 }
@@ -1329,32 +1406,13 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
     const Key &k = key_at(g_row, g_col);
     const bool cross = (data[8] & 0x20) != 0;
 
-    // ⓘ A MODIFIER is a press, not a hold: it cycles its own state and sends
-    // nothing on its own. Latch, then lock for shift, then off.
+    // ⛔ AGAIN: ONE IMPLEMENTATION. This was a second copy of the latch rules,
+    // and it drifted exactly as the actions did -- the guard that stops fn
+    // being sent as a keystroke went into press_current and this copy kept
+    // sending it, which is why unlatching fn opened the Start menu
+    // (rhoquinn8217, 2026-09-02).
     if (cross && k.kind == KK_MOD && edge(deviceKey, 8, true)) {
-        const int st = mod_state(k.mod);
-        const int next = (st == LATCH_OFF)     ? LATCH_ON
-                       : (st == LATCH_ON && k.mod == KBD_SHIFT) ? LATCH_LOCKED
-                       : LATCH_OFF;
-
-        // ⭐⭐ CLEARING AN UNUSED LATCH SENDS THE MODIFIER ON ITS OWN
-        // (rhoquinn8217, 2026-09-02: "the win key doesn't appear to work").
-        //
-        // ⛔ A latched modifier was only ever sent ALONGSIDE a key, so Win on
-        // its own never reached Windows and the Start menu never opened. On a
-        // real keyboard, pressing and releasing Win alone IS the gesture --
-        // this is the same thing: press it, press it again without using it,
-        // and it goes as a tap.
-        //
-        // ⓘ Ctrl and Alt get the same treatment because the rule should not
-        // have exceptions; Alt alone reaching the menu bar is real behaviour.
-        if (next == LATCH_OFF && st == LATCH_ON && !g_latchUsed) {
-            g_tapMod = k.mod;
-            g_tapFrames = 3;        // held for a few reports so it registers
-        }
-        if (next != LATCH_OFF) g_latchUsed = false;
-        g_mods[k.mod] = next;
-        invalidate();
+        press_current(deviceKey);
     } else if (!cross) {
         edge(deviceKey, 8, false);          // keep the modifier edge honest
     }
