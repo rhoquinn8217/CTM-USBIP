@@ -118,11 +118,22 @@ inline bool g_dragHaveFrom = false;
 // want very different pixel counts and the same proportion.
 // ⓘ Cycled with Create -- every face button and shoulder was already spoken
 // for, and Create is out of the way of typing.
-// ⓘ Compact is the DEFAULT: most typing from a couch is a search box or a
-// password, and the punctuation Full adds is a single button away.
+// ⓘ Three faces now, cycled by the layout button. Compact is the DEFAULT:
+// most typing from a couch is a search box or a password.
 // ⛔ Declared here rather than beside the layouts, because the SIZE depends on
 // which face is showing and size_for comes first.
-inline std::atomic_bool g_full{false};
+enum Face { FACE_SUB = 0, FACE_COMPACT = 1, FACE_FULL = 2 };
+inline std::atomic_int g_face{FACE_COMPACT};
+
+// ⓘ How many columns each face is, which is what the size arithmetic needs.
+inline float face_cols()
+{
+    switch (g_face.load()) {
+    case FACE_SUB:  return 11.0f;
+    case FACE_FULL: return 15.5f;
+    default:        return 14.0f;
+    }
+}
 
 inline std::atomic_int g_size{1};                     // 0 small, 1 medium, 2 large
 
@@ -151,12 +162,12 @@ inline void size_for(int *w, int *h)
 {
     const int screenW = GetSystemMetrics(SM_CXSCREEN);
     const float keyW = screenW * kKeyShare[g_size.load() % 3];
-    const float cols0 = g_full.load() ? 15.5f : 14.0f;
+    const float cols0 = face_cols();
     *w = (int)(keyW * cols0);
     // ⓘ Height follows the COLUMN COUNT so the keys stay roughly square: a
     // wider face with more columns needs proportionally more height, and a
     // fixed ratio would have squashed Full's rows.
-    const float cols = g_full.load() ? 15.5f : 14.0f;
+    const float cols = face_cols();
     // ⓘ Two thirds the height it was (rhoquinn8217, 2026-09-02): five rows of
     // tall keys plus a tab made the keyboard cover too much of the screen, and
     // a key does not need to be square to be easy to hit.
@@ -327,6 +338,65 @@ inline const Key kRow4[] = {
 // below, and one table means they cannot drift apart.
 //
 // ⛔ The spacer is most of the width on purpose. It is the handle.
+// ⭐⭐ SUB-COMPACT (rhoquinn8217, 2026-09-02). Compact with every symbol and
+// punctuation mark taken out, backtick included -- eleven columns of letters,
+// digits and the keys a controller cannot reach.
+//
+// ⓘ For typing a name or a search term, where , . / [ ] \ ; ' are dead weight
+// and every column of them is a column of travel.
+inline const Key kSub0[] = {
+    { L"1", nullptr, 0x1e, 0, KK_FN, 1.0f }, { L"2", nullptr, 0x1f, 0, KK_FN, 1.0f },
+    { L"3", nullptr, 0x20, 0, KK_FN, 1.0f }, { L"4", nullptr, 0x21, 0, KK_FN, 1.0f },
+    { L"5", nullptr, 0x22, 0, KK_FN, 1.0f }, { L"6", nullptr, 0x23, 0, KK_FN, 1.0f },
+    { L"7", nullptr, 0x24, 0, KK_FN, 1.0f }, { L"8", nullptr, 0x25, 0, KK_FN, 1.0f },
+    { L"9", nullptr, 0x26, 0, KK_FN, 1.0f }, { L"0", nullptr, 0x27, 0, KK_FN, 1.0f },
+    { L"\u232b", nullptr, 0x2a, 0, KK_NORMAL, 1.0f },
+};
+inline const Key kSub1[] = {
+    { L"tab", nullptr, 0x2b, 0, KK_NORMAL, 1.0f },
+    { L"q", nullptr, 0x14, 0, KK_NORMAL, 1.0f }, { L"w", nullptr, 0x1a, 0, KK_NORMAL, 1.0f },
+    { L"e", nullptr, 0x08, 0, KK_NORMAL, 1.0f }, { L"r", nullptr, 0x15, 0, KK_NORMAL, 1.0f },
+    { L"t", nullptr, 0x17, 0, KK_NORMAL, 1.0f }, { L"y", nullptr, 0x1c, 0, KK_NORMAL, 1.0f },
+    { L"u", nullptr, 0x18, 0, KK_NORMAL, 1.0f }, { L"i", nullptr, 0x0c, 0, KK_NORMAL, 1.0f },
+    { L"o", nullptr, 0x12, 0, KK_NORMAL, 1.0f }, { L"p", nullptr, 0x13, 0, KK_NORMAL, 1.0f },
+};
+inline const Key kSub2[] = {
+    { L"ctrl", nullptr, 0, KBD_CTRL, KK_MOD, 1.0f },
+    { L"a", nullptr, 0x04, 0, KK_NORMAL, 1.0f }, { L"s", nullptr, 0x16, 0, KK_NORMAL, 1.0f },
+    { L"d", nullptr, 0x07, 0, KK_NORMAL, 1.0f }, { L"f", nullptr, 0x09, 0, KK_NORMAL, 1.0f },
+    { L"g", nullptr, 0x0a, 0, KK_NORMAL, 1.0f }, { L"h", nullptr, 0x0b, 0, KK_NORMAL, 1.0f },
+    { L"j", nullptr, 0x0d, 0, KK_NORMAL, 1.0f }, { L"k", nullptr, 0x0e, 0, KK_NORMAL, 1.0f },
+    { L"l", nullptr, 0x0f, 0, KK_NORMAL, 1.0f },
+    { L"enter", nullptr, 0x28, 0, KK_NORMAL, 1.0f },
+};
+inline const Key kSub3[] = {
+    { L"shift", nullptr, 0, KBD_SHIFT, KK_MOD, 1.0f },
+    { L"z", nullptr, 0x1d, 0, KK_NORMAL, 1.0f }, { L"x", nullptr, 0x1b, 0, KK_NORMAL, 1.0f },
+    { L"c", nullptr, 0x06, 0, KK_NORMAL, 1.0f }, { L"v", nullptr, 0x19, 0, KK_NORMAL, 1.0f },
+    { L"b", nullptr, 0x05, 0, KK_NORMAL, 1.0f }, { L"n", nullptr, 0x11, 0, KK_NORMAL, 1.0f },
+    { L"m", nullptr, 0x10, 0, KK_NORMAL, 1.0f },
+    { L"\u2191", nullptr, 0x52, 0, KK_NORMAL, 1.0f },
+    { L"shift", nullptr, 0, KBD_SHIFT, KK_MOD, 1.0f },
+    { L"fn", nullptr, 0, KBD_FN, KK_MOD, 1.0f },
+};
+inline const Key kSub4[] = {
+    { L"alt", nullptr, 0, KBD_ALT, KK_MOD, 1.0f },
+    { L"win", nullptr, 0, KBD_WIN, KK_MOD, 1.0f },
+    { L"space", nullptr, 0x2c, 0, KK_NORMAL, 4.0f },
+    { L"paste", L"copy", ACT_PASTE, 0, KK_ACTION, 1.0f },
+    { L"\u2190", nullptr, 0x50, 0, KK_NORMAL, 1.0f },
+    { L"\u2193", nullptr, 0x51, 0, KK_NORMAL, 1.0f },
+    { L"\u2192", nullptr, 0x4f, 0, KK_NORMAL, 1.0f },
+    { L"\u2328\u2938", nullptr, ACT_CLOSE, 0, KK_ACTION, 1.0f },
+};
+inline const Key kTabSub[] = {
+    { L"", nullptr, 0, 0, KK_SPACER, 8.34f },
+    { L"\u2328", nullptr, ACT_LAYOUT, 0, KK_ACTION, 0.67f },
+    { L"\u21f3", nullptr, ACT_MOVE,   0, KK_ACTION, 0.67f },
+    { L"\u2197", nullptr, ACT_SIZE,   0, KK_ACTION, 0.66f },
+    { L"x", nullptr, ACT_CLOSE, 0, KK_ACTION, 0.66f },
+};
+
 inline const Key kTabCompact[] = {
     { L"", nullptr, 0, 0, KK_SPACER, 11.34f },
     { L"\u2328", nullptr, ACT_LAYOUT, 0, KK_ACTION, 0.67f },
@@ -413,6 +483,10 @@ inline const Row kFullRows[] = {
     CTM_ROW(kTabFull),
     CTM_ROW(kRow0), CTM_ROW(kRow1), CTM_ROW(kRow2), CTM_ROW(kRow3), CTM_ROW(kRow4),
 };
+inline const Row kSubRows[] = {
+    CTM_ROW(kTabSub),
+    CTM_ROW(kSub0), CTM_ROW(kSub1), CTM_ROW(kSub2), CTM_ROW(kSub3), CTM_ROW(kSub4),
+};
 inline const Row kCompactRows[] = {
     CTM_ROW(kTabCompact),
     CTM_ROW(kCompact0), CTM_ROW(kCompact1), CTM_ROW(kCompact2),
@@ -421,7 +495,14 @@ inline const Row kCompactRows[] = {
 #undef CTM_ROW
 
 
-inline const Row *rows_now() { return g_full.load() ? kFullRows : kCompactRows; }
+inline const Row *rows_now()
+{
+    switch (g_face.load()) {
+    case FACE_SUB:  return kSubRows;
+    case FACE_FULL: return kFullRows;
+    default:        return kCompactRows;
+    }
+}
 inline const int kRowCount = 6;          // the tab, then five rows of keys
 
 // ⓘ The tab is shorter than a key row -- it holds icons, not letters.
@@ -695,7 +776,8 @@ inline void move_v(int dir)
 inline void switch_face()
 {
     const wchar_t *was = key_at(g_row, g_col).label;
-    g_full.store(!g_full.load());
+    // ⓘ Cycles sub -> compact -> full -> sub. One button, three faces.
+    g_face.store((g_face.load() + 1) % 3);
     g_placed.clear(); g_placedW = 0;
     int fr = -1, fc = -1;
     for (int r = 0; r < kRowCount && fr < 0; ++r) {
@@ -852,6 +934,9 @@ inline void paint(HWND hwnd)
     // ⭐ A LATCHED KEY IS BOLD. Colour alone says which of three states a
     // modifier is in; bold says it at a glance from across a room, which is
     // what this keyboard is for.
+    HFONT boldSmall = CreateFontW(keyH * 2 / 5, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+                                  DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                                  CLEARTYPE_QUALITY, VARIABLE_PITCH, L"Segoe UI");
     HFONT bold = CreateFontW(keyH * 5 / 9, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
                              DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                              CLEARTYPE_QUALITY, VARIABLE_PITCH, L"Segoe UI");
@@ -941,8 +1026,13 @@ inline void paint(HWND hwnd)
             label = shown;
         }
 
+        // ⛔ A MARKED LABEL NEEDS A SMALLER FONT. "⌵shift⌵" is nearly twice the
+        // width of "shift", and DrawText with DT_CENTER clips what will not
+        // fit -- from BOTH ends, which ate the leading countersink and left
+        // only the trailing one visible (rhoquinn8217, 2026-09-02).
         HGDIOBJ chosen = SelectObject(dc, p.row == 0 ? tabFont
-                                        : (latched || heldNow) ? bold : font);
+                                        : heldNow ? boldSmall
+                                        : latched ? bold : font);
         SetTextColor(dc, hot ? RGB(0xff, 0xff, 0xff) : RGB(0xe8, 0xea, 0xf2));
         DrawTextW(dc, label, -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
         SelectObject(dc, chosen);
@@ -985,8 +1075,11 @@ inline void paint(HWND hwnd)
         tr.left += 8;
         SelectObject(dc, tabFont);
         SetTextColor(dc, RGB(0x8b, 0x8d, 0x96));
-        DrawTextW(dc, g_full.load() ? L"DS5-USBIP Virtual Keyboard - FULL"
-                                    : L"DS5-USBIP Virtual Keyboard - COMPACT", -1, &tr,
+        const wchar_t *title =
+            g_face.load() == FACE_FULL ? L"DS5-USBIP Virtual Keyboard - FULL" :
+            g_face.load() == FACE_SUB  ? L"DS5-USBIP Virtual Keyboard - SUB-COMPACT"
+                                       : L"DS5-USBIP Virtual Keyboard - COMPACT";
+        DrawTextW(dc, title, -1, &tr,
                   DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
         break;
     }
@@ -1000,6 +1093,7 @@ inline void paint(HWND hwnd)
     DeleteObject(small);
     DeleteObject(tabFont);
     DeleteObject(bold);
+    DeleteObject(boldSmall);
 
     // ⓘ The finished picture arrives in one go.
     BitBlt(front, 0, 0, rc.right, rc.bottom, dc, 0, 0, SRCCOPY);
@@ -1136,9 +1230,24 @@ inline LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_APP + 2: {                 // WM_CTM_RESIZE
         int w = 0, h = 0;
         size_for(&w, &h);
-        // ⓘ Re-centred as it resizes, or growing would push it off one edge.
-        SetWindowPos(hwnd, HWND_TOPMOST, (GetSystemMetrics(SM_CXSCREEN) - w) / 2,
-                     overlay_y(h), w, h, SWP_NOACTIVATE);
+        // ⭐ GROWS WHERE IT STANDS (rhoquinn8217, 2026-09-02). It used to jump
+        // back to the centre, which threw away wherever you had just dragged
+        // it to -- so resizing and placing fought each other.
+        //
+        // ⓘ Around its own MIDDLE, not its corner: growing from the top-left
+        // pushes a keyboard that lives at the bottom of the screen off it.
+        RECT rc;
+        GetWindowRect(hwnd, &rc);
+        int x = rc.left - (w - (rc.right - rc.left)) / 2;
+        int y = rc.top  - (h - (rc.bottom - rc.top)) / 2;
+        // ⓘ Still clamped: there is no title bar to grab it back by.
+        const int screenW = GetSystemMetrics(SM_CXSCREEN);
+        const int screenH = GetSystemMetrics(SM_CYSCREEN);
+        if (x < -w / 3) x = -w / 3;
+        if (y < 0) y = 0;
+        if (x > screenW - w / 3) x = screenW - w / 3;
+        if (y > screenH - h / 3) y = screenH - h / 3;
+        SetWindowPos(hwnd, HWND_TOPMOST, x, y, w, h, SWP_NOACTIVATE);
         InvalidateRect(hwnd, nullptr, FALSE);
         return 0;
     }
