@@ -479,6 +479,23 @@ public:
         ctm_rebind_apply(this, profile_.device_descriptor, linked_config(),
                          report.data, report.length);
 
+        // ⭐ Whatever is driving the mouse is hidden from the game -- the gyro
+        // if it is aiming, a stick if it points or scrolls, the touchpad if it
+        // is a trackpad.
+        //
+        // ⛔⛔ LAST, IMMEDIATELY BEFORE THE REPORT LEAVES. It first sat above
+        // rebind, which broke the two-finger chord: the chord is detected
+        // inside rebind, and by then the touch bytes had already been blanked
+        // to "no finger", so the settings window could not be summoned
+        // (rhoquinn8217, 2026-09-03).
+        //
+        // ⓘ Everything that needs to READ the real report -- the three mouse
+        // hooks, the chord, the rebinds -- has now had it. Nothing runs after
+        // this but the send, which is exactly what "hidden from the game"
+        // should mean.
+        ctm_mouse_exclusive_apply(this, profile_.device_descriptor, linked_config(),
+                                  report.data, report.length);
+
         enqueue_input_report(report);
     }
 

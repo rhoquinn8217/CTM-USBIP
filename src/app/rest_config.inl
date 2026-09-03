@@ -269,7 +269,6 @@ static std::string rest_keys_json()
     // somewhere unrelated. Both happened on 2026-09-01. With CTMKEYS the text
     // can contain anything except that exact delimiter.
     const std::string settings = R"CTMKEYS({"keys":[
-{"key":"osk_program","type":"choice","choices":["steam","osk","overlay"],"default":"steam","help":"Which on-screen keyboard the OSKeyboard binding opens. Steam's is navigable with the controller and closes cleanly, but needs Steam running. Windows' own osk.exe always works, but its keys must be clicked with the cursor -- the d-pad cannot walk them. Overlay is this program's own: the d-pad walks it, it never takes focus from the game, and it needs nothing else installed."},
 {"key":"rebind_debug","type":"bool","default":false,"help":"Logs what each bound button is doing, twice a second: whether it was seen as pressed, and the raw button bytes. For working out why a rebind does nothing."},
 {"key":"rebind_0","type":"string","name":"(✕) | (A)","default":"","help":"Remap button to keyboard key or mouse action"},
 {"key":"turbo_0","type":"int","min":0,"max":1000,"name":"(✕) | (A)","default":0,"help":"Set milliseconds between rapid fire presses, 0 means held down"},
@@ -310,6 +309,7 @@ static std::string rest_keys_json()
     // their own piece -- the next-largest structural boundary after the key
     // names.
     const std::string pointers = R"CTMKEYS(
+{"key":"stick_no_passthrough","type":"bool","default":false,"help":"Turn this on together with the stick mouse settings below, so that stick moves only the cursor and nothing else can read it. Leave it off and the game reads it as a stick as well, so you get both at once -- the game steering or walking AND the cursor moving. The other stick is never touched and still plays normally."},
 {"key":"stick_to_mouse","type":"choice","choices":["","right","left","both"],"default":"","help":"Which stick moves the mouse cursor. Blank is off. With both, whichever stick is pushed further drives, so the two never fight. The cursor moves at a speed while the stick is held, unlike gyro and the touchpad which follow movement."},
 {"key":"stick_to_mouse_gate","type":"choice","choices":["always","L2","R2","L1","R1","touchpad","!touchpad","touchpad_click","PS"],"default":"always","help":"What must be held for the stick to move the cursor. Blank means always -- the stick works whenever it is enabled. Useful when the touchpad or gyro is also driving the cursor."},
 {"key":"stick_mouse_speed","type":"int","min":50,"max":5000,"default":1200,"help":"Cursor pixels per second at full stick deflection. Time-based, so the speed does not change with the controller's report rate."},
@@ -321,14 +321,16 @@ static std::string rest_keys_json()
 {"key":"stick_scroll_deadzone","type":"int","min":0,"max":60,"default":25,"help":"Percent of stick travel ignored around the centre. Larger than the cursor's by default, so a stick used for aiming does not scroll by accident."},
 {"key":"stick_scroll_natural","type":"bool","default":false,"help":"Scroll direction. Off: pushing up scrolls the content up, like a wheel. On: inverted, the phone convention."},
 {"key":"stick_mouse_invert","type":"int","min":0,"max":3,"default":0,"help":"1 inverts horizontal, 2 inverts vertical, 3 inverts both."},
+{"key":"touchpad_no_passthrough","type":"bool","default":false,"help":"Turn this on together with the touchpad mouse settings below, so a finger on the touchpad moves only the cursor and nothing else can read the touchpad. Leave it off and, in a game that responds to the touchpad, you get both at once -- the game reacting to your finger AND the cursor moving."},
 {"key":"touchpad_to_mouse_gate","type":"choice","choices":["always","L2","R2","L1","R1","touchpad_click","PS"],"default":"always","help":"What must be held for the touchpad to move the cursor, scroll or tap. Blank means always -- the touchpad settings have their own switches, so an absent gate is not off."},
 {"key":"touchpad_to_mouse","type":"bool","default":false,"help":"One finger on the touchpad moves the cursor, laptop-trackpad style. Relative: lift and reposition without the cursor jumping. Feeds the same virtual mouse as gyro."},
 {"key":"touchpad_mouse_speed","type":"int","min":1,"max":400,"default":100,"help":"Touchpad cursor speed, percent. At 100 a full-pad swipe crosses roughly a full screen width."},
-{"key":"touchpad_scroll","type":"bool","default":false,"help":"Two fingers on the touchpad scroll, like a laptop trackpad. Vertical only."},
+{"key":"touchpad_scroll","type":"choice","choices":["0","1","2"],"default":"0","help":"How many fingers scroll. 0 is off. 1 is one finger, which is what controller makers do -- and on a DualSense a pointer finger reaches the pad without either thumb leaving a stick. 2 is two fingers, the laptop way, and the only option when one finger is already moving the cursor. An older config saying true means 2."},
 {"key":"touchpad_scroll_speed","type":"int","min":1,"max":400,"default":100,"help":"Scroll speed, percent."},
 {"key":"touchpad_scroll_natural","type":"bool","default":false,"help":"Scroll direction. Off: fingers down scrolls the page down, the classic wheel. On: content follows your fingers, the phone convention."},
 {"key":"touchpad_click_drag","type":"bool","default":false,"help":"Click the touchpad in with a finger on it to grab, move to drag, then LIFT THE FINGER to drop -- the click itself can be released straight away. Trackpads call this drag lock; three-finger drag is not possible here because the pad reports only two touches."},
 {"key":"touchpad_tap_click","type":"bool","default":false,"help":"A quick tap clicks: one finger is left click, two fingers is right click. Double-click is just tapping twice. Turn off if taps misfire in your grip."},
+{"key":"gyro_no_passthrough","type":"bool","default":false,"help":"Turn this on together with the gyro-to-mouse setting below, so tilting the pad moves only the cursor and nothing else can read the gyro. Leave it off and, in a game that responds to gyro, you get both at once -- the game reacting to the tilt AND the cursor moving."},
 {"key":"gyro_to_mouse_gate","type":"choice","choices":["","always","L2","R2","L1","R1","touchpad","!touchpad","touchpad_click","PS"],"default":"","help":"What must be held for gyro to move the mouse. Blank is off."},
 {"key":"gyro_mouse_px_per_360","type":"int","min":1000,"max":200000,"default":1920,"help":"Pixels the cursor travels for one full turn. 1920 means one turn crosses a 1080p screen, which is the calibrated figure -- if you need far more than that, the sensitivity settings are usually what is actually wrong."},
 {"key":"gyro_mouse_min_sens","type":"int","min":0,"max":60,"default":8,"help":"Sensitivity for slow, precise movement. ⭐ 8 is the recommended starting point and 4-10 is the useful band; below about 4 slow movement becomes almost dead, which people then compensate for by raising everything else."},
@@ -372,7 +374,7 @@ static std::string rest_keys_json()
 "ControlLeft","ShiftLeft","AltLeft","MetaLeft",
 "ControlRight","ShiftRight","AltRight","MetaRight",
 "MouseLeft","MouseRight","MouseMiddle","MouseWheelUp","MouseWheelDown",
-"OSKeyboard"
+"KeyboardDS5_USBIP","KeyboardSteam","KeyboardWindows"
 ]})CTMKEYS";
     return settings + pointers + names;
 }

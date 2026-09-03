@@ -114,6 +114,9 @@ void ctm_keyboard_forget_device(const void *deviceKey);
 // Swallow whatever is held, so a button that dismissed the overlay cannot also
 // reach the game on the next report.
 void ctm_rebind_swallow_held();
+void ctm_mouse_exclusive_apply(const void *deviceKey,
+                               const std::vector<unsigned char> &descriptor,
+                               const std::string &config, uint8_t *data, size_t len);
 void ctm_stick_mouse_apply(const void *deviceKey,
                            const std::vector<unsigned char> &descriptor,
                            const std::string &linkedConfig,
@@ -123,7 +126,7 @@ void ctm_stick_mouse_forget(const void *deviceKey);
 // after it because it reads config through the same accessors.
 // ⓘ `button` is the standard index that fired it, so an overlay keyboard can be
 // dismissed by the same button that opened it.
-void ctm_osk_toggle(const std::string &section, int button);
+void ctm_osk_toggle(const std::string &section, int button, int program);
 #include "usbip/device.inl"
 #include "audio/iso_in_pacing.inl"
 #include "usbip/server.inl"
@@ -161,7 +164,13 @@ void ctm_rebind_ensure_keyboard_started();
 #include "input/rebind.inl"
 #include "input/touch_mouse.inl"   // touchpad cursor/scroll/taps; needs the mouse device and the gyro mailbox
 #include "input/stick_mouse.inl"   // stick cursor; needs the gyro gate and mailbox
+// ⛔ AFTER the three mouse hooks, whose sources it blanks -- see the note in
+// the file. It must not run before they have read the motion.
+#include "input/mouse_exclusive.inl"  // keep the game out of what drives the mouse
 #include "input/osk.inl"          // the on-screen keyboard toggle
+// ⛔ AFTER osk.inl, which it calls to open the settings window, and after
+// overlay_window.inl, whose keyboard it toggles.
+#include "app/tray_icon.inl"       // the notification-area icon
 #include "app/rest_sessions.inl"
 #include "app/rest_config_sessions.inl"   // defines what rest_config.inl declares; needs agent.inl's sessions
 #include "app/service.inl"
@@ -357,6 +366,10 @@ int wmain(int argc, wchar_t **argv)
                 // could not check for an existing window, so every rebuild left
                 // another one behind.
                 ctm_open_ui::g_open_ui = true;
+                // ⭐ The icon comes with --ui. It is the only way to reach the
+                // on-screen keyboard without a bridged controller, which is
+                // the whole reason it exists.
+                ctm_tray::start();
             } else if (arg == L"--overlay-test") {
                 // ⓘ TEMPORARY, and named so. Step one of the overlay keyboard
                 // is a window with the right styles and a placeholder inside;
@@ -689,6 +702,7 @@ int wmain(int argc, wchar_t **argv)
     server.stop();
     device.stop();
     backend->stop();
+    ctm_tray::stop();
     SetConsoleCtrlHandler(console_ctrl_handler, FALSE);
     return 0;
 }

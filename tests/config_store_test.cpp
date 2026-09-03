@@ -362,16 +362,16 @@ int run_config_store_tests()
                 const std::string value = p->settings[k].value;
                 if (key == "rebind_0" && value == "Enter") enter = true;
                 if (key == "rebind_1" && value == "Escape") escape = true;
-                // ⓘ Square is intentionally unbound now -- see the note in
-                // config_presets.inl. The check that it stays that way is
-                // below, rather than a check that it is bound.
-                if (key == "rebind_2") keyboard = true;
+                // ⭐ Square opens OUR on-screen keyboard (2026-09-02). It was
+                // deliberately unbound while the only option was Steam's, which
+                // a rebound pad could not drive.
+                if (key == "rebind_2" && value == "KeyboardDS5_USBIP") keyboard = true;
                 if (key == "rebind_12" && value == "ArrowUp") arrows = true;
                 if (key == "rebind_7" && value == "MouseLeft") click = true;
             }
             CTM_CHECK(enter);
             CTM_CHECK(escape);
-            CTM_CHECK(!keyboard);        // Square stays free
+            CTM_CHECK(keyboard);         // Square opens the keyboard
             CTM_CHECK(arrows);
             CTM_CHECK(click);
         }
@@ -398,12 +398,46 @@ int run_config_store_tests()
         };
 
         CTM_CHECK(has("gyro-to-mouse", "gyro_to_mouse_gate", "always"));
-        CTM_CHECK(has("gyro-to-mouse", "stick_to_scroll", "left"));
-        // Not the touchpad: with the pad aiming, reaching it means regripping.
-        CTM_CHECK(!mentions("gyro-to-mouse", "touchpad_scroll"));
+        // ⛔ AND NOTHING ELSE DRIVES THE CURSOR HERE (rhoquinn8217, 2026-09-03).
+        // This preset used to borrow the LEFT STICK to scroll. That was nearly
+        // free while a borrowed source still reached the game -- but hiding a
+        // source now means losing it, so aiming with the gyro would have cost a
+        // stick as well. The d-pad's arrow keys already scroll.
+        CTM_CHECK(!mentions("gyro-to-mouse", "stick_to_scroll"));
+        // ⭐ THE TOUCHPAD DOES SCROLL HERE, with ONE finger (rhoquinn8217,
+        // 2026-09-03). The old reasoning was that reaching the pad meant
+        // regripping -- but a POINTER finger reaches a DualSense touchpad with
+        // both thumbs still on the sticks, which is why controller makers use
+        // one finger and laptops use two.
+        //
+        // ⛔ And the left stick is not spent on it: movement is what a gamer
+        // cannot give up, and the touchpad is the cheap thing to borrow.
+        CTM_CHECK(has("gyro-to-mouse", "touchpad_scroll", "1"));
+
+        // ⭐ EACH PRESET HIDES ITS OWN SOURCE AND NOBODY ELSE'S. A single
+        // setting could not say "hide the gyro but leave my sticks alone",
+        // which is why there are three (rhoquinn8217, 2026-09-03).
+        CTM_CHECK(has("gyro-to-mouse", "gyro_no_passthrough", "true"));
+        CTM_CHECK(!mentions("gyro-to-mouse", "stick_no_passthrough"));
+        CTM_CHECK(!mentions("gyro-to-mouse", "touchpad_no_passthrough"));
+
+        CTM_CHECK(has("touchpad-mouse", "touchpad_no_passthrough", "true"));
+        CTM_CHECK(!mentions("touchpad-mouse", "gyro_no_passthrough"));
+
+        CTM_CHECK(has("stick-to-mouse", "stick_no_passthrough", "true"));
+        CTM_CHECK(!mentions("stick-to-mouse", "gyro_no_passthrough"));
+
+        // ⛔ And the superseded single key is gone from every preset.
+        CTM_CHECK(!mentions("gyro-to-mouse", "mouse_exclusive"));
+        CTM_CHECK(!mentions("touchpad-mouse", "mouse_exclusive"));
+        CTM_CHECK(!mentions("stick-to-mouse", "mouse_exclusive"));
 
         CTM_CHECK(has("touchpad-mouse", "touchpad_to_mouse", "true"));
-        CTM_CHECK(has("touchpad-mouse", "touchpad_scroll", "true"));
+        // ⓘ Two fingers here -- one finger cannot scroll while one finger is
+        // already pointing. The gyro preset's ONE is checked above.
+        CTM_CHECK(has("touchpad-mouse", "touchpad_scroll", "2"));
+        // ⓘ The borrow rule -- gyro does not suppress the touchpad -- is
+        // asserted with the other suppression checks above.
         CTM_CHECK(has("touchpad-mouse", "touchpad_tap_click", "true"));
         // The hand is on the pad here, so the sticks are left alone.
         CTM_CHECK(!mentions("touchpad-mouse", "stick_to_scroll"));

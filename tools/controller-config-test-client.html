@@ -1673,7 +1673,9 @@ var PRESET_VALUE_LABELS = {
 
 var PRESET_SCROLL_FROM = {
   'stick_to_scroll': null,
-  'touchpad_scroll': 'Touchpad, two fingers'
+  // ⓘ null so the finger count is read from the VALUE -- it is 1 or 2 now, and
+  // a fixed label would have claimed two fingers on a preset that uses one.
+  'touchpad_scroll': null
 };
 
 // ⓘ Button labels come from /api/v1/keys, whose help opens with the button's
@@ -1748,49 +1750,99 @@ function openPresetPicker(ordinal, dev) {
 // and the picker keeps arrows because those rows are short.
 var PRESET_INFO_OPEN = '';       // the preset being read, or ''
 
+// ⭐⭐ THE PREVIEW SHOWS WHAT THE PRESET ACTUALLY WRITES (rhoquinn8217,
+// 2026-09-03: "give the actual name of the settings and the value").
+//
+// ⛔ It used to translate every setting into a phrase -- "Gyro -> cursor",
+// "Touchpad click -> recentre the cursor". That reads nicely and is a second
+// vocabulary to trust: nothing in the box matched what you would then see on
+// the settings page, and anything the translator did not recognise fell into a
+// catch-all that printed it under BUTTONS as a raw key and a bare "true".
+//
+// ⓘ Now it is the key and the value, exactly as written, with a SHORT note in
+// brackets only where the value cannot speak for itself -- a bare "1" or a
+// rebind index. Everything else is already self-explanatory.
+//
+// ⭐ And it groups with sectionOf, the SAME rule the settings page uses, so a
+// setting appears under the heading you will later find it under. That is what
+// went wrong before: a second grouping rule with its own idea of "Buttons".
+
+// ⓘ Values that need a word. Anything absent is printed bare.
+var PRESET_VALUE_NOTE = {
+  'touchpad_scroll': { '0': 'off', '1': '1 finger scroll', '2': '2 finger scroll' }
+};
+
+// ⭐⭐ THE SAME LABEL THE SETTINGS PAGE USES (rhoquinn8217, 2026-09-03).
+//
+// ⛔ The first attempt put the raw KEY in the label column and hung the button
+// name off the end of the VALUE -- "rebind_0 ... Enter (✕) | (A)". That is
+// backwards: the settings page shows "(✕) | (A) — remap" as the label and
+// "Enter" as the value, and the preview is supposed to be previewing THAT.
+//
+// ⓘ Copied from renderConfigEditor rather than reinvented, so the two cannot
+// drift into two different names for the same row.
+function presetRowLabel(key) {
+  var meta = (KEYS || []).filter(function(k) { return k.key === key; })[0];
+  var m = /^(rebind|turbo)_(\d+)$/.exec(key);
+  if (m) {
+    if (!meta) return key;
+    var name = meta.name || (meta.help ? meta.help.split(' -- ')[0] : key);
+    return name + (m[1] === 'turbo' ? ' — rapid fire' : ' — remap');
+  }
+  // ⓘ Settings keep their key: it is what you will search the page for, and
+  // what the config file says.
+  return key;
+}
+
+function presetRowValue(key, value) {
+  var perValue = PRESET_VALUE_NOTE[key];
+  var note = (perValue && perValue.hasOwnProperty(String(value)))
+             ? perValue[String(value)] : '';
+  return note ? (value + '  (' + note + ')') : String(value);
+}
+
+// ⓘ Shoulders before faces inside the Buttons group: they are the ones a
+// preset changes for a reason, and the face buttons are the same four every
+// time. ⛔ Only the ORDER differs from the settings page -- the labels and the
+// values are that page's own.
+var PRESET_BUTTON_ORDER = ['Shoulder/stick buttons', 'Face buttons', 'System buttons'];
+
 function presetInfoRows(settings) {
-  var mouse = [];
-  var buttons = [];
-  var dpad = 0;
+  var groups = {};
+  var arrows = [];
+
   (settings || []).forEach(function(s) {
-    // The four d-pad rows are one line: a preset only ever binds them to the
-    // arrows, and four near-identical rows push the rest of the table down.
-    if (['rebind_12','rebind_13','rebind_14','rebind_15'].indexOf(s.key) >= 0 &&
-        String(s.value).indexOf('Arrow') === 0) { dpad++; return; }
-    if (PRESET_CURSOR_FROM.hasOwnProperty(s.key)) {
-      mouse.push([PRESET_CURSOR_FROM[s.key] || stickNamed(s.value), 'cursor']);
-    } else if (PRESET_SCROLL_FROM.hasOwnProperty(s.key)) {
-      mouse.push([PRESET_SCROLL_FROM[s.key] || stickNamed(s.value), 'scroll']);
-    } else if (s.key === 'touchpad_tap_click') {
-      mouse.push(['Touchpad tap', 'click']);
-    } else if (s.key === 'gyro_mouse_recenter_button') {
-      mouse.push(['Touchpad click', 'recentre the cursor']);
-    } else if (s.key === 'touchpad_click_drag') {
-      mouse.push(['Touchpad click', 'grab and drag, lift to drop']);
-    } else if (s.key.indexOf('rebind_') === 0) {
-      var label = PRESET_VALUE_LABELS[s.value] || s.value;
-      // The clicks are mouse controls even though they are button bindings.
-      if (s.value === 'MouseLeft' || s.value === 'MouseRight' ||
-          s.value === 'MouseMiddle') mouse.push([buttonLabel(s.key), label]);
-      else buttons.push([buttonLabel(s.key), label]);
-    } else {
-      // ⚠️ Anything without a friendly name still shows, as key = value:
-      // visible and ugly beats silently missing.
-      buttons.push([s.key, s.value]);
+    // ⭐ THE FOUR D-PAD ARROWS COLLAPSE TO ONE ROW. Four rows saying the same
+    // thing crowd out the ones that differ between presets.
+    // ⚠️ Only when all four are there and all four are arrows -- a preset that
+    // binds the d-pad to something else must still show what.
+    if (/^rebind_(12|13|14|15)$/.test(s.key) && String(s.value).indexOf('Arrow') === 0) {
+      arrows.push(s);
+      return;
     }
+    var sect = sectionOf(s.key);
+    var sub = '';
+    if (BUTTON_SECTIONS.indexOf(sect) >= 0) { sub = sect; sect = 'Buttons'; }
+    (groups[sect] = groups[sect] || []).push(
+      [presetRowLabel(s.key), presetRowValue(s.key, s.value), sub]);
   });
-  if (dpad === 4) buttons.push(['D-pad', 'arrow keys']);
-  // ⓘ Cursor first, then the clicks, then scrolling, then the rest -- the
-  // order someone reads them in when deciding whether this is the preset they
-  // want. Config order is the order they happened to be written in.
-  var rank = { 'cursor': 0, 'left click': 1, 'right click': 2, 'click': 3,
-               'scroll': 4 };
-  mouse.sort(function(a, b) {
-    var ra = rank.hasOwnProperty(a[1]) ? rank[a[1]] : 9;
-    var rb = rank.hasOwnProperty(b[1]) ? rank[b[1]] : 9;
-    return ra - rb;
-  });
-  return { mouse: mouse, buttons: buttons };
+
+  if (arrows.length === 4) {
+    (groups['Buttons'] = groups['Buttons'] || []).push(
+      ['d-pad — remap', 'ArrowKeys', 'Face buttons']);
+  } else {
+    arrows.forEach(function(s) {
+      (groups['Buttons'] = groups['Buttons'] || []).push(
+        [presetRowLabel(s.key), presetRowValue(s.key, s.value), 'Face buttons']);
+    });
+  }
+
+  if (groups['Buttons']) {
+    groups['Buttons'].sort(function(a, b) {
+      return PRESET_BUTTON_ORDER.indexOf(a[2]) - PRESET_BUTTON_ORDER.indexOf(b[2]);
+    });
+  }
+  return groups;
 }
 
 function presetTable(title, rows) {
@@ -1816,8 +1868,17 @@ function openPresetInfo(ordinal, presetName) {
   var rows = presetInfoRows(p.settings);
   document.getElementById('presetInfoTitle').textContent = p.name;
   document.getElementById('presetInfoText').textContent = p.help || '';
-  document.getElementById('presetInfoTables').innerHTML =
-    presetTable('Mouse', rows.mouse) + presetTable('Buttons', rows.buttons);
+  // ⓘ In the settings page's own section order, so the preview reads in the
+  // same order as the thing it is previewing.
+  var order = ['Gyro', 'Touchpad', 'Stick', 'Audio', 'Rumble', 'Buttons', 'Other'];
+  var html = '';
+  order.forEach(function(name) {
+    if (rows[name] && rows[name].length) html += presetTable(name, rows[name]);
+  });
+  Object.keys(rows).forEach(function(name) {
+    if (order.indexOf(name) < 0) html += presetTable(name, rows[name]);
+  });
+  document.getElementById('presetInfoTables').innerHTML = html;
   // ⓘ Reading about a preset and choosing it is one press, not back-then-pick.
   document.getElementById('presetInfoUse').onclick = function() {
     createFromPreset(ordinal, presetName);
@@ -3249,6 +3310,16 @@ document.addEventListener('click', function (ev) {
 }, true);
 
 function gpPaint() {
+  // ⛔⛔ THE PLACE IS RECORDED HERE, because this is where the halo actually
+  // lands (rhoquinn8217, 2026-09-03: it remembered the section but not the row).
+  //
+  // ⚠️ It was hooked into focusElement -- but ORDINARY NAVIGATION never calls
+  // that. gpMove sets the index and paints, and every d-pad press goes through
+  // it. So the save fired only on the few paths that do use focusElement, and
+  // what got stored was whatever the halo happened to be on before, which was
+  // usually a section tab: no id, nothing to come back to.
+  savePlace(false);
+
   // ⛔⛔ RE-COLLECT IF THE LIST HAS GONE STALE.
   //
   // Every redraw replaces the elements, and GP_FOCUS keeps holding the OLD
@@ -3876,7 +3947,108 @@ function honourOpenOnTab() {
   return true;
 }
 
+// ⭐⭐ SAVE WHERE YOU ARE AS YOU MOVE, not on one way out (rhoquinn8217,
+// 2026-09-03: it stopped remembering).
+//
+// ⛔ This used to happen ONLY when entering the footer -- the Escape-into-the-
+// footer route that reaches the Close button. Every other way of closing the
+// window wrote nothing at all: the tray, the chord, the window's own close,
+// Alt+F4. It appeared to work only because that was the route being tested.
+//
+// ⓘ Throttled, because the halo moves at the speed of a held d-pad and a write
+// per step would be hundreds a second for no benefit. ⛔ And on pagehide with
+// no throttle, because that is the last moment there is.
+// ⓘ False until the restore has run, or decided not to. Nothing is written
+// before that, so a load cannot destroy what it is about to read.
+var PLACE_READY = false;
+
+var PLACE_LAST = 0;
+var PLACE_PENDING = null;
+var PLACE_TIMER = null;
+
+// ⓘ What to remember, read at the moment of asking.
+function placeNow() {
+  var el = GP_FOCUS[GP_INDEX];
+  return {
+    tab: ACTIVE,
+    index: GP_INDEX,
+    id: (el && el.id) ? el.id : '',
+    sect: SECT_ACTIVE,
+    scroll: window.scrollY || 0,
+    serial: '',
+    run: AGENT_RUN
+  };
+}
+
+function writePlace(p) {
+  try { localStorage.setItem('ctm_place', JSON.stringify(p)); } catch (e) {}
+}
+
+function savePlace(force) {
+  if (!AGENT_RUN) return;              // nothing worth writing yet
+  // ⛔⛔ NOT UNTIL THE RESTORE HAS HAD ITS TURN. The first paint happens while
+  // the page is still empty, and saving then overwrites the very place we are
+  // about to read -- so closing the window without touching anything would
+  // wipe where you were.
+  // ⓘ A FORCED save bypasses this. The gate exists only to stop the automatic
+  // first paint clobbering what the restore is about to read -- it was never
+  // meant to block a deliberate moment like heading for Close, and blocking
+  // one meant nothing was saved at all inside the first two seconds.
+  if (!PLACE_READY && !force) return;
+  // ⛔ NOT WHILE YOU ARE IN THE FOOTER. Escape moves the halo onto Close, and
+  // recording that would mean coming back to the Close button rather than to
+  // the setting you were working on.
+  if (FOOTER_MODE) return;
+
+  var p = placeNow();
+
+  // ⛔⛔ A THROTTLE MUST NOT DROP THE LAST ONE (rhoquinn8217, 2026-09-03: it
+  // remembered the section but not the row).
+  //
+  // ⚠️ This used to simply RETURN inside the window, so a run of d-pad presses
+  // -- which all land inside 400ms -- threw away every position after the
+  // first. What survived was the state at page load: no id, nothing to come
+  // back to. The section looked right only because it is stored separately and
+  // happened not to change.
+  //
+  // ⭐ The pending place is captured HERE, not when the timer fires. By then
+  // the halo may be on the footer's Close button, which is precisely the
+  // position that must not be recorded.
+  var now = Date.now();
+  if (force || now - PLACE_LAST >= 400) {
+    PLACE_LAST = now;
+    PLACE_PENDING = null;
+    writePlace(p);
+    return;
+  }
+  PLACE_PENDING = p;
+  if (PLACE_TIMER === null) {
+    PLACE_TIMER = setTimeout(function () {
+      PLACE_TIMER = null;
+      if (PLACE_PENDING) {
+        PLACE_LAST = Date.now();
+        writePlace(PLACE_PENDING);
+        PLACE_PENDING = null;
+      }
+    }, 450);
+  }
+}
+
+window.addEventListener('pagehide', function () { savePlace(true); });
+
 function restorePlace() {
+  // ⛔⛔ ONE TIMER, NOT A FLAG WITH SEVEN EXITS (rhoquinn8217, 2026-09-03).
+  //
+  // ⚠️ Saving has to wait until the restore has read what is stored, or the
+  // first paint overwrites it. The first attempt set a flag at each exit of
+  // this function -- and it has SEVEN, one of which fires whenever the device
+  // list has not loaded yet. Miss one and saving is disabled for the entire
+  // session, which is worse than the fault it was fixing.
+  //
+  // ⓘ Two seconds, whatever happens. By then the restore has either landed or
+  // given up, and there is no path out of here that can skip it.
+  setTimeout(function () { PLACE_READY = true; }, 2000);
+
   // ⛔ A TARGET SUPPRESSES THE REMEMBERED PLACE ENTIRELY, whether or not the tab
   // exists yet (rhoquinn8217, 2026-09-01: the window landed on the controller
   // and then jumped straight back to Overview).
@@ -3884,7 +4056,25 @@ function restorePlace() {
   // ⚠️ It was `if (honourOpenOnTab()) return;` -- but at startup the device list
   // has not arrived, so the jump reports failure, this carries on, and its own
   // restore fires 900ms later and undoes the jump that lands in between.
-  if (OPEN_ON_TAB) { honourOpenOnTab(); return; }
+  // ⛔ A TARGET CHOOSES THE TAB, NOT WHERE YOU WERE IN IT (rhoquinn8217,
+  // 2026-09-03). This used to return here, throwing the remembered place away
+  // whenever the window was opened by a chord or a bridge -- which is the
+  // ordinary way to open it from a sofa, so it looked like nothing was ever
+  // remembered.
+  //
+  // ⓘ If the target names the SAME tab the place is for, the place is still
+  // right: same section, same halo, same scroll. Only a target naming a
+  // DIFFERENT tab overrides it, and then it should.
+  if (OPEN_ON_TAB) {
+    var placeRaw = null;
+    try { placeRaw = localStorage.getItem('ctm_place'); } catch (e) {}
+    var placeTab = '';
+    try { placeTab = placeRaw ? (JSON.parse(placeRaw) || {}).tab || '' : ''; } catch (e) {}
+    if (placeTab !== OPEN_ON_TAB) { honourOpenOnTab(); return; }
+    // ⓘ Same tab: let the restore below do the whole job. It calls showTab
+    // itself, so the target is honoured either way.
+    OPEN_ON_TAB = '';
+  }
   var raw = null;
   try { raw = localStorage.getItem('ctm_place'); } catch (e) { return; }
   if (!raw) return;
@@ -3896,18 +4086,30 @@ function restorePlace() {
   // sessionStorage used to prevent, and what the run id replaces.
   if (!want.run) return;
 
-  setTimeout(function () {
-    // ⛔ THE RUN MUST MATCH, NOT MERELY FAIL TO CONTRADICT (rhoquinn8217,
-    // 2026-09-01: an ordinary listener start landed on the Editor).
-    //
-    // ⚠️ The check used to pass when AGENT_RUN was still EMPTY -- and at
-    // startup it is, because the first devices poll has not answered yet. So a
-    // place saved under the PREVIOUS listener run was accepted, and the window
-    // came up wherever it was left rather than on Overview.
-    //
-    // ⓘ Checked in here, after the wait, because that is when the run id has
-    // arrived. An unknown run is a refusal, not a maybe.
-    if (!AGENT_RUN || want.run !== AGENT_RUN) return;
+  // ⛔⛔ WAIT FOR THE RUN ID; DO NOT GUESS ON A CLOCK (rhoquinn8217,
+  // 2026-09-03: where you were stopped being remembered).
+  //
+  // ⚠️ This used to decide ONCE, after a fixed delay. An unknown run was a
+  // refusal -- but "unknown" also means "the devices call has not answered
+  // yet", so whenever that call was slower than the timer a perfectly good
+  // place was thrown away.
+  //
+  // ⚠️ And accepting an unknown run is no better: that was the ORIGINAL fault,
+  // where a place from a previous listener run came back and put you on the
+  // wrong tab.
+  //
+  // ⓘ Neither guess is needed. The id arrives; waiting for it answers both. A
+  // run that never arrives means the listener is not talking to us, and then
+  // there is nothing worth restoring into anyway.
+  var waitedForRun = 0;
+  var whenRunKnown = function () {
+    if (!AGENT_RUN) {
+      if (waitedForRun > 6000) return;
+      waitedForRun += 150;
+      setTimeout(whenRunKnown, 150);
+      return;
+    }
+    if (want.run !== AGENT_RUN) return;
     var tab = want.tab;
 
     // ⭐ Find the controller by SERIAL, wherever it landed this time. Falls
@@ -3936,6 +4138,7 @@ function restorePlace() {
       var byId = want.id ? document.getElementById(want.id) : null;
       if (byId && focusElement(byId)) {
         window.scrollTo(0, want.scroll || 0);
+        PLACE_READY = true;          // landed: recording can start now
         return true;
       }
       return false;
@@ -3958,7 +4161,8 @@ function restorePlace() {
         }
       }, 250);
     }
-  }, 900);
+  };
+  whenRunKnown();
 }
 
 function setFooterMode(on) {
@@ -4004,18 +4208,19 @@ function setFooterMode(on) {
     // the window, and the RUN ID is what stops it going stale: a place saved
     // under a previous listener is ignored, which is the boundary where
     // "somewhere you were an hour ago" stops meaning anything.
-    try {
-      // ⛔ Refuse to save a place with no run id rather than writing one that
-      // will be silently discarded on the way back in.
-      if (AGENT_RUN) {
-        var keep = { tab: FOOTER_RETURN.tab, index: FOOTER_RETURN.index,
-                     id: FOOTER_RETURN.id, sect: FOOTER_RETURN.sect,
-                     scroll: FOOTER_RETURN.scroll, serial: FOOTER_RETURN.serial,
-                     run: AGENT_RUN };
-        localStorage.setItem('ctm_place', JSON.stringify(keep));
-      }
-    } catch (e) {}
+    // ⛔ THE SECOND WRITER IS GONE (rhoquinn8217, 2026-09-03). It wrote the
+    // place only here, on the way into the footer, and it captured an EMPTY
+    // element id -- so even a restore that survived had nothing to aim at.
+    //
+    // ⓘ savePlace records continuously and stops the moment FOOTER_MODE turns
+    // on, so the last thing written is where you actually were. One writer,
+    // and it cannot miss the way this one did.
   }
+  // ⛔ FORCE THE WRITE ON THE WAY IN. Entering the footer is the moment someone
+  // is heading for Close, and the throttle's trailing write is up to 450ms
+  // away -- a window destroyed inside that gap would lose the last position.
+  // ⓘ Called BEFORE the flag is set, or savePlace would refuse.
+  if (on && !FOOTER_MODE) savePlace(true);
   FOOTER_MODE = on;
   var bar = document.getElementById('gpbar');
   if (bar) bar.classList.toggle('gp-zone', on);
@@ -4199,9 +4404,22 @@ function gpPoll() {
   for (var i = 0; i < pads.length; i++) { if (pads[i]) live.push(pads[i]); }
   var bar = document.getElementById('gpbar');
   var hint = document.getElementById('gphint');
-  if (!live.length) {
-    // ⭐ A KEYBOARD LEGEND when no pad is visible (rhoquinn8217, 2026-09-01).
-    // The page is fully drivable from a keyboard now, so "press any button to
+  // ⛔⛔ ASK THE LISTENER, NOT THE BROWSER (rhoquinn8217, 2026-09-03: the
+  // footer showed the keyboard legend while a controller was in his hands).
+  //
+  // ⚠️ navigator.getGamepads only sees a pad the BROWSER is given -- and with
+  // Safe Edit Mode on there is never one, because the listener converts the
+  // bridged pad into KEYSTROKES to drive this page. So in the very situation
+  // where someone is most obviously holding a controller, the browser could
+  // not see one, and the legend was structurally unable to be right.
+  //
+  // ⓘ GATE_ON is exactly "a bridged pad is driving this page", which is what
+  // the paused notice and Safe Edit Mode already use.
+  var padDriving = live.length > 0 || GATE_ON;
+
+  if (!padDriving) {
+    // ⭐ A KEYBOARD LEGEND when nothing is driving from a pad (2026-09-01).
+    // The page is fully drivable from a keyboard, so "press any button to
     // connect" was the only thing on offer and it described a controller the
     // person may not be using -- leaving the keys undiscoverable.
     hint.textContent = 'keyboard — arrows move, Enter select, Esc back, Space on/off' +
@@ -4210,8 +4428,10 @@ function gpPoll() {
     requestAnimationFrame(gpPoll);
     return;
   }
+  // ⓘ The count comes from the browser when it can see the pads, and falls
+  // back to the singular when only the gate knows one is there.
   hint.textContent = (live.length > 1 ? live.length + ' controllers' : 'controller') +
-                     ' — L1/R1 tabs, D-pad move, ✕ select, ✕ again to leave a value, □ on/off, ○ back';
+                     ' — L1/R1 tabs, D-pad move, ✕ select, ✕ again to leave a value, △ on/off, ○ back';
   bar.className = 'live';
   measureGpBar();
 
@@ -4369,7 +4589,11 @@ function gpPoll() {
   // dropdown, rename, then the footer.
   if (edge(0)) gpKeySelect();
   if (edge(1)) gpKeyBack();
-  if (edge(2)) gpToggleManaged();    // square: managed / unmanaged
+  // ⭐ TRIANGLE, matching the gate (rhoquinn8217, 2026-09-03). Square is where
+  // an on-screen keyboard belongs, and the same page must not answer to a
+  // different button depending on whether the pad arrived through the browser
+  // or through the listener's gate.
+  if (edge(3)) gpToggleManaged();    // triangle: managed / unmanaged
 
   // ⛔ pressed(), NOT edge(). edge() WRITES GP_PREV as it reads, so calling it
   // here consumed the press and everything below saw nothing -- cross stopped

@@ -201,6 +201,28 @@ inline MouseAction mouse_action_for(const std::string &code)
     return kMouseNone;
 }
 
+// ⛔⛔ THE CONFIG READER LOWERCASES VALUES. Every comparison against a binding
+// name must fold case, or it silently never matches -- which is exactly what
+// happened to the three keyboard bindings on 2026-09-03: the config held
+// "KeyboardDS5_USBIP", the reader returned "keyboardds5_usbip", and the button
+// did nothing at all.
+//
+// ⓘ The old single OSKeyboard check worked only because someone had added an
+// "oskeyboard" alias beside it. That alias WAS this bug, already met once and
+// papered over rather than named.
+inline bool code_is(const std::string &code, const char *name)
+{
+    if (code.size() != strlen(name)) return false;
+    for (size_t i = 0; i < code.size(); ++i) {
+        const char a = code[i];
+        const char b = name[i];
+        const char la = (a >= 'A' && a <= 'Z') ? static_cast<char>(a - 'A' + 'a') : a;
+        const char lb = (b >= 'A' && b <= 'Z') ? static_cast<char>(b - 'A' + 'a') : b;
+        if (la != lb) return false;
+    }
+    return true;
+}
+
 inline const KeyName *key_for(const std::string &code)
 {
     if (code.empty()) return nullptr;
@@ -378,7 +400,12 @@ inline const GateBinding kConfigModeKeys[] = {
     { kBtnR1,        "KeyE",  CTM_GATE_MODS },   // next tab
     { kBtnFaceDown,  "Enter", CTM_GATE_MODS },   // cross:  select
     { kBtnFaceRight, "KeyZ",  CTM_GATE_MODS },   // circle: back out
-    { kBtnFaceLeft,  "KeyX",  CTM_GATE_MODS },   // square: toggle
+    // ⭐⭐ TRIANGLE TOGGLES, NOT SQUARE (rhoquinn8217, decided earlier and built
+    // 2026-09-03). Square is where an on-screen keyboard lives -- Steam puts it
+    // there and the habit transfers -- and with the gate claiming Square, a
+    // keyboard bound to it could never fire while the settings page was in
+    // front, which is exactly when someone wants to type a config name.
+    { kBtnFaceUp,    "KeyX",  CTM_GATE_MODS },   // triangle: toggle
 };
 
 inline void apply(const void *deviceKey,
@@ -623,7 +650,44 @@ inline void apply(const void *deviceKey,
         // shared last-writer-wins state made them cancel each other at report
         // rate, which is what "instant rapid fire with two pads" was.
         ctm_keyboard_device::set_state_for(deviceKey, gateMods, gateKeys, gateCount);
-        return;                       // ⭐ user rebinds do not run in this mode
+
+        // ⭐⭐ EXCEPT THE ON-SCREEN KEYBOARD (rhoquinn8217, 2026-09-03: "the
+        // virtual keyboard is disabled" while the settings page is up).
+        //
+        // ⛔ The gate exists to stop a pad MIRRORING INTO A GAME. Opening a
+        // keyboard cannot do that -- and the settings page is exactly where
+        // someone needs one, to type a config name or a nickname.
+        //
+        // ⓘ Only for buttons the gate does not already claim, so nothing
+        // fights: pressing a gate button still drives the page.
+        // ⛔ BUILT HERE, not borrowed. `section` is not created until a hundred
+        // lines below this branch -- after the gate has already returned -- so
+        // reaching for it compiled nowhere.
+        const std::string gateSection = device_settings_section(kind, linkedConfig);
+
+        for (int i = 0; i < kButtonCount; ++i) {
+            bool claimed = false;
+            for (const GateBinding &g : kConfigModeKeys) {
+                if (g.standardIndex == i) { claimed = true; break; }
+            }
+            if (claimed) continue;
+
+            char kn[32];
+            snprintf(kn, sizeof(kn), "rebind_%d", i);
+            const std::string c = device_config_str(gateSection.c_str(), kn);
+            const int which =
+                code_is(c, "KeyboardSteam")     ? 0 :
+                code_is(c, "KeyboardWindows")   ? 1 :
+                (code_is(c, "KeyboardDS5_USBIP") || code_is(c, "OSKeyboard")) ? 2 : -1;
+            if (which < 0) continue;
+
+            static std::map<std::pair<const void *, int>, bool> gateOskHeld;
+            const bool now = is_pressed(data, len, i);
+            if (now && !gateOskHeld[{deviceKey, i}]) ctm_osk_toggle(gateSection, i, which);
+            gateOskHeld[{deviceKey, i}] = now;
+            clear_button(data, len, i);
+        }
+        return;                       // ⭐ other user rebinds do not run here
     }
 
     // ⭐ Swallow anything still held from before the gate released. Each button
@@ -715,10 +779,18 @@ inline void apply(const void *deviceKey,
         // ⭐ The on-screen keyboard, before the mouse and key paths: it is
         // neither, and like a wheel click it fires ONCE per press -- a toggle
         // repeated at 250Hz would open and close the keyboard continuously.
-        if (code == "OSKeyboard" || code == "oskeyboard") {
+        // ⓘ 0 Steam, 1 Windows' osk.exe, 2 ours. ⛔ OSKeyboard is kept as an
+        // alias for our own so configs written before the split keep working --
+        // it was the only one that could mean anything else, and it meant
+        // whatever osk_program said.
+        const int oskWhich =
+            code_is(code, "KeyboardSteam")     ? 0 :
+            code_is(code, "KeyboardWindows")   ? 1 :
+            (code_is(code, "KeyboardDS5_USBIP") || code_is(code, "OSKeyboard")) ? 2 : -1;
+        if (oskWhich >= 0) {
             static std::map<std::pair<const void *, int>, bool> oskHeld;
             const bool wasHeld = oskHeld[{deviceKey, i}];
-            if (active && !wasHeld) ctm_osk_toggle(section, i);
+            if (active && !wasHeld) ctm_osk_toggle(section, i, oskWhich);
             oskHeld[{deviceKey, i}] = active;
             continue;
         }

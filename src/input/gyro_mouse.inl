@@ -647,9 +647,16 @@ inline void on_ds5_input(const void *deviceKey,
     // ⓘ And "controller inputs locked to page" has to mean all of them. A cursor
     // crossing the screen while the footer says that is the same class of lie as
     // the footer showing green while nothing was gated.
-    if (ctm_rebind_config_mode_effective()) {
-        return;
-    }
+    // ⛔ THE GATE NO LONGER SUSPENDS THE CURSOR (rhoquinn8217, 2026-09-02).
+    //
+    // ⚠️ Safe Edit Mode exists to stop a bridged pad MIRRORING INTO A GAME, and
+    // a cursor cannot do that: pointer movement goes to whatever has focus,
+    // which while the gate applies is our own settings window. Suspending it
+    // protected nothing and made the page look broken -- the pad appeared dead
+    // when it was simply forbidden from doing the one thing it could do safely.
+    //
+    // ⓘ Kept as a comment rather than deleted so the next person wondering why
+    // the cursor works here finds the reasoning instead of the absence.
 
     if (!device_has_ds5_motion(descriptor)) {
         return;

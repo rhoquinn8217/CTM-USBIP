@@ -468,9 +468,20 @@ int run_touch_mouse_tests()
         run_step(r, 0);
         CTM_CHECK_EQ(static_cast<int>(g_dragMask), 0x01);
 
+        // ⭐ THE GATE NO LONGER DROPS A DRAG (rhoquinn8217, 2026-09-02). Safe
+        // Edit Mode stops a pad MIRRORING INTO A GAME, and a drag cannot do
+        // that -- it goes to whatever has focus, which while the gate applies
+        // is our own settings window. So a drag in progress simply continues.
         g_configModeEffective = true;                    // settings page opens
         run_step(r, 16);
+        CTM_CHECK_EQ(static_cast<int>(g_dragMask), 0x01);
+
+        // ⛔ But LIFTING still drops it, gate or no gate: that is the release
+        // path that matters, and nothing may leave a button held.
+        set_point(r, 0, false, 1, 300, 300);
+        run_step(r, 32);
         CTM_CHECK_EQ(static_cast<int>(g_dragMask), 0);
+        g_configModeEffective = false;
 
         // ...and an unbridge mid-drag.
         reset_stubs();
@@ -486,7 +497,11 @@ int run_touch_mouse_tests()
         CTM_CHECK_EQ(static_cast<int>(g_dragMask), 0);
     }
 
-    section("touch: config mode stands the whole feature down");
+    // ⭐ THE RULE CHANGED HERE (rhoquinn8217, 2026-09-02). This used to assert
+    // that the gate stood the touchpad down entirely -- and that over-gated:
+    // pointer movement cannot reach a game, so suspending it protected nothing
+    // and made the settings page look as though the pad had died.
+    section("touch: the cursor still works while the gate is on");
     {
         reset_stubs();
         fresh_device();
@@ -497,7 +512,7 @@ int run_touch_mouse_tests()
         run_step(r, 0);
         set_point(r, 0, true, 1, 500, 500);
         run_step(r, 16);
-        CTM_CHECK_EQ(g_pushCount, 0);
+        CTM_CHECK(g_pushCount > 0);
     }
 
     return 0;

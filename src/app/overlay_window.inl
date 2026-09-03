@@ -5,7 +5,8 @@
 // a rebound button is stripped before Steam sees it -- and the Windows touch
 // keyboard ignores our bridged DS5 entirely (measured 2026-08-31). The TV has a
 // usable keyboard of its own, but using it means TV-side code, a protocol
-// message and an upstream merge; T-063 is about contributing a THIN bridge, so
+// message and an upstream merge; the bridge contributed upstream is meant to
+// stay THIN, so
 // anything solved here is TV-side code never written.
 //
 // ⛔ IT MUST NEVER TAKE FOCUS. That is the whole point: the game keeps focus and

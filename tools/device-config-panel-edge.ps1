@@ -12,10 +12,10 @@
 # everything set through it landed in [ds5] and the Edge correctly ignored it.
 # Measured 2026-08-11: speaker volume and audio off had no effect on an Edge,
 # while audio gain appeared to work -- because the gain path reads [ds5]
-# regardless of device, which is a known soft spot recorded at T-060's close.
+# regardless of device, which is a known soft spot recorded in the project docs.
 #
 # KEEP THE TWO IN STEP. A change to the original belongs here too. Both are
-# expected to be replaced by the web app (T-064), at which point a device
+# expected to be replaced by the web app, at which point a device
 # selector makes both files unnecessary.
 #
 # Generated from device-config-panel.ps1 by substitution -- diff the two if
