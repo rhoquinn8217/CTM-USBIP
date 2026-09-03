@@ -125,7 +125,24 @@ inline void step(const void *deviceKey, const std::string &section,
         gateRaw.empty() ? ctm_gyro_mouse::Gate::Always : ctm_gyro_mouse::parse_gate(gateRaw);
 
     const bool cursorOn = device_config_bool(section.c_str(), "touchpad_to_mouse", false);
-    const bool scrollOn = device_config_bool(section.c_str(), "touchpad_scroll", false);
+    // ⭐⭐ HOW MANY FINGERS SCROLL: 0 off, 1 one finger, 2 two fingers
+    // (rhoquinn8217, 2026-09-03). It was a bool meaning "two fingers", and the
+    // count was hardcoded below.
+    //
+    // ⭐ ONE FINGER is what controller makers do -- the Steam Controller's left
+    // pad scrolls with one. Two fingers is a laptop convention. And on a DS5 a
+    // pointer finger reaches the pad without either thumb leaving a stick,
+    // which is what makes one-finger scrolling usable while playing.
+    //
+    // ⛔ ONE FINGER CANNOT SCROLL WHILE ONE FINGER ALSO POINTS -- every swipe
+    // would do both. So a face that uses the touchpad as a cursor stays on two.
+    //
+    // ⓘ An older config saying "true" meant two fingers, and still does.
+    const std::string scrollRaw = device_config_str(section.c_str(), "touchpad_scroll");
+    const int scrollFingers =
+        (scrollRaw == "1")                          ? 1 :
+        (scrollRaw == "2" || scrollRaw == "true")   ? 2 : 0;
+    const bool scrollOn = scrollFingers > 0;
     const bool tapsOn = device_config_bool(section.c_str(), "touchpad_tap_click", false);
 
     std::lock_guard<std::mutex> lock(g_touchMutex);
@@ -300,7 +317,7 @@ inline void step(const void *deviceKey, const std::string &section,
     }
 
     // ---- Two fingers: scroll ------------------------------------------------
-    if (scrollOn && fingers == 2) {
+    if (scrollOn && fingers == scrollFingers) {
         const float avgY = (static_cast<float>(p1.y) + static_cast<float>(p2.y)) / 2.0f;
         if (!st.scrollTracking) {
             st.scrollTracking = true;

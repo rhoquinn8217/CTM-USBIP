@@ -404,22 +404,28 @@ int run_config_store_tests()
         // source now means losing it, so aiming with the gyro would have cost a
         // stick as well. The d-pad's arrow keys already scroll.
         CTM_CHECK(!mentions("gyro-to-mouse", "stick_to_scroll"));
-        // Not the touchpad either: with the pad aiming, reaching it means
-        // regripping.
-        CTM_CHECK(!mentions("gyro-to-mouse", "touchpad_scroll"));
+        // ⭐ THE TOUCHPAD DOES SCROLL HERE, with ONE finger (rhoquinn8217,
+        // 2026-09-03). The old reasoning was that reaching the pad meant
+        // regripping -- but a POINTER finger reaches a DualSense touchpad with
+        // both thumbs still on the sticks, which is why controller makers use
+        // one finger and laptops use two.
+        //
+        // ⛔ And the left stick is not spent on it: movement is what a gamer
+        // cannot give up, and the touchpad is the cheap thing to borrow.
+        CTM_CHECK(has("gyro-to-mouse", "touchpad_scroll", "1"));
 
         // ⭐ EACH PRESET HIDES ITS OWN SOURCE AND NOBODY ELSE'S. A single
         // setting could not say "hide the gyro but leave my sticks alone",
         // which is why there are three (rhoquinn8217, 2026-09-03).
-        CTM_CHECK(has("gyro-to-mouse", "gyro_hide_from_game", "true"));
-        CTM_CHECK(!mentions("gyro-to-mouse", "stick_hide_from_game"));
-        CTM_CHECK(!mentions("gyro-to-mouse", "touchpad_hide_from_game"));
+        CTM_CHECK(has("gyro-to-mouse", "gyro_no_passthrough", "true"));
+        CTM_CHECK(!mentions("gyro-to-mouse", "stick_no_passthrough"));
+        CTM_CHECK(!mentions("gyro-to-mouse", "touchpad_no_passthrough"));
 
-        CTM_CHECK(has("touchpad-mouse", "touchpad_hide_from_game", "true"));
-        CTM_CHECK(!mentions("touchpad-mouse", "gyro_hide_from_game"));
+        CTM_CHECK(has("touchpad-mouse", "touchpad_no_passthrough", "true"));
+        CTM_CHECK(!mentions("touchpad-mouse", "gyro_no_passthrough"));
 
-        CTM_CHECK(has("stick-to-mouse", "stick_hide_from_game", "true"));
-        CTM_CHECK(!mentions("stick-to-mouse", "gyro_hide_from_game"));
+        CTM_CHECK(has("stick-to-mouse", "stick_no_passthrough", "true"));
+        CTM_CHECK(!mentions("stick-to-mouse", "gyro_no_passthrough"));
 
         // ⛔ And the superseded single key is gone from every preset.
         CTM_CHECK(!mentions("gyro-to-mouse", "mouse_exclusive"));
@@ -427,7 +433,11 @@ int run_config_store_tests()
         CTM_CHECK(!mentions("stick-to-mouse", "mouse_exclusive"));
 
         CTM_CHECK(has("touchpad-mouse", "touchpad_to_mouse", "true"));
-        CTM_CHECK(has("touchpad-mouse", "touchpad_scroll", "true"));
+        // ⓘ Two fingers here -- one finger cannot scroll while one finger is
+        // already pointing. The gyro preset's ONE is checked above.
+        CTM_CHECK(has("touchpad-mouse", "touchpad_scroll", "2"));
+        // ⓘ The borrow rule -- gyro does not suppress the touchpad -- is
+        // asserted with the other suppression checks above.
         CTM_CHECK(has("touchpad-mouse", "touchpad_tap_click", "true"));
         // The hand is on the pad here, so the sticks are left alone.
         CTM_CHECK(!mentions("touchpad-mouse", "stick_to_scroll"));

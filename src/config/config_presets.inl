@@ -82,9 +82,16 @@ struct Preset {
 // touchpad -- with the pad aiming, both thumbs are committed and reaching the
 // touchpad means regripping.
 inline const Setting kGyroMouseMode[] = {
-    { "gyro_hide_from_game", "true" },
+    { "gyro_no_passthrough", "true" },
     CTM_PRESET_SHARED_BINDINGS,
     { "gyro_to_mouse_gate", "always" },
+    /* ⭐ THE TOUCHPAD IS BORROWED, NOT REPURPOSED (rhoquinn8217, 2026-09-03).
+       Gyro has no scroll of its own, so it borrows one -- ONE FINGER, reachable
+       with a pointer finger while both thumbs stay on the sticks.
+       ⛔ And touchpad_no_passthrough is deliberately NOT set: a borrowed source
+       keeps its day job, so a game's own touchpad gestures still work. The
+       person decides if they would rather it did not. */
+    { "touchpad_scroll", "1" },
     /* ⛔ NO stick_to_scroll HERE (rhoquinn8217, 2026-09-03). It borrowed the
        left stick to scroll, which was nearly free before -- the game still saw
        the stick. Now that hiding a source means LOSING it, choosing gyro aiming
@@ -105,10 +112,12 @@ inline const Setting kGyroMouseMode[] = {
 // trackpad the pad already resembles. The sticks are left alone: the hand is
 // on the pad here, so scrolling is where the finger already is.
 inline const Setting kTouchpadMouseMode[] = {
-    { "touchpad_hide_from_game", "true" },
+    { "touchpad_no_passthrough", "true" },
     CTM_PRESET_SHARED_BINDINGS,
     { "touchpad_to_mouse", "true" },
-    { "touchpad_scroll", "true" },
+    /* ⓘ TWO fingers here, and it has no choice: one finger is already moving
+       the cursor, so one-finger scrolling would make every swipe do both. */
+    { "touchpad_scroll", "2" },
     { "touchpad_tap_click", "true" },
     // ⭐ Click the pad in to grab, move, lift the finger to drop. The pad's
     // click is free here because there is no gyro to recentre.
@@ -121,7 +130,7 @@ inline const Setting kTouchpadMouseMode[] = {
 // regrip at all. ⓘ The right stick does nothing else while this is linked,
 // which is fine: this is a desktop config, not one to play with.
 inline const Setting kStickMouseMode[] = {
-    { "stick_hide_from_game", "true" },
+    { "stick_no_passthrough", "true" },
     CTM_PRESET_SHARED_BINDINGS,
     { "stick_to_mouse", "right" },
     { "stick_to_scroll", "left" },
@@ -151,9 +160,9 @@ inline const Preset kPresets[] = {
     { "gyro-to-mouse",
       "Tilt the controller to move the cursor, always on -- no trigger to "
       "hold. The most precise of the three for small movements, and the one "
-      "that takes most getting used to. Scrolling is the left stick rather "
-      "than the touchpad, so both thumbs stay where they are. Square opens "
-      "the on-screen keyboard.",
+      "that takes most getting used to. Scrolling is one finger on the "
+      "touchpad, reachable without either thumb leaving a stick. Square "
+      "opens the on-screen keyboard.",
       true, true, kGyroMouseMode, CTM_PRESET_COUNT_OF(kGyroMouseMode) },
     { "touchpad-mouse",
       "The touchpad behaves like a laptop trackpad. The most familiar of the "

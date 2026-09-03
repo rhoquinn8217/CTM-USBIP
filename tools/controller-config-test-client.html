@@ -1673,7 +1673,9 @@ var PRESET_VALUE_LABELS = {
 
 var PRESET_SCROLL_FROM = {
   'stick_to_scroll': null,
-  'touchpad_scroll': 'Touchpad, two fingers'
+  // ⓘ null so the finger count is read from the VALUE -- it is 1 or 2 now, and
+  // a fixed label would have claimed two fingers on a preset that uses one.
+  'touchpad_scroll': null
 };
 
 // ⓘ Button labels come from /api/v1/keys, whose help opens with the button's
@@ -1752,6 +1754,12 @@ function presetInfoRows(settings) {
   var mouse = [];
   var buttons = [];
   var dpad = 0;
+  // ⓘ Which stick points, read before the loop so the suppression row can name
+  // it whatever order the settings arrive in.
+  var cursorStick = '';
+  (settings || []).forEach(function(s) {
+    if (s.key === 'stick_to_mouse') cursorStick = s.value;
+  });
   (settings || []).forEach(function(s) {
     // The four d-pad rows are one line: a preset only ever binds them to the
     // arrows, and four near-identical rows push the rest of the table down.
@@ -1760,13 +1768,34 @@ function presetInfoRows(settings) {
     if (PRESET_CURSOR_FROM.hasOwnProperty(s.key)) {
       mouse.push([PRESET_CURSOR_FROM[s.key] || stickNamed(s.value), 'cursor']);
     } else if (PRESET_SCROLL_FROM.hasOwnProperty(s.key)) {
-      mouse.push([PRESET_SCROLL_FROM[s.key] || stickNamed(s.value), 'scroll']);
+      var from = PRESET_SCROLL_FROM[s.key];
+      if (!from && s.key === 'touchpad_scroll') {
+        if (String(s.value) === '0') return;          // off: say nothing
+        from = 'Touchpad, ' + (String(s.value) === '1' ? 'one finger' : 'two fingers');
+      }
+      mouse.push([from || stickNamed(s.value), 'scroll']);
     } else if (s.key === 'touchpad_tap_click') {
       mouse.push(['Touchpad tap', 'click']);
     } else if (s.key === 'gyro_mouse_recenter_button') {
       mouse.push(['Touchpad click', 'recentre the cursor']);
     } else if (s.key === 'touchpad_click_drag') {
       mouse.push(['Touchpad click', 'grab and drag, lift to drop']);
+    } else if (s.key === 'gyro_no_passthrough') {
+      // ⭐ MOUSE, NOT BUTTONS, and phrased as an EFFECT. These landed in the
+      // catch-all below and read as "gyro_no_passthrough  true", which is a
+      // setting name and a boolean -- everything else in this box is written
+      // in plain language (rhoquinn8217, 2026-09-03).
+      // ⓘ Phrased as what the GAME loses, not repeating what the cursor gains.
+      // The row above already says "Gyro -> cursor"; saying it twice reads as
+      // two separate features.
+      mouse.push(['Gyro', 'hidden from games and everything else']);
+    } else if (s.key === 'touchpad_no_passthrough') {
+      mouse.push(['Touchpad', 'hidden from games and everything else']);
+    } else if (s.key === 'stick_no_passthrough') {
+      // ⚠️ Named, not "that stick" -- which stick is only obvious from the row
+      // above, and these are sorted, so it may not be above.
+      mouse.push([stickNamed(cursorStick) + ' (mouse)',
+                  'hidden from games and everything else']);
     } else if (s.key.indexOf('rebind_') === 0) {
       var label = PRESET_VALUE_LABELS[s.value] || s.value;
       // The clicks are mouse controls even though they are button bindings.

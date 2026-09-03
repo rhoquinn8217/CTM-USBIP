@@ -76,7 +76,7 @@ inline void apply(const void *deviceKey,
     // a reason living in a different setting. "Hide the gyro from the game"
     // needs no permission from anything else, and it is useful on its own:
     // some games read motion you never asked them to read.
-    if (wants(section, "gyro_hide_from_game")) {
+    if (wants(section, "gyro_no_passthrough")) {
         for (size_t i = kGyroFirst; i <= kGyroLast && i < len; ++i) data[i] = 0;
     }
 
@@ -87,7 +87,7 @@ inline void apply(const void *deviceKey,
     // ⭐ ALSO INDEPENDENT, and for the same reason. ⓘ It used to require a
     // touchpad mouse setting -- and worse, only the POINTING one, so a preset
     // that merely scrolled still handed the game every finger movement.
-    if (wants(section, "touchpad_hide_from_game")) {
+    if (wants(section, "touchpad_no_passthrough")) {
         for (size_t i = kTouchFirst; i <= kTouchLast && i < len; i += 4) {
             data[i] = 0x80;
             if (i + 1 < len) data[i + 1] = 0;
@@ -114,7 +114,7 @@ inline void apply(const void *deviceKey,
     // dependency on another switch.
     const std::string mouseStick  = device_config_str(section.c_str(), "stick_to_mouse");
     const std::string scrollStick = device_config_str(section.c_str(), "stick_to_scroll");
-    if (!wants(section, "stick_hide_from_game")) return;
+    if (!wants(section, "stick_no_passthrough")) return;
     for (const std::string *s : { &mouseStick, &scrollStick }) {
         if (*s == "left")  { if (len > 2) { data[1] = 0x80; data[2] = 0x80; } }
         if (*s == "right") { if (len > 4) { data[3] = 0x80; data[4] = 0x80; } }
