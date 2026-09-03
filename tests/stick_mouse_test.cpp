@@ -495,7 +495,11 @@ int run_stick_mouse_tests()
         CTM_CHECK(g_wheelSum >= 4);          // and it scrolled
     }
 
-    section("stick: config mode stands it down");
+    // ⭐ THE RULE CHANGED HERE (rhoquinn8217, 2026-09-02). The gate used to
+    // stand the stick cursor down, which over-gated: pointer movement goes to
+    // whatever has focus, and while the gate applies that is our own settings
+    // window -- so it could never have reached a game.
+    section("stick: the cursor still works while the gate is on");
     {
         reset_stubs();
         fresh_device();
@@ -505,7 +509,7 @@ int run_stick_mouse_tests()
         r[3] = 255;
         run_step(r, 0);
         run_step(r, 100);
-        CTM_CHECK_EQ(g_pushCount, 0);
+        CTM_CHECK(g_pushCount > 0);
     }
 
     return 0;
