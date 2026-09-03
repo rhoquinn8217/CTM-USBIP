@@ -718,7 +718,7 @@ inline void apply(const void *deviceKey,
         if (code == "OSKeyboard" || code == "oskeyboard") {
             static std::map<std::pair<const void *, int>, bool> oskHeld;
             const bool wasHeld = oskHeld[{deviceKey, i}];
-            if (active && !wasHeld) ctm_osk_toggle(section);
+            if (active && !wasHeld) ctm_osk_toggle(section, i);
             oskHeld[{deviceKey, i}] = active;
             continue;
         }
@@ -768,6 +768,20 @@ inline void apply(const void *deviceKey,
 
 // Defined out here for main.cpp's forward declaration -- device.inl calls this
 // on the input path, and is included long before this file.
+// ⭐ Nothing held right now may reach the game.
+//
+// ⛔ Called when the overlay closes. The button that closed it is STILL DOWN,
+// and the very next report takes the ordinary path -- where a config that
+// rebinds Cross to Enter would hand the app behind an Enter nobody pressed.
+// rhoquinn8217 saw exactly that, 2026-09-02.
+//
+// ⓘ The mechanism already existed for leaving config mode, which has the same
+// problem for the same reason.
+void ctm_rebind_swallow_held()
+{
+    ctm_rebind::g_swallowUntilReleased = 0xffffffffu;
+}
+
 void ctm_keyboard_forget_device(const void *deviceKey)
 {
     ctm_keyboard_device::forget_device(deviceKey);
@@ -811,5 +825,18 @@ void ctm_rebind_apply(const void *deviceKey,
                       const std::string &linkedConfig,
                       uint8_t *data, size_t len)
 {
+    // ⭐ THE OVERLAY GETS FIRST REFUSAL, and only while it is up.
+    //
+    // ⓘ One line here on purpose: the deciding, the layout and the drawing all
+    // live in overlay_window.inl. This file is the report path, not the place
+    // to grow a second feature.
+    //
+    // ⛔ When it consumes the input, the game must see NOTHING -- so the report
+    // is blanked rather than merely left alone. A keyboard on screen that lets
+    // stray presses through to what is behind it is worse than no keyboard.
+    if (ctm_overlay::handle_report(deviceKey, data, len)) {
+        ctm_overlay::blank_report(data, len);
+        return;
+    }
     ctm_rebind::apply(deviceKey, descriptor, linkedConfig, data, len);
 }

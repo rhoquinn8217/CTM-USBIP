@@ -28,13 +28,18 @@
 
 namespace ctm_osk {
 
-enum class Program { Steam, Osk };
+// ⭐ Ours joins the two that existed (rhoquinn8217, 2026-09-01). Steam's needs
+// Steam running and cannot be driven by a REBOUND pad; Windows' own ignores a
+// bridged DS5 entirely. Ours is drawn by the listener and driven by the pad
+// through the same report path everything else uses.
+enum class Program { Steam, Osk, Overlay };
 
 inline Program parse_program(const std::string &raw)
 {
     std::string v;
     for (char c : raw) v.push_back(static_cast<char>((c >= 'A' && c <= 'Z') ? c - 'A' + 'a' : c));
     if (v == "osk" || v == "windows") return Program::Osk;
+    if (v == "overlay" || v == "ctm") return Program::Overlay;
     return Program::Steam;              // unknown or absent: the one that works
 }
 
@@ -75,8 +80,20 @@ inline void run_shell(const wchar_t *what)
     ShellExecuteW(nullptr, L"open", what, nullptr, nullptr, SW_SHOWNORMAL);
 }
 
-inline void do_open(Program program)
+inline void do_open(Program program, int openedByButton)
 {
+    // ⓘ No process to launch: it is a window this same program owns.
+    // ⭐ The button is passed through so the overlay can be closed by the same
+    // one -- it swallows every press while it is up, so the binding cannot fire
+    // a second time to close it.
+    if (program == Program::Overlay) {
+        // ⛔ 0 MEANS "THE CHOSEN SIZE", not a default to fill in. This passed
+        // 900x300 -- a leftover from before the three sizes existed -- so the
+        // keyboard opened tiny on a 4K desktop and only reached a sensible size
+        // once Create had been pressed once. Found on hardware 2026-09-02.
+        ctm_overlay::show(0, 0, openedByButton);
+        return;
+    }
     if (program == Program::Osk) {
         run_shell(L"osk.exe");
         return;
@@ -86,6 +103,10 @@ inline void do_open(Program program)
 
 inline void do_close(Program program)
 {
+    if (program == Program::Overlay) {
+        ctm_overlay::hide();
+        return;
+    }
     if (program == Program::Osk) {
         HWND w = FindWindowW(kOskClass, nullptr);
         // ⓘ WM_CLOSE, not a kill: it is a normal window and asking it to close
@@ -98,13 +119,19 @@ inline void do_close(Program program)
 
 inline std::atomic<bool> g_remembered{false};
 
-inline void toggle(const std::string &section)
+inline void toggle(const std::string &section, int button)
 {
     const Program program = parse_program(device_config_str(section.c_str(), "osk_program"));
-    const int known = (program == Program::Osk) ? osk_known_state() : -1;
+    // ⭐ Ours is the only one we can ASK. Steam's window cannot be found
+    // reliably and osk.exe has to be probed; the overlay is our own window, so
+    // "is it up" is a fact rather than a guess -- and the remembered flag,
+    // which exists to cover not knowing, is not consulted for it.
+    const int known = (program == Program::Overlay) ? (ctm_overlay::visible() ? 1 : 0)
+                    : (program == Program::Osk)     ? osk_known_state()
+                                                    : -1;
     const Action action = next_action(known, g_remembered.load());
     if (action == Action::Open) {
-        do_open(program);
+        do_open(program, button);
         g_remembered.store(true);
     } else {
         do_close(program);
@@ -114,7 +141,17 @@ inline void toggle(const std::string &section)
 
 } // namespace ctm_osk
 
-void ctm_osk_toggle(const std::string &section)
+// ⓘ `button` is the standard index of the button that fired this, so the
+// overlay can be dismissed by the same one. The other two keyboards ignore it.
+// ⓘ The overlay's Steam key. Defined here because this file already knows how
+// to hand a steam:// URL to the shell, and declared in overlay_window.inl,
+// which is included before it.
+void ctm_overlay_open_steam()
 {
-    ctm_osk::toggle(section);
+    ctm_osk::run_shell(L"steam://open/bigpicture");
+}
+
+void ctm_osk_toggle(const std::string &section, int button)
+{
+    ctm_osk::toggle(section, button);
 }

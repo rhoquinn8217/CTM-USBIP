@@ -111,6 +111,9 @@ void ctm_touch_mouse_forget(const void *deviceKey);
 // ⓘ Releases only THIS controller's held keys -- they are kept per device so
 // two gated pads cannot cancel each other.
 void ctm_keyboard_forget_device(const void *deviceKey);
+// Swallow whatever is held, so a button that dismissed the overlay cannot also
+// reach the game on the next report.
+void ctm_rebind_swallow_held();
 void ctm_stick_mouse_apply(const void *deviceKey,
                            const std::vector<unsigned char> &descriptor,
                            const std::string &linkedConfig,
@@ -118,7 +121,9 @@ void ctm_stick_mouse_apply(const void *deviceKey,
 void ctm_stick_mouse_forget(const void *deviceKey);
 // ⓘ rebind.inl fires the on-screen keyboard toggle, and osk.inl is included
 // after it because it reads config through the same accessors.
-void ctm_osk_toggle(const std::string &section);
+// ⓘ `button` is the standard index that fired it, so an overlay keyboard can be
+// dismissed by the same button that opened it.
+void ctm_osk_toggle(const std::string &section, int button);
 #include "usbip/device.inl"
 #include "audio/iso_in_pacing.inl"
 #include "usbip/server.inl"
@@ -146,6 +151,10 @@ void ctm_rebind_ensure_keyboard_started();
 #include "app/agent.inl"
 #include "input/mouse_device.inl"      // needs g_agent_usbip_server, find_relative_asset, run_usbip_attach
 #include "input/keyboard_device.inl"   // same dependencies as the mouse above
+// ⛔ AFTER keyboard_device.inl, which it types through, and BEFORE rebind.inl,
+//    which calls into it. Both directions matter: the overlay needs the
+//    keyboard to exist, and rebind needs the overlay to exist.
+#include "app/overlay_window.inl"  // --overlay-test: the always-on-top, never-focused window
 // ⚠️ AFTER keyboard_device: rebind pushes key state into it, so it must be
 // defined first. And after gyro_mouse, for device_section_for and the config
 // helpers.
@@ -221,6 +230,23 @@ void ctm_chord_show_ui(const std::string &ordinal)
 
 int wmain(int argc, wchar_t **argv)
 {
+    // ⭐⭐ TELL WINDOWS WE UNDERSTAND HIGH-DPI, before any window exists.
+    //
+    // ⚠️ Without this the process gets VIRTUALISED screen metrics: on a 4K
+    // desktop at 300% scaling, GetSystemMetrics(SM_CXSCREEN) answers 1280
+    // rather than 3840. The overlay keyboard would size itself in those
+    // pretend pixels and Windows would then stretch the result -- the right
+    // physical size, but blurry, which is the one thing that hurts on a
+    // television across a room.
+    //
+    // ⓘ Safe for everything else here: the only other absolute screen use is
+    // warping the cursor to the CENTRE (gyro_mouse.inl), and the centre is the
+    // centre in either coordinate space. Nothing else in the listener reads
+    // screen positions -- the browser window is found by title, not location.
+    //
+    // ⓘ The capture program already does this, for DuplicateOutput1.
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+
     SetConsoleCtrlHandler(console_ctrl_handler, TRUE);
     EnetGlobalGuard enetGuard;
     if (!enetGuard.ok) {
@@ -331,6 +357,12 @@ int wmain(int argc, wchar_t **argv)
                 // could not check for an existing window, so every rebuild left
                 // another one behind.
                 ctm_open_ui::g_open_ui = true;
+            } else if (arg == L"--overlay-test") {
+                // ⓘ TEMPORARY, and named so. Step one of the overlay keyboard
+                // is a window with the right styles and a placeholder inside;
+                // this flag is how it gets looked at before anything is wired
+                // to it. It goes when the OSKeyboard action opens the real one.
+                ctm_overlay::show();
             } else if (arg == L"--rest-lan") {
                 g_rest_bind_lan = true;
             } else if (arg == L"--rest-token" && i + 1 < argc) {
