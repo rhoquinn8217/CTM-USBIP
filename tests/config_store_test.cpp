@@ -411,15 +411,15 @@ int run_config_store_tests()
         // ⭐ EACH PRESET HIDES ITS OWN SOURCE AND NOBODY ELSE'S. A single
         // setting could not say "hide the gyro but leave my sticks alone",
         // which is why there are three (rhoquinn8217, 2026-09-03).
-        CTM_CHECK(has("gyro-to-mouse", "mouse_exclusive_gyro", "true"));
-        CTM_CHECK(!mentions("gyro-to-mouse", "mouse_exclusive_stick"));
-        CTM_CHECK(!mentions("gyro-to-mouse", "mouse_exclusive_touchpad"));
+        CTM_CHECK(has("gyro-to-mouse", "gyro_hide_from_game", "true"));
+        CTM_CHECK(!mentions("gyro-to-mouse", "stick_hide_from_game"));
+        CTM_CHECK(!mentions("gyro-to-mouse", "touchpad_hide_from_game"));
 
-        CTM_CHECK(has("touchpad-mouse", "mouse_exclusive_touchpad", "true"));
-        CTM_CHECK(!mentions("touchpad-mouse", "mouse_exclusive_gyro"));
+        CTM_CHECK(has("touchpad-mouse", "touchpad_hide_from_game", "true"));
+        CTM_CHECK(!mentions("touchpad-mouse", "gyro_hide_from_game"));
 
-        CTM_CHECK(has("stick-to-mouse", "mouse_exclusive_stick", "true"));
-        CTM_CHECK(!mentions("stick-to-mouse", "mouse_exclusive_gyro"));
+        CTM_CHECK(has("stick-to-mouse", "stick_hide_from_game", "true"));
+        CTM_CHECK(!mentions("stick-to-mouse", "gyro_hide_from_game"));
 
         // ⛔ And the superseded single key is gone from every preset.
         CTM_CHECK(!mentions("gyro-to-mouse", "mouse_exclusive"));

@@ -82,7 +82,7 @@ struct Preset {
 // touchpad -- with the pad aiming, both thumbs are committed and reaching the
 // touchpad means regripping.
 inline const Setting kGyroMouseMode[] = {
-    { "mouse_exclusive_gyro", "true" },
+    { "gyro_hide_from_game", "true" },
     CTM_PRESET_SHARED_BINDINGS,
     { "gyro_to_mouse_gate", "always" },
     /* ⛔ NO stick_to_scroll HERE (rhoquinn8217, 2026-09-03). It borrowed the
@@ -105,7 +105,7 @@ inline const Setting kGyroMouseMode[] = {
 // trackpad the pad already resembles. The sticks are left alone: the hand is
 // on the pad here, so scrolling is where the finger already is.
 inline const Setting kTouchpadMouseMode[] = {
-    { "mouse_exclusive_touchpad", "true" },
+    { "touchpad_hide_from_game", "true" },
     CTM_PRESET_SHARED_BINDINGS,
     { "touchpad_to_mouse", "true" },
     { "touchpad_scroll", "true" },
@@ -121,7 +121,7 @@ inline const Setting kTouchpadMouseMode[] = {
 // regrip at all. ⓘ The right stick does nothing else while this is linked,
 // which is fine: this is a desktop config, not one to play with.
 inline const Setting kStickMouseMode[] = {
-    { "mouse_exclusive_stick", "true" },
+    { "stick_hide_from_game", "true" },
     CTM_PRESET_SHARED_BINDINGS,
     { "stick_to_mouse", "right" },
     { "stick_to_scroll", "left" },

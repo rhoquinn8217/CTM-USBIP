@@ -33,12 +33,19 @@ inline const size_t kTouchLast  = 40;
 // whatever happened to be mapped, and the gyro preset borrowed a stick, so
 // choosing gyro aiming silently cost a stick as well.
 //
-// ⓘ Each falls back to the old single key, so a config written before the split
-// keeps behaving as it did rather than quietly switching everything off.
+// ⛔ NO FALLBACK TO THE OLD SINGLE KEY, and that was a deliberate reversal.
+//
+// ⚠️ It looked like kind migration -- an old config would keep working. But
+// once gyro and touchpad became INDEPENDENT of their mouse settings, the old
+// key started meaning MORE than it used to: a config that only mapped a stick
+// would find its touchpad silently dead in games as well. Migrating someone
+// into broader behaviour than they chose is worse than migrating them into
+// none.
+//
+// ⓘ Re-applying a mouse preset is the migration, and it sets the new keys.
 inline bool wants(const std::string &section, const char *key)
 {
-    const bool old = device_config_bool(section.c_str(), "mouse_exclusive", false);
-    return device_config_bool(section.c_str(), key, old);
+    return device_config_bool(section.c_str(), key, false);
 }
 
 // ⛔ The descriptor is a std::vector<unsigned char>, matching every other hook
@@ -64,8 +71,12 @@ inline void apply(const void *deviceKey,
     // ⓘ Accelerometer goes with it: they are one motion sensor as far as a
     // game is concerned, and leaving accel alive would still let a game read
     // the tilt we are consuming.
-    const std::string gyroGate = device_config_str(section.c_str(), "gyro_to_mouse_gate");
-    if (!gyroGate.empty() && wants(section, "mouse_exclusive_gyro")) {
+    // ⭐ INDEPENDENT (rhoquinn8217, 2026-09-03). This used to require gyro-to-
+    // mouse to be set as well -- so the switch could be ON and do nothing, for
+    // a reason living in a different setting. "Hide the gyro from the game"
+    // needs no permission from anything else, and it is useful on its own:
+    // some games read motion you never asked them to read.
+    if (wants(section, "gyro_hide_from_game")) {
         for (size_t i = kGyroFirst; i <= kGyroLast && i < len; ++i) data[i] = 0;
     }
 
@@ -73,13 +84,10 @@ inline void apply(const void *deviceKey,
     // ⛔ The high bit SET means "no finger", so this is 0x80 rather than 0 --
     // zeroing would tell the game a finger is permanently down at the top-left
     // corner, which is worse than passing the real thing through.
-    // ⛔ SCROLLING COUNTS TOO. This asked only about touchpad_to_mouse, so a
-    // preset that scrolled with the touchpad without pointing still handed the
-    // game every finger movement (found 2026-09-03).
-    const bool touchDrives =
-        device_config_bool(section.c_str(), "touchpad_to_mouse", false) ||
-        device_config_bool(section.c_str(), "touchpad_scroll", false);
-    if (touchDrives && wants(section, "mouse_exclusive_touchpad")) {
+    // ⭐ ALSO INDEPENDENT, and for the same reason. ⓘ It used to require a
+    // touchpad mouse setting -- and worse, only the POINTING one, so a preset
+    // that merely scrolled still handed the game every finger movement.
+    if (wants(section, "touchpad_hide_from_game")) {
         for (size_t i = kTouchFirst; i <= kTouchLast && i < len; i += 4) {
             data[i] = 0x80;
             if (i + 1 < len) data[i + 1] = 0;
@@ -93,9 +101,20 @@ inline void apply(const void *deviceKey,
     // ⭐ A STICK, when it points or scrolls.
     // ⓘ 0x80 is centre, not 0: a zeroed stick reads as fully left and up, and
     // a game would spin.
+    // ⚠️ THE STICK IS THE ONE THAT CANNOT BE FULLY INDEPENDENT, because there
+    // are TWO of them. "Hide the gyro" names a thing; "hide the stick" does
+    // not, and only the mapping knows which one drives the cursor.
+    //
+    // ⛔ Blanking BOTH when the switch is on would kill walking for anyone who
+    // turned it on without a stick mapped -- a far worse surprise than the
+    // setting doing nothing.
+    //
+    // ⓘ So this reads as "hide the stick that drives the mouse", and when no
+    // stick does, there is no such stick. That is a definition, not a hidden
+    // dependency on another switch.
     const std::string mouseStick  = device_config_str(section.c_str(), "stick_to_mouse");
     const std::string scrollStick = device_config_str(section.c_str(), "stick_to_scroll");
-    if (!wants(section, "mouse_exclusive_stick")) return;
+    if (!wants(section, "stick_hide_from_game")) return;
     for (const std::string *s : { &mouseStick, &scrollStick }) {
         if (*s == "left")  { if (len > 2) { data[1] = 0x80; data[2] = 0x80; } }
         if (*s == "right") { if (len > 4) { data[3] = 0x80; data[4] = 0x80; } }
