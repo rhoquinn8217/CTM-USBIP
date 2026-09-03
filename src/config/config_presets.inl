@@ -25,10 +25,13 @@
 //
 // ⚠️ AND A KNOWN LIMIT, worth reading before wondering why: Square opens
 // Steam's keyboard, but a REBOUND button is stripped from the report before
-// Steam sees it -- so with one of these linked, the keyboard opens and the pad
-// cannot drive it. Its keys are clicked with the cursor instead. The other
-// keyboards do not register our controller at all (T-089), which is why
-// Steam's is what the button opens.
+// Steam sees it -- so with one of these linked, the keyboard opened and the pad
+// could not drive it. Windows' own keyboard does not register our controller at
+// all.
+//
+// ⭐ SUPERSEDED 2026-09-02: Square now opens OUR on-screen keyboard, which
+// reads the pad directly and has none of these problems. ⛔ No ticket id here:
+// this is a public repo.
 
 #pragma once
 
@@ -58,11 +61,12 @@ struct Preset {
 #define CTM_PRESET_SHARED_BINDINGS                                             \
     { "rebind_0",  "Enter" },        /* cross  -- Deck: A = Enter          */  \
     { "rebind_1",  "Escape" },       /* circle -- Deck: B = Escape         */  \
-    /* \u26d4 Square is deliberately LEFT FREE. It opened Steam's keyboard until
-       2026-08-31, and the keyboard is not usable this way: a rebound button is
-       stripped before Steam sees it, so the pad cannot drive the keys, and
-       clicking them with the touchpad cursor fights the pad's own input. The
-       binding promised something that did not work. T-089 is the real answer. */  \
+    /* \u2b50 Square opens OUR OWN on-screen keyboard, built 2026-09-02. It was
+       left free because Steam's keyboard could not be driven this way: a
+       rebound button is stripped before Steam sees it, so the pad could not
+       reach the keys, and clicking them with the touchpad cursor fought the
+       pad's own input. Ours takes the pad directly. */                       \
+    { "rebind_2",  "OSKeyboard" },   /* square -- our on-screen keyboard   */  \
     { "rebind_3",  "Space" },        /* triangle -- Deck: Y = Space        */  \
     { "rebind_12", "ArrowUp" },                                                \
     { "rebind_13", "ArrowDown" },                                              \
@@ -78,6 +82,7 @@ struct Preset {
 // touchpad -- with the pad aiming, both thumbs are committed and reaching the
 // touchpad means regripping.
 inline const Setting kGyroMouseMode[] = {
+    { "mouse_exclusive", "true" },
     CTM_PRESET_SHARED_BINDINGS,
     { "gyro_to_mouse_gate", "always" },
     { "stick_to_scroll", "left" },
@@ -94,6 +99,7 @@ inline const Setting kGyroMouseMode[] = {
 // trackpad the pad already resembles. The sticks are left alone: the hand is
 // on the pad here, so scrolling is where the finger already is.
 inline const Setting kTouchpadMouseMode[] = {
+    { "mouse_exclusive", "true" },
     CTM_PRESET_SHARED_BINDINGS,
     { "touchpad_to_mouse", "true" },
     { "touchpad_scroll", "true" },
@@ -109,6 +115,7 @@ inline const Setting kTouchpadMouseMode[] = {
 // regrip at all. ⓘ The right stick does nothing else while this is linked,
 // which is fine: this is a desktop config, not one to play with.
 inline const Setting kStickMouseMode[] = {
+    { "mouse_exclusive", "true" },
     CTM_PRESET_SHARED_BINDINGS,
     { "stick_to_mouse", "right" },
     { "stick_to_scroll", "left" },
@@ -139,17 +146,18 @@ inline const Preset kPresets[] = {
       "Tilt the controller to move the cursor, always on -- no trigger to "
       "hold. The most precise of the three for small movements, and the one "
       "that takes most getting used to. Scrolling is the left stick rather "
-      "than the touchpad, so both thumbs stay where they are.",
+      "than the touchpad, so both thumbs stay where they are. Square opens "
+      "the on-screen keyboard.",
       true, true, kGyroMouseMode, CTM_PRESET_COUNT_OF(kGyroMouseMode) },
     { "touchpad-mouse",
       "The touchpad behaves like a laptop trackpad. The most familiar of the "
       "three, and the easiest to pick up, but your hand leaves the sticks to "
-      "use it.",
+      "use it. Square opens the on-screen keyboard.",
       true, true, kTouchpadMouseMode, CTM_PRESET_COUNT_OF(kTouchpadMouseMode) },
     { "stick-to-mouse",
       "Right stick moves the cursor, left stick scrolls -- both thumbs where "
       "they already are. The least precise of the three for fine work, and "
-      "the one that needs no new habits.",
+      "the one that needs no new habits. Square opens the on-screen keyboard.",
       true, true, kStickMouseMode, CTM_PRESET_COUNT_OF(kStickMouseMode) },
     { "L2-gyro-mouse-aiming",
       "For playing, not for the desktop. Gyro aims only while L2 is held, so "

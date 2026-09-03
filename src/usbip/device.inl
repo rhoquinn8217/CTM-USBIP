@@ -471,6 +471,13 @@ public:
         ctm_stick_mouse_apply(this, profile_.device_descriptor, linked_config(),
                               report.data, report.length);
 
+        // ⭐ Whatever is driving the mouse is now hidden from the game -- the
+        // gyro if it is aiming, a stick if it points or scrolls, the touchpad
+        // if it is a trackpad. ⛔ AFTER the three hooks above, which must read
+        // the real values first.
+        ctm_mouse_exclusive_apply(this, profile_.device_descriptor, linked_config(),
+                                  report.data, report.length);
+
         // ⭐ Button rebinding. ⚠️ Unlike the gyro hook above, this MODIFIES the
         // report -- a rebound button is cleared before Windows sees it, so the
         // game never receives it. Placed here because `report` is a fresh local

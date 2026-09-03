@@ -362,16 +362,16 @@ int run_config_store_tests()
                 const std::string value = p->settings[k].value;
                 if (key == "rebind_0" && value == "Enter") enter = true;
                 if (key == "rebind_1" && value == "Escape") escape = true;
-                // ⓘ Square is intentionally unbound now -- see the note in
-                // config_presets.inl. The check that it stays that way is
-                // below, rather than a check that it is bound.
-                if (key == "rebind_2") keyboard = true;
+                // ⭐ Square opens OUR on-screen keyboard (2026-09-02). It was
+                // deliberately unbound while the only option was Steam's, which
+                // a rebound pad could not drive.
+                if (key == "rebind_2" && value == "OSKeyboard") keyboard = true;
                 if (key == "rebind_12" && value == "ArrowUp") arrows = true;
                 if (key == "rebind_7" && value == "MouseLeft") click = true;
             }
             CTM_CHECK(enter);
             CTM_CHECK(escape);
-            CTM_CHECK(!keyboard);        // Square stays free
+            CTM_CHECK(keyboard);         // Square opens the keyboard
             CTM_CHECK(arrows);
             CTM_CHECK(click);
         }

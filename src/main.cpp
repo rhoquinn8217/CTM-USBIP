@@ -114,6 +114,9 @@ void ctm_keyboard_forget_device(const void *deviceKey);
 // Swallow whatever is held, so a button that dismissed the overlay cannot also
 // reach the game on the next report.
 void ctm_rebind_swallow_held();
+void ctm_mouse_exclusive_apply(const void *deviceKey,
+                               const std::vector<unsigned char> &descriptor,
+                               const std::string &config, uint8_t *data, size_t len);
 void ctm_stick_mouse_apply(const void *deviceKey,
                            const std::vector<unsigned char> &descriptor,
                            const std::string &linkedConfig,
@@ -161,6 +164,9 @@ void ctm_rebind_ensure_keyboard_started();
 #include "input/rebind.inl"
 #include "input/touch_mouse.inl"   // touchpad cursor/scroll/taps; needs the mouse device and the gyro mailbox
 #include "input/stick_mouse.inl"   // stick cursor; needs the gyro gate and mailbox
+// ⛔ AFTER the three mouse hooks, whose sources it blanks -- see the note in
+// the file. It must not run before they have read the motion.
+#include "input/mouse_exclusive.inl"  // keep the game out of what drives the mouse
 #include "input/osk.inl"          // the on-screen keyboard toggle
 // ⛔ AFTER osk.inl, which it calls to open the settings window, and after
 // overlay_window.inl, whose keyboard it toggles.
