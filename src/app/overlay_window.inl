@@ -135,15 +135,24 @@ inline std::atomic_int g_size{1};                     // 0 small, 1 medium, 2 la
 //
 // ⓘ Full's middle size is 4/5 of the screen, as asked. Compact stays where it
 // was, because it was right.
-inline const float kCompactShare[3] = { 0.46f, 0.62f, 0.80f };
-inline const float kFullShare[3]    = { 0.66f, 0.80f, 0.94f };
+// ⭐⭐ THE KEY SIZE IS THE SETTING, NOT THE WINDOW WIDTH (rhoquinn8217,
+// 2026-09-02: the faces should look the same at the same size).
+//
+// ⛔ Each face used to pick a share of the SCREEN, so Compact's fourteen
+// columns and Full's fifteen and a half divided that width differently and
+// their letters came out different sizes. Only the largest happened to match.
+//
+// ⓘ Now a size chooses how wide one KEY is, and the window follows from how
+// many columns the face has. Same keys, same font, either face -- and the
+// height falls out identical too, because it depends only on the key size.
+inline const float kKeyShare[3] = { 0.0426f, 0.0516f, 0.0606f };
 
 inline void size_for(int *w, int *h)
 {
     const int screenW = GetSystemMetrics(SM_CXSCREEN);
-    const float share = g_full.load() ? kFullShare[g_size.load() % 3]
-                                      : kCompactShare[g_size.load() % 3];
-    *w = (int)(screenW * share);
+    const float keyW = screenW * kKeyShare[g_size.load() % 3];
+    const float cols0 = g_full.load() ? 15.5f : 14.0f;
+    *w = (int)(keyW * cols0);
     // ⓘ Height follows the COLUMN COUNT so the keys stay roughly square: a
     // wider face with more columns needs proportionally more height, and a
     // fixed ratio would have squashed Full's rows.
@@ -785,11 +794,26 @@ inline void release_current(const void *who)
 inline void paint(HWND hwnd)
 {
     PAINTSTRUCT ps;
-    HDC dc = BeginPaint(hwnd, &ps);
+    HDC front = BeginPaint(hwnd, &ps);
 
     RECT rc;
     GetClientRect(hwnd, &rc);
     layout(rc.right, rc.bottom);
+
+    // ⛔⛔ DRAW INTO A BITMAP, THEN BLIT IT ONCE (rhoquinn8217, 2026-09-02:
+    // "there is a noticeable flicker when navigating").
+    //
+    // ⚠️ Painting straight to the window means the screen holds a half-drawn
+    // keyboard for a moment on every highlight move -- background cleared,
+    // keys appearing one at a time. Moving the highlight repaints the whole
+    // surface, so it flickered on every press.
+    //
+    // ⓘ One buffer per paint rather than one kept around: this happens at the
+    // rate a person presses keys, not per frame, and a cached bitmap would
+    // need invalidating every time the window resized.
+    HDC dc = CreateCompatibleDC(front);
+    HBITMAP buffer = CreateCompatibleBitmap(front, rc.right, rc.bottom);
+    HGDIOBJ oldBmp = SelectObject(dc, buffer);
 
     HBRUSH back = CreateSolidBrush(RGB(0x08, 0x09, 0x0c));
     FillRect(dc, &rc, back);
@@ -961,7 +985,8 @@ inline void paint(HWND hwnd)
         tr.left += 8;
         SelectObject(dc, tabFont);
         SetTextColor(dc, RGB(0x8b, 0x8d, 0x96));
-        DrawTextW(dc, L"DS5-USBIP Virtual Keyboard", -1, &tr,
+        DrawTextW(dc, g_full.load() ? L"DS5-USBIP Virtual Keyboard - FULL"
+                                    : L"DS5-USBIP Virtual Keyboard - COMPACT", -1, &tr,
                   DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
         break;
     }
@@ -976,6 +1001,12 @@ inline void paint(HWND hwnd)
     DeleteObject(tabFont);
     DeleteObject(bold);
 
+    // ⓘ The finished picture arrives in one go.
+    BitBlt(front, 0, 0, rc.right, rc.bottom, dc, 0, 0, SRCCOPY);
+    SelectObject(dc, oldBmp);
+    DeleteObject(buffer);
+    DeleteDC(dc);
+
     EndPaint(hwnd, &ps);
 }
 
@@ -985,6 +1016,11 @@ inline LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_PAINT:
         paint(hwnd);
         return 0;
+
+    // ⛔ NOTHING TO ERASE. The paint covers every pixel, so letting Windows
+    // clear the window first only adds a flash of blank between the two.
+    case WM_ERASEBKGND:
+        return 1;
     // ⛔ REFUSE ACTIVATION EVEN IF ASKED. WS_EX_NOACTIVATE covers clicks, but a
     // stray SetForegroundWindow from elsewhere would still hand us focus -- and
     // the moment this window has focus, the game stops receiving the keystrokes
