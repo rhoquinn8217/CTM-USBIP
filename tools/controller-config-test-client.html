@@ -3896,18 +3896,30 @@ function restorePlace() {
   // sessionStorage used to prevent, and what the run id replaces.
   if (!want.run) return;
 
-  setTimeout(function () {
-    // ⛔ THE RUN MUST MATCH, NOT MERELY FAIL TO CONTRADICT (rhoquinn8217,
-    // 2026-09-01: an ordinary listener start landed on the Editor).
-    //
-    // ⚠️ The check used to pass when AGENT_RUN was still EMPTY -- and at
-    // startup it is, because the first devices poll has not answered yet. So a
-    // place saved under the PREVIOUS listener run was accepted, and the window
-    // came up wherever it was left rather than on Overview.
-    //
-    // ⓘ Checked in here, after the wait, because that is when the run id has
-    // arrived. An unknown run is a refusal, not a maybe.
-    if (!AGENT_RUN || want.run !== AGENT_RUN) return;
+  // ⛔⛔ WAIT FOR THE RUN ID; DO NOT GUESS ON A CLOCK (rhoquinn8217,
+  // 2026-09-03: where you were stopped being remembered).
+  //
+  // ⚠️ This used to decide ONCE, after a fixed delay. An unknown run was a
+  // refusal -- but "unknown" also means "the devices call has not answered
+  // yet", so whenever that call was slower than the timer a perfectly good
+  // place was thrown away.
+  //
+  // ⚠️ And accepting an unknown run is no better: that was the ORIGINAL fault,
+  // where a place from a previous listener run came back and put you on the
+  // wrong tab.
+  //
+  // ⓘ Neither guess is needed. The id arrives; waiting for it answers both. A
+  // run that never arrives means the listener is not talking to us, and then
+  // there is nothing worth restoring into anyway.
+  var waitedForRun = 0;
+  var whenRunKnown = function () {
+    if (!AGENT_RUN) {
+      if (waitedForRun > 6000) return;
+      waitedForRun += 150;
+      setTimeout(whenRunKnown, 150);
+      return;
+    }
+    if (want.run !== AGENT_RUN) return;
     var tab = want.tab;
 
     // ⭐ Find the controller by SERIAL, wherever it landed this time. Falls
@@ -3958,7 +3970,8 @@ function restorePlace() {
         }
       }, 250);
     }
-  }, 900);
+  };
+  whenRunKnown();
 }
 
 function setFooterMode(on) {
