@@ -3929,7 +3929,11 @@ function savePlace(force) {
   // the page is still empty, and saving then overwrites the very place we are
   // about to read -- so closing the window without touching anything would
   // wipe where you were.
-  if (!PLACE_READY) return;
+  // ⓘ A FORCED save bypasses this. The gate exists only to stop the automatic
+  // first paint clobbering what the restore is about to read -- it was never
+  // meant to block a deliberate moment like heading for Close, and blocking
+  // one meant nothing was saved at all inside the first two seconds.
+  if (!PLACE_READY && !force) return;
   // ⛔ NOT WHILE YOU ARE IN THE FOOTER. Escape moves the halo onto Close, and
   // recording that would mean coming back to the Close button rather than to
   // the setting you were working on.
@@ -3972,6 +3976,18 @@ function savePlace(force) {
 window.addEventListener('pagehide', function () { savePlace(true); });
 
 function restorePlace() {
+  // ⛔⛔ ONE TIMER, NOT A FLAG WITH SEVEN EXITS (rhoquinn8217, 2026-09-03).
+  //
+  // ⚠️ Saving has to wait until the restore has read what is stored, or the
+  // first paint overwrites it. The first attempt set a flag at each exit of
+  // this function -- and it has SEVEN, one of which fires whenever the device
+  // list has not loaded yet. Miss one and saving is disabled for the entire
+  // session, which is worse than the fault it was fixing.
+  //
+  // ⓘ Two seconds, whatever happens. By then the restore has either landed or
+  // given up, and there is no path out of here that can skip it.
+  setTimeout(function () { PLACE_READY = true; }, 2000);
+
   // ⛔ A TARGET SUPPRESSES THE REMEMBERED PLACE ENTIRELY, whether or not the tab
   // exists yet (rhoquinn8217, 2026-09-01: the window landed on the controller
   // and then jumped straight back to Overview).
@@ -4000,14 +4016,14 @@ function restorePlace() {
   }
   var raw = null;
   try { raw = localStorage.getItem('ctm_place'); } catch (e) { return; }
-  if (!raw) { PLACE_READY = true; return; }
+  if (!raw) return;
   var want;
   try { want = JSON.parse(raw); } catch (e) { return; }
-  if (!want || !want.tab) { PLACE_READY = true; return; }
+  if (!want || !want.tab) return;
   // ⛔ A place from a PREVIOUS listener run is not ours. Without this, opening
   // the page tomorrow would drop you wherever you were tonight -- which is what
   // sessionStorage used to prevent, and what the run id replaces.
-  if (!want.run) { PLACE_READY = true; return; }
+  if (!want.run) return;
 
   // ⛔⛔ WAIT FOR THE RUN ID; DO NOT GUESS ON A CLOCK (rhoquinn8217,
   // 2026-09-03: where you were stopped being remembered).
@@ -4032,7 +4048,7 @@ function restorePlace() {
       setTimeout(whenRunKnown, 150);
       return;
     }
-    if (want.run !== AGENT_RUN) { PLACE_READY = true; return; }
+    if (want.run !== AGENT_RUN) return;
     var tab = want.tab;
 
     // ⭐ Find the controller by SERIAL, wherever it landed this time. Falls
@@ -4061,12 +4077,11 @@ function restorePlace() {
       var byId = want.id ? document.getElementById(want.id) : null;
       if (byId && focusElement(byId)) {
         window.scrollTo(0, want.scroll || 0);
+        PLACE_READY = true;          // landed: recording can start now
         return true;
       }
       return false;
     };
-
-    PLACE_READY = true;      // from here on, moving records where you are
 
     if (!settle()) {
       // ⚠️ Nothing rendered yet, or a refresh landed mid-restore. Try a few
