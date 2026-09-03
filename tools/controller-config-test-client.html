@@ -1283,6 +1283,8 @@ function focusElement(el) {
   GP_INDEX = at;
   GP_WANT = focusKeyOf(el);
   gpPaint();
+  savePlace(false);        // where you are, kept as you move
+
   // ⛔ The section scroll runs INSTEAD of scrollIntoView, never after it: the
   // browser's own scroll is what was clipping the top, so letting it run and
   // then correcting would fight it every time.
@@ -3875,6 +3877,40 @@ function honourOpenOnTab() {
   OPEN_ON_TAB = '';                 // one open, one jump
   return true;
 }
+
+// ⭐⭐ SAVE WHERE YOU ARE AS YOU MOVE, not on one way out (rhoquinn8217,
+// 2026-09-03: it stopped remembering).
+//
+// ⛔ This used to happen ONLY when entering the footer -- the Escape-into-the-
+// footer route that reaches the Close button. Every other way of closing the
+// window wrote nothing at all: the tray, the chord, the window's own close,
+// Alt+F4. It appeared to work only because that was the route being tested.
+//
+// ⓘ Throttled, because the halo moves at the speed of a held d-pad and a write
+// per step would be hundreds a second for no benefit. ⛔ And on pagehide with
+// no throttle, because that is the last moment there is.
+var PLACE_LAST = 0;
+
+function savePlace(force) {
+  if (!AGENT_RUN) return;              // nothing worth writing yet
+  var now = Date.now();
+  if (!force && now - PLACE_LAST < 400) return;
+  PLACE_LAST = now;
+  try {
+    var el = GP_FOCUS[GP_INDEX];
+    localStorage.setItem('ctm_place', JSON.stringify({
+      tab: ACTIVE,
+      index: GP_INDEX,
+      id: (el && el.id) ? el.id : '',
+      sect: SECT_ACTIVE,
+      scroll: window.scrollY || 0,
+      serial: '',
+      run: AGENT_RUN
+    }));
+  } catch (e) {}
+}
+
+window.addEventListener('pagehide', function () { savePlace(true); });
 
 function restorePlace() {
   // ⛔ A TARGET SUPPRESSES THE REMEMBERED PLACE ENTIRELY, whether or not the tab
