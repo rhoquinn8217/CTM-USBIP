@@ -148,7 +148,10 @@ inline void size_for(int *w, int *h)
     // wider face with more columns needs proportionally more height, and a
     // fixed ratio would have squashed Full's rows.
     const float cols = g_full.load() ? 15.5f : 14.0f;
-    *h = (int)(*w * 5.0f / (cols * 1.15f));
+    // ⓘ Two thirds the height it was (rhoquinn8217, 2026-09-02): five rows of
+    // tall keys plus a tab made the keyboard cover too much of the screen, and
+    // a key does not need to be square to be easy to hit.
+    *h = (int)(*w * 5.0f / (cols * 1.72f));
 }
 
 inline int overlay_y(int height)
@@ -315,11 +318,20 @@ inline const Key kRow4[] = {
 // below, and one table means they cannot drift apart.
 //
 // ⛔ The spacer is most of the width on purpose. It is the handle.
-inline const Key kTabRow[] = {
-    { L"", nullptr, 0, 0, KK_SPACER, 11.0f },
-    { L"\u2328\u21f3", nullptr, ACT_MOVE, 0, KK_ACTION, 1.0f },
-    { L"\u2921", nullptr, ACT_SIZE, 0, KK_ACTION, 1.0f },
-    { L"\u25a6", nullptr, ACT_LAYOUT, 0, KK_ACTION, 1.0f },
+inline const Key kTabCompact[] = {
+    { L"", nullptr, 0, 0, KK_SPACER, 12.0f },
+    { L"\u2328", nullptr, ACT_LAYOUT, 0, KK_ACTION, 0.67f },
+    { L"\u21f3", nullptr, ACT_MOVE,   0, KK_ACTION, 0.67f },
+    { L"\u2197", nullptr, ACT_SIZE,   0, KK_ACTION, 0.66f },
+};
+
+// ⓘ One per face, because the grab area has to fill whatever width that face
+// is -- 14 units for Compact, 15.5 for Full. Only the spacer differs.
+inline const Key kTabFull[] = {
+    { L"", nullptr, 0, 0, KK_SPACER, 13.5f },
+    { L"\u2328", nullptr, ACT_LAYOUT, 0, KK_ACTION, 0.67f },
+    { L"\u21f3", nullptr, ACT_MOVE,   0, KK_ACTION, 0.67f },
+    { L"\u2197", nullptr, ACT_SIZE,   0, KK_ACTION, 0.66f },
 };
 
 inline const Key kCompact0[] = {
@@ -379,11 +391,11 @@ struct Row { const Key *keys; int count; };
 #define CTM_ROW(a) { a, (int)(sizeof(a) / sizeof(a[0])) }
 
 inline const Row kFullRows[] = {
-    CTM_ROW(kTabRow),
+    CTM_ROW(kTabFull),
     CTM_ROW(kRow0), CTM_ROW(kRow1), CTM_ROW(kRow2), CTM_ROW(kRow3), CTM_ROW(kRow4),
 };
 inline const Row kCompactRows[] = {
-    CTM_ROW(kTabRow),
+    CTM_ROW(kTabCompact),
     CTM_ROW(kCompact0), CTM_ROW(kCompact1), CTM_ROW(kCompact2),
     CTM_ROW(kCompact3), CTM_ROW(kCompact4),
 };
@@ -394,7 +406,7 @@ inline const Row *rows_now() { return g_full.load() ? kFullRows : kCompactRows; 
 inline const int kRowCount = 6;          // the tab, then five rows of keys
 
 // ⓘ The tab is shorter than a key row -- it holds icons, not letters.
-inline float row_height_factor(int r) { return r == 0 ? 0.55f : 1.0f; }
+inline float row_height_factor(int r) { return r == 0 ? 0.5f : 1.0f; }
 
 // ⓘ F1..F12 replace the digits while L2 is held. Same positions, so the row you
 // are looking at is the row that changes -- there is no key to travel to and
@@ -701,11 +713,6 @@ inline void press_current(const void *who)
             if (g_hwnd != nullptr) PostMessageW(g_hwnd, WM_CTM_RESIZE, 0, 0);
         }
         if (k.usage == ACT_LAYOUT) switch_face();
-        if (k.usage == ACT_SIZE) {
-            g_size.store((g_size.load() + 1) % 3);
-            if (g_hwnd != nullptr) PostMessageW(g_hwnd, WM_CTM_RESIZE, 0, 0);
-        }
-        if (k.usage == ACT_LAYOUT) switch_face();
         return;
     }
 
@@ -774,8 +781,13 @@ inline void paint(HWND hwnd)
     FrameRect(dc, &rc, edge);
     DeleteObject(edge);
 
-    const int keyH = g_placed.empty() ? 30
-                   : (g_placed[0].r.bottom - g_placed[0].r.top);
+    // ⛔ MEASURE A KEY ROW, NOT THE FIRST ENTRY. The first entry is the tab
+    // now, which is half the height -- so every letter on the keyboard shrank
+    // to fit a strip it is not drawn in (rhoquinn8217, 2026-09-02).
+    int keyH = 30;
+    for (const Placed &pl : g_placed) {
+        if (pl.row == 1) { keyH = pl.r.bottom - pl.r.top; break; }
+    }
     HFONT font = CreateFontW(keyH * 5 / 9, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
                              DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                              CLEARTYPE_QUALITY, VARIABLE_PITCH, L"Segoe UI");
@@ -1349,23 +1361,13 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
 
     // ⭐ AN ACTION KEY ACTS ON THE KEYBOARD and sends nothing. Handled before
     // the sending path so it cannot also type.
+    // ⛔ ONE IMPLEMENTATION OF WHAT A KEY DOES. This used to be a second copy
+    // of the action handling, and it drifted the moment new actions were added
+    // -- the layout button worked with a mouse and did nothing from the pad
+    // (rhoquinn8217, 2026-09-02). The pad now presses the same way a click does.
     if (cross && k.kind == KK_ACTION && edge(deviceKey, 9, true)) {
-        if (k.usage == ACT_CLOSE) { hide(); return true; }
-        if (k.usage == ACT_STEAM) { ctm_overlay_open_steam(); hide(); return true; }
-        if (k.usage == ACT_PASTE) {
-            // ⓘ Shift turns it into copy. The shifted label already prints on
-            // the key, so it says so rather than needing to be known.
-            // ⓘ Not a keystroke: ctrl+v, sent as one. The only entry on the
-            // face that is a combination rather than a key.
-            const bool asCopy = shift_showing();
-            uint8_t pv[6] = { (uint8_t)(asCopy ? 0x06 : 0x19), 0, 0, 0, 0, 0 };
-            ctm_keyboard_device::set_state_for(deviceKey, KBD_CTRL, pv, 1);
-            return true;
-        }
-        if (k.usage == ACT_MOVE) {
-            g_atTop.store(!g_atTop.load());
-            if (g_hwnd != nullptr) PostMessageW(g_hwnd, WM_CTM_REPOSITION, 0, 0);
-        }
+        press_current(deviceKey);
+        if (!visible()) return true;          // it may have closed itself
     } else if (!cross) {
         edge(deviceKey, 9, false);
     }
