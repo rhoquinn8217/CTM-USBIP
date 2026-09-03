@@ -1283,8 +1283,6 @@ function focusElement(el) {
   GP_INDEX = at;
   GP_WANT = focusKeyOf(el);
   gpPaint();
-  savePlace(false);        // where you are, kept as you move
-
   // ⛔ The section scroll runs INSTEAD of scrollIntoView, never after it: the
   // browser's own scroll is what was clipping the top, so letting it run and
   // then correcting would fight it every time.
@@ -3251,6 +3249,16 @@ document.addEventListener('click', function (ev) {
 }, true);
 
 function gpPaint() {
+  // ⛔⛔ THE PLACE IS RECORDED HERE, because this is where the halo actually
+  // lands (rhoquinn8217, 2026-09-03: it remembered the section but not the row).
+  //
+  // ⚠️ It was hooked into focusElement -- but ORDINARY NAVIGATION never calls
+  // that. gpMove sets the index and paints, and every d-pad press goes through
+  // it. So the save fired only on the few paths that do use focusElement, and
+  // what got stored was whatever the halo happened to be on before, which was
+  // usually a section tab: no id, nothing to come back to.
+  savePlace(false);
+
   // ⛔⛔ RE-COLLECT IF THE LIST HAS GONE STALE.
   //
   // Every redraw replaces the elements, and GP_FOCUS keeps holding the OLD
@@ -3889,31 +3897,76 @@ function honourOpenOnTab() {
 // ⓘ Throttled, because the halo moves at the speed of a held d-pad and a write
 // per step would be hundreds a second for no benefit. ⛔ And on pagehide with
 // no throttle, because that is the last moment there is.
+// ⓘ False until the restore has run, or decided not to. Nothing is written
+// before that, so a load cannot destroy what it is about to read.
+var PLACE_READY = false;
+
 var PLACE_LAST = 0;
+var PLACE_PENDING = null;
+var PLACE_TIMER = null;
+
+// ⓘ What to remember, read at the moment of asking.
+function placeNow() {
+  var el = GP_FOCUS[GP_INDEX];
+  return {
+    tab: ACTIVE,
+    index: GP_INDEX,
+    id: (el && el.id) ? el.id : '',
+    sect: SECT_ACTIVE,
+    scroll: window.scrollY || 0,
+    serial: '',
+    run: AGENT_RUN
+  };
+}
+
+function writePlace(p) {
+  try { localStorage.setItem('ctm_place', JSON.stringify(p)); } catch (e) {}
+}
 
 function savePlace(force) {
   if (!AGENT_RUN) return;              // nothing worth writing yet
+  // ⛔⛔ NOT UNTIL THE RESTORE HAS HAD ITS TURN. The first paint happens while
+  // the page is still empty, and saving then overwrites the very place we are
+  // about to read -- so closing the window without touching anything would
+  // wipe where you were.
+  if (!PLACE_READY) return;
   // ⛔ NOT WHILE YOU ARE IN THE FOOTER. Escape moves the halo onto Close, and
   // recording that would mean coming back to the Close button rather than to
-  // the setting you were working on. Freezing here is exactly what the old
-  // footer-only writer was trying to achieve, and it does it without a second
-  // copy of the same job.
+  // the setting you were working on.
   if (FOOTER_MODE) return;
+
+  var p = placeNow();
+
+  // ⛔⛔ A THROTTLE MUST NOT DROP THE LAST ONE (rhoquinn8217, 2026-09-03: it
+  // remembered the section but not the row).
+  //
+  // ⚠️ This used to simply RETURN inside the window, so a run of d-pad presses
+  // -- which all land inside 400ms -- threw away every position after the
+  // first. What survived was the state at page load: no id, nothing to come
+  // back to. The section looked right only because it is stored separately and
+  // happened not to change.
+  //
+  // ⭐ The pending place is captured HERE, not when the timer fires. By then
+  // the halo may be on the footer's Close button, which is precisely the
+  // position that must not be recorded.
   var now = Date.now();
-  if (!force && now - PLACE_LAST < 400) return;
-  PLACE_LAST = now;
-  try {
-    var el = GP_FOCUS[GP_INDEX];
-    localStorage.setItem('ctm_place', JSON.stringify({
-      tab: ACTIVE,
-      index: GP_INDEX,
-      id: (el && el.id) ? el.id : '',
-      sect: SECT_ACTIVE,
-      scroll: window.scrollY || 0,
-      serial: '',
-      run: AGENT_RUN
-    }));
-  } catch (e) {}
+  if (force || now - PLACE_LAST >= 400) {
+    PLACE_LAST = now;
+    PLACE_PENDING = null;
+    writePlace(p);
+    return;
+  }
+  PLACE_PENDING = p;
+  if (PLACE_TIMER === null) {
+    PLACE_TIMER = setTimeout(function () {
+      PLACE_TIMER = null;
+      if (PLACE_PENDING) {
+        PLACE_LAST = Date.now();
+        writePlace(PLACE_PENDING);
+        PLACE_PENDING = null;
+      }
+    }, 450);
+  }
 }
 
 window.addEventListener('pagehide', function () { savePlace(true); });
@@ -3947,14 +4000,14 @@ function restorePlace() {
   }
   var raw = null;
   try { raw = localStorage.getItem('ctm_place'); } catch (e) { return; }
-  if (!raw) return;
+  if (!raw) { PLACE_READY = true; return; }
   var want;
   try { want = JSON.parse(raw); } catch (e) { return; }
-  if (!want || !want.tab) return;
+  if (!want || !want.tab) { PLACE_READY = true; return; }
   // ⛔ A place from a PREVIOUS listener run is not ours. Without this, opening
   // the page tomorrow would drop you wherever you were tonight -- which is what
   // sessionStorage used to prevent, and what the run id replaces.
-  if (!want.run) return;
+  if (!want.run) { PLACE_READY = true; return; }
 
   // ⛔⛔ WAIT FOR THE RUN ID; DO NOT GUESS ON A CLOCK (rhoquinn8217,
   // 2026-09-03: where you were stopped being remembered).
@@ -3979,7 +4032,7 @@ function restorePlace() {
       setTimeout(whenRunKnown, 150);
       return;
     }
-    if (want.run !== AGENT_RUN) return;
+    if (want.run !== AGENT_RUN) { PLACE_READY = true; return; }
     var tab = want.tab;
 
     // ⭐ Find the controller by SERIAL, wherever it landed this time. Falls
@@ -4012,6 +4065,8 @@ function restorePlace() {
       }
       return false;
     };
+
+    PLACE_READY = true;      // from here on, moving records where you are
 
     if (!settle()) {
       // ⚠️ Nothing rendered yet, or a refresh landed mid-restore. Try a few
@@ -4085,6 +4140,11 @@ function setFooterMode(on) {
     // on, so the last thing written is where you actually were. One writer,
     // and it cannot miss the way this one did.
   }
+  // ⛔ FORCE THE WRITE ON THE WAY IN. Entering the footer is the moment someone
+  // is heading for Close, and the throttle's trailing write is up to 450ms
+  // away -- a window destroyed inside that gap would lose the last position.
+  // ⓘ Called BEFORE the flag is set, or savePlace would refuse.
+  if (on && !FOOTER_MODE) savePlace(true);
   FOOTER_MODE = on;
   var bar = document.getElementById('gpbar');
   if (bar) bar.classList.toggle('gp-zone', on);
