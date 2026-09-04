@@ -3354,7 +3354,12 @@ function gpPaint() {
   // is still ON the box would fight the person typing in it.
   var active = document.activeElement;
   if (active && active !== want && fieldIsEditable(active)) {
+    // ⓘ Hold the index across the blur here too: this runs DURING a paint, and
+    // losing the position mid-paint would move the halo somewhere nobody asked
+    // for.
+    var keepIdx = GP_INDEX;
     active.blur();
+    GP_INDEX = keepIdx;
   }
 
   // ⛔ CLAMP FIRST. A redraw replaces the elements, and if the new list is
@@ -4436,7 +4441,16 @@ document.addEventListener('keydown', function (ev) {
     var esc = document.activeElement;
     if (esc && esc.blur) {
       ev.preventDefault();
+      // ⛔ THE HALO STAYS ON THE BOX (rhoquinn8217, 2026-09-03: "it's too
+      // strong -- it throws you into the footer").
+      //
+      // ⓘ Blurring makes document.activeElement the BODY, and the halo follows
+      // real focus, so letting go of the box also let go of where you were.
+      // Leaving a text box should put you back on that box, ready to move on
+      // -- not at the bottom of the page.
+      var keep = GP_INDEX;
       esc.blur();
+      GP_INDEX = keep;
       gpPaint();
       return;
     }

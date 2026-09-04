@@ -104,8 +104,10 @@ inline void do_open(Program program, int openedByButton)
             device_log::input(device_log::msg()
                 << "osk: refused -- the config window has focus and no field is "
                    "being edited");
-            ctm_ui_notify("Close the settings window to use the keyboard, or "
-                          "open it inside a text box.");
+            ctm_ui_notify(
+                "DS5-USBIP Virtual keyboard restricted from opening with "
+                "Controller Config except when making text input based "
+                "changes.");
             return;
         }
         ctm_overlay::show(0, 0, openedByButton);
