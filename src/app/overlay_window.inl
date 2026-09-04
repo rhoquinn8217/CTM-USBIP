@@ -1118,10 +1118,16 @@ inline void paint(HWND hwnd)
         tr.left += 8;
         SelectObject(dc, tabFont);
         SetTextColor(dc, RGB(0x8b, 0x8d, 0x96));
+        // ⓘ SHORT, so the legend fits beside it (2026-09-04). The face name was
+        // spelled out -- "DS5-USBIP Virtual Keyboard - SUB-COMPACT" -- which is
+        // the LONGEST title on the NARROWEST tab, and squeezed the legend off
+        // exactly the face where an unfamiliar layout most needs one.
+        // ⭐ The face is visible from the keyboard itself; the name is not
+        // carrying its width.
         const wchar_t *title =
-            g_face.load() == FACE_FULL ? L"DS5-USBIP Virtual Keyboard - FULL" :
-            g_face.load() == FACE_SUB  ? L"DS5-USBIP Virtual Keyboard - SUB-COMPACT"
-                                       : L"DS5-USBIP Virtual Keyboard - COMPACT";
+            g_face.load() == FACE_FULL ? L"DS5-USBIP \u2014 full" :
+            g_face.load() == FACE_SUB  ? L"DS5-USBIP \u2014 sub-compact"
+                                       : L"DS5-USBIP \u2014 compact";
         DrawTextW(dc, title, -1, &tr,
                   DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
 
@@ -1143,18 +1149,42 @@ inline void paint(HWND hwnd)
         // the spacer is NARROWEST there, so a left-aligned title and a
         // right-aligned legend can collide in the middle. Measured rather than
         // assumed -- the estimate that said it would fit was wrong by 4x once.
+        // ⓘ ☰ for move, not a cog: it is the button's own symbol on the pad,
+        // and the Deck community calls it the hamburger. A cog says "settings".
         const wchar_t *legend =
             L"\u25cb close   \u25a1 \u232b   \u25b3 space   "
-            L"\u2715 select   \u2699 move";
+            L"\u2715 select   \u2630 move";
         SIZE ts = {0, 0}, ls = {0, 0};
         GetTextExtentPoint32W(dc, title, lstrlenW(title), &ts);
         GetTextExtentPoint32W(dc, legend, lstrlenW(legend), &ls);
         const LONG room = (pl.r.right - 8) - (pl.r.left + 8);
-        if (ts.cx + ls.cx + 24 <= room) {
-            RECT lr = pl.r;
-            lr.right -= 8;
+        // ⓘ CENTRED in the spacer, not right-aligned: the right edge butts up
+        // against the tab's own four buttons, and the legend reads as part of
+        // them there. ⭐ Centred it belongs to the window instead.
+        //
+        // ⛔ Still only when it fits BESIDE the title -- centring does not make
+        // the collision go away, it just moves where they would meet.
+        //
+        // ⚠️ AND THE ARITHMETIC IS NOT THE SAME AS FOR RIGHT-ALIGNED. Centred,
+        // the legend's left edge sits at (room - legend) / 2 -- so it can run
+        // into a long title even when the two widths SUM to less than the room.
+        // ➡️ The title must end before that point: room >= 2*title + legend.
+        // ⭐ AND IT NEVER JUST DISAPPEARS. If a centred legend would run into
+        // the title, it centres in what is LEFT of the row instead -- slightly
+        // off-centre on the narrowest face, which is far better than absent on
+        // the face whose layout is least familiar.
+        // ⛔ Only hidden if even that has no room, which would mean the title
+        // alone fills the tab.
+        RECT lr = pl.r;
+        lr.right -= 8;
+        if (room >= 2 * ts.cx + ls.cx + 24) {
+            lr.left += 8;                       // truly centred in the tab
+        } else {
+            lr.left = pl.r.left + 8 + ts.cx + 24;   // centred after the title
+        }
+        if (lr.right - lr.left >= ls.cx) {
             DrawTextW(dc, legend, -1, &lr,
-                      DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+                      DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
         }
         break;
     }
