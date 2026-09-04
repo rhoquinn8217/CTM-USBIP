@@ -4422,8 +4422,6 @@ var PLAIN_KEYS = {
 document.addEventListener('keydown', function (ev) {
   if (STOPPED) return;
   if (ev.ctrlKey || ev.altKey || ev.shiftKey || ev.metaKey) return;   // the gate's keys
-  // ⓘ Typing keeps every key -- including inside the rename field, whose own
-  // handler deals with Enter and Escape.
 
   // ⭐⭐ ESCAPE GETS OUT OF ANY FIELD, not just the rename one (rhoquinn8217,
   // 2026-09-03: "the inconsistency is jarring").

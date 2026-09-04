@@ -617,6 +617,29 @@ inline void apply(const void *deviceKey,
         }
     }
 
+    // ⛔⛔ THE SWALLOW RUNS BEFORE THE GATE, not after (2026-09-03).
+    //
+    // ⚠️ It used to sit below the config-mode branch -- which RETURNS -- so in
+    // config mode the swallow never ran at all. That is the mode where it
+    // matters most: close the on-screen keyboard with Circle still held, and
+    // the very next report reached the gate as a fresh press, which sent its
+    // "back" key and threw you into the footer.
+    //
+    // ⓘ A held button is blanked until it is seen RELEASED. Whatever armed it
+    // -- hide(), a keyboard close, a mode change -- gets the same protection,
+    // and it has to be applied before anything can consume the report.
+    if (g_swallowUntilReleased != 0 && len > 10) {
+        for (int i = 0; i < kButtonCount; ++i) {
+            const uint32_t bit = 1u << i;
+            if ((g_swallowUntilReleased & bit) == 0) continue;
+            if (is_pressed(data, len, i)) {
+                clear_button(data, len, i);
+            } else {
+                g_swallowUntilReleased &= ~bit;
+            }
+        }
+    }
+
     if (config_mode()) {
         uint8_t gateKeys[6] = {0, 0, 0, 0, 0, 0};
         size_t gateCount = 0;
@@ -771,17 +794,6 @@ inline void apply(const void *deviceKey,
     // ⭐ Swallow anything still held from before the gate released. Each button
     // clears as it is let go, so the pad becomes live piece by piece rather than
     // all at once with a stale press in flight.
-    if (g_swallowUntilReleased != 0 && len > 10) {
-        for (int i = 0; i < kButtonCount; ++i) {
-            const uint32_t bit = 1u << i;
-            if ((g_swallowUntilReleased & bit) == 0) continue;
-            if (is_pressed(data, len, i)) {
-                clear_button(data, len, i);
-            } else {
-                g_swallowUntilReleased &= ~bit;
-            }
-        }
-    }
 
     const std::string section = device_settings_section(kind, linkedConfig);
 
