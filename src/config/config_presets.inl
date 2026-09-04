@@ -92,12 +92,12 @@ inline const Setting kGyroMouseMode[] = {
        keeps its day job, so a game's own touchpad gestures still work. The
        person decides if they would rather it did not. */
     { "touchpad_scroll", "1" },
-    /* ⛔ NO stick_to_scroll HERE (rhoquinn8217, 2026-09-03). It borrowed the
-       left stick to scroll, which was nearly free before -- the game still saw
-       the stick. Now that hiding a source means LOSING it, choosing gyro aiming
-       would silently cost a stick too.
-       ⓘ The d-pad is already bound to the arrow keys, which scroll most things.
-       And the convention elsewhere puts scroll on the spare POINTING surface --
+    /* ⛔ NEITHER STICK IS SPENT HERE (rhoquinn8217, 2026-09-03). This preset
+       used to borrow the left stick to scroll, which was nearly free while the
+       game still saw the stick -- and became a real cost once hiding a source
+       meant losing it. Movement is what a gamer cannot give up.
+       ⓘ The d-pad is already bound to the arrow keys, which scroll most things,
+       and the convention elsewhere puts scroll on the spare POINTING surface --
        the Steam Controller's left trackpad -- rather than on a stick. */
     // ⓘ Recentring belongs HERE and only here: it points the gyro back at the
     // middle of the screen. On a stick or touchpad cursor there is nothing to
@@ -130,10 +130,14 @@ inline const Setting kTouchpadMouseMode[] = {
 // regrip at all. ⓘ The right stick does nothing else while this is linked,
 // which is fine: this is a desktop config, not one to play with.
 inline const Setting kStickMouseMode[] = {
-    { "stick_no_passthrough", "true" },
     CTM_PRESET_SHARED_BINDINGS,
-    { "stick_to_mouse", "right" },
-    { "stick_to_scroll", "left" },
+    // ⭐ One setting per stick, and each says what THAT stick does. ⓘ Both are
+    // spent here, which is the trade this preset is: the sticks become a mouse
+    // and the game stops seeing them.
+    { "right_stick_mode", "mouse" },
+    { "right_stick_no_passthrough", "true" },
+    { "left_stick_mode", "scroll" },
+    { "left_stick_no_passthrough", "true" },
 };
 
 // ---- L2-gyro-mouse-aiming --------------------------------------------------

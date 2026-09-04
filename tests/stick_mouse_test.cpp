@@ -181,7 +181,7 @@ int run_stick_mouse_tests()
     {
         reset_stubs();
         fresh_device();
-        g_cfg["stick_to_mouse"] = "right";
+        g_cfg["right_stick_mode"] = "mouse";
         auto r = rest_report();
         run_step(r, 0);
         run_step(r, 100);
@@ -193,8 +193,8 @@ int run_stick_mouse_tests()
     {
         reset_stubs();
         fresh_device();
-        g_cfg["stick_to_mouse"] = "right";
-        g_cfg["stick_mouse_deadzone"] = "20";
+        g_cfg["right_stick_mode"] = "mouse";
+        g_cfg["right_stick_mouse_deadzone"] = "20";
         auto r = rest_report();
         r[3] = 148;                        // ~16% right, inside 20%
         run_step(r, 0);
@@ -206,9 +206,9 @@ int run_stick_mouse_tests()
     {
         reset_stubs();
         fresh_device();
-        g_cfg["stick_to_mouse"] = "right";
-        g_cfg["stick_mouse_speed"] = "1000";
-        g_cfg["stick_mouse_curve"] = "linear";
+        g_cfg["right_stick_mode"] = "mouse";
+        g_cfg["right_stick_mouse_speed"] = "1000";
+        g_cfg["right_stick_mouse_curve"] = "linear";
         auto r = rest_report();
         r[3] = 255;                        // hard right
         run_step(r, 0);                    // first report only sets the clock
@@ -223,9 +223,9 @@ int run_stick_mouse_tests()
         // elapsed time produces the same travel however many reports arrive.
         reset_stubs();
         fresh_device();
-        g_cfg["stick_to_mouse"] = "right";
-        g_cfg["stick_mouse_speed"] = "1000";
-        g_cfg["stick_mouse_curve"] = "linear";
+        g_cfg["right_stick_mode"] = "mouse";
+        g_cfg["right_stick_mouse_speed"] = "1000";
+        g_cfg["right_stick_mouse_curve"] = "linear";
         auto r = rest_report();
         r[3] = 255;
         run_step(r, 0);
@@ -234,9 +234,9 @@ int run_stick_mouse_tests()
 
         reset_stubs();
         fresh_device();
-        g_cfg["stick_to_mouse"] = "right";
-        g_cfg["stick_mouse_speed"] = "1000";
-        g_cfg["stick_mouse_curve"] = "linear";
+        g_cfg["right_stick_mode"] = "mouse";
+        g_cfg["right_stick_mouse_speed"] = "1000";
+        g_cfg["right_stick_mouse_curve"] = "linear";
         auto r2 = rest_report();
         r2[3] = 255;
         run_step(r2, 0);
@@ -250,9 +250,9 @@ int run_stick_mouse_tests()
     {
         reset_stubs();
         fresh_device();
-        g_cfg["stick_to_mouse"] = "right";
-        g_cfg["stick_mouse_speed"] = "1000";
-        g_cfg["stick_mouse_curve"] = "linear";
+        g_cfg["right_stick_mode"] = "mouse";
+        g_cfg["right_stick_mouse_speed"] = "1000";
+        g_cfg["right_stick_mouse_curve"] = "linear";
         auto r = rest_report();
         r[3] = 255;
         run_step(r, 0);
@@ -265,10 +265,10 @@ int run_stick_mouse_tests()
         auto travel = [](const char *curve) {
             reset_stubs();
             fresh_device();
-            g_cfg["stick_to_mouse"] = "right";
-            g_cfg["stick_mouse_speed"] = "2000";
-            g_cfg["stick_mouse_curve"] = curve;
-            g_cfg["stick_mouse_deadzone"] = "0";
+            g_cfg["right_stick_mode"] = "mouse";
+            g_cfg["right_stick_mouse_speed"] = "2000";
+            g_cfg["right_stick_mouse_curve"] = curve;
+            g_cfg["right_stick_mouse_deadzone"] = "0";
             auto r = rest_report();
             r[3] = 192;                    // ~half right
             run_step(r, 0);
@@ -287,9 +287,9 @@ int run_stick_mouse_tests()
     {
         reset_stubs();
         fresh_device();
-        g_cfg["stick_to_mouse"] = "left";
-        g_cfg["stick_mouse_speed"] = "1000";
-        g_cfg["stick_mouse_curve"] = "linear";
+        g_cfg["left_stick_mode"] = "mouse";
+        g_cfg["left_stick_mouse_speed"] = "1000";
+        g_cfg["left_stick_mouse_curve"] = "linear";
         auto r = rest_report();
         r[1] = 255;                        // left stick hard right
         r[3] = 128;                        // right stick centred
@@ -302,10 +302,10 @@ int run_stick_mouse_tests()
     {
         reset_stubs();
         fresh_device();
-        g_cfg["stick_to_mouse"] = "right";
-        g_cfg["stick_mouse_speed"] = "1000";
-        g_cfg["stick_mouse_curve"] = "linear";
-        g_cfg["stick_mouse_invert"] = "1";
+        g_cfg["right_stick_mode"] = "mouse";
+        g_cfg["right_stick_mouse_speed"] = "1000";
+        g_cfg["right_stick_mouse_curve"] = "linear";
+        g_cfg["right_stick_mouse_invert"] = "1";
         auto r = rest_report();
         r[3] = 255;
         run_step(r, 0);
@@ -317,10 +317,10 @@ int run_stick_mouse_tests()
     {
         reset_stubs();
         fresh_device();
-        g_cfg["stick_to_mouse"] = "right";
-        g_cfg["stick_to_mouse_gate"] = "L2";
-        g_cfg["stick_mouse_speed"] = "1000";
-        g_cfg["stick_mouse_curve"] = "linear";
+        g_cfg["right_stick_mode"] = "mouse";
+        g_cfg["right_stick_gate"] = "L2";
+        g_cfg["right_stick_mouse_speed"] = "1000";
+        g_cfg["right_stick_mouse_curve"] = "linear";
         auto r = rest_report();
         r[3] = 255;                        // held hard right throughout
         run_step(r, 0);
@@ -336,9 +336,9 @@ int run_stick_mouse_tests()
     {
         reset_stubs();
         fresh_device();
-        g_cfg["stick_to_mouse"] = "right";
-        g_cfg["stick_mouse_speed"] = "1000";
-        g_cfg["stick_mouse_curve"] = "linear";
+        g_cfg["right_stick_mode"] = "mouse";
+        g_cfg["right_stick_mouse_speed"] = "1000";
+        g_cfg["right_stick_mouse_curve"] = "linear";
         auto r = rest_report();
         r[3] = 255;
         run_step(r, 0);
@@ -350,9 +350,12 @@ int run_stick_mouse_tests()
     {
         reset_stubs();
         fresh_device();
-        g_cfg["stick_to_mouse"] = "both";
-        g_cfg["stick_mouse_speed"] = "1000";
-        g_cfg["stick_mouse_curve"] = "linear";
+        g_cfg["right_stick_mode"] = "mouse";
+        g_cfg["left_stick_mode"] = "mouse";
+        g_cfg["right_stick_mouse_speed"] = "1000";
+        g_cfg["left_stick_mouse_speed"] = "1000";
+        g_cfg["right_stick_mouse_curve"] = "linear";
+        g_cfg["left_stick_mouse_curve"] = "linear";
 
         // Left pushed hard right, right stick barely off centre: the left wins.
         auto r = rest_report();
@@ -366,9 +369,12 @@ int run_stick_mouse_tests()
         // Now the right stick is pushed further, and it takes over.
         reset_stubs();
         fresh_device();
-        g_cfg["stick_to_mouse"] = "both";
-        g_cfg["stick_mouse_speed"] = "1000";
-        g_cfg["stick_mouse_curve"] = "linear";
+        g_cfg["right_stick_mode"] = "mouse";
+        g_cfg["left_stick_mode"] = "mouse";
+        g_cfg["right_stick_mouse_speed"] = "1000";
+        g_cfg["left_stick_mouse_speed"] = "1000";
+        g_cfg["right_stick_mouse_curve"] = "linear";
+        g_cfg["left_stick_mouse_curve"] = "linear";
         auto r2 = rest_report();
         r2[1] = 140;
         r2[2] = 255;      // left barely right, right stick hard DOWN
@@ -385,9 +391,12 @@ int run_stick_mouse_tests()
         // sum to a dead cursor, which reads as the feature being broken.
         reset_stubs();
         fresh_device();
-        g_cfg["stick_to_mouse"] = "both";
-        g_cfg["stick_mouse_speed"] = "1000";
-        g_cfg["stick_mouse_curve"] = "linear";
+        g_cfg["right_stick_mode"] = "mouse";
+        g_cfg["left_stick_mode"] = "mouse";
+        g_cfg["right_stick_mouse_speed"] = "1000";
+        g_cfg["left_stick_mouse_speed"] = "1000";
+        g_cfg["right_stick_mouse_curve"] = "linear";
+        g_cfg["left_stick_mouse_curve"] = "linear";
         auto r = rest_report();
         r[1] = 0;         // left hard LEFT
         r[3] = 255;       // right hard RIGHT
@@ -410,9 +419,9 @@ int run_stick_mouse_tests()
     {
         reset_stubs();
         fresh_device();
-        g_cfg["stick_to_scroll"] = "left";
-        g_cfg["stick_scroll_speed"] = "10";        // 10 clicks a second
-        g_cfg["stick_scroll_deadzone"] = "0";
+        g_cfg["left_stick_mode"] = "scroll";
+        g_cfg["left_stick_scroll_speed"] = "10";        // 10 clicks a second
+        g_cfg["left_stick_scroll_deadzone"] = "0";
         auto r = rest_report();
         r[2] = 0;                                  // hard up
         scroll_for(r, 500);
@@ -423,9 +432,9 @@ int run_stick_mouse_tests()
     {
         reset_stubs();
         fresh_device();
-        g_cfg["stick_to_scroll"] = "left";
-        g_cfg["stick_scroll_speed"] = "10";
-        g_cfg["stick_scroll_deadzone"] = "0";
+        g_cfg["left_stick_mode"] = "scroll";
+        g_cfg["left_stick_scroll_speed"] = "10";
+        g_cfg["left_stick_scroll_deadzone"] = "0";
         auto r = rest_report();
         r[2] = 255;                                // hard down
         scroll_for(r, 500);
@@ -436,8 +445,8 @@ int run_stick_mouse_tests()
     {
         reset_stubs();
         fresh_device();
-        g_cfg["stick_to_scroll"] = "left";
-        g_cfg["stick_scroll_speed"] = "20";
+        g_cfg["left_stick_mode"] = "scroll";
+        g_cfg["left_stick_scroll_speed"] = "20";
         auto r = rest_report();                    // centred
         scroll_for(r, 500);
         CTM_CHECK_EQ(g_wheelSum, 0);
@@ -451,10 +460,10 @@ int run_stick_mouse_tests()
     {
         reset_stubs();
         fresh_device();
-        g_cfg["stick_to_scroll"] = "left";
-        g_cfg["stick_scroll_speed"] = "10";
-        g_cfg["stick_scroll_deadzone"] = "0";
-        g_cfg["stick_scroll_natural"] = "true";
+        g_cfg["left_stick_mode"] = "scroll";
+        g_cfg["left_stick_scroll_speed"] = "10";
+        g_cfg["left_stick_scroll_deadzone"] = "0";
+        g_cfg["left_stick_scroll_natural"] = "true";
         auto r = rest_report();
         r[2] = 0;                                  // hard up
         scroll_for(r, 500);
@@ -462,10 +471,12 @@ int run_stick_mouse_tests()
 
         reset_stubs();
         fresh_device();
-        g_cfg["stick_to_scroll"] = "left";
-        g_cfg["stick_to_scroll_gate"] = "L2";
-        g_cfg["stick_scroll_speed"] = "10";
-        g_cfg["stick_scroll_deadzone"] = "0";
+        g_cfg["left_stick_mode"] = "scroll";
+        // ⓘ The LEFT stick's gate, because the gate belongs to the stick doing
+        // the job -- not to the job.
+        g_cfg["left_stick_gate"] = "L2";
+        g_cfg["left_stick_scroll_speed"] = "10";
+        g_cfg["left_stick_scroll_deadzone"] = "0";
         auto r2 = rest_report();
         r2[2] = 0;
         scroll_for(r2, 500);
@@ -478,12 +489,16 @@ int run_stick_mouse_tests()
         // stick scrolls, neither disturbing the other.
         reset_stubs();
         fresh_device();
-        g_cfg["stick_to_mouse"] = "right";
-        g_cfg["stick_mouse_speed"] = "1000";
-        g_cfg["stick_mouse_curve"] = "linear";
-        g_cfg["stick_to_scroll"] = "left";
-        g_cfg["stick_scroll_speed"] = "10";
-        g_cfg["stick_scroll_deadzone"] = "0";
+        g_cfg["right_stick_mode"] = "mouse";
+        g_cfg["right_stick_mouse_speed"] = "1000";
+        g_cfg["left_stick_mouse_speed"] = "1000";
+        g_cfg["right_stick_mouse_curve"] = "linear";
+        g_cfg["left_stick_mouse_curve"] = "linear";
+        g_cfg["left_stick_mode"] = "scroll";
+        g_cfg["right_stick_scroll_speed"] = "10";
+        g_cfg["left_stick_scroll_speed"] = "10";
+        g_cfg["right_stick_scroll_deadzone"] = "0";
+        g_cfg["left_stick_scroll_deadzone"] = "0";
         auto r = rest_report();
         r[3] = 255;                                // right stick hard right
         r[2] = 0;                                  // left stick hard up
@@ -503,7 +518,7 @@ int run_stick_mouse_tests()
     {
         reset_stubs();
         fresh_device();
-        g_cfg["stick_to_mouse"] = "right";
+        g_cfg["right_stick_mode"] = "mouse";
         g_configModeEffective = true;
         auto r = rest_report();
         r[3] = 255;

@@ -403,7 +403,8 @@ int run_config_store_tests()
         // free while a borrowed source still reached the game -- but hiding a
         // source now means losing it, so aiming with the gyro would have cost a
         // stick as well. The d-pad's arrow keys already scroll.
-        CTM_CHECK(!mentions("gyro-to-mouse", "stick_to_scroll"));
+        CTM_CHECK(!mentions("gyro-to-mouse", "left_stick_mode"));
+        CTM_CHECK(!mentions("gyro-to-mouse", "right_stick_mode"));
         // ⭐ THE TOUCHPAD DOES SCROLL HERE, with ONE finger (rhoquinn8217,
         // 2026-09-03). The old reasoning was that reaching the pad meant
         // regripping -- but a POINTER finger reaches a DualSense touchpad with
@@ -418,13 +419,15 @@ int run_config_store_tests()
         // setting could not say "hide the gyro but leave my sticks alone",
         // which is why there are three (rhoquinn8217, 2026-09-03).
         CTM_CHECK(has("gyro-to-mouse", "gyro_no_passthrough", "true"));
-        CTM_CHECK(!mentions("gyro-to-mouse", "stick_no_passthrough"));
+        CTM_CHECK(!mentions("gyro-to-mouse", "right_stick_no_passthrough"));
+        CTM_CHECK(!mentions("gyro-to-mouse", "left_stick_no_passthrough"));
         CTM_CHECK(!mentions("gyro-to-mouse", "touchpad_no_passthrough"));
 
         CTM_CHECK(has("touchpad-mouse", "touchpad_no_passthrough", "true"));
         CTM_CHECK(!mentions("touchpad-mouse", "gyro_no_passthrough"));
 
-        CTM_CHECK(has("stick-to-mouse", "stick_no_passthrough", "true"));
+        CTM_CHECK(has("stick-to-mouse", "right_stick_no_passthrough", "true"));
+        CTM_CHECK(has("stick-to-mouse", "left_stick_no_passthrough", "true"));
         CTM_CHECK(!mentions("stick-to-mouse", "gyro_no_passthrough"));
 
         // ⛔ And the superseded single key is gone from every preset.
@@ -440,10 +443,12 @@ int run_config_store_tests()
         // asserted with the other suppression checks above.
         CTM_CHECK(has("touchpad-mouse", "touchpad_tap_click", "true"));
         // The hand is on the pad here, so the sticks are left alone.
-        CTM_CHECK(!mentions("touchpad-mouse", "stick_to_scroll"));
+        CTM_CHECK(!mentions("touchpad-mouse", "left_stick_mode"));
+        CTM_CHECK(!mentions("touchpad-mouse", "right_stick_mode"));
 
-        CTM_CHECK(has("stick-to-mouse", "stick_to_mouse", "right"));
-        CTM_CHECK(has("stick-to-mouse", "stick_to_scroll", "left"));
+        // ⭐ Each stick says what IT does, rather than a job naming a stick.
+        CTM_CHECK(has("stick-to-mouse", "right_stick_mode", "mouse"));
+        CTM_CHECK(has("stick-to-mouse", "left_stick_mode", "scroll"));
     }
 
     section("presets: no tuning numbers, on purpose");
@@ -452,8 +457,14 @@ int run_config_store_tests()
         // a number written here would be a guess competing with them.
         const char *const tuning[] = {
             "gyro_mouse_px_per_360", "gyro_mouse_min_sens", "gyro_mouse_max_sens",
-            "stick_mouse_speed", "stick_mouse_curve", "stick_mouse_deadzone",
-            "stick_scroll_speed", "touchpad_mouse_speed", "touchpad_scroll_speed"
+            // ⚠️ Per stick now. The old shared names would still be listed here
+            // and match nothing, so this test would pass while checking nothing
+            // (2026-09-03).
+            "right_stick_mouse_speed", "right_stick_mouse_curve",
+            "right_stick_mouse_deadzone", "right_stick_scroll_speed",
+            "left_stick_mouse_speed", "left_stick_mouse_curve",
+            "left_stick_mouse_deadzone", "left_stick_scroll_speed",
+            "touchpad_mouse_speed", "touchpad_scroll_speed"
         };
         for (size_t i = 0; i < ctm_presets::preset_count(); ++i) {
             const ctm_presets::Preset &p = ctm_presets::kPresets[i];
