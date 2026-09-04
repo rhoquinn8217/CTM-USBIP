@@ -3340,6 +3340,23 @@ function gpPaint() {
     return;                       // gpCollect paints
   }
 
+  // ⛔⛔ THE PAD MOVING AWAY MUST LET GO OF A TEXT BOX (rhoquinn8217,
+  // 2026-09-03: "the white halo persists even if you navigate away from it
+  // with the blue halo").
+  //
+  // ⓘ There are three focus rings and two of them are different things: the
+  // BLUE halo is this page's own pad cursor, and the WHITE one is real DOM
+  // focus on an input. They were free to diverge -- so a text box stayed
+  // focused after the pad had walked off it, and the on-screen keyboard stayed
+  // allowed because it follows DOM focus.
+  //
+  // ⚠️ Only when the pad has actually moved elsewhere. Blurring while the halo
+  // is still ON the box would fight the person typing in it.
+  var active = document.activeElement;
+  if (active && active !== want && fieldIsEditable(active)) {
+    active.blur();
+  }
+
   // ⛔ CLAMP FIRST. A redraw replaces the elements, and if the new list is
   // shorter -- picking "(no config)" removes the Rename button -- the index can
   // point past the end. GP_FOCUS[GP_INDEX] is then undefined, gpPaint returns
@@ -3712,10 +3729,11 @@ document.addEventListener('focusout', function () {
 // ⓘ Reading it clears it listener-side, so this cannot show the same one twice.
 setInterval(function () {
   if (inPlainTab() || !document.hasFocus()) return;
-  // ⛔ undefined, NOT null. call() attaches a body whenever it is not
-  // undefined, so null puts "null" in the body of a GET -- which is where the
-  // first attempt at this quietly died (2026-09-03).
-  call('GET', '/api/v1/ui/notice', undefined, true).then(function (r) {
+  // ⛔ POST, not GET. Every /api/v1/ui/ route answers 405 to anything else
+  // (rest_config.inl guards the whole prefix), so the first two attempts at
+  // this were rejected before reaching the handler and failed silently.
+  // ⓘ It reads and clears, so a POST is the honest verb anyway.
+  call('POST', '/api/v1/ui/notice', {}, true).then(function (r) {
     if (r && r.notice) showListenerNotice(r.notice);
   }).catch(function () {});
 }, 1000);
@@ -3927,6 +3945,20 @@ function gpKeyBack() {
   }
   if (GP_SELECTING) { gpSelectEnd(false); return; }
   if (RENAMING) { cancelRename(); return; }
+
+  // ⛔ CIRCLE LETS GO OF A TEXT BOX (rhoquinn8217, 2026-09-03: "circle should
+  // remove the white focus on the box but it doesn't").
+  //
+  // ⓘ The branches above only know about boxes this page is TRACKING --
+  // GP_EDITING, GP_SELECTING, RENAMING. A plain input that took DOM focus some
+  // other way (the agent address, the config creator) is none of those, so
+  // Circle sailed past it and the white halo stayed. ⚠️ Which also kept the
+  // on-screen keyboard allowed, since that follows DOM focus.
+  if (fieldIsEditable(document.activeElement)) {
+    document.activeElement.blur();
+    gpPaint();
+    return;
+  }
 
   // ⭐ ○ GOES STRAIGHT TO THE FOOTER, from anywhere.
   //
