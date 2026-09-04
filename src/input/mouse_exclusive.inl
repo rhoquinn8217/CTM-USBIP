@@ -101,23 +101,22 @@ inline void apply(const void *deviceKey,
     // ⭐ A STICK, when it points or scrolls.
     // ⓘ 0x80 is centre, not 0: a zeroed stick reads as fully left and up, and
     // a game would spin.
-    // ⚠️ THE STICK IS THE ONE THAT CANNOT BE FULLY INDEPENDENT, because there
-    // are TWO of them. "Hide the gyro" names a thing; "hide the stick" does
-    // not, and only the mapping knows which one drives the cursor.
+    // ⭐⭐ EACH STICK IS ITS OWN SWITCH NOW (rhoquinn8217, 2026-09-03).
     //
-    // ⛔ Blanking BOTH when the switch is on would kill walking for anyone who
-    // turned it on without a stick mapped -- a far worse surprise than the
-    // setting doing nothing.
+    // ⛔ This used to hide "the stick that drives the mouse", which meant it
+    // could be ON and do nothing when no stick was mapped -- exactly what
+    // happened in a live config. A switch names its own stick now, so turning
+    // it on always does what it says.
     //
-    // ⓘ So this reads as "hide the stick that drives the mouse", and when no
-    // stick does, there is no such stick. That is a definition, not a hidden
-    // dependency on another switch.
-    const std::string mouseStick  = device_config_str(section.c_str(), "stick_to_mouse");
-    const std::string scrollStick = device_config_str(section.c_str(), "stick_to_scroll");
-    if (!wants(section, "stick_no_passthrough")) return;
-    for (const std::string *s : { &mouseStick, &scrollStick }) {
-        if (*s == "left")  { if (len > 2) { data[1] = 0x80; data[2] = 0x80; } }
-        if (*s == "right") { if (len > 4) { data[3] = 0x80; data[4] = 0x80; } }
+    // ⓘ Independent of the modes, like the gyro and touchpad ones: hiding a
+    // stick from the game is a thing you can want on its own.
+    if (device_config_bool(section.c_str(), "right_stick_no_passthrough", false)) {
+        // ⓘ 0x80 is centre, not 0: a zeroed stick reads as fully left and up,
+        // and a game would spin.
+        if (len > 4) { data[3] = 0x80; data[4] = 0x80; }
+    }
+    if (device_config_bool(section.c_str(), "left_stick_no_passthrough", false)) {
+        if (len > 2) { data[1] = 0x80; data[2] = 0x80; }
     }
 }
 

@@ -45,6 +45,50 @@ constexpr long long kMaxStepMs = 50;
 
 enum class Which { Off, Right, Left, Both };
 
+// ⭐⭐ EACH STICK SAYS WHAT IT DOES (rhoquinn8217, 2026-09-03).
+//
+// ⛔ It used to be the other way round: one setting per JOB naming which stick
+// did it -- stick_to_mouse = right, stick_to_scroll = left. That reads
+// backwards. A stick can only do one job at a time, so the question a person
+// actually has is "what does THIS stick do", and left/right/both is a third
+// answer to a question with two sides.
+//
+// ⚠️ And the old shape produced a real fault: stick_no_passthrough could be ON
+// and do nothing, because the blanking acted on whichever stick the mapping
+// named and with none named there was no such stick. A switch that is on and
+// silently inert is the thing this project keeps having to remove.
+//
+// ⓘ Derived rather than stored: everything below still wants one "which", and
+// the both-sticks rule is worth keeping exactly as it is.
+// ⭐⭐ TUNING IS PER STICK (rhoquinn8217, 2026-09-03), not per job.
+//
+// ⭐ THE CASE THAT DECIDED IT: coarse and fine on the same hand -- a fast stick
+// for crossing the screen and a slow one for the last few pixels. That is a
+// real technique, and shared tuning cannot express it at all.
+//
+// ⚠️ The earlier argument against was settings COUNT: fourteen where seven
+// would do. That was defending tidiness over what someone can actually do.
+//
+// ⓘ With BOTH sticks pointing, the tuning of whichever stick is currently
+// driving applies -- the further-pushed one, same rule that picks the axes.
+inline std::string stick_key(Which which, const char *suffix)
+{
+    const char *side = (which == Which::Left) ? "left_stick_" : "right_stick_";
+    return std::string(side) + suffix;
+}
+
+inline Which which_for(const std::string &section, const char *job)
+{
+    const std::string r = device_config_str(section.c_str(), "right_stick_mode");
+    const std::string l = device_config_str(section.c_str(), "left_stick_mode");
+    const bool rightDoes = (r == job);
+    const bool leftDoes  = (l == job);
+    if (rightDoes && leftDoes) return Which::Both;
+    if (rightDoes) return Which::Right;
+    if (leftDoes)  return Which::Left;
+    return Which::Off;
+}
+
 inline Which parse_which(const std::string &raw)
 {
     std::string v;
@@ -110,7 +154,7 @@ inline void step(const void *deviceKey, const std::string &section,
 {
     if (data == nullptr || len <= kRightY) return;
 
-    const Which which = parse_which(device_config_str(section.c_str(), "stick_to_mouse"));
+    const Which which = which_for(section, "mouse");
     if (which == Which::Off) {
         std::lock_guard<std::mutex> lock(g_stickMutex);
         g_sticks.erase(deviceKey);
@@ -137,7 +181,10 @@ inline void step(const void *deviceKey, const std::string &section,
     // drive one cursor, gating is what lets a stick point while the touchpad
     // does something else. Default is always on: a stick that needs a held
     // trigger to move a cursor would be a surprise.
-    const std::string gateRaw = device_config_str(section.c_str(), "stick_to_mouse_gate");
+    // ⓘ A gate belongs to the STICK you are holding, not to the job it does.
+    // With both sticks pointing, the right one's gate governs.
+    const std::string gateRaw = device_config_str(
+        section.c_str(), which == Which::Left ? "left_stick_gate" : "right_stick_gate");
     const ctm_gyro_mouse::Gate gate =
         gateRaw.empty() ? ctm_gyro_mouse::Gate::Always : ctm_gyro_mouse::parse_gate(gateRaw);
 
@@ -160,6 +207,12 @@ inline void step(const void *deviceKey, const std::string &section,
 
     float x = 0.0f;
     float y = 0.0f;
+    // ⭐ WHY ANYONE WANTS TWO MOUSE STICKS, which was never written down and is
+    // the kind of thing deleted later as redundant. rhoquinn8217, 2026-09-03:
+    // "there are cases where you need both as a mouse -- where your right hand
+    // is pressing something and your left hand is free to move the mouse, or
+    // vice versa."
+    Which driving = which;
     if (which == Which::Both) {
         // ⭐ EITHER STICK DRIVES, and the one pushed FURTHER wins rather than
         // the two being summed. Summing would let opposite pushes cancel to a
@@ -169,8 +222,8 @@ inline void step(const void *deviceKey, const std::string &section,
         const float ly = axis_unit(data[kLeftY]);
         const float rx = axis_unit(data[kRightX]);
         const float ry = axis_unit(data[kRightY]);
-        if ((rx * rx + ry * ry) >= (lx * lx + ly * ly)) { x = rx; y = ry; }
-        else { x = lx; y = ly; }
+        if ((rx * rx + ry * ry) >= (lx * lx + ly * ly)) { x = rx; y = ry; driving = Which::Right; }
+        else { x = lx; y = ly; driving = Which::Left; }
     } else {
         const size_t xi = (which == Which::Right) ? kRightX : kLeftX;
         const size_t yi = (which == Which::Right) ? kRightY : kLeftY;
@@ -182,7 +235,7 @@ inline void step(const void *deviceKey, const std::string &section,
     // the deadzone's speed the instant it is crossed; with it, movement grows
     // from zero at the edge, which is what makes slow aiming possible at all.
     const float deadzone =
-        static_cast<float>(device_config_int(section.c_str(), "stick_mouse_deadzone", 15)) / 100.0f;
+        static_cast<float>(device_config_int(section.c_str(), stick_key(driving, "mouse_deadzone").c_str(), 15)) / 100.0f;
     float mag = std::sqrt(x * x + y * y);
     if (mag <= deadzone || mag <= 0.0f) {
         st.carryX = 0.0f;
@@ -195,16 +248,16 @@ inline void step(const void *deviceKey, const std::string &section,
     float t = (mag - deadzone) / (1.0f - deadzone);
     if (t > 1.0f) t = 1.0f;
 
-    const Curve curve = parse_curve(device_config_str(section.c_str(), "stick_mouse_curve"));
+    const Curve curve = parse_curve(device_config_str(section.c_str(), stick_key(driving, "mouse_curve").c_str()));
     const float scaled = apply_curve(curve, t);
 
     // Pixels per second at full deflection -- time-based, so the cursor moves
     // at the same speed whatever rate reports arrive at.
-    const int speed = device_config_int(section.c_str(), "stick_mouse_speed", 1200);
+    const int speed = device_config_int(section.c_str(), stick_key(driving, "mouse_speed").c_str(), 1200);
     const float perSecond = static_cast<float>(speed <= 0 ? 1200 : speed) * scaled;
     const float move = perSecond * (static_cast<float>(dt) / 1000.0f);
 
-    const int invert = device_config_int(section.c_str(), "stick_mouse_invert", 0);
+    const int invert = device_config_int(section.c_str(), stick_key(driving, "mouse_invert").c_str(), 0);
     float mx = dirX * move * ((invert & 1) ? -1.0f : 1.0f);
     float my = dirY * move * ((invert & 2) ? -1.0f : 1.0f);
 
@@ -240,7 +293,7 @@ inline void scroll_step(const void *deviceKey, const std::string &section,
 {
     if (data == nullptr || len <= kRightY) return;
 
-    const Which which = parse_which(device_config_str(section.c_str(), "stick_to_scroll"));
+    const Which which = which_for(section, "scroll");
     if (which == Which::Off) {
         std::lock_guard<std::mutex> lock(g_stickMutex);
         auto it = g_sticks.find(deviceKey);
@@ -252,7 +305,8 @@ inline void scroll_step(const void *deviceKey, const std::string &section,
     }
     // ⓘ Scrolling is the same argument as the cursor: it goes to the focused
     // window, which while the gate applies is ours.
-    const std::string gateRaw = device_config_str(section.c_str(), "stick_to_scroll_gate");
+    const std::string gateRaw = device_config_str(
+        section.c_str(), which == Which::Left ? "left_stick_gate" : "right_stick_gate");
     const ctm_gyro_mouse::Gate gate =
         gateRaw.empty() ? ctm_gyro_mouse::Gate::Always : ctm_gyro_mouse::parse_gate(gateRaw);
 
@@ -274,16 +328,19 @@ inline void scroll_step(const void *deviceKey, const std::string &section,
     // separate thing to decide on rather than a free extra: few windows honour
     // it, and it would fight the cursor stick in `both`.
     float y = 0.0f;
+    Which driving = which;
     if (which == Which::Both) {
         const float ly = axis_unit(data[kLeftY]);
         const float ry = axis_unit(data[kRightY]);
-        y = (ry * ry >= ly * ly) ? ry : ly;
+        const bool rightWins = (ry * ry >= ly * ly);
+        y = rightWins ? ry : ly;
+        driving = rightWins ? Which::Right : Which::Left;
     } else {
         y = axis_unit((which == Which::Right) ? data[kRightY] : data[kLeftY]);
     }
 
     const float deadzone =
-        static_cast<float>(device_config_int(section.c_str(), "stick_scroll_deadzone", 25)) / 100.0f;
+        static_cast<float>(device_config_int(section.c_str(), stick_key(driving, "scroll_deadzone").c_str(), 25)) / 100.0f;
     float mag = y < 0.0f ? -y : y;
     if (mag <= deadzone) {
         st.scrollCarry = 0.0f;
@@ -293,7 +350,7 @@ inline void scroll_step(const void *deviceKey, const std::string &section,
     float amount = (mag - deadzone) / (1.0f - deadzone);
     if (amount > 1.0f) amount = 1.0f;
 
-    const int speed = device_config_int(section.c_str(), "stick_scroll_speed", 10);
+    const int speed = device_config_int(section.c_str(), stick_key(driving, "scroll_speed").c_str(), 10);
     const float perSecond = static_cast<float>(speed <= 0 ? 10 : speed) * amount;
     // ⓘ Pushing UP scrolls the content up, which is wheel-up: the stick's Y is
     // negative when pushed up, so the sign is flipped here.
@@ -303,7 +360,7 @@ inline void scroll_step(const void *deviceKey, const std::string &section,
     int ticks = static_cast<int>(st.scrollCarry);
     if (ticks != 0) {
         st.scrollCarry -= static_cast<float>(ticks);
-        const bool natural = device_config_bool(section.c_str(), "stick_scroll_natural", false);
+        const bool natural = device_config_bool(section.c_str(), stick_key(driving, "scroll_natural").c_str(), false);
         ctm_mouse_device::add_wheel(natural ? -ticks : ticks);
         ctm_gyro_mouse_ensure_mouse_started();
     }

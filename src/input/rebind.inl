@@ -632,6 +632,19 @@ inline void apply(const void *deviceKey,
         // buttons before they were read, and nothing would ever register.
         //
         // ⓘ Sticks go to CENTRE (0x80) -- zero is full deflection, not neutral.
+        // ⛔⛔ READ THE BUTTONS BEFORE THE REPORT IS WIPED (2026-09-03).
+        //
+        // ⚠️ The lines below blank byte 9, which carries L1, R1, L2, R2,
+        // Create, Options, L3 and R3. The keyboard-and-mouse exception below
+        // ran AFTER that, so is_pressed always answered false and the triggers
+        // appeared to do nothing at all -- with no log line, because the log
+        // was inside the same `if (pressed)`.
+        //
+        // ⓘ A snapshot rather than moving the exception: the blanking must
+        // still happen, and it must happen before anything can forget to.
+        bool gatePressed[kButtonCount] = {};
+        for (int i = 0; i < kButtonCount; ++i) gatePressed[i] = is_pressed(data, len, i);
+
         data[1] = data[2] = data[3] = data[4] = 0x80;   // LX LY RX RY
         data[5] = data[6] = 0x00;                       // L2 R2 analog
         // ⓘ Options (0x20) survives while the chord's own press is held --
@@ -664,6 +677,8 @@ inline void apply(const void *deviceKey,
         // lines below this branch -- after the gate has already returned -- so
         // reaching for it compiled nowhere.
         const std::string gateSection = device_settings_section(kind, linkedConfig);
+        uint8_t gateMouseButtons = 0;
+        bool gateAnyMouse = false;
 
         for (int i = 0; i < kButtonCount; ++i) {
             bool claimed = false;
@@ -672,6 +687,7 @@ inline void apply(const void *deviceKey,
             }
             if (claimed) continue;
 
+
             char kn[32];
             snprintf(kn, sizeof(kn), "rebind_%d", i);
             const std::string c = device_config_str(gateSection.c_str(), kn);
@@ -679,13 +695,56 @@ inline void apply(const void *deviceKey,
                 code_is(c, "KeyboardSteam")     ? 0 :
                 code_is(c, "KeyboardWindows")   ? 1 :
                 (code_is(c, "KeyboardDS5_USBIP") || code_is(c, "OSKeyboard")) ? 2 : -1;
-            if (which < 0) continue;
+            // ⓘ From the snapshot taken before the wipe, not from the report.
+            const bool now = gatePressed[i];
 
-            static std::map<std::pair<const void *, int>, bool> gateOskHeld;
-            const bool now = is_pressed(data, len, i);
-            if (now && !gateOskHeld[{deviceKey, i}]) ctm_osk_toggle(gateSection, i, which);
-            gateOskHeld[{deviceKey, i}] = now;
-            clear_button(data, len, i);
+            if (which >= 0) {
+                static std::map<std::pair<const void *, int>, bool> gateOskHeld;
+                if (now && !gateOskHeld[{deviceKey, i}]) ctm_osk_toggle(gateSection, i, which);
+                gateOskHeld[{deviceKey, i}] = now;
+                clear_button(data, len, i);
+                continue;
+            }
+
+            // ⭐⭐ AND MOUSE BUTTONS AND THE WHEEL (rhoquinn8217, 2026-09-03).
+            //
+            // ⛔ Same reasoning that freed the cursor: a CLICK cannot mirror
+            // into a game. It goes to whatever has focus -- our own settings
+            // window, or a browser you deliberately clicked into. Gating it
+            // protected nothing and left the pad unable to click on the very
+            // page it was driving.
+            //
+            // ⓘ The triggers were never claimed by the gate anyway; they were
+            // caught by the blanket return that stops ALL user rebinds.
+            const MouseAction gma = mouse_action_for(c);
+            if (gma != kMouseNone) {
+                gateAnyMouse = true;      // bound, whether or not it is held
+                if (gma == kMouseWheelUp || gma == kMouseWheelDown) {
+                    static std::map<std::pair<const void *, int>, bool> gateWheelHeld;
+                    if (now && !gateWheelHeld[{deviceKey, i}]) {
+                        ctm_mouse_device::add_wheel(gma == kMouseWheelUp ? 1 : -1);
+                    }
+                    gateWheelHeld[{deviceKey, i}] = now;
+                } else if (now) {
+                    gateMouseButtons = static_cast<uint8_t>(
+                        gateMouseButtons | (gma == kMouseLeft ? 0x01 :
+                                            gma == kMouseRight ? 0x02 : 0x04));
+                }
+                clear_button(data, len, i);
+            }
+        }
+
+        // ⓘ Published once, after the loop, so two buttons held together arrive
+        // as one state rather than overwriting each other.
+        //
+        // ⛔ AND WHENEVER A MOUSE ACTION IS BOUND, not only while one is held --
+        // otherwise releasing publishes nothing and the button stays down. The
+        // main path does the same; copied rather than reasoned about afresh.
+        //
+        // ⓘ The virtual mouse has to be started, or the clicks go nowhere.
+        if (gateAnyMouse) {
+            ctm_mouse_device::set_buttons(gateMouseButtons);
+            ctm_gyro_mouse_ensure_mouse_started();
         }
         return;                       // ⭐ other user rebinds do not run here
     }
