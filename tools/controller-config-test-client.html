@@ -4441,13 +4441,18 @@ document.addEventListener('keydown', function (ev) {
     var esc = document.activeElement;
     if (esc && esc.blur) {
       ev.preventDefault();
-      // ⛔ THE HALO STAYS ON THE BOX (rhoquinn8217, 2026-09-03: "it's too
-      // strong -- it throws you into the footer").
-      //
+      // ⛔⛔ AND STOP THE OTHER LISTENERS. `return` leaves THIS handler only --
+      // there is a second keydown listener below, and Escape reached it too.
+      // By then the field was already blurred, so gpKeyBack fell past its
+      // text-box branch and hit setFooterMode: one press, two handlers, and
+      // you ended up in the footer (rhoquinn8217, 2026-09-03: "it's too
+      // strong").
+      // ⓘ preventDefault does not do this; stopImmediatePropagation does.
+      ev.stopImmediatePropagation();
+
       // ⓘ Blurring makes document.activeElement the BODY, and the halo follows
-      // real focus, so letting go of the box also let go of where you were.
-      // Leaving a text box should put you back on that box, ready to move on
-      // -- not at the bottom of the page.
+      // real focus -- so letting go of the box also let go of where you were.
+      // Leaving a text box should put you back ON that box, ready to move on.
       var keep = GP_INDEX;
       esc.blur();
       GP_INDEX = keep;
