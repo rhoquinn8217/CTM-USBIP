@@ -419,12 +419,20 @@ inline const GateBinding kConfigModeKeys[] = {
     { kBtnR1,        "KeyE",  CTM_GATE_MODS },   // next tab
     { kBtnFaceDown,  "Enter", CTM_GATE_MODS },   // cross:  select
     { kBtnFaceRight, "KeyZ",  CTM_GATE_MODS },   // circle: back out
-    // ⭐⭐ TRIANGLE TOGGLES, NOT SQUARE (rhoquinn8217, decided earlier and built
-    // 2026-09-03). Square is where an on-screen keyboard lives -- Steam puts it
-    // there and the habit transfers -- and with the gate claiming Square, a
-    // keyboard bound to it could never fire while the settings page was in
-    // front, which is exactly when someone wants to type a config name.
-    { kBtnFaceUp,    "KeyX",  CTM_GATE_MODS },   // triangle: toggle
+    // ⭐⭐ SQUARE TOGGLES AGAIN (rhoquinn8217, 2026-09-03, same evening).
+    //
+    // ⓘ It moved to Triangle earlier that day to free Square for the on-screen
+    // keyboard. ⛔ That reason then evaporated: the keyboard REFUSES to open
+    // over this window at all, except inside a text box -- so Square was never
+    // going to open it here, and the move bought nothing.
+    //
+    // ⚠️ The one place the two meanings meet is a setting whose value is a text
+    // box: in the box Square types, out of it Square toggles. ⭐ Judged not
+    // worth avoiding (rhoquinn8217): booleans and choices are dropdowns, and
+    // integers have increment steps that beat typing a number from a sofa. So
+    // the collision is nearly theoretical, and when it happens you notice and
+    // step off the box.
+    { kBtnFaceLeft,  "KeyX",  CTM_GATE_MODS },   // square: toggle
 };
 
 inline void apply(const void *deviceKey,
@@ -641,11 +649,48 @@ inline void apply(const void *deviceKey,
     }
 
     if (config_mode()) {
+        // ⛔ BUILT HERE, not borrowed. `section` is not created until well
+        // below this branch -- after the gate has already returned -- so
+        // reaching for it compiled nowhere. ⓘ At the TOP, because the Square
+        // reservation AND the mouse/keyboard exceptions both need it.
+        const std::string gateSection = device_settings_section(kind, linkedConfig);
+
         uint8_t gateKeys[6] = {0, 0, 0, 0, 0, 0};
         size_t gateCount = 0;
         uint8_t gateMods = 0;
 
+        // ⭐⭐ IN A TEXT BOX, SQUARE OPENS THE KEYBOARD (rhoquinn8217, 2026-09-03).
+        //
+        // ⛔ THE TRAP IT REMOVES: someone playing a game has Square bound to
+        // something the game needs. They open this window to rename a config,
+        // move into the name box -- and cannot type, because they have no
+        // keyboard and Square is not bound to one. To get one they must edit
+        // THAT config to add a keyboard binding, rename it, then remember to
+        // undo the binding before going back to the game. A loop where the fix
+        // requires changing the thing you came to change.
+        //
+        // ⭐ So Square is RESERVED here, exactly as Cross, Circle and the
+        // shoulders already are: this window claims the buttons it needs to be
+        // usable, and typing is one of them. ⓘ Narrow on purpose -- only in a
+        // text box, only in this window. Outside the box Square toggles the
+        // setting as it always has.
+        //
+        // ⓘ Pressing it again closes the keyboard, because the overlay owns
+        // Square while it is up. One button, both directions.
+        static std::map<std::pair<const void *, int>, bool> gateSquareHeld;
+        if (ctm_rebind_editing_field()) {
+            const bool sq = is_pressed(data, len, kBtnFaceLeft);
+            clear_button(data, len, kBtnFaceLeft);
+            if (sq && !gateSquareHeld[{deviceKey, kBtnFaceLeft}]) {
+                ctm_osk_toggle(gateSection, kBtnFaceLeft, 2);   // 2 = ours
+            }
+            gateSquareHeld[{deviceKey, kBtnFaceLeft}] = sq;
+        }
+
         for (const GateBinding &g : kConfigModeKeys) {
+            // ⛔ Square belongs to the keyboard while a text box has focus;
+            // sending the toggle as well would do both.
+            if (g.standardIndex == kBtnFaceLeft && ctm_rebind_editing_field()) continue;
             const bool held = is_pressed(data, len, g.standardIndex);
             // ⛔ Cleared whether or not it is held, so a button released this
             // frame cannot leave a stale bit behind.
@@ -715,10 +760,6 @@ inline void apply(const void *deviceKey,
         //
         // ⓘ Only for buttons the gate does not already claim, so nothing
         // fights: pressing a gate button still drives the page.
-        // ⛔ BUILT HERE, not borrowed. `section` is not created until a hundred
-        // lines below this branch -- after the gate has already returned -- so
-        // reaching for it compiled nowhere.
-        const std::string gateSection = device_settings_section(kind, linkedConfig);
         uint8_t gateMouseButtons = 0;
         bool gateAnyMouse = false;
 

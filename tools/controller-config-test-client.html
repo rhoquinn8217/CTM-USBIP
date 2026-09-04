@@ -4593,7 +4593,7 @@ function gpPoll() {
   // ⓘ The count comes from the browser when it can see the pads, and falls
   // back to the singular when only the gate knows one is there.
   hint.textContent = (live.length > 1 ? live.length + ' controllers' : 'controller') +
-                     ' — L1/R1 tabs, D-pad move, ✕ select, ✕ again to leave a value, △ on/off, ○ back';
+                     ' — L1/R1 tabs, D-pad move, ✕ select, ✕ again to leave a value, □ on/off, ○ back';
   bar.className = 'live';
   measureGpBar();
 
@@ -4751,11 +4751,13 @@ function gpPoll() {
   // dropdown, rename, then the footer.
   if (edge(0)) gpKeySelect();
   if (edge(1)) gpKeyBack();
-  // ⭐ TRIANGLE, matching the gate (rhoquinn8217, 2026-09-03). Square is where
-  // an on-screen keyboard belongs, and the same page must not answer to a
-  // different button depending on whether the pad arrived through the browser
-  // or through the listener's gate.
-  if (edge(3)) gpToggleManaged();    // triangle: managed / unmanaged
+  // ⭐ SQUARE, matching the gate (rhoquinn8217, 2026-09-03). It moved to
+  // Triangle earlier the same day to free Square for the on-screen keyboard --
+  // and that reason evaporated, because the keyboard refuses to open over this
+  // window except inside a text box. ⓘ The page must not answer to a different
+  // button depending on whether the pad arrived through the browser or the
+  // listener's gate.
+  if (edge(2)) gpToggleManaged();    // square: managed / unmanaged
 
   // ⛔ pressed(), NOT edge(). edge() WRITES GP_PREV as it reads, so calling it
   // here consumed the press and everything below saw nothing -- cross stopped
