@@ -368,6 +368,10 @@ inline bool config_mode() { return g_configMode.load(std::memory_order_relaxed);
 // field is the one place on that page a keyboard earns its place.
 inline std::atomic<bool> g_editingField{false};
 
+// ⓘ So the "why didn't the keyboard open" notice is said once per visit to the
+// config window, not once per toggle. Cleared when the window takes focus.
+inline bool g_saidKeyboardRefused = false;
+
 inline bool editing_field() { return g_editingField.load(std::memory_order_relaxed); }
 
 // ⓘ One pending notice for the page to collect, because nothing pushes
@@ -678,13 +682,42 @@ inline void apply(const void *deviceKey,
         // ⓘ Pressing it again closes the keyboard, because the overlay owns
         // Square while it is up. One button, both directions.
         static std::map<std::pair<const void *, int>, bool> gateSquareHeld;
-        if (ctm_rebind_editing_field()) {
+        {
             const bool sq = is_pressed(data, len, kBtnFaceLeft);
-            clear_button(data, len, kBtnFaceLeft);
-            if (sq && !gateSquareHeld[{deviceKey, kBtnFaceLeft}]) {
-                ctm_osk_toggle(gateSection, kBtnFaceLeft, 2);   // 2 = ours
-            }
+            const bool fresh = sq && !gateSquareHeld[{deviceKey, kBtnFaceLeft}];
             gateSquareHeld[{deviceKey, kBtnFaceLeft}] = sq;
+
+            if (ctm_rebind_editing_field()) {
+                clear_button(data, len, kBtnFaceLeft);
+                if (fresh) ctm_osk_toggle(gateSection, kBtnFaceLeft, 2);   // 2 = ours
+            } else if (fresh) {
+                // ⭐⭐ SAY WHY THE KEYBOARD DID NOT OPEN (rhoquinn8217,
+                // 2026-09-03). ⛔ The presets bind Square to our keyboard, so
+                // pressing it here and getting a TOGGLE instead looks like a
+                // bug -- the person bound a keyboard and no keyboard appeared,
+                // with nothing said.
+                //
+                // ⓘ Only when Square is actually bound to a keyboard. Someone
+                // who bound it to something else is not expecting one and does
+                // not need telling.
+                // ⛔ ONCE PER VISIT, not once per press. Square IS the toggle
+                // here, so saying this every time would bury the page in
+                // notices while somebody edits. ⓘ The flag clears when the
+                // window next takes focus, so the next visit says it again.
+                const std::string sqCode =
+                    device_config_str(gateSection.c_str(), "rebind_2");
+                if (!g_saidKeyboardRefused &&
+                    (code_is(sqCode, "KeyboardDS5_USBIP") ||
+                     code_is(sqCode, "OSKeyboard") ||
+                     code_is(sqCode, "KeyboardSteam") ||
+                     code_is(sqCode, "KeyboardWindows"))) {
+                    g_saidKeyboardRefused = true;
+                    ctm_ui_notify(
+                        "DS5-USBIP Virtual keyboard restricted from opening "
+                        "with Controller Config except when making text input "
+                        "based changes.");
+                }
+            }
         }
 
         for (const GateBinding &g : kConfigModeKeys) {
@@ -1039,6 +1072,9 @@ void ctm_rebind_set_config_mode(bool on)
     // ⓘ hide() arms the swallow, so a trigger held across the close does not
     // arrive as a press nobody made.
     ctm_overlay_hide();
+
+    // ⓘ A fresh visit gets the explanation again.
+    if (on) ctm_rebind::g_saidKeyboardRefused = false;
 
     if (!on) ctm_rebind::g_editingField.store(false, std::memory_order_relaxed);
 }
