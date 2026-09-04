@@ -1118,16 +1118,15 @@ inline void paint(HWND hwnd)
         tr.left += 8;
         SelectObject(dc, tabFont);
         SetTextColor(dc, RGB(0x8b, 0x8d, 0x96));
-        // ⓘ SHORT, so the legend fits beside it (2026-09-04). The face name was
-        // spelled out -- "DS5-USBIP Virtual Keyboard - SUB-COMPACT" -- which is
-        // the LONGEST title on the NARROWEST tab, and squeezed the legend off
-        // exactly the face where an unfamiliar layout most needs one.
-        // ⭐ The face is visible from the keyboard itself; the name is not
-        // carrying its width.
+        // ⓘ The full title stays: MEASURED on hardware 2026-09-04, there is room
+        // for it and the legend even on the narrowest face. ⚠️ It had been
+        // shortened on an ESTIMATE of characters-per-column that was twice too
+        // pessimistic -- the second time that guess was wrong in the same
+        // direction.
         const wchar_t *title =
-            g_face.load() == FACE_FULL ? L"DS5-USBIP \u2014 full" :
-            g_face.load() == FACE_SUB  ? L"DS5-USBIP \u2014 sub-compact"
-                                       : L"DS5-USBIP \u2014 compact";
+            g_face.load() == FACE_FULL ? L"DS5-USBIP Virtual Keyboard - FULL" :
+            g_face.load() == FACE_SUB  ? L"DS5-USBIP Virtual Keyboard - SUB-COMPACT"
+                                       : L"DS5-USBIP Virtual Keyboard - COMPACT";
         DrawTextW(dc, title, -1, &tr,
                   DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
 
@@ -1149,10 +1148,12 @@ inline void paint(HWND hwnd)
         // the spacer is NARROWEST there, so a left-aligned title and a
         // right-aligned legend can collide in the middle. Measured rather than
         // assumed -- the estimate that said it would fit was wrong by 4x once.
-        // ⓘ ☰ for move, not a cog: it is the button's own symbol on the pad,
-        // and the Deck community calls it the hamburger. A cog says "settings".
+        // ⓘ ☰ for move: the button's own symbol on the pad. A cog would say
+        // "settings".
+        // ⭐ And BACKSPACE is spelled out rather than ⌫ -- there is room, and a
+        // word carries no font risk and nothing to decode at TV distance.
         const wchar_t *legend =
-            L"\u25cb close   \u25a1 \u232b   \u25b3 space   "
+            L"\u25cb close   \u25a1 backspace   \u25b3 space   "
             L"\u2715 select   \u2630 move";
         SIZE ts = {0, 0}, ls = {0, 0};
         GetTextExtentPoint32W(dc, title, lstrlenW(title), &ts);
