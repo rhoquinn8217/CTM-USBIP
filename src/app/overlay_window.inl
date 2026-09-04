@@ -538,7 +538,10 @@ inline std::map<uint8_t, int> g_mods;
 inline bool g_latchUsed = false;
 inline uint8_t g_tapMod = 0;
 inline int g_tapFrames = 0;
-inline int g_escFrames = 0;
+// ⛔ g_escFrames is GONE (2026-09-04). It held Escape down for three frames
+// after Circle sent it; Circle closes the keyboard now, so nothing sets it.
+// ⓘ Removed rather than left -- unused state is what someone later wires back
+// up, and T-079 keeps collecting exactly this.
 // ⓘ How long a direction has been held, in reports. ⛔ Not per device: it is
 // one highlight, and two pads holding opposite directions should fight over it
 // exactly as two hands on one keyboard would.
@@ -1508,38 +1511,48 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
     // ⓘ The close is not armed until the opening button has been released --
     // it is still held when the window appears, and acting on that press would
     // close what it just opened.
+    // ⛔⛔ THE OPENING PRESS MUST NOT TYPE (2026-09-04).
+    //
+    // ⚠️ This guard used to stop the opening button CLOSING the keyboard it had
+    // just opened. Circle closes now -- but the same trap moved rather than
+    // went away: **Square opens the keyboard and is BACKSPACE once it is up**,
+    // so the press that opened it would delete a character on arrival.
+    //
+    // ⓘ Armed only once that button has been seen released.
     const int openedBy = g_openedBy.load();
-    const bool closeBtn = (openedBy >= 0 && button_down(data, len, openedBy));
-    if (!g_closeArmed.load()) {
-        if (!closeBtn) g_closeArmed.store(true);
-        edge(deviceKey, 4, closeBtn);
-    } else if (edge(deviceKey, 4, closeBtn)) {
-        hide();
-        return true;
-    }
+    const bool openBtnStillDown =
+        (openedBy >= 0 && button_down(data, len, openedBy));
+    if (!g_closeArmed.load() && !openBtnStillDown) g_closeArmed.store(true);
+    const bool faceArmed = g_closeArmed.load();
 
     // ⭐ CIRCLE IS ESC. Sent straight through rather than moving the highlight,
     // so backing out of a dialog costs one press from wherever you are.
+    // ⭐⭐ CIRCLE CLOSES THE KEYBOARD (2026-09-04). It used to type Escape.
+    //
+    // ⓘ Both Valve and Microsoft put close/cancel on this button: the Steam
+    // Deck's keyboard closes with B, and B is Escape everywhere else in its
+    // desktop layout. ⭐ And Escape is not lost -- there is an `esc` key on the
+    // keyboard itself, which is the honest place for it: a keystroke that fires
+    // into whatever is BEHIND the keyboard was a surprise, not a feature.
     if (edge(deviceKey, 5, button_down(data, len, 1))) {
-        uint8_t escKeys[6] = { 0x29, 0, 0, 0, 0, 0 };
-        ctm_keyboard_device::set_state_for(deviceKey, 0, escKeys, 1);
-        g_escFrames = 3;
-    }
-    if (g_escFrames > 0) {
-        --g_escFrames;
-        if (g_escFrames == 0) {
-            uint8_t none[6] = { 0, 0, 0, 0, 0, 0 };
-            ctm_keyboard_device::set_state_for(deviceKey, 0, none, 0);
-        }
+        hide();
         return true;
     }
-
     // ⭐⭐ TRIANGLE: TAP TO SNAP, HOLD TO STEER.
     //
     // ⓘ The tap fires on RELEASE, not on press, and only when the stick was
     // never used -- otherwise every drag would end by also snapping the window
     // to the top or bottom, undoing the placing you just did.
-    const bool tri = button_down(data, len, 3);
+    // ⭐⭐ OPTIONS MOVES THE WINDOW, NOT TRIANGLE (2026-09-04).
+    //
+    // ⭐ Triangle is SPACE on both the Steam Deck and Windows 11's gamepad
+    // keyboard -- Y in their notation -- and space is around a fifth of
+    // everything anyone types, so it earns a face button.
+    // ⓘ Moving goes to Options, which is where the Deck community reports the
+    // hamburger/menu button already repositions its keyboard.
+    // ⚠️ Options previously cycled the FACE. That is not lost -- the tab's own
+    // ⌨ key still does it -- but it no longer has a button.
+    const bool tri = button_down(data, len, 9);
     if (tri && !g_triHeld.load()) {
         g_triHeld.store(true);
         g_triMoved.store(false);
@@ -1599,9 +1612,10 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
     // ⭐⭐ OPTIONS SWITCHES THE FACE. Create is how BIG; Options is how MUCH --
     // genuinely different questions, and a big compact keyboard is as
     // reasonable a thing to want as a small full one.
-    if (edge(deviceKey, 10, button_down(data, len, 9))) {
-        switch_face();               // the same thing the tab's button does
-    }
+    // ⛔ Options no longer cycles the face -- it moves the window now. The
+    // tab's ⌨ key still cycles, which is where someone looks for it anyway.
+    //
+    // ⓘ Create still cycles the SIZE, below.
 
     // ⭐ CREATE CYCLES THE THREE SIZES. It is free, out of the way of typing,
     // and its own thing rather than a mode.
@@ -1654,6 +1668,30 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
     //
     // ⭐ Measured before fixing: the sequence gives "a b (release)" the old way
     // and "a (release)" this way.
+    // ⭐⭐ SQUARE IS BACKSPACE, TRIANGLE IS SPACE (2026-09-04).
+    //
+    // ⭐ Both Valve and Microsoft landed here independently: the Steam Deck uses
+    // X for backspace and Y for space, and Windows 11's gamepad keyboard uses
+    // the same two. Different companies, different operating systems, the same
+    // answer -- which is the strongest evidence a convention exists.
+    // ⓘ In DualSense terms X is Square and Y is Triangle.
+    //
+    // ⛔ These take priority over the key under the halo, because our device
+    // sends ONE key at a time: Cross-and-Square together must not try to send
+    // both. ⓘ They are also repeated by the same repeat timer as everything
+    // else, so holding backspace deletes a run.
+    // ⛔ R2 IS NOT ENTER, AND THAT IS DELIBERATE (2026-09-04). Both the Deck and
+    // Windows put Enter on a trigger or the menu button -- but R2 is MouseLeft
+    // in our presets, and with gyro-to-mouse someone clicks INTO a text field
+    // while this keyboard is up. Taking R2 would remove the click they need.
+    // ➡️ Revisit once T-149 moves clicks onto the touchpad. ⓘ Enter is on the
+    // keyboard as a key meanwhile.
+    uint8_t faceUsage = 0;
+    if (faceArmed) {
+        if (button_down(data, len, 2))      faceUsage = 0x2A;   // square: backspace
+        else if (button_down(data, len, 3)) faceUsage = 0x2C;   // triangle: space
+    }
+
     // ⓘ PER DEVICE, using the file's own edge helper (slot 6 was free) rather
     // than a bare static: two pads share this keyboard by design, and a static
     // would let one pad's press decide the other's key.
@@ -1695,6 +1733,9 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
         ctm_keyboard_device::set_state_for(deviceKey, g_tapMod, none, 0);
         return true;
     }
+
+    // ⛔ A face key WINS over the halo key, for the reason above.
+    if (faceUsage != 0) usage = faceUsage;
 
     uint8_t keys[6] = { usage, 0, 0, 0, 0, 0 };
     ctm_keyboard_device::set_state_for(deviceKey, usage != 0 ? mods : 0,
