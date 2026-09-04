@@ -1124,6 +1124,38 @@ inline void paint(HWND hwnd)
                                        : L"DS5-USBIP Virtual Keyboard - COMPACT";
         DrawTextW(dc, title, -1, &tr,
                   DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+
+        // ⭐⭐ A LEGEND, because the buttons are not guessable (rhoquinn8217,
+        // 2026-09-04 -- he asked what Circle did, having built it).
+        //
+        // ⭐ PlayStation glyphs ONLY. Combining them with Xbox letters --
+        // "✕/A select" -- reads as a fraction rather than a button and is
+        // unreadable at a distance.
+        //
+        // ⓘ Right-aligned in the SAME rectangle as the title, so it costs no
+        // layout: the tab's spacer is 8.34 columns even on the narrowest face,
+        // and the tab font fits roughly eleven characters per column.
+        //
+        // ⛔ The order is by how surprising each one is, not by button position:
+        // Circle CLOSES here where it is Escape everywhere else, and Square is
+        // backspace where it opened the keyboard. Those two are why this exists.
+        // ⛔ ONLY IF IT FITS. The title is LONGEST on the sub-compact face and
+        // the spacer is NARROWEST there, so a left-aligned title and a
+        // right-aligned legend can collide in the middle. Measured rather than
+        // assumed -- the estimate that said it would fit was wrong by 4x once.
+        const wchar_t *legend =
+            L"\u25cb close   \u25a1 \u232b   \u25b3 space   "
+            L"\u2715 select   \u2699 move";
+        SIZE ts = {0, 0}, ls = {0, 0};
+        GetTextExtentPoint32W(dc, title, lstrlenW(title), &ts);
+        GetTextExtentPoint32W(dc, legend, lstrlenW(legend), &ls);
+        const LONG room = (pl.r.right - 8) - (pl.r.left + 8);
+        if (ts.cx + ls.cx + 24 <= room) {
+            RECT lr = pl.r;
+            lr.right -= 8;
+            DrawTextW(dc, legend, -1, &lr,
+                      DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        }
         break;
     }
 
