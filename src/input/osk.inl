@@ -87,6 +87,29 @@ inline void do_open(Program program, int openedByButton)
         // 900x300 -- a leftover from before the three sizes existed -- so the
         // keyboard opened tiny on a 4K desktop and only reached a sensible size
         // once Create had been pressed once. Found on hardware 2026-09-02.
+        // ⛔⛔ REFUSED WHILE THE CONFIG WINDOW HAS FOCUS (T-141).
+        //
+        // ⭐ With that window up the pad belongs to it exclusively -- that is
+        // the whole promise of Safe Edit Mode. A keyboard opening on top takes
+        // the pad silently: nothing says the window has stopped listening, or
+        // that the keyboard must be closed to get it back.
+        //
+        // ⭐ EXCEPT in a text field, which is the one place on that page a
+        // keyboard earns its place. Everywhere else the pad already navigates.
+        //
+        // ⓘ Refuse rather than open-then-close: something that appears and
+        // vanishes is worse than something that never appears. The page says
+        // why, so the press is not silence.
+        if (ctm_rebind_config_mode() && !ctm_rebind_editing_field()) {
+            device_log::input(device_log::msg()
+                << "osk: refused -- the config window has focus and no field is "
+                   "being edited");
+            ctm_ui_notify(
+                "DS5-USBIP Virtual keyboard restricted from opening with "
+                "Controller Config except when making text input based "
+                "changes.");
+            return;
+        }
         ctm_overlay::show(0, 0, openedByButton);
         return;
     }
@@ -160,6 +183,14 @@ inline void toggle(const std::string &section, int button, Program program)
 void ctm_overlay_open_steam()
 {
     ctm_osk::run_shell(L"steam://open/bigpicture");
+}
+
+// ⓘ T-141. So rest_config.inl can close the keyboard when a text field loses
+// focus. ⛔ That file is included before overlay_window.inl, so it cannot name
+// ctm_overlay:: itself -- the same reason ctm_overlay_open_steam exists.
+void ctm_overlay_hide()
+{
+    ctm_overlay::hide();
 }
 
 void ctm_osk_toggle(const std::string &section, int button, int program)

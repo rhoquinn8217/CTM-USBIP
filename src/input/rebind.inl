@@ -356,6 +356,29 @@ inline void set_config_mode(bool on)
 
 inline bool config_mode() { return g_configMode.load(std::memory_order_relaxed); }
 
+// ⭐⭐ IS THE PAGE'S CURSOR IN A TEXT FIELD? (T-141, 2026-09-03.)
+//
+// ⛔ The listener already knows when the WINDOW has focus -- ui/focus and
+// window_has_foreground() both say so. It cannot know when a FIELD does: that
+// is a page-side event, so the page sends `ui/field`.
+//
+// ⓘ Why it exists: the on-screen keyboard refuses to open while the config
+// window is focused, because the pad belongs to that window exclusively and a
+// keyboard silently taking it is the fault this ticket was filed for. A text
+// field is the one place on that page a keyboard earns its place.
+inline std::atomic<bool> g_editingField{false};
+
+// ⓘ So the "why didn't the keyboard open" notice is said once per visit to the
+// config window, not once per toggle. Cleared when the window takes focus.
+inline bool g_saidKeyboardRefused = false;
+
+inline bool editing_field() { return g_editingField.load(std::memory_order_relaxed); }
+
+// ⓘ One pending notice for the page to collect, because nothing pushes
+// host->page. Read-once: one refusal, one bubble (T-141).
+inline std::mutex g_noticeMutex;
+inline std::string g_notice;
+
 // ⛔ THE PAGE INTERPRETS THESE, and they carry CTRL+ALT.
 //
 // ⚠️ MEASURED 2026-08-28, after a long hunt: F13-F24 do NOT reach a browser as
@@ -400,12 +423,20 @@ inline const GateBinding kConfigModeKeys[] = {
     { kBtnR1,        "KeyE",  CTM_GATE_MODS },   // next tab
     { kBtnFaceDown,  "Enter", CTM_GATE_MODS },   // cross:  select
     { kBtnFaceRight, "KeyZ",  CTM_GATE_MODS },   // circle: back out
-    // ⭐⭐ TRIANGLE TOGGLES, NOT SQUARE (rhoquinn8217, decided earlier and built
-    // 2026-09-03). Square is where an on-screen keyboard lives -- Steam puts it
-    // there and the habit transfers -- and with the gate claiming Square, a
-    // keyboard bound to it could never fire while the settings page was in
-    // front, which is exactly when someone wants to type a config name.
-    { kBtnFaceUp,    "KeyX",  CTM_GATE_MODS },   // triangle: toggle
+    // ⭐⭐ SQUARE TOGGLES AGAIN (rhoquinn8217, 2026-09-03, same evening).
+    //
+    // ⓘ It moved to Triangle earlier that day to free Square for the on-screen
+    // keyboard. ⛔ That reason then evaporated: the keyboard REFUSES to open
+    // over this window at all, except inside a text box -- so Square was never
+    // going to open it here, and the move bought nothing.
+    //
+    // ⚠️ The one place the two meanings meet is a setting whose value is a text
+    // box: in the box Square types, out of it Square toggles. ⭐ Judged not
+    // worth avoiding (rhoquinn8217): booleans and choices are dropdowns, and
+    // integers have increment steps that beat typing a number from a sofa. So
+    // the collision is nearly theoretical, and when it happens you notice and
+    // step off the box.
+    { kBtnFaceLeft,  "KeyX",  CTM_GATE_MODS },   // square: toggle
 };
 
 inline void apply(const void *deviceKey,
@@ -598,12 +629,101 @@ inline void apply(const void *deviceKey,
         }
     }
 
+    // ⛔⛔ THE SWALLOW RUNS BEFORE THE GATE, not after (2026-09-03).
+    //
+    // ⚠️ It used to sit below the config-mode branch -- which RETURNS -- so in
+    // config mode the swallow never ran at all. That is the mode where it
+    // matters most: close the on-screen keyboard with Circle still held, and
+    // the very next report reached the gate as a fresh press, which sent its
+    // "back" key and threw you into the footer.
+    //
+    // ⓘ A held button is blanked until it is seen RELEASED. Whatever armed it
+    // -- hide(), a keyboard close, a mode change -- gets the same protection,
+    // and it has to be applied before anything can consume the report.
+    if (g_swallowUntilReleased != 0 && len > 10) {
+        for (int i = 0; i < kButtonCount; ++i) {
+            const uint32_t bit = 1u << i;
+            if ((g_swallowUntilReleased & bit) == 0) continue;
+            if (is_pressed(data, len, i)) {
+                clear_button(data, len, i);
+            } else {
+                g_swallowUntilReleased &= ~bit;
+            }
+        }
+    }
+
     if (config_mode()) {
+        // ⛔ BUILT HERE, not borrowed. `section` is not created until well
+        // below this branch -- after the gate has already returned -- so
+        // reaching for it compiled nowhere. ⓘ At the TOP, because the Square
+        // reservation AND the mouse/keyboard exceptions both need it.
+        const std::string gateSection = device_settings_section(kind, linkedConfig);
+
         uint8_t gateKeys[6] = {0, 0, 0, 0, 0, 0};
         size_t gateCount = 0;
         uint8_t gateMods = 0;
 
+        // ⭐⭐ IN A TEXT BOX, SQUARE OPENS THE KEYBOARD (rhoquinn8217, 2026-09-03).
+        //
+        // ⛔ THE TRAP IT REMOVES: someone playing a game has Square bound to
+        // something the game needs. They open this window to rename a config,
+        // move into the name box -- and cannot type, because they have no
+        // keyboard and Square is not bound to one. To get one they must edit
+        // THAT config to add a keyboard binding, rename it, then remember to
+        // undo the binding before going back to the game. A loop where the fix
+        // requires changing the thing you came to change.
+        //
+        // ⭐ So Square is RESERVED here, exactly as Cross, Circle and the
+        // shoulders already are: this window claims the buttons it needs to be
+        // usable, and typing is one of them. ⓘ Narrow on purpose -- only in a
+        // text box, only in this window. Outside the box Square toggles the
+        // setting as it always has.
+        //
+        // ⓘ Pressing it again closes the keyboard, because the overlay owns
+        // Square while it is up. One button, both directions.
+        static std::map<std::pair<const void *, int>, bool> gateSquareHeld;
+        {
+            const bool sq = is_pressed(data, len, kBtnFaceLeft);
+            const bool fresh = sq && !gateSquareHeld[{deviceKey, kBtnFaceLeft}];
+            gateSquareHeld[{deviceKey, kBtnFaceLeft}] = sq;
+
+            if (ctm_rebind_editing_field()) {
+                clear_button(data, len, kBtnFaceLeft);
+                if (fresh) ctm_osk_toggle(gateSection, kBtnFaceLeft, 2);   // 2 = ours
+            } else if (fresh) {
+                // ⭐⭐ SAY WHY THE KEYBOARD DID NOT OPEN (rhoquinn8217,
+                // 2026-09-03). ⛔ The presets bind Square to our keyboard, so
+                // pressing it here and getting a TOGGLE instead looks like a
+                // bug -- the person bound a keyboard and no keyboard appeared,
+                // with nothing said.
+                //
+                // ⓘ Only when Square is actually bound to a keyboard. Someone
+                // who bound it to something else is not expecting one and does
+                // not need telling.
+                // ⛔ ONCE PER VISIT, not once per press. Square IS the toggle
+                // here, so saying this every time would bury the page in
+                // notices while somebody edits. ⓘ The flag clears when the
+                // window next takes focus, so the next visit says it again.
+                const std::string sqCode =
+                    device_config_str(gateSection.c_str(), "rebind_2");
+                if (!g_saidKeyboardRefused &&
+                    (code_is(sqCode, "KeyboardDS5_USBIP") ||
+                     code_is(sqCode, "OSKeyboard") ||
+                     code_is(sqCode, "KeyboardSteam") ||
+                     code_is(sqCode, "KeyboardWindows"))) {
+                    g_saidKeyboardRefused = true;
+                    ctm_ui_notify(
+                        "DS5-USBIP Virtual keyboard restricted from opening "
+                        "with Controller Config except when making text input "
+                        "based changes.");
+                }
+            }
+        }
+
         for (const GateBinding &g : kConfigModeKeys) {
+            // ⛔ Square belongs to the keyboard while a text box has focus;
+            // sending the toggle as well would do both.
+            if (g.standardIndex == kBtnFaceLeft && ctm_rebind_editing_field()) continue;
             const bool held = is_pressed(data, len, g.standardIndex);
             // ⛔ Cleared whether or not it is held, so a button released this
             // frame cannot leave a stale bit behind.
@@ -673,10 +793,6 @@ inline void apply(const void *deviceKey,
         //
         // ⓘ Only for buttons the gate does not already claim, so nothing
         // fights: pressing a gate button still drives the page.
-        // ⛔ BUILT HERE, not borrowed. `section` is not created until a hundred
-        // lines below this branch -- after the gate has already returned -- so
-        // reaching for it compiled nowhere.
-        const std::string gateSection = device_settings_section(kind, linkedConfig);
         uint8_t gateMouseButtons = 0;
         bool gateAnyMouse = false;
 
@@ -752,17 +868,6 @@ inline void apply(const void *deviceKey,
     // ⭐ Swallow anything still held from before the gate released. Each button
     // clears as it is let go, so the pad becomes live piece by piece rather than
     // all at once with a stale press in flight.
-    if (g_swallowUntilReleased != 0 && len > 10) {
-        for (int i = 0; i < kButtonCount; ++i) {
-            const uint32_t bit = 1u << i;
-            if ((g_swallowUntilReleased & bit) == 0) continue;
-            if (is_pressed(data, len, i)) {
-                clear_button(data, len, i);
-            } else {
-                g_swallowUntilReleased &= ~bit;
-            }
-        }
-    }
 
     const std::string section = device_settings_section(kind, linkedConfig);
 
@@ -949,6 +1054,57 @@ void ctm_rebind_set_gate_hold(bool hold)
 void ctm_rebind_set_config_mode(bool on)
 {
     ctm_rebind::set_config_mode(on);
+    // ⛔ A WINDOW THAT LOSES FOCUS IS NOT EDITING ANYTHING, whatever the page
+    // last said (T-141). ⚠️ A window that closes abruptly never gets to send
+    // `editing: false`, so the flag would latch on forever and the keyboard
+    // would keep opening when it should refuse.
+    // ⭐⭐ EITHER WAY, THE KEYBOARD CLOSES (T-141).
+    //
+    // **Losing** focus ends its warrant: it was allowed to open only because a
+    // field in THIS window had focus.
+    // **Gaining** focus closes it too (rhoquinn8217, 2026-09-03) -- bringing
+    // the config window forward means you want to drive the PAGE, and the
+    // keyboard would silently be holding the pad, which is the fault this
+    // ticket exists for.
+    //
+    // ⓘ This runs only on a focus TRANSITION, so it cannot interrupt typing:
+    // the window keeps focus throughout and no transition happens.
+    // ⓘ hide() arms the swallow, so a trigger held across the close does not
+    // arrive as a press nobody made.
+    ctm_overlay_hide();
+
+    // ⓘ A fresh visit gets the explanation again.
+    if (on) ctm_rebind::g_saidKeyboardRefused = false;
+
+    if (!on) ctm_rebind::g_editingField.store(false, std::memory_order_relaxed);
+}
+
+// ⓘ Set by the page's `ui/field` message; read when deciding whether the
+// on-screen keyboard may open.
+void ctm_rebind_set_editing_field(bool on)
+{
+    ctm_rebind::g_editingField.store(on, std::memory_order_relaxed);
+}
+
+bool ctm_rebind_editing_field()
+{
+    return ctm_rebind::editing_field();
+}
+
+void ctm_ui_notify(const std::string &message)
+{
+    std::lock_guard<std::mutex> lock(ctm_rebind::g_noticeMutex);
+    ctm_rebind::g_notice = message;
+}
+
+// ⛔ READING CLEARS IT, so a notice is delivered once and a missed reply does
+// not queue bubbles.
+std::string ctm_ui_take_notice()
+{
+    std::lock_guard<std::mutex> lock(ctm_rebind::g_noticeMutex);
+    std::string out;
+    out.swap(ctm_rebind::g_notice);
+    return out;
 }
 
 void ctm_rebind_apply(const void *deviceKey,

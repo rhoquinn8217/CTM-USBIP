@@ -81,6 +81,13 @@ static void mic_ring_reset(const CtmBackend *owner);
 // from its endpoints, so the setter is forward declared here too.
 void ctm_rebind_set_config_mode(bool on);
 bool ctm_rebind_config_mode();
+void ctm_rebind_set_editing_field(bool on);   // T-141: the page's cursor is in a text field
+bool ctm_rebind_editing_field();
+void ctm_ui_notify(const std::string &message);   // T-141: one pending bubble for the page
+std::string ctm_ui_take_notice();
+// ⓘ T-141. Defined in osk.inl, beside ctm_overlay_open_steam and for the same
+// reason: rest_config.inl is included before the overlay exists.
+void ctm_overlay_hide();
 bool ctm_rebind_gate_hold();
 void ctm_rebind_clear_provisional();
 // ⓘ rebind.inl runs on the input path and needs the window check from open_ui.

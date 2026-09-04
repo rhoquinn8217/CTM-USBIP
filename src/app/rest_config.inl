@@ -510,6 +510,62 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
             return true;
         }
 
+        // ⭐⭐ A NOTICE THE PAGE COLLECTS (T-141).
+        //
+        // ⛔ Nothing pushes host->page. ⚠️ The first attempt hung this on the
+        // `focus` reply -- but syncFocus posts only when focus CHANGES, so a
+        // refusal while the window stayed focused would never be collected.
+        //
+        // ➡️ The page asks instead, once a second and ONLY while it has focus:
+        // the only moment a refusal can happen and the only moment a bubble
+        // could be seen.
+        //
+        // ⭐ READING IT CLEARS IT, so one refusal makes one bubble and a missed
+        // reply does not queue them. ⓘ Same shape as the KEYBOARD_PENDING
+        // contract proposed for the TV side, for the same reason.
+        if (what == "notice") {
+            const std::string notice = ctm_ui_take_notice();
+            *out = rest_http_response(200,
+                notice.empty()
+                    ? std::string(R"({"ok":true,"notice":""})")
+                    : std::string(R"({"ok":true,"notice":")")
+                      + rest_json_escape(notice) + R"("})");
+            return true;
+        }
+
+        // ⭐ T-141. The same shape as `focus`, for a thing the listener cannot
+        // see for itself: whether the page's cursor sits in a text field.
+        // ⓘ Sent on change only, not per keystroke.
+        if (what == "field") {
+            RestJson json;
+            std::string parseError;
+            if (!rest_parse_flat_json(req.body, &json, &parseError)) {
+                device_log::input(device_log::msg()
+                    << "ui/field: body did not parse -- " << parseError
+                    << " (body was: " << req.body << ")");
+                *out = rest_error_response(400, parseError);
+                return true;
+            }
+            device_log::input(device_log::msg() << "ui/field: " << req.body);
+            auto it = json.bools.find("editing");
+            const bool editing = (it != json.bools.end()) && it->second;
+            ctm_rebind_set_editing_field(editing);
+            // ⛔ Leaving a field CLOSES an open keyboard. It was allowed to open
+            // only because a field had focus, and the pad belongs to the page.
+            // ⭐ hide() ALREADY ARMS THE SWALLOW (overlay_window.inl), which is
+            // exactly what a close-by-focus needs: a trigger still held when the
+            // keyboard vanishes must not arrive at the page, or a game, as a
+            // press nobody made.
+            //
+            // ⛔ Through a free function, NOT ctm_overlay:: directly. This file
+            // is included at main.cpp:146 and the overlay at :164, so the
+            // namespace does not exist yet here.
+            if (!editing) ctm_overlay_hide();
+            *out = rest_http_response(200, editing ? R"({"ok":true,"editing":true})"
+                                                   : R"({"ok":true,"editing":false})");
+            return true;
+        }
+
         // ⭐ The page reporting FOCUS. The gate follows it, so clicking away
         // hands the pad straight back to the game -- and the window stays,
         // because one vanishing mid-edit is worse than the bookkeeping is good.
@@ -540,8 +596,15 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
             // window came forward, so the failsafe can stand down.
             if (on) ctm_rebind_clear_provisional();
             ctm_rebind_set_config_mode(on);
-            *out = rest_http_response(200, on ? R"({"ok":true,"config_mode":true})"
-                                              : R"({"ok":true,"config_mode":false})");
+
+            const std::string notice = ctm_ui_take_notice();
+            std::string body = std::string("{\"ok\":true,\"config_mode\":")
+                             + (on ? "true" : "false");
+            if (!notice.empty()) {
+                body += ",\"notice\":\"" + rest_json_escape(notice) + "\"";
+            }
+            body += "}";
+            *out = rest_http_response(200, body);
             return true;
         }
 

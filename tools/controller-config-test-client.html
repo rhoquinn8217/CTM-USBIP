@@ -3340,6 +3340,28 @@ function gpPaint() {
     return;                       // gpCollect paints
   }
 
+  // ⛔⛔ THE PAD MOVING AWAY MUST LET GO OF A TEXT BOX (rhoquinn8217,
+  // 2026-09-03: "the white halo persists even if you navigate away from it
+  // with the blue halo").
+  //
+  // ⓘ There are three focus rings and two of them are different things: the
+  // BLUE halo is this page's own pad cursor, and the WHITE one is real DOM
+  // focus on an input. They were free to diverge -- so a text box stayed
+  // focused after the pad had walked off it, and the on-screen keyboard stayed
+  // allowed because it follows DOM focus.
+  //
+  // ⚠️ Only when the pad has actually moved elsewhere. Blurring while the halo
+  // is still ON the box would fight the person typing in it.
+  var active = document.activeElement;
+  if (active && active !== want && fieldIsEditable(active)) {
+    // ⓘ Hold the index across the blur here too: this runs DURING a paint, and
+    // losing the position mid-paint would move the halo somewhere nobody asked
+    // for.
+    var keepIdx = GP_INDEX;
+    active.blur();
+    GP_INDEX = keepIdx;
+  }
+
   // ⛔ CLAMP FIRST. A redraw replaces the elements, and if the new list is
   // shorter -- picking "(no config)" removes the Rename button -- the index can
   // point past the end. GP_FOCUS[GP_INDEX] is then undefined, gpPaint returns
@@ -3661,6 +3683,99 @@ window.addEventListener('blur',  syncFocus);
 // change.
 setInterval(syncFocus, 1000);
 
+// ⭐⭐ T-141. TELL THE LISTENER WHEN A TEXT FIELD HAS FOCUS.
+//
+// ⛔ The on-screen keyboard refuses to open while this window has focus,
+// because the pad belongs to this page and a keyboard silently taking it is
+// the fault that ticket was filed for. ⭐ A value box is the one exception:
+// it is the only place here a keyboard earns its place.
+//
+// ⓘ On CHANGE only, not per keystroke.
+var LAST_FIELD_SENT = null;
+
+function fieldIsEditable(el) {
+  if (!el) return false;
+  var tag = (el.tagName || '').toLowerCase();
+  if (tag === 'textarea') return true;
+  if (tag !== 'input') return false;
+  // ⓘ Only the ones you TYPE into. A checkbox or a dropdown is navigated with
+  // the pad and wants no keyboard.
+  var type = (el.type || 'text').toLowerCase();
+  return ['text', 'search', 'url', 'email', 'number', 'password',
+          'tel'].indexOf(type) >= 0;
+}
+
+function reportField() {
+  if (inPlainTab()) return;
+  var on = fieldIsEditable(document.activeElement);
+  if (on === LAST_FIELD_SENT) return;
+  LAST_FIELD_SENT = on;
+  try {
+    fetch(base() + '/api/v1/ui/field', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ editing: on })
+    }).catch(function () {});
+  } catch (e) {}
+}
+
+// ⓘ focusin/focusout bubble, unlike focus/blur, so one pair of listeners on the
+// document covers every field the page will ever grow.
+document.addEventListener('focusin', reportField);
+document.addEventListener('focusout', function () {
+  // ⚠️ activeElement is still the OLD element during focusout, so let the move
+  // finish before asking. Without this, tabbing between two fields reports a
+  // false in between and closes the keyboard mid-edit.
+  setTimeout(reportField, 0);
+});
+
+// ⭐ COLLECT A NOTICE, but only while this window has focus -- the only moment
+// a refusal can happen and the only moment a bubble could be seen.
+// ⓘ Reading it clears it listener-side, so this cannot show the same one twice.
+setInterval(function () {
+  if (inPlainTab() || !document.hasFocus()) return;
+  // ⛔ POST, not GET. Every /api/v1/ui/ route answers 405 to anything else
+  // (rest_config.inl guards the whole prefix), so the first two attempts at
+  // this were rejected before reaching the handler and failed silently.
+  // ⓘ It reads and clears, so a POST is the honest verb anyway.
+  call('POST', '/api/v1/ui/notice', {}, true).then(function (r) {
+    if (r && r.notice) showListenerNotice(r.notice);
+  }).catch(function () {});
+}, 1000);
+
+// ⓘ One at a time. A second attempt REPLACES the first rather than stacking
+// under it (rhoquinn8217, 2026-09-03): each press is its own event and should
+// look like one, but three identical notices are clutter, not information.
+var LISTENER_NOTICE = null;
+var LISTENER_NOTICE_TIMER = null;
+
+function clearListenerNotice() {
+  if (LISTENER_NOTICE_TIMER) { clearTimeout(LISTENER_NOTICE_TIMER); LISTENER_NOTICE_TIMER = null; }
+  if (LISTENER_NOTICE && LISTENER_NOTICE.parentNode) {
+    LISTENER_NOTICE.parentNode.removeChild(LISTENER_NOTICE);
+  }
+  LISTENER_NOTICE = null;
+}
+
+function showListenerNotice(text) {
+  clearListenerNotice();
+
+  var box = document.createElement('div');
+  // ⭐ AMBER, not blue. This is a refusal -- something you asked for did not
+  // happen -- and blue reads as information you may ignore. Same colours as the
+  // ungated-gate warning, so a warning always looks like a warning here.
+  box.style.cssText = 'border:1px solid #e0c07a;background:#3a3320;color:#e8cf92';
+  box.textContent = text;
+  document.getElementById('bubbles').appendChild(box);
+  LISTENER_NOTICE = box;
+  measureNotices();
+
+  LISTENER_NOTICE_TIMER = setTimeout(function () {
+    clearListenerNotice();
+    measureNotices();
+  }, 6000);
+}
+
 // ⛔ sendBeacon, not fetch. A normal request is cancelled when the page goes
 // away; sendBeacon is built to survive teardown, and this is the path that
 // releases the gate when someone closes the window with the X.
@@ -3856,6 +3971,20 @@ function gpKeyBack() {
   }
   if (GP_SELECTING) { gpSelectEnd(false); return; }
   if (RENAMING) { cancelRename(); return; }
+
+  // ⛔ CIRCLE LETS GO OF A TEXT BOX (rhoquinn8217, 2026-09-03: "circle should
+  // remove the white focus on the box but it doesn't").
+  //
+  // ⓘ The branches above only know about boxes this page is TRACKING --
+  // GP_EDITING, GP_SELECTING, RENAMING. A plain input that took DOM focus some
+  // other way (the agent address, the config creator) is none of those, so
+  // Circle sailed past it and the white halo stayed. ⚠️ Which also kept the
+  // on-screen keyboard allowed, since that follows DOM focus.
+  if (fieldIsEditable(document.activeElement)) {
+    document.activeElement.blur();
+    gpPaint();
+    return;
+  }
 
   // ⭐ ○ GOES STRAIGHT TO THE FOOTER, from anywhere.
   //
@@ -4293,8 +4422,43 @@ var PLAIN_KEYS = {
 document.addEventListener('keydown', function (ev) {
   if (STOPPED) return;
   if (ev.ctrlKey || ev.altKey || ev.shiftKey || ev.metaKey) return;   // the gate's keys
-  // ⓘ Typing keeps every key -- including inside the rename field, whose own
-  // handler deals with Enter and Escape.
+
+  // ⭐⭐ ESCAPE GETS OUT OF ANY FIELD, not just the rename one (rhoquinn8217,
+  // 2026-09-03: "the inconsistency is jarring").
+  //
+  // ⛔ The rename field has its OWN Escape handler; no other input does. So
+  // with the on-screen keyboard up, Circle -- which types Escape -- backed
+  // out of a rename and did NOTHING anywhere else, leaving Square or the
+  // keyboard's own exit key as the only way out. One box behaved unlike every
+  // other box.
+  //
+  // ⓘ Blurring is enough: the page then reports `editing: false` and the
+  // listener closes the keyboard -- the same route as walking away with the
+  // d-pad. ⚠️ RENAMING is left alone, because its handler does more than blur.
+  if (ev.code === 'Escape' && typingInAField() && !RENAMING) {
+    var esc = document.activeElement;
+    if (esc && esc.blur) {
+      ev.preventDefault();
+      // ⛔⛔ AND STOP THE OTHER LISTENERS. `return` leaves THIS handler only --
+      // there is a second keydown listener below, and Escape reached it too.
+      // By then the field was already blurred, so gpKeyBack fell past its
+      // text-box branch and hit setFooterMode: one press, two handlers, and
+      // you ended up in the footer (rhoquinn8217, 2026-09-03: "it's too
+      // strong").
+      // ⓘ preventDefault does not do this; stopImmediatePropagation does.
+      ev.stopImmediatePropagation();
+
+      // ⓘ Blurring makes document.activeElement the BODY, and the halo follows
+      // real focus -- so letting go of the box also let go of where you were.
+      // Leaving a text box should put you back ON that box, ready to move on.
+      var keep = GP_INDEX;
+      esc.blur();
+      GP_INDEX = keep;
+      gpPaint();
+      return;
+    }
+  }
+
   if (typingInAField()) return;
   // ⛔ But NOT the whole rename row: once focus has left the field, Escape has
   // to be able to close it, or the second press in the sequence above has
@@ -4429,7 +4593,7 @@ function gpPoll() {
   // ⓘ The count comes from the browser when it can see the pads, and falls
   // back to the singular when only the gate knows one is there.
   hint.textContent = (live.length > 1 ? live.length + ' controllers' : 'controller') +
-                     ' — L1/R1 tabs, D-pad move, ✕ select, ✕ again to leave a value, △ on/off, ○ back';
+                     ' — L1/R1 tabs, D-pad move, ✕ select, ✕ again to leave a value, □ on/off, ○ back';
   bar.className = 'live';
   measureGpBar();
 
@@ -4587,11 +4751,13 @@ function gpPoll() {
   // dropdown, rename, then the footer.
   if (edge(0)) gpKeySelect();
   if (edge(1)) gpKeyBack();
-  // ⭐ TRIANGLE, matching the gate (rhoquinn8217, 2026-09-03). Square is where
-  // an on-screen keyboard belongs, and the same page must not answer to a
-  // different button depending on whether the pad arrived through the browser
-  // or through the listener's gate.
-  if (edge(3)) gpToggleManaged();    // triangle: managed / unmanaged
+  // ⭐ SQUARE, matching the gate (rhoquinn8217, 2026-09-03). It moved to
+  // Triangle earlier the same day to free Square for the on-screen keyboard --
+  // and that reason evaporated, because the keyboard refuses to open over this
+  // window except inside a text box. ⓘ The page must not answer to a different
+  // button depending on whether the pad arrived through the browser or the
+  // listener's gate.
+  if (edge(2)) gpToggleManaged();    // square: managed / unmanaged
 
   // ⛔ pressed(), NOT edge(). edge() WRITES GP_PREV as it reads, so calling it
   // here consumed the press and everything below saw nothing -- cross stopped
