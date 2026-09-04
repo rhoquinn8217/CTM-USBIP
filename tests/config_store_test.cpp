@@ -320,16 +320,34 @@ int run_config_store_tests()
         }
     }
 
-    section("presets: L2-gyro-mouse-aiming binds NOTHING but the gate");
+    section("presets: L2-gyro-mouse-aiming BINDS nothing, and hides the gyro");
     {
         // The one preset used WHILE PLAYING. Rebinding a face button here
-        // would take it away from the game, which is why this preset is one
-        // line and must stay one line.
+        // would take it away from the game, which is why this preset binds
+        // nothing and must go on binding nothing.
+        //
+        // ⭐ The suppression is not a binding, and the same reasoning argues
+        // FOR it: with the gyro aiming the cursor, a game still reading the
+        // gyro gives double input -- the camera drifting as the cursor moves
+        // (2026-09-03).
         const ctm_presets::Preset *p = ctm_presets::find("L2-gyro-mouse-aiming");
         CTM_CHECK(p != nullptr);
-        CTM_CHECK_EQ(static_cast<int>(p->count), 1);
-        CTM_CHECK(std::string(p->settings[0].key) == "gyro_to_mouse_gate");
-        CTM_CHECK(std::string(p->settings[0].value) == "L2");
+        CTM_CHECK_EQ(static_cast<int>(p->count), 2);
+
+        bool gate = false, hidden = false, anyBinding = false;
+        for (size_t k = 0; k < p->count; ++k) {
+            const std::string key = p->settings[k].key;
+            const std::string val = p->settings[k].value;
+            if (key == "gyro_to_mouse_gate" && val == "L2") gate = true;
+            if (key == "gyro_no_passthrough" && val == "true") hidden = true;
+            // ⛔ The rule that matters: NO button is taken from the game.
+            if (key.rfind("rebind_", 0) == 0 || key.rfind("turbo_", 0) == 0) {
+                anyBinding = true;
+            }
+        }
+        CTM_CHECK(gate);
+        CTM_CHECK(hidden);
+        CTM_CHECK(!anyBinding);
     }
 
     section("presets: found by name, and only where they suit the controller");

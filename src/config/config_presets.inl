@@ -156,6 +156,24 @@ inline const Setting kStickMouseMode[] = {
 // game reading the pad as a gamepad will not see it.
 inline const Setting kL2GyroAiming[] = {
     { "gyro_to_mouse_gate", "L2" },
+    /* ⭐ AND THE GYRO STOPS REACHING THE GAME (rhoquinn8217, 2026-09-03).
+       This is the preset FOR gyro aiming, which is exactly the case where a
+       game reading the gyro alongside the cursor gives you double input --
+       the camera drifting while the cursor moves.
+       ⓘ Steam does the same, and by construction rather than by choice: its
+       virtual controller OMITS the gyro values whenever gyro is driving mouse
+       or joystick emulation. People have filed requests asking for a way to
+       turn that off, so games with native gyro can still read it -- which is
+       the switch we already have and Steam does not.
+       ⚠️ Known limitation this does NOT fix: some games flip between controller
+       and mouse prompts when a gyro-driven mouse arrives alongside a pad. The
+       mouse is real; hiding the gyro does not change that. Expect it to be
+       reported as our bug.
+       ⚠️ It has not bitten us only because few games read gyro at all. That is
+       an absence of evidence, not a reason.
+       ⛔ And it is NOT a button binding -- this preset still takes nothing away
+       from the game, which is the rule that keeps it one line long. */
+    { "gyro_no_passthrough", "true" },
 };
 
 #define CTM_PRESET_COUNT_OF(a) (sizeof(a) / sizeof((a)[0]))
