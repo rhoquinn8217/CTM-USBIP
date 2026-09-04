@@ -3738,14 +3738,35 @@ setInterval(function () {
   }).catch(function () {});
 }, 1000);
 
+// ⓘ One at a time. A second attempt REPLACES the first rather than stacking
+// under it (rhoquinn8217, 2026-09-03): each press is its own event and should
+// look like one, but three identical notices are clutter, not information.
+var LISTENER_NOTICE = null;
+var LISTENER_NOTICE_TIMER = null;
+
+function clearListenerNotice() {
+  if (LISTENER_NOTICE_TIMER) { clearTimeout(LISTENER_NOTICE_TIMER); LISTENER_NOTICE_TIMER = null; }
+  if (LISTENER_NOTICE && LISTENER_NOTICE.parentNode) {
+    LISTENER_NOTICE.parentNode.removeChild(LISTENER_NOTICE);
+  }
+  LISTENER_NOTICE = null;
+}
+
 function showListenerNotice(text) {
+  clearListenerNotice();
+
   var box = document.createElement('div');
-  box.style.cssText = 'border:1px solid #6c8cff;background:#1e2333;color:#c9d4ff';
+  // ⭐ AMBER, not blue. This is a refusal -- something you asked for did not
+  // happen -- and blue reads as information you may ignore. Same colours as the
+  // ungated-gate warning, so a warning always looks like a warning here.
+  box.style.cssText = 'border:1px solid #e0c07a;background:#3a3320;color:#e8cf92';
   box.textContent = text;
   document.getElementById('bubbles').appendChild(box);
+  LISTENER_NOTICE = box;
   measureNotices();
-  setTimeout(function () {
-    if (box.parentNode) box.parentNode.removeChild(box);
+
+  LISTENER_NOTICE_TIMER = setTimeout(function () {
+    clearListenerNotice();
     measureNotices();
   }, 6000);
 }
@@ -4398,6 +4419,29 @@ document.addEventListener('keydown', function (ev) {
   if (ev.ctrlKey || ev.altKey || ev.shiftKey || ev.metaKey) return;   // the gate's keys
   // ⓘ Typing keeps every key -- including inside the rename field, whose own
   // handler deals with Enter and Escape.
+
+  // ⭐⭐ ESCAPE GETS OUT OF ANY FIELD, not just the rename one (rhoquinn8217,
+  // 2026-09-03: "the inconsistency is jarring").
+  //
+  // ⛔ The rename field has its OWN Escape handler; no other input does. So
+  // with the on-screen keyboard up, Circle -- which types Escape -- backed
+  // out of a rename and did NOTHING anywhere else, leaving Square or the
+  // keyboard's own exit key as the only way out. One box behaved unlike every
+  // other box.
+  //
+  // ⓘ Blurring is enough: the page then reports `editing: false` and the
+  // listener closes the keyboard -- the same route as walking away with the
+  // d-pad. ⚠️ RENAMING is left alone, because its handler does more than blur.
+  if (ev.code === 'Escape' && typingInAField() && !RENAMING) {
+    var esc = document.activeElement;
+    if (esc && esc.blur) {
+      ev.preventDefault();
+      esc.blur();
+      gpPaint();
+      return;
+    }
+  }
+
   if (typingInAField()) return;
   // ⛔ But NOT the whole rename row: once focus has left the field, Escape has
   // to be able to close it, or the second press in the sequence above has
