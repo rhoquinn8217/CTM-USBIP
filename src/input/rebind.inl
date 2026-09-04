@@ -972,7 +972,15 @@ void ctm_rebind_set_config_mode(bool on)
     // last said (T-141). ⚠️ A window that closes abruptly never gets to send
     // `editing: false`, so the flag would latch on forever and the keyboard
     // would keep opening when it should refuse.
-    if (!on) ctm_rebind::g_editingField.store(false, std::memory_order_relaxed);
+    if (!on) {
+        ctm_rebind::g_editingField.store(false, std::memory_order_relaxed);
+        // ⛔ AND CLOSE THE KEYBOARD (T-141). Clearing the flag is not the same
+        // as hiding: the keyboard was allowed to open only because a field in
+        // THIS window had focus, so the window losing focus ends its warrant.
+        // ⓘ hide() arms the swallow, so a trigger held through the close does
+        // not arrive as a press nobody made.
+        ctm_overlay_hide();
+    }
 }
 
 // ⓘ Set by the page's `ui/field` message; read when deciding whether the

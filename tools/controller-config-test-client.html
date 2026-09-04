@@ -3712,7 +3712,10 @@ document.addEventListener('focusout', function () {
 // ⓘ Reading it clears it listener-side, so this cannot show the same one twice.
 setInterval(function () {
   if (inPlainTab() || !document.hasFocus()) return;
-  call('GET', '/api/v1/ui/notice', null, true).then(function (r) {
+  // ⛔ undefined, NOT null. call() attaches a body whenever it is not
+  // undefined, so null puts "null" in the body of a GET -- which is where the
+  // first attempt at this quietly died (2026-09-03).
+  call('GET', '/api/v1/ui/notice', undefined, true).then(function (r) {
     if (r && r.notice) showListenerNotice(r.notice);
   }).catch(function () {});
 }, 1000);
