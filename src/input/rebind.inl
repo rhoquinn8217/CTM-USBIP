@@ -356,6 +356,25 @@ inline void set_config_mode(bool on)
 
 inline bool config_mode() { return g_configMode.load(std::memory_order_relaxed); }
 
+// ⭐⭐ IS THE PAGE'S CURSOR IN A TEXT FIELD? (T-141, 2026-09-03.)
+//
+// ⛔ The listener already knows when the WINDOW has focus -- ui/focus and
+// window_has_foreground() both say so. It cannot know when a FIELD does: that
+// is a page-side event, so the page sends `ui/field`.
+//
+// ⓘ Why it exists: the on-screen keyboard refuses to open while the config
+// window is focused, because the pad belongs to that window exclusively and a
+// keyboard silently taking it is the fault this ticket was filed for. A text
+// field is the one place on that page a keyboard earns its place.
+inline std::atomic<bool> g_editingField{false};
+
+inline bool editing_field() { return g_editingField.load(std::memory_order_relaxed); }
+
+// ⓘ One pending notice for the page to collect, because nothing pushes
+// host->page. Read-once: one refusal, one bubble (T-141).
+inline std::mutex g_noticeMutex;
+inline std::string g_notice;
+
 // ⛔ THE PAGE INTERPRETS THESE, and they carry CTRL+ALT.
 //
 // ⚠️ MEASURED 2026-08-28, after a long hunt: F13-F24 do NOT reach a browser as
@@ -949,6 +968,39 @@ void ctm_rebind_set_gate_hold(bool hold)
 void ctm_rebind_set_config_mode(bool on)
 {
     ctm_rebind::set_config_mode(on);
+    // ⛔ A WINDOW THAT LOSES FOCUS IS NOT EDITING ANYTHING, whatever the page
+    // last said (T-141). ⚠️ A window that closes abruptly never gets to send
+    // `editing: false`, so the flag would latch on forever and the keyboard
+    // would keep opening when it should refuse.
+    if (!on) ctm_rebind::g_editingField.store(false, std::memory_order_relaxed);
+}
+
+// ⓘ Set by the page's `ui/field` message; read when deciding whether the
+// on-screen keyboard may open.
+void ctm_rebind_set_editing_field(bool on)
+{
+    ctm_rebind::g_editingField.store(on, std::memory_order_relaxed);
+}
+
+bool ctm_rebind_editing_field()
+{
+    return ctm_rebind::editing_field();
+}
+
+void ctm_ui_notify(const std::string &message)
+{
+    std::lock_guard<std::mutex> lock(ctm_rebind::g_noticeMutex);
+    ctm_rebind::g_notice = message;
+}
+
+// ⛔ READING CLEARS IT, so a notice is delivered once and a missed reply does
+// not queue bubbles.
+std::string ctm_ui_take_notice()
+{
+    std::lock_guard<std::mutex> lock(ctm_rebind::g_noticeMutex);
+    std::string out;
+    out.swap(ctm_rebind::g_notice);
+    return out;
 }
 
 void ctm_rebind_apply(const void *deviceKey,

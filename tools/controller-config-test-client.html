@@ -3661,6 +3661,74 @@ window.addEventListener('blur',  syncFocus);
 // change.
 setInterval(syncFocus, 1000);
 
+// ⭐⭐ T-141. TELL THE LISTENER WHEN A TEXT FIELD HAS FOCUS.
+//
+// ⛔ The on-screen keyboard refuses to open while this window has focus,
+// because the pad belongs to this page and a keyboard silently taking it is
+// the fault that ticket was filed for. ⭐ A value box is the one exception:
+// it is the only place here a keyboard earns its place.
+//
+// ⓘ On CHANGE only, not per keystroke.
+var LAST_FIELD_SENT = null;
+
+function fieldIsEditable(el) {
+  if (!el) return false;
+  var tag = (el.tagName || '').toLowerCase();
+  if (tag === 'textarea') return true;
+  if (tag !== 'input') return false;
+  // ⓘ Only the ones you TYPE into. A checkbox or a dropdown is navigated with
+  // the pad and wants no keyboard.
+  var type = (el.type || 'text').toLowerCase();
+  return ['text', 'search', 'url', 'email', 'number', 'password',
+          'tel'].indexOf(type) >= 0;
+}
+
+function reportField() {
+  if (inPlainTab()) return;
+  var on = fieldIsEditable(document.activeElement);
+  if (on === LAST_FIELD_SENT) return;
+  LAST_FIELD_SENT = on;
+  try {
+    fetch(base() + '/api/v1/ui/field', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ editing: on })
+    }).catch(function () {});
+  } catch (e) {}
+}
+
+// ⓘ focusin/focusout bubble, unlike focus/blur, so one pair of listeners on the
+// document covers every field the page will ever grow.
+document.addEventListener('focusin', reportField);
+document.addEventListener('focusout', function () {
+  // ⚠️ activeElement is still the OLD element during focusout, so let the move
+  // finish before asking. Without this, tabbing between two fields reports a
+  // false in between and closes the keyboard mid-edit.
+  setTimeout(reportField, 0);
+});
+
+// ⭐ COLLECT A NOTICE, but only while this window has focus -- the only moment
+// a refusal can happen and the only moment a bubble could be seen.
+// ⓘ Reading it clears it listener-side, so this cannot show the same one twice.
+setInterval(function () {
+  if (inPlainTab() || !document.hasFocus()) return;
+  call('GET', '/api/v1/ui/notice', null, true).then(function (r) {
+    if (r && r.notice) showListenerNotice(r.notice);
+  }).catch(function () {});
+}, 1000);
+
+function showListenerNotice(text) {
+  var box = document.createElement('div');
+  box.style.cssText = 'border:1px solid #6c8cff;background:#1e2333;color:#c9d4ff';
+  box.textContent = text;
+  document.getElementById('bubbles').appendChild(box);
+  measureNotices();
+  setTimeout(function () {
+    if (box.parentNode) box.parentNode.removeChild(box);
+    measureNotices();
+  }, 6000);
+}
+
 // ⛔ sendBeacon, not fetch. A normal request is cancelled when the page goes
 // away; sendBeacon is built to survive teardown, and this is the path that
 // releases the gate when someone closes the window with the X.
