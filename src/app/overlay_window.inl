@@ -552,6 +552,12 @@ inline int g_dirHeld = 0;
 // ⓘ Now: a HALO marks where the cursor is, a FILL means pressed, a fill that
 // stays means latched, and amber means held down on a shoulder.
 inline int g_pressRow = -1, g_pressCol = -1;
+
+// ⓘ T-142. The key each pad latched when its Cross went down, kept until that
+// Cross is released -- so moving the halo mid-press cannot change what is being
+// typed. ⭐ Per device: two pads share this keyboard by design, and a single
+// value would let one pad's press decide the other's key.
+inline std::map<const void *, uint8_t> heldUsageFor;
 inline const void *g_pasteHeld = nullptr;
 
 inline int mod_state(uint8_t bit)
@@ -1636,15 +1642,42 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
     // shoulders are shortcuts to keys that are also ON the keyboard -- Steam
     // does the same, and a shortcut to something invisible is folklore.
     uint8_t usage = 0;
+    // ⛔⛔ THE KEY IS CHOSEN WHEN CROSS GOES DOWN, AND NOT AGAIN (T-142).
+    //
+    // ⚠️ This used to read the key under the halo on EVERY report while Cross
+    // was held. Hold Cross on `a`, move the halo to `b`, release -- and the
+    // host saw `a` go up and `b` go down without the button ever having been
+    // released, so BOTH letters typed.
+    //
+    // ⓘ The modifier and action paths immediately above both use edge(); this
+    // one was the odd one out.
+    //
+    // ⭐ Measured before fixing: the sequence gives "a b (release)" the old way
+    // and "a (release)" this way.
+    // ⓘ PER DEVICE, using the file's own edge helper (slot 6 was free) rather
+    // than a bare static: two pads share this keyboard by design, and a static
+    // would let one pad's press decide the other's key.
+    const bool crossFresh = edge(deviceKey, 6, cross);
+    uint8_t &heldUsage = heldUsageFor[deviceKey];
+
     if (cross && k.kind != KK_MOD && k.kind != KK_ACTION) {
-        usage = k.usage;
-        // ⓘ Esc is the backtick while L2 is held -- the developer console in a
-        // great many PC games, and nothing else on the pad produces one.
-        if (g_fnHeld.load() && usage == 0x29) usage = 0x35;
-        if (fn_showing() && k.kind == KK_FN) {
-            const int idx = fn_index(g_row, g_col);
-            if (idx >= 0 && idx < 12) usage = kFnUsages[idx];
+        if (crossFresh) {
+            heldUsage = k.usage;
+            // ⓘ Esc is the backtick while L2 is held -- the developer console in
+            // a great many PC games, and nothing else on the pad produces one.
+            if (g_fnHeld.load() && heldUsage == 0x29) heldUsage = 0x35;
+            if (fn_showing() && k.kind == KK_FN) {
+                const int idx = fn_index(g_row, g_col);
+                if (idx >= 0 && idx < 12) heldUsage = kFnUsages[idx];
+            }
+            // ⓘ And the PRESSED MARKER latches with it: it followed the halo
+            // too, so the drawing disagreed with the key actually down.
+            g_pressRow = g_row; g_pressCol = g_col;
+            invalidate();
         }
+        usage = heldUsage;
+    } else if (!cross) {
+        heldUsage = 0;
     }
 
 
@@ -1674,10 +1707,8 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
     static bool sentLast = false;
     if (usage != 0) {
         sentLast = true;
-        if (g_pressRow != g_row || g_pressCol != g_col) {
-            g_pressRow = g_row; g_pressCol = g_col;
-            invalidate();
-        }
+        // ⓘ The marker is latched on the press edge above and left alone here,
+        // so it stays on the key that is down instead of following the halo.
     } else if (sentLast) {
         sentLast = false;
         if (g_pressRow >= 0) { g_pressRow = g_pressCol = -1; invalidate(); }
@@ -1720,6 +1751,9 @@ inline void hide()
             ctm_keyboard_device::forget_device(entry.first);
         }
         g_padPrev.clear();
+        // ⓘ T-142's latched key goes with it, or a key held when the keyboard
+        // closed would still be the "held" one when it next opens.
+        heldUsageFor.clear();
     }
     // ⓘ Posting rather than destroying from here: the window belongs to the
     // thread that created it, and destroying it from another one is undefined.
