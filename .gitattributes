@@ -1,0 +1,48 @@
+# Keep text stable so diffs show CONTENT, not line endings.
+#
+# ⛔ WHY THIS EXISTS: this machine has core.autocrlf = true at the SYSTEM level,
+# with nothing overriding it. Without a committed .gitattributes, git decides
+# line endings by itself and two things follow:
+#
+#   - A CRLF-only difference presents as a WHOLE-FILE change. During the doc
+#     consolidation, rest_api.md showed a 139-line diff between two copies that
+#     were byte-identical once line endings were stripped. That noise makes
+#     "is this version newer?" much harder to answer.
+#   - core.autocrlf is a MACHINE setting, not a committed one. The machine that
+#     builds the TV side may have it set differently, so the same file can
+#     round-trip differently on the two machines.
+#
+# ⭐ A committed .gitattributes travels with the clone and removes both.
+# ⓘ aurora-tv and ds5-webos-bridge already have one; ctm-bridge-webos is next.
+
+* text=auto eol=lf
+
+*.c    text eol=lf
+*.h    text eol=lf
+*.inl  text eol=lf
+*.cpp  text eol=lf
+*.cs   text eol=lf
+*.md   text eol=lf
+*.txt  text eol=lf
+*.map     text eol=lf
+*.profile text eol=lf
+
+# Windows tooling expects CRLF here.
+# ⓘ .ps1 is deliberately CRLF: PowerShell tolerates LF, but a BOM-less LF
+# here-string can behave differently, and every .ps1 in the working tree is
+# already CRLF.
+*.bat     text eol=crlf
+*.ps1     text eol=crlf
+*.sln     text eol=crlf
+*.vcxproj text eol=crlf
+*.filters text eol=crlf
+*.xaml    text eol=crlf
+*.rc      text eol=crlf
+
+# Never touch these.
+*.png binary
+*.ico binary
+*.dll binary
+*.lib binary
+*.exe binary
+*.wav binary
