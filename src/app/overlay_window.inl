@@ -353,12 +353,17 @@ inline const Key kRow4[] = {
 //
 // ⓘ For typing a name or a search term, where , . / [ ] \ ; ' are dead weight
 // and every column of them is a column of travel.
+// ⛔ THE SHIFTED SYMBOLS WERE MISSING HERE (rhoquinn8217, 2026-09-04). Every
+// digit had `nullptr` where FULL and COMPACT carry L"!" and the rest -- that
+// second field IS the shifted label, so shift had nothing to show or type and
+// the row simply did not respond. ⓘ Sub-compact has no punctuation row, which
+// makes these the only way to reach these symbols on that face.
 inline const Key kSub0[] = {
-    { L"1", nullptr, 0x1e, 0, KK_FN, 1.0f }, { L"2", nullptr, 0x1f, 0, KK_FN, 1.0f },
-    { L"3", nullptr, 0x20, 0, KK_FN, 1.0f }, { L"4", nullptr, 0x21, 0, KK_FN, 1.0f },
-    { L"5", nullptr, 0x22, 0, KK_FN, 1.0f }, { L"6", nullptr, 0x23, 0, KK_FN, 1.0f },
-    { L"7", nullptr, 0x24, 0, KK_FN, 1.0f }, { L"8", nullptr, 0x25, 0, KK_FN, 1.0f },
-    { L"9", nullptr, 0x26, 0, KK_FN, 1.0f }, { L"0", nullptr, 0x27, 0, KK_FN, 1.0f },
+    { L"1", L"!", 0x1e, 0, KK_FN, 1.0f }, { L"2", L"@", 0x1f, 0, KK_FN, 1.0f },
+    { L"3", L"#", 0x20, 0, KK_FN, 1.0f }, { L"4", L"$", 0x21, 0, KK_FN, 1.0f },
+    { L"5", L"%", 0x22, 0, KK_FN, 1.0f }, { L"6", L"^", 0x23, 0, KK_FN, 1.0f },
+    { L"7", L"&", 0x24, 0, KK_FN, 1.0f }, { L"8", L"*", 0x25, 0, KK_FN, 1.0f },
+    { L"9", L"(", 0x26, 0, KK_FN, 1.0f }, { L"0", L")", 0x27, 0, KK_FN, 1.0f },
     { L"\u232b", nullptr, 0x2a, 0, KK_NORMAL, 1.0f },
 };
 inline const Key kSub1[] = {
@@ -366,8 +371,8 @@ inline const Key kSub1[] = {
     { L"q", nullptr, 0x14, 0, KK_NORMAL, 1.0f }, { L"w", nullptr, 0x1a, 0, KK_NORMAL, 1.0f },
     { L"e", nullptr, 0x08, 0, KK_NORMAL, 1.0f }, { L"r", nullptr, 0x15, 0, KK_NORMAL, 1.0f },
     { L"t", nullptr, 0x17, 0, KK_NORMAL, 1.0f }, { L"y", nullptr, 0x1c, 0, KK_NORMAL, 1.0f },
-    { L"u", nullptr, 0x18, 0, KK_NORMAL, 1.0f }, { L"i", nullptr, 0x0c, 0, KK_NORMAL, 1.0f },
-    { L"o", nullptr, 0x12, 0, KK_NORMAL, 1.0f }, { L"p", nullptr, 0x13, 0, KK_NORMAL, 1.0f },
+    { L"u", nullptr, 0x18, 0, KK_NORMAL, 1.0f }, { L"i", nullptr, 0x0c, 0, KK_FN, 1.0f },
+    { L"o", nullptr, 0x12, 0, KK_FN, 1.0f }, { L"p", nullptr, 0x13, 0, KK_NORMAL, 1.0f },
 };
 inline const Key kSub2[] = {
     { L"ctrl", nullptr, 0, KBD_CTRL, KK_MOD, 1.0f },
@@ -596,13 +601,24 @@ inline uint8_t active_mods()
 // digits began at column 1. Adding esc pushed them right by one, so 1 became F2
 // and F1 disappeared entirely (rhoquinn8217, 2026-09-02). Counting cannot go
 // wrong when the layout moves.
+// ⭐ COUNTED ACROSS THE WHOLE FACE, not per row (2026-09-04).
+//
+// ⛔ Per row, an fn key on the SECOND row restarted at F1. Sub-compact has only
+// ten digits, so it stopped at F10 -- and F11/F12 are volume and mute on most
+// keyboards, which rhoquinn8217 rightly calls regularly used.
+//
+// ⓘ MEASURED before changing it: every face keeps all its fn keys in row 0 and
+// none anywhere else, so this is identical for FULL and COMPACT and only
+// extends sub-compact, whose `i` and `o` continue the run as F11 and F12.
 inline int fn_index(int row, int col)
 {
     int n = 0;
-    for (int c = 0; c < rows_now()[row].count; ++c) {
-        if (rows_now()[row].keys[c].kind != KK_FN) continue;
-        if (c == col) return n;
-        ++n;
+    for (int r = 0; r <= row; ++r) {
+        for (int c = 0; c < rows_now()[r].count; ++c) {
+            if (rows_now()[r].keys[c].kind != KK_FN) continue;
+            if (r == row && c == col) return n;
+            ++n;
+        }
     }
     return -1;
 }
@@ -1037,9 +1053,13 @@ inline void paint(HWND hwnd)
         // ⓘ One label decided in one place: F-keys win over shifted, which wins
         // over the plain one.
         const wchar_t *label = k.label;
-        if (k.usage == 0x29 && fnNow) {
-            label = L"`";                 // esc becomes the console key
-        } else if (k.kind == KK_FN && fnNow) {
+        // ⛔ THE DRAWING'S COPY OF THE ESC SUBSTITUTION IS GONE TOO
+        // (2026-09-04). Removing it from the TYPING path left this one, so esc
+        // still LOOKED shifted under fn while typing an escape -- worse than
+        // either behaviour alone.
+        // ⚠️ Second copy of one rule, which this file's own notes record as
+        // having cost four build cycles already.
+        if (k.kind == KK_FN && fnNow) {
             const int idx = fn_index(p.row, p.col);
             if (idx >= 0 && idx < 12) label = kFnLabels[idx];
         } else if (shiftNow && k.shifted != nullptr) {
