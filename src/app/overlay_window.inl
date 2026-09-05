@@ -1152,9 +1152,19 @@ inline void paint(HWND hwnd)
         // "settings".
         // ⭐ And BACKSPACE is spelled out rather than ⌫ -- there is room, and a
         // word carries no font risk and nothing to decode at TV distance.
+        // ⭐ ORDERED BY FREQUENCY (rhoquinn8217): select is constant, close is
+        // once. ⓘ No standard exists to follow -- Steam's keyboard shows no
+        // legend and Windows 11 puts hints on the keys themselves -- so
+        // frequency is as good a rule as there is. ⚠️ Close stays at an END
+        // rather than buried mid-line: it is the one someone hunts for.
+        //
+        // ⭐ AND EACH SYMBOL IS WHAT THE BUTTON LOOKS LIKE, not what it does
+        // (rhoquinn8217). \|/ is the Create button's three lines going up and
+        // outward; ☰ is the Options hamburger. ⛔ A cog or an arrow would be
+        // describing the action, which is what the words are for.
         const wchar_t *legend =
-            L"\u25cb close   \u25a1 backspace   \u25b3 space   "
-            L"\u2715 select   \u2630 move";
+            L"\u2715 select   \u25a1 backspace   \u25b3 space   "
+            L"\u2630 move   \\|/ layout   R3 size   \u25cb close";
         SIZE ts = {0, 0}, ls = {0, 0};
         GetTextExtentPoint32W(dc, title, lstrlenW(title), &ts);
         GetTextExtentPoint32W(dc, legend, lstrlenW(legend), &ls);
@@ -1682,7 +1692,22 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
 
     // ⭐ CREATE CYCLES THE THREE SIZES. It is free, out of the way of typing,
     // and its own thing rather than a mode.
+    // ⭐⭐ CREATE CYCLES THE LAYOUT, R3 CYCLES THE SIZE (rhoquinn8217,
+    // 2026-09-04) -- and that is the way round it should have been.
+    //
+    // ⭐ The LAYOUT changes what keys exist: punctuation, the F row, the shift
+    // row. That is a real decision someone revisits. The SIZE is set once for
+    // your television and never touched again.
+    // ➡️ So the easy button takes the thing you use, and the awkward one takes
+    // the thing you do not. Create had size only because it was there first.
+    //
+    // ⓘ R3 is genuinely free -- the keyboard does not use the right stick --
+    // and the gyro layouts already put secondary toggles on it. The right thumb
+    // is idle while typing; the left is on the d-pad.
     if (edge(deviceKey, 7, button_down(data, len, 8))) {
+        switch_face();               // the same thing the tab's \|/ key does
+    }
+    if (edge(deviceKey, 11, button_down(data, len, 11))) {
         g_size.store((g_size.load() + 1) % 3);
         if (g_hwnd != nullptr) PostMessageW(g_hwnd, WM_CTM_RESIZE, 0, 0);
     }
