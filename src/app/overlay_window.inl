@@ -1162,13 +1162,18 @@ inline void paint(HWND hwnd)
         // (rhoquinn8217). \|/ is the Create button's three lines going up and
         // outward; ☰ is the Options hamburger. ⛔ A cog or an arrow would be
         // describing the action, which is what the words are for.
+        // ⓘ SEPARATED BY PIPES. Without them the eye groups a word with the
+        // NEXT symbol rather than the one before it, so nothing reads as a
+        // pair (rhoquinn8217, from a screenshot -- "it looks like it's hard to
+        // associate the symbol with the description").
         const wchar_t *legend =
-            L"\u2715 select   \u25a1 backspace   \u25b3 space   "
-            L"\u2630 move   \\|/ layout   R3 size   \u25cb close";
+            L"\u2715 select | \u25a1 backspace | \u25b3 space | "
+            L"\u2630 move | \\|/ layout | R3 size | \u25cb close";
+        // ⓘ Both widths are measured: the title's positions the legend, the
+        // legend's decides whether it fits at all.
         SIZE ts = {0, 0}, ls = {0, 0};
         GetTextExtentPoint32W(dc, title, lstrlenW(title), &ts);
         GetTextExtentPoint32W(dc, legend, lstrlenW(legend), &ls);
-        const LONG room = (pl.r.right - 8) - (pl.r.left + 8);
         // ⓘ CENTRED in the spacer, not right-aligned: the right edge butts up
         // against the tab's own four buttons, and the legend reads as part of
         // them there. ⭐ Centred it belongs to the window instead.
@@ -1180,19 +1185,18 @@ inline void paint(HWND hwnd)
         // the legend's left edge sits at (room - legend) / 2 -- so it can run
         // into a long title even when the two widths SUM to less than the room.
         // ➡️ The title must end before that point: room >= 2*title + legend.
-        // ⭐ AND IT NEVER JUST DISAPPEARS. If a centred legend would run into
-        // the title, it centres in what is LEFT of the row instead -- slightly
-        // off-centre on the narrowest face, which is far better than absent on
-        // the face whose layout is least familiar.
-        // ⛔ Only hidden if even that has no room, which would mean the title
+        // ⭐ CENTRED IN WHAT IS LEFT AFTER THE TITLE, not in the whole tab.
+        //
+        // ⚠️ Centring across the whole row counts the title's own space, so the
+        // legend sits close to the title with a wide gap before the tab's
+        // buttons -- lopsided (rhoquinn8217, from a screenshot). Centring in
+        // the REMAINDER gives equal air on both sides.
+        //
+        // ⛔ Hidden only if even that has no room, which would mean the title
         // alone fills the tab.
         RECT lr = pl.r;
         lr.right -= 8;
-        if (room >= 2 * ts.cx + ls.cx + 24) {
-            lr.left += 8;                       // truly centred in the tab
-        } else {
-            lr.left = pl.r.left + 8 + ts.cx + 24;   // centred after the title
-        }
+        lr.left = pl.r.left + 8 + ts.cx + 24;
         if (lr.right - lr.left >= ls.cx) {
             DrawTextW(dc, legend, -1, &lr,
                       DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
