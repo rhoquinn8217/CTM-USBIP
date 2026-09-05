@@ -131,7 +131,10 @@ inline float face_cols()
 {
     switch (g_face.load()) {
     case FACE_SUB:  return 11.0f;
-    case FACE_FULL: return 15.5f;
+    // ⓘ 16.5 since the navigation column was added (2026-09-04): home, end,
+    // page up, page down and close down the right-hand side, which is what
+    // makes FULL a different keyboard rather than COMPACT plus three keys.
+    case FACE_FULL: return 16.5f;
     default:        return 14.0f;
     }
 }
@@ -279,6 +282,7 @@ inline const Key kRow0[] = {
     { L"9", L"(", 0x26, 0, KK_FN, 1.0f }, { L"0", L")", 0x27, 0, KK_FN, 1.0f },
     { L"-", L"_", 0x2d, 0, KK_FN, 1.0f }, { L"=", L"+", 0x2e, 0, KK_FN, 1.0f },
     { L"\u232b", nullptr, 0x2a, 0, KK_NORMAL, 1.5f },
+    { L"home", nullptr, 0x4a, 0, KK_NORMAL, 1.0f },
 };
 inline const Key kRow1[] = {
     { L"tab", nullptr, 0x2b, 0, KK_NORMAL, 1.5f },
@@ -290,6 +294,7 @@ inline const Key kRow1[] = {
     { L"[", L"{", 0x2f, 0, KK_NORMAL, 1.0f }, { L"]", L"}", 0x30, 0, KK_NORMAL, 1.0f },
     { L"\\", L"|", 0x31, 0, KK_NORMAL, 1.0f },
     { L"del", nullptr, 0x4c, 0, KK_NORMAL, 1.0f },
+    { L"end", nullptr, 0x4d, 0, KK_NORMAL, 1.0f },
 };
 inline const Key kRow2[] = {
     { L"caps", nullptr, 0x39, 0, KK_NORMAL, 1.8f },
@@ -300,6 +305,7 @@ inline const Key kRow2[] = {
     { L"l", nullptr, 0x0f, 0, KK_NORMAL, 1.0f },
     { L";", L":", 0x33, 0, KK_NORMAL, 1.0f }, { L"'", L"\"", 0x34, 0, KK_NORMAL, 1.0f },
     { L"enter", nullptr, 0x28, 0, KK_NORMAL, 2.7f },
+    { L"pg up", nullptr, 0x4b, 0, KK_NORMAL, 1.0f },
 };
 inline const Key kRow3[] = {
     { L"shift", nullptr, 0, KBD_SHIFT, KK_MOD, 2.2f },
@@ -315,6 +321,7 @@ inline const Key kRow3[] = {
     // to the tab, where it belongs with the other two that act on the window.
     { L"shift", nullptr, 0, KBD_SHIFT, KK_MOD, 1.0f },
     { L"fn", nullptr, 0, KBD_FN, KK_MOD, 1.3f },
+    { L"pg dn", nullptr, 0x4e, 0, KK_NORMAL, 1.0f },
 };
 inline const Key kRow4[] = {
     { L"ctrl", nullptr, 0, KBD_CTRL, KK_MOD, 1.3f },
@@ -327,7 +334,8 @@ inline const Key kRow4[] = {
     { L"\u2190", nullptr, 0x50, 0, KK_NORMAL, 1.0f },
     { L"\u2193", nullptr, 0x51, 0, KK_NORMAL, 1.0f },
     { L"\u2192", nullptr, 0x4f, 0, KK_NORMAL, 1.0f },
-    { L"\u2328\u2938", nullptr, ACT_CLOSE, 0, KK_ACTION, 1.3f },
+    { L"menu", nullptr, 0x65, 0, KK_NORMAL, 1.3f },
+    { L"\u2328\u2938", nullptr, ACT_CLOSE, 0, KK_ACTION, 1.0f },
 };
 
 // ⭐⭐ THE TAB (rhoquinn8217, 2026-09-02). The window's frame is four pixels
@@ -413,7 +421,10 @@ inline const Key kTabCompact[] = {
 // ⓘ One per face, because the grab area has to fill whatever width that face
 // is -- 14 units for Compact, 15.5 for Full. Only the spacer differs.
 inline const Key kTabFull[] = {
-    { L"", nullptr, 0, 0, KK_SPACER, 12.84f },
+    // ⓘ 13.84 since the navigation column widened this face to 16.5 -- the tab
+    // must span the same width as the keys or the row ends ragged. ⭐ The
+    // extra column lands in the spacer, so the legend gains room too.
+    { L"", nullptr, 0, 0, KK_SPACER, 13.84f },
     { L"\u2328", nullptr, ACT_LAYOUT, 0, KK_ACTION, 0.67f },
     { L"\u21f3", nullptr, ACT_MOVE,   0, KK_ACTION, 0.67f },
     { L"\u2197", nullptr, ACT_SIZE,   0, KK_ACTION, 0.66f },
