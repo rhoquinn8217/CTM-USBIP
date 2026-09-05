@@ -131,7 +131,10 @@ inline float face_cols()
 {
     switch (g_face.load()) {
     case FACE_SUB:  return 11.0f;
-    case FACE_FULL: return 15.5f;
+    // ⓘ 16.5 since the navigation column was added (2026-09-04): home, end,
+    // page up, page down and close down the right-hand side, which is what
+    // makes FULL a different keyboard rather than COMPACT plus three keys.
+    case FACE_FULL: return 16.5f;
     default:        return 14.0f;
     }
 }
@@ -279,6 +282,7 @@ inline const Key kRow0[] = {
     { L"9", L"(", 0x26, 0, KK_FN, 1.0f }, { L"0", L")", 0x27, 0, KK_FN, 1.0f },
     { L"-", L"_", 0x2d, 0, KK_FN, 1.0f }, { L"=", L"+", 0x2e, 0, KK_FN, 1.0f },
     { L"\u232b", nullptr, 0x2a, 0, KK_NORMAL, 1.5f },
+    { L"home", nullptr, 0x4a, 0, KK_NORMAL, 1.0f },
 };
 inline const Key kRow1[] = {
     { L"tab", nullptr, 0x2b, 0, KK_NORMAL, 1.5f },
@@ -290,6 +294,7 @@ inline const Key kRow1[] = {
     { L"[", L"{", 0x2f, 0, KK_NORMAL, 1.0f }, { L"]", L"}", 0x30, 0, KK_NORMAL, 1.0f },
     { L"\\", L"|", 0x31, 0, KK_NORMAL, 1.0f },
     { L"del", nullptr, 0x4c, 0, KK_NORMAL, 1.0f },
+    { L"end", nullptr, 0x4d, 0, KK_NORMAL, 1.0f },
 };
 inline const Key kRow2[] = {
     { L"caps", nullptr, 0x39, 0, KK_NORMAL, 1.8f },
@@ -300,6 +305,7 @@ inline const Key kRow2[] = {
     { L"l", nullptr, 0x0f, 0, KK_NORMAL, 1.0f },
     { L";", L":", 0x33, 0, KK_NORMAL, 1.0f }, { L"'", L"\"", 0x34, 0, KK_NORMAL, 1.0f },
     { L"enter", nullptr, 0x28, 0, KK_NORMAL, 2.7f },
+    { L"PgUp", nullptr, 0x4b, 0, KK_NORMAL, 1.0f },
 };
 inline const Key kRow3[] = {
     { L"shift", nullptr, 0, KBD_SHIFT, KK_MOD, 2.2f },
@@ -315,6 +321,7 @@ inline const Key kRow3[] = {
     // to the tab, where it belongs with the other two that act on the window.
     { L"shift", nullptr, 0, KBD_SHIFT, KK_MOD, 1.0f },
     { L"fn", nullptr, 0, KBD_FN, KK_MOD, 1.3f },
+    { L"PgDn", nullptr, 0x4e, 0, KK_NORMAL, 1.0f },
 };
 inline const Key kRow4[] = {
     { L"ctrl", nullptr, 0, KBD_CTRL, KK_MOD, 1.3f },
@@ -327,7 +334,8 @@ inline const Key kRow4[] = {
     { L"\u2190", nullptr, 0x50, 0, KK_NORMAL, 1.0f },
     { L"\u2193", nullptr, 0x51, 0, KK_NORMAL, 1.0f },
     { L"\u2192", nullptr, 0x4f, 0, KK_NORMAL, 1.0f },
-    { L"\u2328\u2938", nullptr, ACT_CLOSE, 0, KK_ACTION, 1.3f },
+    { L"menu", nullptr, 0x65, 0, KK_NORMAL, 1.3f },
+    { L"\u2328\u2938", nullptr, ACT_CLOSE, 0, KK_ACTION, 1.0f },
 };
 
 // ⭐⭐ THE TAB (rhoquinn8217, 2026-09-02). The window's frame is four pixels
@@ -345,12 +353,17 @@ inline const Key kRow4[] = {
 //
 // ⓘ For typing a name or a search term, where , . / [ ] \ ; ' are dead weight
 // and every column of them is a column of travel.
+// ⛔ THE SHIFTED SYMBOLS WERE MISSING HERE (rhoquinn8217, 2026-09-04). Every
+// digit had `nullptr` where FULL and COMPACT carry L"!" and the rest -- that
+// second field IS the shifted label, so shift had nothing to show or type and
+// the row simply did not respond. ⓘ Sub-compact has no punctuation row, which
+// makes these the only way to reach these symbols on that face.
 inline const Key kSub0[] = {
-    { L"1", nullptr, 0x1e, 0, KK_FN, 1.0f }, { L"2", nullptr, 0x1f, 0, KK_FN, 1.0f },
-    { L"3", nullptr, 0x20, 0, KK_FN, 1.0f }, { L"4", nullptr, 0x21, 0, KK_FN, 1.0f },
-    { L"5", nullptr, 0x22, 0, KK_FN, 1.0f }, { L"6", nullptr, 0x23, 0, KK_FN, 1.0f },
-    { L"7", nullptr, 0x24, 0, KK_FN, 1.0f }, { L"8", nullptr, 0x25, 0, KK_FN, 1.0f },
-    { L"9", nullptr, 0x26, 0, KK_FN, 1.0f }, { L"0", nullptr, 0x27, 0, KK_FN, 1.0f },
+    { L"1", L"!", 0x1e, 0, KK_FN, 1.0f }, { L"2", L"@", 0x1f, 0, KK_FN, 1.0f },
+    { L"3", L"#", 0x20, 0, KK_FN, 1.0f }, { L"4", L"$", 0x21, 0, KK_FN, 1.0f },
+    { L"5", L"%", 0x22, 0, KK_FN, 1.0f }, { L"6", L"^", 0x23, 0, KK_FN, 1.0f },
+    { L"7", L"&", 0x24, 0, KK_FN, 1.0f }, { L"8", L"*", 0x25, 0, KK_FN, 1.0f },
+    { L"9", L"(", 0x26, 0, KK_FN, 1.0f }, { L"0", L")", 0x27, 0, KK_FN, 1.0f },
     { L"\u232b", nullptr, 0x2a, 0, KK_NORMAL, 1.0f },
 };
 inline const Key kSub1[] = {
@@ -358,8 +371,8 @@ inline const Key kSub1[] = {
     { L"q", nullptr, 0x14, 0, KK_NORMAL, 1.0f }, { L"w", nullptr, 0x1a, 0, KK_NORMAL, 1.0f },
     { L"e", nullptr, 0x08, 0, KK_NORMAL, 1.0f }, { L"r", nullptr, 0x15, 0, KK_NORMAL, 1.0f },
     { L"t", nullptr, 0x17, 0, KK_NORMAL, 1.0f }, { L"y", nullptr, 0x1c, 0, KK_NORMAL, 1.0f },
-    { L"u", nullptr, 0x18, 0, KK_NORMAL, 1.0f }, { L"i", nullptr, 0x0c, 0, KK_NORMAL, 1.0f },
-    { L"o", nullptr, 0x12, 0, KK_NORMAL, 1.0f }, { L"p", nullptr, 0x13, 0, KK_NORMAL, 1.0f },
+    { L"u", nullptr, 0x18, 0, KK_NORMAL, 1.0f }, { L"i", nullptr, 0x0c, 0, KK_FN, 1.0f },
+    { L"o", nullptr, 0x12, 0, KK_FN, 1.0f }, { L"p", nullptr, 0x13, 0, KK_NORMAL, 1.0f },
 };
 inline const Key kSub2[] = {
     { L"ctrl", nullptr, 0, KBD_CTRL, KK_MOD, 1.0f },
@@ -413,7 +426,10 @@ inline const Key kTabCompact[] = {
 // ⓘ One per face, because the grab area has to fill whatever width that face
 // is -- 14 units for Compact, 15.5 for Full. Only the spacer differs.
 inline const Key kTabFull[] = {
-    { L"", nullptr, 0, 0, KK_SPACER, 12.84f },
+    // ⓘ 13.84 since the navigation column widened this face to 16.5 -- the tab
+    // must span the same width as the keys or the row ends ragged. ⭐ The
+    // extra column lands in the spacer, so the legend gains room too.
+    { L"", nullptr, 0, 0, KK_SPACER, 13.84f },
     { L"\u2328", nullptr, ACT_LAYOUT, 0, KK_ACTION, 0.67f },
     { L"\u21f3", nullptr, ACT_MOVE,   0, KK_ACTION, 0.67f },
     { L"\u2197", nullptr, ACT_SIZE,   0, KK_ACTION, 0.66f },
@@ -538,7 +554,10 @@ inline std::map<uint8_t, int> g_mods;
 inline bool g_latchUsed = false;
 inline uint8_t g_tapMod = 0;
 inline int g_tapFrames = 0;
-inline int g_escFrames = 0;
+// ⛔ g_escFrames is GONE (2026-09-04). It held Escape down for three frames
+// after Circle sent it; Circle closes the keyboard now, so nothing sets it.
+// ⓘ Removed rather than left -- unused state is what someone later wires back
+// up, and T-079 keeps collecting exactly this.
 // ⓘ How long a direction has been held, in reports. ⛔ Not per device: it is
 // one highlight, and two pads holding opposite directions should fight over it
 // exactly as two hands on one keyboard would.
@@ -582,13 +601,24 @@ inline uint8_t active_mods()
 // digits began at column 1. Adding esc pushed them right by one, so 1 became F2
 // and F1 disappeared entirely (rhoquinn8217, 2026-09-02). Counting cannot go
 // wrong when the layout moves.
+// ⭐ COUNTED ACROSS THE WHOLE FACE, not per row (2026-09-04).
+//
+// ⛔ Per row, an fn key on the SECOND row restarted at F1. Sub-compact has only
+// ten digits, so it stopped at F10 -- and F11/F12 are volume and mute on most
+// keyboards, which rhoquinn8217 rightly calls regularly used.
+//
+// ⓘ MEASURED before changing it: every face keeps all its fn keys in row 0 and
+// none anywhere else, so this is identical for FULL and COMPACT and only
+// extends sub-compact, whose `i` and `o` continue the run as F11 and F12.
 inline int fn_index(int row, int col)
 {
     int n = 0;
-    for (int c = 0; c < rows_now()[row].count; ++c) {
-        if (rows_now()[row].keys[c].kind != KK_FN) continue;
-        if (c == col) return n;
-        ++n;
+    for (int r = 0; r <= row; ++r) {
+        for (int c = 0; c < rows_now()[r].count; ++c) {
+            if (rows_now()[r].keys[c].kind != KK_FN) continue;
+            if (r == row && c == col) return n;
+            ++n;
+        }
     }
     return -1;
 }
@@ -1023,9 +1053,13 @@ inline void paint(HWND hwnd)
         // ⓘ One label decided in one place: F-keys win over shifted, which wins
         // over the plain one.
         const wchar_t *label = k.label;
-        if (k.usage == 0x29 && fnNow) {
-            label = L"`";                 // esc becomes the console key
-        } else if (k.kind == KK_FN && fnNow) {
+        // ⛔ THE DRAWING'S COPY OF THE ESC SUBSTITUTION IS GONE TOO
+        // (2026-09-04). Removing it from the TYPING path left this one, so esc
+        // still LOOKED shifted under fn while typing an escape -- worse than
+        // either behaviour alone.
+        // ⚠️ Second copy of one rule, which this file's own notes record as
+        // having cost four build cycles already.
+        if (k.kind == KK_FN && fnNow) {
             const int idx = fn_index(p.row, p.col);
             if (idx >= 0 && idx < 12) label = kFnLabels[idx];
         } else if (shiftNow && k.shifted != nullptr) {
@@ -1115,12 +1149,89 @@ inline void paint(HWND hwnd)
         tr.left += 8;
         SelectObject(dc, tabFont);
         SetTextColor(dc, RGB(0x8b, 0x8d, 0x96));
+        // ⓘ The full title stays: MEASURED on hardware 2026-09-04, there is room
+        // for it and the legend even on the narrowest face. ⚠️ It had been
+        // shortened on an ESTIMATE of characters-per-column that was twice too
+        // pessimistic -- the second time that guess was wrong in the same
+        // direction.
         const wchar_t *title =
             g_face.load() == FACE_FULL ? L"DS5-USBIP Virtual Keyboard - FULL" :
             g_face.load() == FACE_SUB  ? L"DS5-USBIP Virtual Keyboard - SUB-COMPACT"
                                        : L"DS5-USBIP Virtual Keyboard - COMPACT";
         DrawTextW(dc, title, -1, &tr,
                   DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+
+        // ⭐⭐ A LEGEND, because the buttons are not guessable (rhoquinn8217,
+        // 2026-09-04 -- he asked what Circle did, having built it).
+        //
+        // ⭐ PlayStation glyphs ONLY. Combining them with Xbox letters --
+        // "✕/A select" -- reads as a fraction rather than a button and is
+        // unreadable at a distance.
+        //
+        // ⓘ Right-aligned in the SAME rectangle as the title, so it costs no
+        // layout: the tab's spacer is 8.34 columns even on the narrowest face,
+        // and the tab font fits roughly eleven characters per column.
+        //
+        // ⛔ The order is by how surprising each one is, not by button position:
+        // Circle CLOSES here where it is Escape everywhere else, and Square is
+        // backspace where it opened the keyboard. Those two are why this exists.
+        // ⛔ ONLY IF IT FITS. The title is LONGEST on the sub-compact face and
+        // the spacer is NARROWEST there, so a left-aligned title and a
+        // right-aligned legend can collide in the middle. Measured rather than
+        // assumed -- the estimate that said it would fit was wrong by 4x once.
+        // ⓘ ☰ for move: the button's own symbol on the pad. A cog would say
+        // "settings".
+        // ⭐ And BACKSPACE is spelled out rather than ⌫ -- there is room, and a
+        // word carries no font risk and nothing to decode at TV distance.
+        // ⭐ ORDERED BY FREQUENCY (rhoquinn8217): select is constant, close is
+        // once. ⓘ No standard exists to follow -- Steam's keyboard shows no
+        // legend and Windows 11 puts hints on the keys themselves -- so
+        // frequency is as good a rule as there is. ⚠️ Close stays at an END
+        // rather than buried mid-line: it is the one someone hunts for.
+        //
+        // ⭐ AND EACH SYMBOL IS WHAT THE BUTTON LOOKS LIKE, not what it does
+        // (rhoquinn8217). \|/ is the Create button's three lines going up and
+        // outward; ☰ is the Options hamburger. ⛔ A cog or an arrow would be
+        // describing the action, which is what the words are for.
+        // ⓘ SEPARATED BY PIPES. Without them the eye groups a word with the
+        // NEXT symbol rather than the one before it, so nothing reads as a
+        // pair (rhoquinn8217, from a screenshot -- "it looks like it's hard to
+        // associate the symbol with the description").
+        const wchar_t *legend =
+            L"\u2715 select | \u25a1 backspace | \u25b3 space | "
+            L"\u2630 move | \\|/ layout | R3 size | \u25cb close";
+        // ⓘ Both widths are measured: the title's positions the legend, the
+        // legend's decides whether it fits at all.
+        SIZE ts = {0, 0}, ls = {0, 0};
+        GetTextExtentPoint32W(dc, title, lstrlenW(title), &ts);
+        GetTextExtentPoint32W(dc, legend, lstrlenW(legend), &ls);
+        // ⓘ CENTRED in the spacer, not right-aligned: the right edge butts up
+        // against the tab's own four buttons, and the legend reads as part of
+        // them there. ⭐ Centred it belongs to the window instead.
+        //
+        // ⛔ Still only when it fits BESIDE the title -- centring does not make
+        // the collision go away, it just moves where they would meet.
+        //
+        // ⚠️ AND THE ARITHMETIC IS NOT THE SAME AS FOR RIGHT-ALIGNED. Centred,
+        // the legend's left edge sits at (room - legend) / 2 -- so it can run
+        // into a long title even when the two widths SUM to less than the room.
+        // ➡️ The title must end before that point: room >= 2*title + legend.
+        // ⭐ CENTRED IN WHAT IS LEFT AFTER THE TITLE, not in the whole tab.
+        //
+        // ⚠️ Centring across the whole row counts the title's own space, so the
+        // legend sits close to the title with a wide gap before the tab's
+        // buttons -- lopsided (rhoquinn8217, from a screenshot). Centring in
+        // the REMAINDER gives equal air on both sides.
+        //
+        // ⛔ Hidden only if even that has no room, which would mean the title
+        // alone fills the tab.
+        RECT lr = pl.r;
+        lr.right -= 8;
+        lr.left = pl.r.left + 8 + ts.cx + 24;
+        if (lr.right - lr.left >= ls.cx) {
+            DrawTextW(dc, legend, -1, &lr,
+                      DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        }
         break;
     }
 
@@ -1508,38 +1619,48 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
     // ⓘ The close is not armed until the opening button has been released --
     // it is still held when the window appears, and acting on that press would
     // close what it just opened.
+    // ⛔⛔ THE OPENING PRESS MUST NOT TYPE (2026-09-04).
+    //
+    // ⚠️ This guard used to stop the opening button CLOSING the keyboard it had
+    // just opened. Circle closes now -- but the same trap moved rather than
+    // went away: **Square opens the keyboard and is BACKSPACE once it is up**,
+    // so the press that opened it would delete a character on arrival.
+    //
+    // ⓘ Armed only once that button has been seen released.
     const int openedBy = g_openedBy.load();
-    const bool closeBtn = (openedBy >= 0 && button_down(data, len, openedBy));
-    if (!g_closeArmed.load()) {
-        if (!closeBtn) g_closeArmed.store(true);
-        edge(deviceKey, 4, closeBtn);
-    } else if (edge(deviceKey, 4, closeBtn)) {
-        hide();
-        return true;
-    }
+    const bool openBtnStillDown =
+        (openedBy >= 0 && button_down(data, len, openedBy));
+    if (!g_closeArmed.load() && !openBtnStillDown) g_closeArmed.store(true);
+    const bool faceArmed = g_closeArmed.load();
 
     // ⭐ CIRCLE IS ESC. Sent straight through rather than moving the highlight,
     // so backing out of a dialog costs one press from wherever you are.
+    // ⭐⭐ CIRCLE CLOSES THE KEYBOARD (2026-09-04). It used to type Escape.
+    //
+    // ⓘ Both Valve and Microsoft put close/cancel on this button: the Steam
+    // Deck's keyboard closes with B, and B is Escape everywhere else in its
+    // desktop layout. ⭐ And Escape is not lost -- there is an `esc` key on the
+    // keyboard itself, which is the honest place for it: a keystroke that fires
+    // into whatever is BEHIND the keyboard was a surprise, not a feature.
     if (edge(deviceKey, 5, button_down(data, len, 1))) {
-        uint8_t escKeys[6] = { 0x29, 0, 0, 0, 0, 0 };
-        ctm_keyboard_device::set_state_for(deviceKey, 0, escKeys, 1);
-        g_escFrames = 3;
-    }
-    if (g_escFrames > 0) {
-        --g_escFrames;
-        if (g_escFrames == 0) {
-            uint8_t none[6] = { 0, 0, 0, 0, 0, 0 };
-            ctm_keyboard_device::set_state_for(deviceKey, 0, none, 0);
-        }
+        hide();
         return true;
     }
-
     // ⭐⭐ TRIANGLE: TAP TO SNAP, HOLD TO STEER.
     //
     // ⓘ The tap fires on RELEASE, not on press, and only when the stick was
     // never used -- otherwise every drag would end by also snapping the window
     // to the top or bottom, undoing the placing you just did.
-    const bool tri = button_down(data, len, 3);
+    // ⭐⭐ OPTIONS MOVES THE WINDOW, NOT TRIANGLE (2026-09-04).
+    //
+    // ⭐ Triangle is SPACE on both the Steam Deck and Windows 11's gamepad
+    // keyboard -- Y in their notation -- and space is around a fifth of
+    // everything anyone types, so it earns a face button.
+    // ⓘ Moving goes to Options, which is where the Deck community reports the
+    // hamburger/menu button already repositions its keyboard.
+    // ⚠️ Options previously cycled the FACE. That is not lost -- the tab's own
+    // ⌨ key still does it -- but it no longer has a button.
+    const bool tri = button_down(data, len, 9);
     if (tri && !g_triHeld.load()) {
         g_triHeld.store(true);
         g_triMoved.store(false);
@@ -1599,13 +1720,29 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
     // ⭐⭐ OPTIONS SWITCHES THE FACE. Create is how BIG; Options is how MUCH --
     // genuinely different questions, and a big compact keyboard is as
     // reasonable a thing to want as a small full one.
-    if (edge(deviceKey, 10, button_down(data, len, 9))) {
-        switch_face();               // the same thing the tab's button does
-    }
+    // ⛔ Options no longer cycles the face -- it moves the window now. The
+    // tab's ⌨ key still cycles, which is where someone looks for it anyway.
+    //
+    // ⓘ Create still cycles the SIZE, below.
 
     // ⭐ CREATE CYCLES THE THREE SIZES. It is free, out of the way of typing,
     // and its own thing rather than a mode.
+    // ⭐⭐ CREATE CYCLES THE LAYOUT, R3 CYCLES THE SIZE (rhoquinn8217,
+    // 2026-09-04) -- and that is the way round it should have been.
+    //
+    // ⭐ The LAYOUT changes what keys exist: punctuation, the F row, the shift
+    // row. That is a real decision someone revisits. The SIZE is set once for
+    // your television and never touched again.
+    // ➡️ So the easy button takes the thing you use, and the awkward one takes
+    // the thing you do not. Create had size only because it was there first.
+    //
+    // ⓘ R3 is genuinely free -- the keyboard does not use the right stick --
+    // and the gyro layouts already put secondary toggles on it. The right thumb
+    // is idle while typing; the left is on the d-pad.
     if (edge(deviceKey, 7, button_down(data, len, 8))) {
+        switch_face();               // the same thing the tab's \|/ key does
+    }
+    if (edge(deviceKey, 11, button_down(data, len, 11))) {
         g_size.store((g_size.load() + 1) % 3);
         if (g_hwnd != nullptr) PostMessageW(g_hwnd, WM_CTM_RESIZE, 0, 0);
     }
@@ -1654,6 +1791,30 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
     //
     // ⭐ Measured before fixing: the sequence gives "a b (release)" the old way
     // and "a (release)" this way.
+    // ⭐⭐ SQUARE IS BACKSPACE, TRIANGLE IS SPACE (2026-09-04).
+    //
+    // ⭐ Both Valve and Microsoft landed here independently: the Steam Deck uses
+    // X for backspace and Y for space, and Windows 11's gamepad keyboard uses
+    // the same two. Different companies, different operating systems, the same
+    // answer -- which is the strongest evidence a convention exists.
+    // ⓘ In DualSense terms X is Square and Y is Triangle.
+    //
+    // ⛔ These take priority over the key under the halo, because our device
+    // sends ONE key at a time: Cross-and-Square together must not try to send
+    // both. ⓘ They are also repeated by the same repeat timer as everything
+    // else, so holding backspace deletes a run.
+    // ⛔ R2 IS NOT ENTER, AND THAT IS DELIBERATE (2026-09-04). Both the Deck and
+    // Windows put Enter on a trigger or the menu button -- but R2 is MouseLeft
+    // in our presets, and with gyro-to-mouse someone clicks INTO a text field
+    // while this keyboard is up. Taking R2 would remove the click they need.
+    // ➡️ Revisit once T-149 moves clicks onto the touchpad. ⓘ Enter is on the
+    // keyboard as a key meanwhile.
+    uint8_t faceUsage = 0;
+    if (faceArmed) {
+        if (button_down(data, len, 2))      faceUsage = 0x2A;   // square: backspace
+        else if (button_down(data, len, 3)) faceUsage = 0x2C;   // triangle: space
+    }
+
     // ⓘ PER DEVICE, using the file's own edge helper (slot 6 was free) rather
     // than a bare static: two pads share this keyboard by design, and a static
     // would let one pad's press decide the other's key.
@@ -1663,9 +1824,14 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
     if (cross && k.kind != KK_MOD && k.kind != KK_ACTION) {
         if (crossFresh) {
             heldUsage = k.usage;
-            // ⓘ Esc is the backtick while L2 is held -- the developer console in
-            // a great many PC games, and nothing else on the pad produces one.
-            if (g_fnHeld.load() && heldUsage == 0x29) heldUsage = 0x35;
+            // ⛔ ESC NO LONGER BECOMES THE BACKTICK UNDER FN (rhoquinn8217,
+            // 2026-09-04: "it's also shifting esc when it doesn't need to").
+            //
+            // ⓘ It was there so a pad could reach the developer console. But
+            // MEASURED 2026-09-04: `esc` exists ONLY on the FULL face, and FULL
+            // is the one face that already carries its own ` key. So the
+            // substitution could only ever fire where a backtick sat two keys
+            // away -- it changed a key under fn for no gain.
             if (fn_showing() && k.kind == KK_FN) {
                 const int idx = fn_index(g_row, g_col);
                 if (idx >= 0 && idx < 12) heldUsage = kFnUsages[idx];
@@ -1695,6 +1861,9 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
         ctm_keyboard_device::set_state_for(deviceKey, g_tapMod, none, 0);
         return true;
     }
+
+    // ⛔ A face key WINS over the halo key, for the reason above.
+    if (faceUsage != 0) usage = faceUsage;
 
     uint8_t keys[6] = { usage, 0, 0, 0, 0, 0 };
     ctm_keyboard_device::set_state_for(deviceKey, usage != 0 ? mods : 0,
