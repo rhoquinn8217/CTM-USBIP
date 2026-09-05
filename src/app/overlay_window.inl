@@ -305,7 +305,7 @@ inline const Key kRow2[] = {
     { L"l", nullptr, 0x0f, 0, KK_NORMAL, 1.0f },
     { L";", L":", 0x33, 0, KK_NORMAL, 1.0f }, { L"'", L"\"", 0x34, 0, KK_NORMAL, 1.0f },
     { L"enter", nullptr, 0x28, 0, KK_NORMAL, 2.7f },
-    { L"pg up", nullptr, 0x4b, 0, KK_NORMAL, 1.0f },
+    { L"PgUp", nullptr, 0x4b, 0, KK_NORMAL, 1.0f },
 };
 inline const Key kRow3[] = {
     { L"shift", nullptr, 0, KBD_SHIFT, KK_MOD, 2.2f },
@@ -321,7 +321,7 @@ inline const Key kRow3[] = {
     // to the tab, where it belongs with the other two that act on the window.
     { L"shift", nullptr, 0, KBD_SHIFT, KK_MOD, 1.0f },
     { L"fn", nullptr, 0, KBD_FN, KK_MOD, 1.3f },
-    { L"pg dn", nullptr, 0x4e, 0, KK_NORMAL, 1.0f },
+    { L"PgDn", nullptr, 0x4e, 0, KK_NORMAL, 1.0f },
 };
 inline const Key kRow4[] = {
     { L"ctrl", nullptr, 0, KBD_CTRL, KK_MOD, 1.3f },
@@ -1804,9 +1804,14 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
     if (cross && k.kind != KK_MOD && k.kind != KK_ACTION) {
         if (crossFresh) {
             heldUsage = k.usage;
-            // ⓘ Esc is the backtick while L2 is held -- the developer console in
-            // a great many PC games, and nothing else on the pad produces one.
-            if (g_fnHeld.load() && heldUsage == 0x29) heldUsage = 0x35;
+            // ⛔ ESC NO LONGER BECOMES THE BACKTICK UNDER FN (rhoquinn8217,
+            // 2026-09-04: "it's also shifting esc when it doesn't need to").
+            //
+            // ⓘ It was there so a pad could reach the developer console. But
+            // MEASURED 2026-09-04: `esc` exists ONLY on the FULL face, and FULL
+            // is the one face that already carries its own ` key. So the
+            // substitution could only ever fire where a backtick sat two keys
+            // away -- it changed a key under fn for no gain.
             if (fn_showing() && k.kind == KK_FN) {
                 const int idx = fn_index(g_row, g_col);
                 if (idx >= 0 && idx < 12) heldUsage = kFnUsages[idx];
