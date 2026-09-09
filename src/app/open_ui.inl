@@ -249,6 +249,22 @@ inline bool window_exists()
     return state.found != nullptr;
 }
 
+// ⭐ PARK the settings window behind the game (rhoquinn8217, 2026-09-09): the
+// page asked, having done its job. ⓘ MINIMISED rather than lowered, because
+// Windows then hands focus to the next window itself -- the game gets its pad
+// back through the gate's own foreground rule, with no SetForegroundWindow and
+// none of the Alt-key dance -- and the taskbar entry is the visible way back
+// for anyone not used to the chord. Config mode stays armed; the chord's
+// focus_existing() already restores an iconic window.
+inline bool park_window()
+{
+    FindState state;
+    EnumWindows(find_window_proc, reinterpret_cast<LPARAM>(&state));
+    if (state.found == nullptr) return false;
+    ShowWindow(state.found, SW_MINIMIZE);
+    return true;
+}
+
 // ⭐ Bring our window ABOVE a borderless game.
 //
 // ⛔ Measured 2026-08-29: the window opened, took focus and HELD it for nine

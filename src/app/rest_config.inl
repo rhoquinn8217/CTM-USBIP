@@ -646,6 +646,14 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
             return true;
         }
 
+        // ⭐ PARK: the compact view picked a config and is done. Behind the
+        // game, not closed -- config mode stays armed for the way back.
+        if (what == "park") {
+            const bool ok = ctm_open_ui::park_window();
+            *out = rest_http_response(200, ok ? R"({"ok":true})" : R"({"ok":false})");
+            return true;
+        }
+
         if (what == "closed") {
             // ⓘ Logged because it was silent: a close produced a focus report
             // but no beacon line, so there was no way to tell whether the

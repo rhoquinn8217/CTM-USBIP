@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.63.3 -- see the changelog at the bottom of this comment.
+  VERSION 2.64.0 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,15 @@
   tidy message about it.
 
   CHANGELOG
+    2.64.0 The compact view: one controller, one config selector, three
+           buttons. Create on the pad switches between it and the full page,
+           and the Fit window button becomes Compact for the mouse. Picking a
+           config PARKS the window behind the game rather than closing it, as
+           do Close and Circle; the listener minimises it on ui/park. With no
+           config for the controller, a big New config button opens the preset
+           selector. Safe Edit stays on throughout compact. The view is
+           remembered. "New" is "New config" everywhere (rhoquinn8217,
+           2026-09-09).
     2.63.3 The pad legend gains "R3 size": the listener cycles this window
            through three sizes, as it does the keyboard's (rhoquinn8217,
            2026-09-08). Fit window is the large one, centred.
@@ -387,6 +396,22 @@
   .tabs button .tabkind { display:block; font-size:11px; color:#71737c;
                           font-style:italic; margin-left:14px; margin-top:1px; }
   .pane { display:none; } .pane.on { display:block; }
+  /* ⭐ COMPACT VIEW: hide the page, show the box. Everything hidden leaves the
+     pad's focus list by itself -- gpCollect skips what has no offsetParent. */
+  body.compact #tabs, body.compact #stickyHead, body.compact #sectBar,
+  body.compact #renameRow, body.compact .pane, body.compact #gpbar { display:none !important; }
+  #compactBox { display:none; }
+  body.compact #compactBox { display:flex; flex-direction:column; align-items:center;
+    justify-content:center; gap:18px; padding:28px 20px 20px; min-height:calc(100vh - 40px);
+    box-sizing:border-box; }
+  #compactBox .cname { font-size:24px; font-weight:600; text-align:center; }
+  #compactBox .ckind { font-size:13px; color:#71737c; text-align:center; margin-top:4px; }
+  #compactBox select { font-size:20px; padding:10px 14px; min-width:min(560px, 90vw); }
+  #compactBox .cbig { font-size:22px; padding:18px 44px; }
+  #compactBox .cfoot { display:flex; gap:10px; margin-top:6px; }
+  #compactBox .cfoot button { padding:8px 18px; font-size:14px; }
+  #compactBox .cempty { color:#c8c9ce; font-size:15px; }
+  #compactBox .clegend { font-size:12px; color:#71737c; margin-top:10px; }
   /* ⭐ Sits under the tabs and stays with them. Which controller you are
      editing, and which config it is reading, are the two things you must not
      lose track of while scrolling a long settings list. */
@@ -694,6 +719,9 @@
        step. -->
   <div id="sectBar" class="sectbar"></div>
   <div id="renameRow"></div>
+  <!-- ⭐ The compact view. Inside #stickyTop so the pad's focus list already
+       collects its controls; empty until body.compact. -->
+  <div id="compactBox"></div>
 </div>
 
 <!-- ⭐ Shown when the agent stops answering. Overview's contents describe
@@ -723,7 +751,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.63.3</span>
+  <span class="muted" style="font-size:12px">v2.64.0</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -832,15 +860,16 @@
 <div id="gpbar">
   <span id="health" class="muted">checking…</span>
   <span id="gphint">controller: press any button to connect</span>
-  <!-- ⭐ On demand. The load-time check only fires when the window is clearly
-       wrong, so a window nudged slightly off keeps its size -- this is how you
-       ask for it back without hunting for the right drag. -->
+  <!-- ⭐ THE COMPACT VIEW, for the mouse; Create on the pad does the same.
+       ⓘ This was Fit window. Its two jobs went to the listener with the move
+       gesture -- Options places, R3 sizes -- and the load-time oversize check
+       still runs without a button. -->
   <!-- ⭐ Where the controller's input is going. Says it plainly rather than
        naming the mechanism: "gated" means nothing to someone who did not build
        it, and this is the one piece of state that changes under you. -->
   <span id="padDest" class="muted">controllers → game</span>
-  <button id="fitBtn" onclick="fitWindow(); setFooterMode(false);"
-          title="centre this window and set a sensible size">Fit window</button>
+  <button id="fitBtn" onclick="setCompact(true); setFooterMode(false);"
+          title="the compact view: one controller, one config, nothing else">Compact</button>
   <!-- ⓘ Closing releases the gate on the way out, via the pagehide beacon, so
        this is a safe exit rather than a way to strand yourself. -->
   <button id="closeBtn" onclick="window.close()" title="close this window">Close</button>
@@ -1554,6 +1583,7 @@ function renderTabs(devices) {
   // ⚠️ If the active tab's controller has gone, fall back rather than showing
   // nothing -- an unbridge should not leave a blank page.
   if (TABS.indexOf(ACTIVE) < 0) showTab('overview');
+  if (COMPACT) compactEnsureController();
 }
 
 // A SESSION kind ("ds5_usb") is not the kind a config is stored under ("ds5").
@@ -1996,6 +2026,7 @@ function createFromPreset(ordinal, preset) {
     .then(function() {
       setConn('created ' + name + (preset ? ' from ' + preset : ''), 'good');
       loadConfigs(); loadDevices();
+      if (COMPACT) park();   // ⭐ the same ending as picking one: back to the game
     })
     .catch(function(){});
 }
@@ -2033,6 +2064,7 @@ function paintStickyHead() {
   // now rather than leaving it plain until the next poll.
   paintHoldControls();
   measureSticky();
+  paintCompact();    // ⓘ the head is rebuilt whenever configs or links change; so is the box
 }
 
 // ⭐ Measure the sticky block rather than hardcoding its height. A device row
@@ -2227,7 +2259,7 @@ function buildDevicePane(d) {
           '<select id="pick-' + esc(d.ordinal) + '"' +
           ' onchange="applyPick(\'' + esc(d.ordinal) + '\')">' + options + '</select>' +
           '<button onclick="newConfigFor(\'' + esc(d.ordinal) + '\')" ' +
-          'title="create the next ds5_config and link it">New</button>' +
+          'title="create the next ds5_config and link it">New config</button>' +
           (d.linked_config
             ? '<button onclick="renameConfig(\'' + esc(d.linked_config) + '\')" ' +
               'title="rename this config">Rename</button>' +
@@ -2238,7 +2270,7 @@ function buildDevicePane(d) {
           claimBtn +
           (kindOk.length ? '' :
             ' <span class="muted">no ' + esc(settingsKindOf(d.kind)) +
-            ' configs yet — press New</span>') +
+            ' configs yet — press New config</span>') +
           // ⭐ Safe Edit Mode at the END of the config row, pushed right. It
           // governs what the pad may do to the settings below, so it belongs on
           // the row that names them rather than on a line of its own.
@@ -3721,7 +3753,11 @@ function gpSelectEnd(commit) {
   if (!commit) el.selectedIndex = GP_SELECT_WAS;
   el.classList.remove('gp-selecting');
   el.size = 0;                                  // collapse
+  // ⓘ The 'change' fires on a cancel too, to put the old value back; compact's
+  // pick reads this flag so a cancel never links or parks.
+  GP_SELECT_COMMIT = commit;
   el.dispatchEvent(new Event('change'));
+  GP_SELECT_COMMIT = true;
   GP_SELECTING = null;
 }
 
@@ -3941,7 +3977,10 @@ var CONFIG_MODE_KEYS = {
   KeyE: function () { gpKeyCoarse(1); },
   Enter: function () { gpKeySelect(); },
   KeyZ: function () { gpKeyBack(); },
-  KeyX: function () { gpToggleManaged(); }
+  KeyX: function () { gpToggleManaged(); },
+  // ⭐ Create on the pad: compact / full view. The listener sends it as KeyC
+  // the way it sends the rest of these.
+  KeyC: function () { toggleCompact(); }
 };
 
 // ⭐ One place that steps the value being edited. It was inline in gpPoll; the
@@ -4039,6 +4078,9 @@ function gpKeyStep(dir) {
     GP_SELECTING.selectedIndex = Math.max(0, Math.min(n - 1, next));
     return;
   }
+  // ⭐ In compact there is nothing to step: Left and Right move between the
+  // footer's buttons, as they do everywhere two things sit side by side.
+  if (COMPACT) { gpMove(dir); return; }
   // ⭐ ◄ ► SWITCH SECTIONS (rhoquinn8217, 2026-08-31). Only one section is
   // shown at a time now, so this changes which one that is rather than jumping
   // the halo down the page to the next heading.
@@ -4094,6 +4136,9 @@ function gpKeyBack() {
   }
   if (GP_SELECTING) { gpSelectEnd(false); return; }
   if (RENAMING) { cancelRename(); return; }
+  // ⭐ In compact, Circle parks the window: the same word, the same act, as
+  // Close in the footer and Circle on the keyboard.
+  if (COMPACT) { park(); return; }
 
   // ⛔ CIRCLE LETS GO OF A TEXT BOX (rhoquinn8217, 2026-09-03: "circle should
   // remove the white focus on the box but it doesn't").
@@ -4490,6 +4535,7 @@ function restorePlace() {
 }
 
 function setFooterMode(on) {
+  if (on && COMPACT) return;   // the footer bar is hidden in compact; its buttons are in the box
   if (on && !FOOTER_MODE) {
     // ⭐ The SERIAL, not just the ordinal.
     //
@@ -4707,6 +4753,180 @@ document.addEventListener('keydown', function (ev) {
   fn();
 }, true);
 
+
+// ⭐⭐ COMPACT VIEW (rhoquinn8217, pre-designed 2026-09-09).
+//
+// One controller, one config selector, three buttons. The full page becomes a
+// setup tool you rarely visit; once the configs you need exist, compact is all
+// you would ever open.
+//
+// ⭐ THE SAME PAGE, NOT A SECOND WINDOW: a class on <body> hides everything but
+// #compactBox, and everything already solved -- the halo, the gate, the notice
+// strip, the pagehide beacon -- is inherited. ⓘ gpCollect() skips anything
+// with no offsetParent, so the hidden page simply leaves the focus list.
+//
+// ⭐ PARK, NOT CLOSE. Picking a config sends the window behind the game rather
+// than closing it: the gate stops the moment we are not in front, so the game
+// gets its pad back, and the taskbar or Alt-Tab is a way back for anyone not
+// used to the chord. The page cannot lower its own window, so the listener
+// minimises it on ui/park. Close and Circle park too -- the same word means
+// the same thing on the keyboard, whose Circle hides rather than destroys.
+//
+// ⭐ CREATE ON THE PAD SWITCHES VIEWS, as it cycles the keyboard's layout. It
+// arrives here as the gated key KeyC, the way L1/R1 and the d-pad do, because
+// in config mode the listener blanks the pad report and re-sends the buttons
+// it knows as ctrl+alt+shift keys. ⛔ So the on-screen button is "New config",
+// never "Create ..." -- once the pad's Create means "switch view", a button
+// with Create in its name under a legend that says otherwise is a trap.
+//
+// ⭐ SAFE EDIT MODE IS ON THROUGHOUT COMPACT. Off, every navigation press and
+// the pick itself mirror to the game. If it was off in full when we switched,
+// compact holds it on and hands the choice back on return.
+//
+// ⭐ REMEMBERED without the run id: ctm_place forgets on a listener restart,
+// which is right for a place and wrong for a preference. Default is full.
+var COMPACT = false;
+var COMPACT_HOLD_RESTORE = false;
+var GP_SELECT_COMMIT = true;
+
+function isControllerTab(t) { return t !== 'overview' && t !== 'editor'; }
+
+function saveMode() {
+  try { localStorage.setItem('ctm_mode', COMPACT ? 'compact' : 'full'); } catch (e) {}
+}
+function applySavedMode() {
+  var m = '';
+  try { m = localStorage.getItem('ctm_mode') || ''; } catch (e) {}
+  if (m === 'compact') setCompact(true);
+}
+
+// ⓘ Half the screen wide, a little under half tall, centred. Small on purpose:
+// a window that does one thing feels considered, a shrunken full page feels
+// truncated. ⚠️ R3 in the listener still cycles its three sizes over this; it
+// does not know the view. Left as is for now.
+function compactSize() {
+  var w = Math.round(screen.availWidth * 0.5);
+  var h = Math.round(screen.availHeight * 0.45);
+  window.resizeTo(w, h);
+  window.moveTo(Math.round((screen.availWidth - w) / 2),
+                Math.round((screen.availHeight - h) / 2));
+}
+
+function setGateHold(hold) {
+  // toggleGateHold without the flip: the same request and the same follow-up.
+  fetch(base() + '/api/v1/ui/hold', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ hold: hold })
+  }).then(function () {
+    if (!hold) { LAST_FOCUS_SENT = null; syncFocus(); }
+    loadDevices();
+  }).catch(function () {});
+}
+
+function setCompact(on) {
+  on = !!on;
+  if (on === COMPACT) return;
+  COMPACT = on;
+  document.body.classList.toggle('compact', on);
+  saveMode();
+  if (on) {
+    setFooterMode(false);
+    if (window.GATE_HELD === true) {
+      COMPACT_HOLD_RESTORE = true;
+      setGateHold(false);
+    }
+    compactSize();
+    compactEnsureController();
+  } else {
+    if (COMPACT_HOLD_RESTORE) { COMPACT_HOLD_RESTORE = false; setGateHold(true); }
+    fitWindow();
+    gpCollect();
+    GP_INDEX = 0;
+    gpPaint();
+  }
+}
+function toggleCompact() {
+  if (PRESET_OPEN || PRESET_INFO_OPEN || CONFIRM_CB || RENAMING) return;
+  setCompact(!COMPACT);
+}
+
+// Compact shows a controller or nothing: never Overview or the Editor.
+function compactEnsureController() {
+  if (!COMPACT) return;
+  if (!isControllerTab(ACTIVE)) {
+    var first = TABS.filter(isControllerTab)[0];
+    if (first) { showTab(first); return; }
+  }
+  paintCompact();
+}
+
+function park() {
+  fetch(base() + '/api/v1/ui/park', { method: 'POST' }).catch(function () {});
+}
+
+function compactPick() {
+  var sel = document.getElementById('cpick');
+  if (!sel || !COMPACT) return;
+  // ⛔ gpSelectEnd() dispatches 'change' on a CANCEL too, to put the old value
+  // back. That must not link and must not park.
+  if (!GP_SELECT_COMMIT) return;
+  var ordinal = sel.dataset.ordinal;
+  var body = sel.value ? { config: sel.value } : {};
+  call('POST', '/api/v1/devices/' + encodeURIComponent(ordinal) + '/link', body)
+    .then(function () { loadDevices(); loadConfigs(); if (sel.value) park(); })
+    .catch(function () {});
+}
+
+function paintCompact() {
+  var box = document.getElementById('compactBox');
+  if (!box || !COMPACT) return;
+  var d = (LAST_DEVICES || []).filter(function (x) { return x.ordinal === ACTIVE; })[0];
+  var many = TABS.filter(isControllerTab).length > 1;
+  var foot = function (withNew, ordinal) {
+    return '<div class="cfoot">' +
+      (withNew ? '<button onclick="newConfigFor(\'' + esc(ordinal) + '\')">New config</button>' : '') +
+      '<button onclick="setCompact(false)">Full view</button>' +
+      '<button onclick="park()">Close</button></div>';
+  };
+  var html = '';
+  if (!d) {
+    html = '<div class="cempty">No controller is bridged yet.</div>' + foot(false, '');
+  } else {
+    var kindOk = CONFIGS.filter(function (c) { return settingsKindOf(d.kind) === c.kind; });
+    html += '<div><div class="cname">' + esc(nameFor(d.ordinal)) + '</div>' +
+            '<div class="ckind">' + esc(deviceLabelShort(d)) +
+            (many ? '&nbsp;&nbsp;&middot;&nbsp;&nbsp;L1 / R1 for the next controller' : '') +
+            '</div></div>';
+    if (!kindOk.length) {
+      // ⭐ The empty state is DELIBERATELY different: a first preset deserves
+      // a button that looks like it will do something, not a footer button.
+      // Same words as the footer's, so one action has one name -- only its
+      // room changes. It opens the preset selector, info page and confirm
+      // that already exist.
+      html += '<div class="cempty">This controller has no config yet.</div>' +
+              '<button class="cbig go" onclick="newConfigFor(\'' + esc(d.ordinal) + '\')">New config</button>' +
+              foot(false, d.ordinal);
+    } else {
+      var opts = '<option value="">(no config)</option>';
+      kindOk.forEach(function (c) {
+        opts += '<option value="' + esc(c.name) + '"' +
+                (c.name === d.linked_config ? ' selected' : '') + '>' + esc(c.name) + '</option>';
+      });
+      html += '<select id="cpick" data-ordinal="' + esc(d.ordinal) + '" onchange="compactPick()">' +
+              opts + '</select>' + foot(true, d.ordinal);
+    }
+  }
+  html += '<div class="clegend">L1/R1 controller | \u2715 select | \u25cb close | ' +
+          '\\|/ full view | \u2630 move | R3 size</div>';
+  box.innerHTML = html;
+  gpCollect();
+  // ⭐ Focus lands where the next press should go: the selector when there is
+  // something to pick, the big button when there is not.
+  var want = document.getElementById('cpick') || box.querySelector('button.cbig') || box.querySelector('button');
+  if (!focusElement(want)) { GP_INDEX = 0; gpPaint(); }
+}
+
 function gpTab(delta) {
   // ⛔ NOT WHILE SOMETHING IS OPEN (rhoquinn8217, 2026-09-01: L1/R1 still
   // switched controllers from inside the footer).
@@ -4722,9 +4942,13 @@ function gpTab(delta) {
   if (FOOTER_MODE || CONFIRM_CB || RENAMING || PRESET_OPEN || PRESET_INFO_OPEN) {
     return;
   }
-  var at = TABS.indexOf(ACTIVE);
+  // ⭐ In compact, L1/R1 step through CONTROLLERS only -- no Overview, no
+  // Editor (rhoquinn8217, 2026-09-09).
+  var tabs = COMPACT ? TABS.filter(isControllerTab) : TABS;
+  if (!tabs.length) return;
+  var at = tabs.indexOf(ACTIVE);
   if (at < 0) at = 0;
-  showTab(TABS[(at + delta + TABS.length) % TABS.length]);
+  showTab(tabs[(at + delta + tabs.length) % tabs.length]);
   GP_INDEX = 0;
   gpCollect();
 
@@ -4790,7 +5014,7 @@ function gpPoll() {
   // ⓘ The count comes from the browser when it can see the pads, and falls
   // back to the singular when only the gate knows one is there.
   hint.textContent = (live.length > 1 ? live.length + ' controllers' : 'controller') +
-                     ' — L1/R1 tabs | D-pad move | ✕ select | □ on/off | ○ back | ☰ move window | R3 size';
+                     ' — L1/R1 tabs | D-pad move | ✕ select | □ on/off | ○ back | ☰ move window | R3 size | \\|/ compact';
   bar.className = 'live';
   measureGpBar();
 
@@ -5485,6 +5709,7 @@ function startPage() {
   fitWindowIfOversized();
   refreshAll();
   restorePlace();
+  applySavedMode();   // ⭐ compact if that is where you left it
 }
 
 if (location.search.indexOf('selftest') >= 0) {
