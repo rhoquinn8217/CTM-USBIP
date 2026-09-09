@@ -646,6 +646,24 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
             return true;
         }
 
+        // ⭐ VIEW: the page says whether it is compact, so R3 sizes it from the
+        // right table. Sent on every switch and whenever the page regains
+        // focus, so a restarted listener learns it too.
+        if (what == "view") {
+            RestJson json;
+            std::string parseError;
+            if (!rest_parse_flat_json(req.body, &json, &parseError)) {
+                *out = rest_error_response(400, parseError);
+                return true;
+            }
+            auto cv = json.bools.find("compact");
+            const bool compact = (cv != json.bools.end()) && cv->second;
+            ui_view_set_compact(compact);
+            *out = rest_http_response(200, compact ? R"({"ok":true,"compact":true})"
+                                                   : R"({"ok":true,"compact":false})");
+            return true;
+        }
+
         // ⭐ PARK: the compact view picked a config and is done. Behind the
         // game, not closed -- config mode stays armed for the way back.
         if (what == "park") {

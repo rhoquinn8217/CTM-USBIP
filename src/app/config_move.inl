@@ -63,6 +63,28 @@ struct SizeShare { double w; double h; };
 inline const SizeShare kSizes[3] = { { 0.55, 0.66 }, { 0.68, 0.73 }, { 0.80, 0.80 } };
 inline std::atomic_int g_size{2};
 
+// ⭐ COMPACT HAS SIZES OF ITS OWN (rhoquinn8217, 2026-09-09): at 250% scaling on
+// a large screen the compact view still needs to be sized to the room, so R3
+// cycles a second table while the page is compact, with a position of its own.
+//
+//   small   0.38 x 0.34
+//   medium  0.50 x 0.45   what the page opens compact at, so the two agree
+//   large   0.62 x 0.56
+//
+// ⓘ The page says which view it is in (ui/view); the listener cannot tell by
+// looking. Each switch resets that view's position to its entry size -- medium
+// for compact, large for full -- which is exactly the size the page resizes to
+// on the switch, so R3 always cycles from where the window actually is.
+inline const SizeShare kCompactSizes[3] = { { 0.38, 0.34 }, { 0.50, 0.45 }, { 0.62, 0.56 } };
+inline std::atomic_int  g_sizeCompact{1};
+inline std::atomic_bool g_compact{false};
+
+inline void set_compact(bool on)
+{
+    g_compact.store(on);
+    if (on) g_sizeCompact.store(1); else g_size.store(2);
+}
+
 // ⓘ Own edge tracking for R3 rather than ctm_overlay::edge(): that table's
 // slots are the keyboard's, and slot 11 is already R3 there.
 inline std::mutex g_r3Mutex;
@@ -153,11 +175,14 @@ inline void resize_next(HWND hwnd)
 {
     RECT rc;
     if (!GetWindowRect(hwnd, &rc)) return;
-    const int idx = (g_size.load() + 1) % 3;
-    g_size.store(idx);
+    const bool compact = g_compact.load();
+    std::atomic_int &slot = compact ? g_sizeCompact : g_size;
+    const SizeShare *table = compact ? kCompactSizes : kSizes;
+    const int idx = (slot.load() + 1) % 3;
+    slot.store(idx);
     const RECT wa = work_area();
-    const int w = (int)((wa.right - wa.left) * kSizes[idx].w);
-    const int h = (int)((wa.bottom - wa.top) * kSizes[idx].h);
+    const int w = (int)((wa.right - wa.left) * table[idx].w);
+    const int h = (int)((wa.bottom - wa.top) * table[idx].h);
     const int cx = rc.left + (rc.right - rc.left) / 2;
     const int cy = rc.top + (rc.bottom - rc.top) / 2;
     int x = cx - w / 2;

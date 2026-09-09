@@ -92,6 +92,9 @@ bool ctm_rebind_gate_hold();
 void ctm_rebind_clear_provisional();
 // ⓘ rebind.inl runs on the input path and needs the window check from open_ui.
 bool ctm_ui_has_foreground();
+/* The page says which view it is in, so R3 sizes the compact window from its
+ * own table. Defined below, after config_move.inl. */
+void ui_view_set_compact(bool on);
 // ⓘ The chord calls this from the input path; the REST endpoint calls it too.
 // ⓘ Takes the controller that ran the chord, so the window can come up on its
 // tab. Empty means "no particular one" -- the REST spawn path has no controller
@@ -187,6 +190,10 @@ void ctm_rebind_ensure_keyboard_started();
 bool ctm_ui_has_foreground()
 {
     return ctm_open_ui::window_has_foreground();
+}
+void ui_view_set_compact(bool on)
+{
+    config_move::set_compact(on);
 }
 
 
