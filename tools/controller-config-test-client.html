@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.64.3 -- see the changelog at the bottom of this comment.
+  VERSION 2.64.4 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,12 @@
   tidy message about it.
 
   CHANGELOG
+    2.64.4 More room everywhere in compact. The ring's side entries sit three
+           characters further out, carry the kind under the nickname, and
+           slide in from the side they were pushed from. The preset selector
+           and its info page fit the compact window at their own size, with
+           the table's columns together -- they had inherited the confirm
+           box's large text (rhoquinn8217, 2026-09-09).
     2.64.3 Compact's text is half again as large, its window a tenth
            narrower, and there is room around the footer rule. The other
            controllers show either side of the one in focus, dimmed under L1
@@ -423,7 +429,7 @@
      here grows or shrinks with it. */
   body.compact { padding:0; }
   body.compact #compactBox { display:flex; flex-direction:column; align-items:center;
-    justify-content:center; gap:2.4vh; padding:3vh 4vw; min-height:100vh;
+    justify-content:center; gap:4.5vh; padding:4vh 4vw; min-height:100vh;
     box-sizing:border-box; }
   /* ⓘ Every size here is 1.5x the first cut (rhoquinn8217, 2026-09-09). */
   /* ⭐ THE CAROUSEL: the controller in focus stays in the centre, its
@@ -431,32 +437,60 @@
      ring. One controller shows nothing at the sides; two show the same name
      both sides, which is true -- either button reaches it. */
   #compactBox .ccar { display:flex; align-items:center; justify-content:center; gap:3vw;
-    width:100%; }
+    width:100%; overflow:hidden; }
+  /* ⓘ The sides sit three characters further out than the gap alone would put
+     them (rhoquinn8217, 2026-09-09), and carry the kind under the nickname. */
   #compactBox .cside { flex:1 1 0; min-width:0; color:#4e515b; font-size:4.5vh;
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  #compactBox .cside.l { text-align:right; }
-  #compactBox .cside.r { text-align:left; }
+  #compactBox .cside.l { text-align:right; padding-right:3ch; }
+  #compactBox .cside.r { text-align:left; padding-left:3ch; }
   #compactBox .cside small { display:block; font-size:3vh; color:#3d4049; }
+  #compactBox .cside .ckind { font-size:3vh; color:#3d4049; text-align:inherit; margin-top:0.4vh; }
   #compactBox .ccur { flex:0 1 auto; min-width:0; text-align:center; }
+  /* ⭐ THE RING SLIDES the way it was pushed: R1 brings the next one in from the
+     right, L1 from the left. A short, decisive move -- long enough to read as
+     motion, short enough never to be waited for. */
+  @keyframes cslide-r { from { transform:translateX(12vw); opacity:.2; } to { transform:none; opacity:1; } }
+  @keyframes cslide-l { from { transform:translateX(-12vw); opacity:.2; } to { transform:none; opacity:1; } }
+  #compactBox .ccar.slide-r { animation:cslide-r .26s ease-out; }
+  #compactBox .ccar.slide-l { animation:cslide-l .26s ease-out; }
   #compactBox .cname { font-size:9vh; font-weight:600; text-align:center; line-height:1.1; }
   #compactBox .ckind { font-size:4.5vh; color:#71737c; text-align:center; margin-top:0.8vh; }
   #compactBox select { font-size:6.3vh; padding:1.2vh 2vw; min-width:70vw; }
   #compactBox .cbig { font-size:8.1vh; padding:2vh 5vw; }
-  #compactBox .cfoot { display:flex; gap:2vw; margin-top:1vh; }
+  #compactBox .cfoot { display:flex; gap:3vw; margin-top:1.5vh; }
   #compactBox .cfoot button { padding:1.4vh 3vw; font-size:5.4vh; }
   #compactBox .cempty { color:#c8c9ce; font-size:5.4vh; text-align:center; }
   /* ⭐ The footer area: the legend and the way back, at the same size as the
      rest of the view, with room around the rule (rhoquinn8217, 2026-09-09). */
-  #compactBox .cbar { width:100%; border-top:1px solid #2c2e36; margin-top:3vh;
-    padding-top:3.5vh; display:flex; flex-direction:column; gap:2.6vh; align-items:center; }
+  #compactBox .cbar { width:100%; border-top:1px solid #2c2e36; margin-top:4vh;
+    padding-top:4.5vh; display:flex; flex-direction:column; gap:3.4vh; align-items:center; }
   #compactBox .clegend { font-size:4.5vh; color:#71737c; text-align:center; }
   #compactBox .cinfo { font-size:4.5vh; color:#c8c9ce; text-align:center; line-height:1.4;
     max-width:92vw; }
   #compactBox .cinfo b { color:#e8e8ea; }
-  body.compact .confirmCard { font-size:5.1vh; max-width:86vw; }
-  body.compact .confirmCard h2 { font-size:6.3vh; }
-  body.compact .confirmCard p { font-size:5.1vh; }
-  body.compact .confirmCard button { font-size:5.1vh; padding:1.4vh 3vw; }
+  body.compact #confirmBox .confirmCard { font-size:5.1vh; max-width:86vw; }
+  body.compact #confirmBox .confirmCard h2 { font-size:6.3vh; }
+  body.compact #confirmBox .confirmCard p { font-size:5.1vh; }
+  body.compact #confirmBox .confirmCard button { font-size:5.1vh; padding:1.4vh 3vw; }
+  /* ⭐ THE PRESET BOXES FIT THE COMPACT WINDOW (rhoquinn8217, 2026-09-09).
+     ⛔ They share .confirmCard with the confirm box, so the rule above once
+     scaled them too: the preset description came out at the size of a
+     question and its table stretched to the card. Their own sizes now, a card
+     that scrolls inside the window, and a table whose two columns sit
+     together rather than at opposite edges. */
+  body.compact #presetInfoBox .confirmCard, body.compact #presetBox .confirmCard {
+    font-size:2.6vh; max-width:84vw; max-height:88vh; overflow:auto; box-sizing:border-box; }
+  body.compact #presetInfoBox .confirmCard h2, body.compact #presetBox .confirmCard h2 { font-size:3.8vh; }
+  body.compact #presetInfoBox .confirmCard p { font-size:2.6vh; line-height:1.4; }
+  body.compact #presetInfoTables h4 { font-size:2.2vh; margin:2vh 0 0.6vh; }
+  body.compact #presetInfoTables table { width:auto; margin:0 auto; }
+  body.compact #presetInfoTables td { font-size:2.6vh; padding:0.3vh 1.5vw; }
+  body.compact #presetInfoTables td:last-child { text-align:left; }
+  body.compact #presetInfoBox .confirmCard button, body.compact #presetBox .confirmCard button {
+    font-size:3vh; padding:1.2vh 2.5vw; }
+  body.compact #presetList .prow > button:first-child { font-size:3vh; padding:1.4vh 2vw; }
+  body.compact #presetList small { font-size:2.4vh; }
   /* ⭐ Sits under the tabs and stays with them. Which controller you are
      editing, and which config it is reading, are the two things you must not
      lose track of while scrolling a long settings list. */
@@ -796,7 +830,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.64.3</span>
+  <span class="muted" style="font-size:12px">v2.64.4</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -4836,6 +4870,7 @@ document.addEventListener('keydown', function (ev) {
 // which is right for a place and wrong for a preference. Default is full.
 var COMPACT = false;
 var COMPACT_HOLD_RESTORE = false;
+var COMPACT_SLIDE = 0;   // +1 after R1, -1 after L1: which way the ring slides in
 var GP_SELECT_COMMIT = true;
 
 function isControllerTab(t) { return t !== 'overview' && t !== 'editor'; }
@@ -4984,9 +5019,13 @@ function paintCompact() {
     var next = many ? ring[(at + 1) % ring.length] : '';
     var side = function (ord, cls, key) {
       if (!ord) return '<div class="cside ' + cls + '"></div>';
-      return '<div class="cside ' + cls + '"><small>' + key + '</small>' + esc(nameFor(ord)) + '</div>';
+      var od = (LAST_DEVICES || []).filter(function (x) { return x.ordinal === ord; })[0];
+      return '<div class="cside ' + cls + '"><small>' + key + '</small>' + esc(nameFor(ord)) +
+             (od ? '<div class="ckind">' + esc(deviceLabelShort(od)) + '</div>' : '') + '</div>';
     };
-    html += '<div class="ccar">' +
+    var slide = COMPACT_SLIDE > 0 ? ' slide-r' : COMPACT_SLIDE < 0 ? ' slide-l' : '';
+    COMPACT_SLIDE = 0;
+    html += '<div class="ccar' + slide + '">' +
             side(prev, 'l', '\u25c2 L1') +
             '<div class="ccur"><div class="cname">' + esc(nameFor(d.ordinal)) + '</div>' +
             '<div class="ckind">' + esc(deviceLabelShort(d)) + '</div></div>' +
@@ -5047,6 +5086,7 @@ function gpTab(delta) {
   // Editor (rhoquinn8217, 2026-09-09).
   var tabs = COMPACT ? TABS.filter(isControllerTab) : TABS;
   if (!tabs.length) return;
+  if (COMPACT) COMPACT_SLIDE = delta;
   var at = tabs.indexOf(ACTIVE);
   if (at < 0) at = 0;
   showTab(tabs[(at + delta + tabs.length) % tabs.length]);
