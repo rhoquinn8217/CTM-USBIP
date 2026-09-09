@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.64.4 -- see the changelog at the bottom of this comment.
+  VERSION 2.64.5 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,12 @@
   tidy message about it.
 
   CHANGELOG
+    2.64.5 Compact's footer is pinned to the bottom at half size, with Close
+           alone in its corner; under the selector sit New, Edit and
+           Configurator, Edit being this controller's settings and
+           Configurator the whole tool. The preset boxes no longer stretch.
+           Notices are bubbles in compact and the slide-out strip in the
+           configurator (rhoquinn8217, 2026-09-09). "New config" is "New".
     2.64.4 More room everywhere in compact. The ring's side entries sit three
            characters further out, carry the kind under the nickname, and
            slide in from the side they were pushed from. The preset selector
@@ -429,8 +435,12 @@
      here grows or shrinks with it. */
   body.compact { padding:0; }
   body.compact #compactBox { display:flex; flex-direction:column; align-items:center;
-    justify-content:center; gap:4.5vh; padding:4vh 4vw; min-height:100vh;
+    justify-content:flex-start; gap:0; padding:4vh 4vw 3vh; min-height:100vh;
     box-sizing:border-box; }
+  /* ⭐ The content centres in the room above the footer; the footer is pinned
+     to the bottom of the page (rhoquinn8217, 2026-09-09). */
+  #compactBox .cmain { flex:1 1 auto; width:100%; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:4.5vh; }
   /* ⓘ Every size here is 1.5x the first cut (rhoquinn8217, 2026-09-09). */
   /* ⭐ THE CAROUSEL: the controller in focus stays in the centre, its
      neighbours sit dimmed either side under L1 and R1, and L1/R1 rotate the
@@ -463,12 +473,18 @@
   #compactBox .cempty { color:#c8c9ce; font-size:5.4vh; text-align:center; }
   /* ⭐ The footer area: the legend and the way back, at the same size as the
      rest of the view, with room around the rule (rhoquinn8217, 2026-09-09). */
-  #compactBox .cbar { width:100%; border-top:1px solid #2c2e36; margin-top:4vh;
-    padding-top:4.5vh; display:flex; flex-direction:column; gap:3.4vh; align-items:center; }
-  #compactBox .clegend { font-size:4.5vh; color:#71737c; text-align:center; }
-  #compactBox .cinfo { font-size:4.5vh; color:#c8c9ce; text-align:center; line-height:1.4;
-    max-width:92vw; }
+  #compactBox .cbar { width:100%; border-top:1px solid #2c2e36; margin-top:auto;
+    padding-top:2.4vh; display:flex; flex-direction:row; align-items:center; gap:3vw; }
+  #compactBox .cbarText { flex:1 1 auto; min-width:0; display:flex; flex-direction:column;
+    gap:1.4vh; align-items:center; }
+  /* ⓘ Half the size of the rest (rhoquinn8217, 2026-09-09). */
+  #compactBox .clegend { font-size:2.3vh; color:#71737c; text-align:center; }
+  #compactBox .cinfo { font-size:2.3vh; color:#c8c9ce; text-align:center; line-height:1.4;
+    max-width:80vw; }
   #compactBox .cinfo b { color:#e8e8ea; }
+  /* ⭐ Close lives in the bottom-right corner, on its own, away from the
+     actions under the selector. */
+  #compactBox .cclose { flex:0 0 auto; font-size:3.4vh; padding:1.2vh 2.6vw; }
   body.compact #confirmBox .confirmCard { font-size:5.1vh; max-width:86vw; }
   body.compact #confirmBox .confirmCard h2 { font-size:6.3vh; }
   body.compact #confirmBox .confirmCard p { font-size:5.1vh; }
@@ -480,11 +496,11 @@
      that scrolls inside the window, and a table whose two columns sit
      together rather than at opposite edges. */
   body.compact #presetInfoBox .confirmCard, body.compact #presetBox .confirmCard {
-    font-size:2.6vh; max-width:84vw; max-height:88vh; overflow:auto; box-sizing:border-box; }
+    font-size:2.6vh; width:auto; max-width:62vw; max-height:88vh; overflow:auto; box-sizing:border-box; }
   body.compact #presetInfoBox .confirmCard h2, body.compact #presetBox .confirmCard h2 { font-size:3.8vh; }
   body.compact #presetInfoBox .confirmCard p { font-size:2.6vh; line-height:1.4; }
   body.compact #presetInfoTables h4 { font-size:2.2vh; margin:2vh 0 0.6vh; }
-  body.compact #presetInfoTables table { width:auto; margin:0 auto; }
+  body.compact #presetInfoTables table { width:auto; margin:0; }
   body.compact #presetInfoTables td { font-size:2.6vh; padding:0.3vh 1.5vw; }
   body.compact #presetInfoTables td:last-child { text-align:left; }
   body.compact #presetInfoBox .confirmCard button, body.compact #presetBox .confirmCard button {
@@ -729,6 +745,20 @@
                    border-top-width:2px; border-bottom:none;
                    border-left:none; border-right:none; }
   #bubbles > div + div { border-left:1px solid rgba(255,255,255,.10); }
+  /* ⭐ IN COMPACT, NOTICES ARE BUBBLES; in the configurator they stay the
+     slide-out strip (rhoquinn8217, 2026-09-09). Same element, same code that
+     fills it -- only where it sits and how it is drawn changes. */
+  body.compact #bubbles { top:2vh; right:2vw; left:auto; bottom:auto; width:auto;
+    max-width:60vw; flex-direction:column; align-items:flex-end; gap:1.2vh;
+    transform:none; transition:none; pointer-events:none; }
+  body.compact #bubbles > div { flex:0 0 auto; border-radius:1.4vh; font-size:2.6vh;
+    line-height:1.4; padding:1.4vh 2.2vw; border:1px solid rgba(255,255,255,.14);
+    border-top-width:2px; box-shadow:0 1vh 3vh rgba(0,0,0,.45); }
+  body.compact #bubbles > div + div { border-left:1px solid rgba(255,255,255,.14); }
+  /* Each bubble pops in from its corner; the strip slides, a bubble appears. */
+  @keyframes cbubble { from { transform:translateY(-1.5vh) scale(.96); opacity:0; }
+                       to { transform:none; opacity:1; } }
+  body.compact #bubbles > div { animation:cbubble .2s ease-out; }
   #presetBox { position:fixed; inset:0; z-index:60; display:none;
                align-items:center; justify-content:center; background:#0009; }
   #presetList button { display:block; width:100%; text-align:left;
@@ -830,7 +860,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.64.4</span>
+  <span class="muted" style="font-size:12px">v2.64.5</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -2338,7 +2368,7 @@ function buildDevicePane(d) {
           '<select id="pick-' + esc(d.ordinal) + '"' +
           ' onchange="applyPick(\'' + esc(d.ordinal) + '\')">' + options + '</select>' +
           '<button onclick="newConfigFor(\'' + esc(d.ordinal) + '\')" ' +
-          'title="create the next ds5_config and link it">New config</button>' +
+          'title="create the next ds5_config and link it">New</button>' +
           (d.linked_config
             ? '<button onclick="renameConfig(\'' + esc(d.linked_config) + '\')" ' +
               'title="rename this config">Rename</button>' +
@@ -2349,7 +2379,7 @@ function buildDevicePane(d) {
           claimBtn +
           (kindOk.length ? '' :
             ' <span class="muted">no ' + esc(settingsKindOf(d.kind)) +
-            ' configs yet — press New config</span>') +
+            ' configs yet — press New</span>') +
           // ⭐ Safe Edit Mode at the END of the config row, pushed right. It
           // governs what the pad may do to the settings below, so it belongs on
           // the row that names them rather than on a line of its own.
@@ -4858,9 +4888,9 @@ document.addEventListener('keydown', function (ev) {
 // ⭐ CREATE ON THE PAD SWITCHES VIEWS, as it cycles the keyboard's layout. It
 // arrives here as the gated key KeyC, the way L1/R1 and the d-pad do, because
 // in config mode the listener blanks the pad report and re-sends the buttons
-// it knows as ctrl+alt+shift keys. ⛔ So the on-screen button is "New config",
-// never "Create ..." -- once the pad's Create means "switch view", a button
-// with Create in its name under a legend that says otherwise is a trap.
+// it knows as ctrl+alt+shift keys. ⛔ So the on-screen button is "New", never
+// "Create ..." -- once the pad's Create means "switch view", a button with
+// Create in its name under a legend that says otherwise is a trap.
 //
 // ⭐ SAFE EDIT MODE IS ON THROUGHOUT COMPACT. Off, every navigation press and
 // the pick itself mirror to the game. If it was off in full when we switched,
@@ -4940,6 +4970,11 @@ function setCompact(on) {
     gpPaint();
   }
 }
+// The whole tool, from the top: the full page on its Overview.
+function openConfigurator() {
+  setCompact(false);
+  showTab('overview');
+}
 function toggleCompact() {
   if (PRESET_OPEN || PRESET_INFO_OPEN || CONFIRM_CB || RENAMING) return;
   setCompact(!COMPACT);
@@ -4997,17 +5032,19 @@ function paintCompact() {
   if (!box || !COMPACT) return;
   var d = (LAST_DEVICES || []).filter(function (x) { return x.ordinal === ACTIVE; })[0];
   var many = TABS.filter(isControllerTab).length > 1;
-  // ⓘ "Configure", not "Full view": the other page is where a config is
-  // edited, and the word should say so (rhoquinn8217, 2026-09-09).
+  // ⭐ Under the selector: New, Edit, Configurator (rhoquinn8217, 2026-09-09).
+  // Edit is the other page on THIS controller, its config's settings;
+  // Configurator is the whole tool, from the top. Close is not here -- it
+  // sits alone in the bottom-right corner, in the footer.
   var foot = function (withNew, ordinal) {
     return '<div class="cfoot">' +
-      (withNew ? '<button onclick="newConfigFor(\'' + esc(ordinal) + '\')">New config</button>' : '') +
-      '<button onclick="setCompact(false)">Configure</button>' +
-      '<button onclick="park()">Close</button></div>';
+      (withNew ? '<button onclick="newConfigFor(\'' + esc(ordinal) + '\')">New</button>' : '') +
+      (ordinal ? '<button onclick="setCompact(false)">Edit</button>' : '') +
+      '<button onclick="openConfigurator()">Configurator</button></div>';
   };
-  var html = '';
+  var html = '<div class="cmain">';
   if (!d) {
-    html = '<div class="cempty">No controller is bridged yet.</div>' + foot(false, '');
+    html += '<div class="cempty">No controller is bridged yet.</div>' + foot(false, '');
   } else {
     var kindOk = CONFIGS.filter(function (c) { return settingsKindOf(d.kind) === c.kind; });
     // ⭐ The ring: the controller in focus in the centre, the previous under
@@ -5038,7 +5075,7 @@ function paintCompact() {
       // room changes. It opens the preset selector, info page and confirm
       // that already exist.
       html += '<div class="cempty">This controller has no config yet.</div>' +
-              '<button class="cbig go" onclick="newConfigFor(\'' + esc(d.ordinal) + '\')">New config</button>' +
+              '<button class="cbig go" onclick="newConfigFor(\'' + esc(d.ordinal) + '\')">New</button>' +
               foot(false, d.ordinal);
     } else {
       var opts = '<option value="">(no config)</option>';
@@ -5053,12 +5090,13 @@ function paintCompact() {
   // ⭐ The footer area: the legend and the way back, as large as the rest.
   // The way back is written out because someone who parked this window and
   // is not used to the chord has no other way to learn it (rhoquinn8217).
-  html += '<div class="cbar">' +
+  html += '</div>';   // .cmain
+  html += '<div class="cbar"><div class="cbarText">' +
           '<div class="clegend">L1/R1 controller | \u2715 select | \u25cb close | ' +
-          '\\|/ configure | \u2630 move | R3 size</div>' +
+          '\\|/ edit | \u2630 move | R3 size</div>' +
           '<div class="cinfo">To bring this window back: <b>hold two fingers on the touchpad ' +
           'and press Options</b>, or click it in the taskbar.</div>' +
-          '</div>';
+          '</div><button class="cclose" onclick="park()">Close</button></div>';
   box.innerHTML = html;
   gpCollect();
   // ⭐ Focus lands where the next press should go: the selector when there is
