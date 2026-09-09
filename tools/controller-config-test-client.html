@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.64.10 -- see the changelog at the bottom of this comment.
+  VERSION 2.64.11 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,12 @@
   tidy message about it.
 
   CHANGELOG
+    2.64.11 Compact: a ⟳ button beside the selector auto links the chosen
+            config to the controller, the claimed config carries a green ⟳
+            in the list and the selector reads green while it is chosen.
+            "Bridge a controller to start" sits centred; the down screen
+            says "Check if the listener is running or restart it"
+            (rhoquinn8217, 2026-09-09).
     2.64.10 Compact's content starts just under the bubble strip instead of
             centred below it, closing the gap between a notice and the
             controller's name (rhoquinn8217, 2026-09-09).
@@ -482,6 +488,17 @@
      2026-09-09, third placing). */
   #compactBox .cmain { flex:1 1 auto; width:100%; display:flex; flex-direction:column;
     align-items:center; justify-content:flex-start; padding-top:13vh; gap:4.5vh; }
+  /* A screen that is only a message sits in the middle of the room
+     (rhoquinn8217, 2026-09-09); the controller screen keeps its place. */
+  #compactBox .cmain.centre { justify-content:center; padding-top:0; }
+  /* ⭐ AUTO LINK beside the selector (rhoquinn8217, 2026-09-09): the ⟳ button
+     claims this controller for the chosen config, so it gets that config the
+     next time it bridges. The claimed config carries a green ⟳ in the list,
+     and the selector reads green while that is the one chosen. */
+  #compactBox .cselrow { display:flex; align-items:center; gap:1.5vw; }
+  #compactBox .cauto-btn { font-size:4.2vh; padding:0.6vh 1.4vw; line-height:1; }
+  #compactBox .cauto-btn.on { color:#7fd18c; border-color:#7fd18c; opacity:1; }
+  #compactBox select.cauto, #cpick option.cauto { color:#7fd18c; }
   /* ⓘ Every size here is 1.5x the first cut (rhoquinn8217, 2026-09-09). */
   /* ⭐ THE CAROUSEL: the controller in focus stays in the centre, its
      neighbours sit dimmed either side under L1 and R1, and L1/R1 rotate the
@@ -926,7 +943,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.64.10</span>
+  <span class="muted" style="font-size:12px">v2.64.11</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -4225,8 +4242,16 @@ function compactMove(dx, dy) {
   var box = document.getElementById('compactBox');
   if (!box) return false;
   var rows = [];
-  var top = box.querySelector('#cpick') || box.querySelector('button.cbig');
-  if (top) rows.push([top]);
+  var topRow = [];
+  var sel = box.querySelector('#cpick');
+  if (sel) topRow.push(sel);
+  var auto = box.querySelector('.cauto-btn:not([disabled])');
+  if (auto) topRow.push(auto);   // Right from the selector reaches ⟳ when it can act
+  if (!topRow.length) {
+    var big = box.querySelector('button.cbig');
+    if (big) topRow.push(big);
+  }
+  if (topRow.length) rows.push(topRow);
   var foot = Array.prototype.slice.call(box.querySelectorAll('.cfoot button'));
   if (foot.length) rows.push(foot);
   var bar = Array.prototype.slice.call(box.querySelectorAll('.cbar > button'));
@@ -5154,6 +5179,24 @@ function compactAskExit(title, buttons) {
   askConfirm(title, '', function () { restore(); if (go) go(); });
 }
 
+// ⟳: claim this controller for the config it is reading. The full page's
+// setAutoLink does the asking when another config holds the claim, and the
+// claiming; the repaint that follows lights the ⟳.
+function compactAutoLink() {
+  var d = (LAST_DEVICES || []).filter(function (x) { return x.ordinal === ACTIVE; })[0];
+  if (!d || !d.linked_config) return;
+  var mySerial = normSerial(d.serial);
+  if (!mySerial) return;
+  var claimedBy = '';
+  CONFIGS.forEach(function (c) {
+    (c.auto_link || []).forEach(function (sn) {
+      if (normSerial(sn) === mySerial) claimedBy = c.name;
+    });
+  });
+  if (claimedBy === d.linked_config) return;
+  setAutoLink(d.ordinal, d.linked_config, mySerial, claimedBy);
+}
+
 function compactPick() {
   var sel = document.getElementById('cpick');
   if (!sel || !COMPACT) return;
@@ -5181,14 +5224,13 @@ function paintCompact() {
       (withNew ? '<button onclick="newConfigFor(\'' + esc(ordinal) + '\')">New</button>' : '') +
       (ordinal ? '<button onclick="setCompact(false)">Edit</button>' : '') + '</div>';
   };
-  var html = '<div class="cmain">';
+  var html = '<div class="cmain' + (!IS_DOWN && !d ? ' centre' : '') + '">';
   if (IS_DOWN) {
     // ⭐ THE LISTENER IS NOT ANSWERING (rhoquinn8217, 2026-09-09). The full
     // page has its cover; compact says the same thing at its own size, with
     // the address that failed and the line that starts the listener.
     html += '<div class="cempty"><span class="cbad">\u2717</span> Listener not connected</div>' +
-            '<div class="csub">No reply from ' + esc(base()) + '. Start it, or restart it ' +
-            'if it was just rebuilt:</div>' +
+            '<div class="csub">Check if the listener is running or restart it.</div>' +
             '<div class="ccmd">ctm-usbip.exe agent 48054 --rest 48055 --ui</div>';
   } else if (!d) {
     html += '<div class="cempty">Bridge a controller to start.</div>' + foot(false, '');
@@ -5226,15 +5268,46 @@ function paintCompact() {
       html += '<div class="cempty">Create a custom controller config</div>' +
               '<button class="cbig go" onclick="newConfigFor(\'' + esc(d.ordinal) + '\')">Start</button>';
     } else {
+      // ⓘ Which config claims this controller's serial, the way the full
+      // page's device row works it out: that is the one that auto links.
+      var mySerial = normSerial(d.serial);
+      var claimedBy = '';
+      CONFIGS.forEach(function (c) {
+        (c.auto_link || []).forEach(function (sn) {
+          if (mySerial && normSerial(sn) === mySerial) claimedBy = c.name;
+        });
+      });
+      var autoOn = !!d.linked_config && d.linked_config === claimedBy;
       var opts = '<option value="">(no config)</option>';
       kindOk.forEach(function (c) {
-        opts += '<option value="' + esc(c.name) + '"' +
-                (c.name === d.linked_config ? ' selected' : '') + '>' + esc(c.name) + '</option>';
+        var mine = c.name === claimedBy;
+        opts += '<option value="' + esc(c.name) + '"' + (mine ? ' class="cauto"' : '') +
+                (c.name === d.linked_config ? ' selected' : '') + '>' + esc(c.name) +
+                (mine ? ' \u27f3' : '') + '</option>';
       });
+      // ⭐ The ⟳ button SETS an auto link and never clears one, as the full
+      // page's does -- a button that sometimes set and sometimes cleared meant
+      // reading the label to find out which. Lit green and at rest when the
+      // chosen config already claims this controller; greyed, with the reason,
+      // when there is nothing to claim.
+      var autoBtn;
+      if (!mySerial) {
+        autoBtn = '<button class="cauto-btn" disabled title="this controller reports no serial, ' +
+                  'so there is nothing to remember it by">\u27f3</button>';
+      } else if (!d.linked_config) {
+        autoBtn = '<button class="cauto-btn" disabled title="pick a config first">\u27f3</button>';
+      } else if (autoOn) {
+        autoBtn = '<button class="cauto-btn on" disabled title="' + esc(d.linked_config) +
+                  ' auto links to this controller">\u27f3</button>';
+      } else {
+        autoBtn = '<button class="cauto-btn" onclick="compactAutoLink()" title="auto link ' +
+                  esc(d.linked_config) + ' to this controller">\u27f3</button>';
+      }
       // The selector under a title, sliding with the ring (rhoquinn8217, 2026-09-09).
       html += '<div class="csel' + slide + '"><div class="ctitle">Controller Config</div>' +
-              '<select id="cpick" data-ordinal="' + esc(d.ordinal) + '" onchange="compactPick()">' +
-              opts + '</select></div>' + foot(true, d.ordinal);
+              '<div class="cselrow"><select id="cpick" data-ordinal="' + esc(d.ordinal) + '"' +
+              (autoOn ? ' class="cauto"' : '') + ' onchange="compactPick()">' +
+              opts + '</select>' + autoBtn + '</div></div>' + foot(true, d.ordinal);
     }
   }
   // ⭐ The footer area: the legend and the way back, as large as the rest.
