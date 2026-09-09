@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.64.5 -- see the changelog at the bottom of this comment.
+  VERSION 2.64.6 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,12 @@
   tidy message about it.
 
   CHANGELOG
+    2.64.6 Compact: Configurator moves to the footer's bottom-left corner,
+           the legend is green as the configurator's is, the selector is two
+           thirds its size under a "Linked config" title and slides with the
+           ring, the empty state reads "Bridge a controller to start", and
+           the way back names the DS5 chord and the taskbar icon
+           (rhoquinn8217, 2026-09-09).
     2.64.5 Compact's footer is pinned to the bottom at half size, with Close
            alone in its corner; under the selector sit New, Edit and
            Configurator, Edit being this controller's settings and
@@ -462,11 +468,15 @@
      motion, short enough never to be waited for. */
   @keyframes cslide-r { from { transform:translateX(12vw); opacity:.2; } to { transform:none; opacity:1; } }
   @keyframes cslide-l { from { transform:translateX(-12vw); opacity:.2; } to { transform:none; opacity:1; } }
-  #compactBox .ccar.slide-r { animation:cslide-r .26s ease-out; }
-  #compactBox .ccar.slide-l { animation:cslide-l .26s ease-out; }
+  #compactBox .ccar.slide-r, #compactBox .csel.slide-r { animation:cslide-r .26s ease-out; }
+  #compactBox .ccar.slide-l, #compactBox .csel.slide-l { animation:cslide-l .26s ease-out; }
+  /* The selector and its title travel with the ring (rhoquinn8217, 2026-09-09). */
+  #compactBox .csel { display:flex; flex-direction:column; align-items:center; gap:1.2vh; }
+  #compactBox .ctitle { font-size:3vh; color:#71737c; text-align:center; }
   #compactBox .cname { font-size:9vh; font-weight:600; text-align:center; line-height:1.1; }
   #compactBox .ckind { font-size:4.5vh; color:#71737c; text-align:center; margin-top:0.8vh; }
-  #compactBox select { font-size:6.3vh; padding:1.2vh 2vw; min-width:70vw; }
+  /* ⓘ Two thirds of what it was (rhoquinn8217, 2026-09-09). */
+  #compactBox select { font-size:4.2vh; padding:0.8vh 1.4vw; min-width:47vw; }
   #compactBox .cbig { font-size:8.1vh; padding:2vh 5vw; }
   #compactBox .cfoot { display:flex; gap:3vw; margin-top:1.5vh; }
   #compactBox .cfoot button { padding:1.4vh 3vw; font-size:5.4vh; }
@@ -477,14 +487,15 @@
     padding-top:2.4vh; display:flex; flex-direction:row; align-items:center; gap:3vw; }
   #compactBox .cbarText { flex:1 1 auto; min-width:0; display:flex; flex-direction:column;
     gap:1.4vh; align-items:center; }
-  /* ⓘ Half the size of the rest (rhoquinn8217, 2026-09-09). */
-  #compactBox .clegend { font-size:2.3vh; color:#71737c; text-align:center; }
+  /* ⓘ Half the size of the rest (rhoquinn8217, 2026-09-09), and green as the
+     configurator's legend is while the pad is live. */
+  #compactBox .clegend { font-size:2.3vh; color:#7fd18c; text-align:center; }
   #compactBox .cinfo { font-size:2.3vh; color:#c8c9ce; text-align:center; line-height:1.4;
     max-width:80vw; }
   #compactBox .cinfo b { color:#e8e8ea; }
-  /* ⭐ Close lives in the bottom-right corner, on its own, away from the
-     actions under the selector. */
-  #compactBox .cclose { flex:0 0 auto; font-size:3.4vh; padding:1.2vh 2.6vw; }
+  /* ⭐ The footer's two corners: Configurator bottom-left, Close bottom-right,
+     away from the actions under the selector (rhoquinn8217, 2026-09-09). */
+  #compactBox .cbar > button { flex:0 0 auto; font-size:3.4vh; padding:1.2vh 2.6vw; }
   body.compact #confirmBox .confirmCard { font-size:5.1vh; max-width:86vw; }
   body.compact #confirmBox .confirmCard h2 { font-size:6.3vh; }
   body.compact #confirmBox .confirmCard p { font-size:5.1vh; }
@@ -860,7 +871,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.64.5</span>
+  <span class="muted" style="font-size:12px">v2.64.6</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -5032,19 +5043,17 @@ function paintCompact() {
   if (!box || !COMPACT) return;
   var d = (LAST_DEVICES || []).filter(function (x) { return x.ordinal === ACTIVE; })[0];
   var many = TABS.filter(isControllerTab).length > 1;
-  // ⭐ Under the selector: New, Edit, Configurator (rhoquinn8217, 2026-09-09).
-  // Edit is the other page on THIS controller, its config's settings;
-  // Configurator is the whole tool, from the top. Close is not here -- it
-  // sits alone in the bottom-right corner, in the footer.
+  // ⭐ Under the selector: New and Edit (rhoquinn8217, 2026-09-09). Edit is
+  // the other page on THIS controller, its config's settings. Configurator,
+  // the whole tool from the top, and Close are the footer's two corners.
   var foot = function (withNew, ordinal) {
     return '<div class="cfoot">' +
       (withNew ? '<button onclick="newConfigFor(\'' + esc(ordinal) + '\')">New</button>' : '') +
-      (ordinal ? '<button onclick="setCompact(false)">Edit</button>' : '') +
-      '<button onclick="openConfigurator()">Configurator</button></div>';
+      (ordinal ? '<button onclick="setCompact(false)">Edit</button>' : '') + '</div>';
   };
   var html = '<div class="cmain">';
   if (!d) {
-    html += '<div class="cempty">No controller is bridged yet.</div>' + foot(false, '');
+    html += '<div class="cempty">Bridge a controller to start.</div>' + foot(false, '');
   } else {
     var kindOk = CONFIGS.filter(function (c) { return settingsKindOf(d.kind) === c.kind; });
     // ⭐ The ring: the controller in focus in the centre, the previous under
@@ -5083,19 +5092,22 @@ function paintCompact() {
         opts += '<option value="' + esc(c.name) + '"' +
                 (c.name === d.linked_config ? ' selected' : '') + '>' + esc(c.name) + '</option>';
       });
-      html += '<select id="cpick" data-ordinal="' + esc(d.ordinal) + '" onchange="compactPick()">' +
-              opts + '</select>' + foot(true, d.ordinal);
+      // The selector under a title, sliding with the ring (rhoquinn8217, 2026-09-09).
+      html += '<div class="csel' + slide + '"><div class="ctitle">Linked config</div>' +
+              '<select id="cpick" data-ordinal="' + esc(d.ordinal) + '" onchange="compactPick()">' +
+              opts + '</select></div>' + foot(true, d.ordinal);
     }
   }
   // ⭐ The footer area: the legend and the way back, as large as the rest.
   // The way back is written out because someone who parked this window and
   // is not used to the chord has no other way to learn it (rhoquinn8217).
   html += '</div>';   // .cmain
-  html += '<div class="cbar"><div class="cbarText">' +
+  html += '<div class="cbar"><button class="cconf" onclick="openConfigurator()">Configurator</button>' +
+          '<div class="cbarText">' +
           '<div class="clegend">L1/R1 controller | \u2715 select | \u25cb close | ' +
           '\\|/ edit | \u2630 move | R3 size</div>' +
           '<div class="cinfo">To bring this window back: <b>hold two fingers on the touchpad ' +
-          'and press Options</b>, or click it in the taskbar.</div>' +
+          'and press Options</b> (DS5 only), or open it with the taskbar icon.</div>' +
           '</div><button class="cclose" onclick="park()">Close</button></div>';
   box.innerHTML = html;
   gpCollect();
