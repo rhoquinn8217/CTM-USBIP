@@ -366,15 +366,15 @@ inline void open_new(uint16_t restPort, bool withToken = true)
     const std::wstring dataDir = std::wstring(profile) + L"ctm-usbip-ui";
 
     // ⭐ The same size the page's Fit window computes -- four fifths of the
-    // screen tall, a tenth wider than it was (rhoquinn8217, 2026-09-08) --
-    // so the window opens right rather than being fitted after it appears.
+    // screen in both directions (rhoquinn8217, 2026-09-08, measured at 250%
+    // scaling, where the page is the main event and not a side panel) -- so
+    // the window opens right rather than being fitted after it appears.
     // ⚠️ These fractions are duplicated in the page's wantSize(); the two
     // must move together. The work area, so the taskbar is not counted.
     RECT wa = { 0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN) };
     SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0);
     const int waW = wa.right - wa.left, waH = wa.bottom - wa.top;
-    int winW = (int)(waW * 0.605);
-    if (winW > 1540) winW = 1540;
+    const int winW = (int)(waW * 0.8);
     const int winH = (int)(waH * 0.8);
     const std::wstring args = L"--app=" + url +
                               L" --user-data-dir=\"" + dataDir + L"\"" +

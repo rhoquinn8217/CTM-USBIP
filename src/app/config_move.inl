@@ -17,12 +17,14 @@
 // ⓘ Options was free on the page. Measured 2026-09-08: the page reads gamepad
 // indices 0-5 and 12-15 and never consults 9, so nothing there loses a button.
 //
-// ⭐ TWO POSITIONS, LEFT AND RIGHT, at whatever size the window is, each
-// held in from the edge by a margin and centred vertically (rhoquinn8217,
-// 2026-09-08 -- three positions with centre was tried on hardware first; the
-// window is four fifths of the screen tall now, so it lives beside the game
-// or nowhere). ⭐ ALWAYS THE MAIN MONITOR: this streams to one large screen,
-// and the keyboard already snaps to the primary display.
+// ⭐ THREE POSITIONS, LEFT, CENTRE, RIGHT, at whatever size the window is,
+// the outer two held in from the edge by a margin, all centred vertically.
+// ⓘ It went to two positions and back in one evening (rhoquinn8217,
+// 2026-09-08): at Windows 250% scaling, the likely setting on a large TV, the
+// page cannot be a side panel and is four fifths of the screen both ways, so
+// centre is where it lives and left and right are a small shift to glance at
+// the game. ⭐ ALWAYS THE MAIN MONITOR: this streams to one large screen, and
+// the keyboard already snaps to the primary display.
 // ⛔ FULLY ON SCREEN, unlike the keyboard, which is allowed to overhang by a
 // third: a keyboard is parked, a page is read.
 //
@@ -83,10 +85,10 @@ inline int snap_margin(const RECT &wa)
     return (wa.right - wa.left) / 20;
 }
 
-// A tap: the OTHER side -- judged from where the window IS, so one that was
-// steered somewhere still goes to a sensible side rather than to whatever a
-// stale flag said. Left when it sits in the right half, right otherwise; and
-// centred vertically, which is what a snap to a defined place means.
+// A tap: the NEXT of left, centre, right -- judged from where the window IS,
+// so one that was steered somewhere still goes somewhere sensible rather than
+// to whatever a stale counter said; and centred vertically, which is what a
+// snap to a defined place means.
 inline void snap_next(HWND hwnd)
 {
     RECT rc;
@@ -95,11 +97,18 @@ inline void snap_next(HWND hwnd)
     const int h = rc.bottom - rc.top;
     const RECT wa = work_area();
     const int margin = snap_margin(wa);
-    const int leftX  = wa.left + margin;
-    const int rightX = wa.right - margin - w;
-    const int centreX = rc.left + w / 2;
-    const int midScreen = wa.left + (wa.right - wa.left) / 2;
-    int x = (centreX >= midScreen) ? leftX : rightX;
+    const int targets[3] = {
+        wa.left + margin,
+        wa.left + ((wa.right - wa.left) - w) / 2,
+        wa.right - margin - w,
+    };
+    int nearest = 0;
+    long best = LONG_MAX;
+    for (int i = 0; i < 3; ++i) {
+        const long d = labs((long)rc.left - (long)targets[i]);
+        if (d < best) { best = d; nearest = i; }
+    }
+    int x = targets[(nearest + 1) % 3];
     int y = wa.top + ((wa.bottom - wa.top) - h) / 2;
     clamp_into(wa, w, h, x, y);
     place(hwnd, x, y);
