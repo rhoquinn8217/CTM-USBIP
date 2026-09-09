@@ -108,12 +108,10 @@ inline const UINT WM_CTM_NUDGE      = WM_APP + 3;
 // because the window belongs to that thread and moving it from the report
 // thread is the kind of thing that works until it does not.
 inline std::atomic_int g_nudgeX{0}, g_nudgeY{0};
-inline std::atomic_bool g_triHeld{false}, g_triMoved{false};
-
-// ⓘ Where the cursor was when the hold began, so the window follows the mouse
-// by its DELTA rather than jumping to wherever the pointer happens to be.
-inline POINT g_dragFrom = { 0, 0 };
-inline bool g_dragHaveFrom = false;
+// ⭐ The tap/hold/steer gesture itself lives in window_move.inl now, shared
+// with the settings page (2026-09-08). This is the keyboard's instance of it;
+// what the keyboard does with a tap or a nudge stays below.
+inline window_move::Mover g_mover;
 
 // ⭐ THREE SIZES, as a share of the screen rather than pixels: 1080p and 4K
 // want very different pixel counts and the same proportion.
@@ -1660,56 +1658,18 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
     // hamburger/menu button already repositions its keyboard.
     // ⚠️ Options previously cycled the FACE. That is not lost -- the tab's own
     // ⌨ key still does it -- but it no longer has a button.
-    const bool tri = button_down(data, len, 9);
-    if (tri && !g_triHeld.load()) {
-        g_triHeld.store(true);
-        g_triMoved.store(false);
-        g_dragHaveFrom = (GetCursorPos(&g_dragFrom) != 0);
-    } else if (!tri && g_triHeld.load()) {
-        g_triHeld.store(false);
-        g_dragHaveFrom = false;
-        if (!g_triMoved.load()) {
-            g_atTop.store(!g_atTop.load());
-            if (g_hwnd != nullptr) PostMessageW(g_hwnd, WM_CTM_REPOSITION, 0, 0);
-        }
+    // ⭐ The gesture is window_move::Mover, shared with the settings page. What
+    // stays here is what the KEYBOARD does with it: a tap flips top/bottom,
+    // a nudge is queued for the window's own thread.
+    const window_move::Step mv = g_mover.step(button_down(data, len, 9), data, len);
+    if (mv.tapped) {
+        g_atTop.store(!g_atTop.load());
+        if (g_hwnd != nullptr) PostMessageW(g_hwnd, WM_CTM_REPOSITION, 0, 0);
     }
-
-    if (g_triHeld.load()) {
-        // ⓘ The left stick, with a deadzone so a resting stick does not creep.
-        // ⛔ Byte 1 and 2 are LX and LY, 0x80 at centre -- the same bytes the
-        // stick mouse reads, and the same reason for the deadzone.
-        const int lx = (int)data[1] - 128;
-        const int ly = (int)data[2] - 128;
-        const int dead = 18;
-        int dx = 0, dy = 0;
-        if (lx > dead || lx < -dead) dx = lx / 16;
-        if (ly > dead || ly < -dead) dy = ly / 16;
-        // ⭐⭐ AND THE MOUSE STEERS IT TOO, on the same hold. Whichever you
-        // reach for works -- the pad or the mouse -- with no button to press
-        // first, which is the rule the hover highlight already follows.
-        //
-        // ⓘ Read from the SYSTEM rather than from mouse messages: the pointer
-        // is usually not over the keyboard while you are placing it, and a
-        // window gets no moves for a cursor outside it.
-        //
-        // ⛔ By the DELTA since the last look, not to the cursor's position --
-        // otherwise the keyboard would leap so its corner sat under the
-        // pointer the moment you held Triangle.
-        POINT now;
-        if (g_dragHaveFrom && GetCursorPos(&now)) {
-            const int mx = now.x - g_dragFrom.x;
-            const int my = now.y - g_dragFrom.y;
-            if (mx != 0 || my != 0) {
-                dx += mx;
-                dy += my;
-                g_dragFrom = now;
-            }
-        }
-
-        if (dx != 0 || dy != 0) {
-            g_nudgeX.fetch_add(dx);
-            g_nudgeY.fetch_add(dy);
-            g_triMoved.store(true);
+    if (mv.holding) {
+        if (mv.dx != 0 || mv.dy != 0) {
+            g_nudgeX.fetch_add(mv.dx);
+            g_nudgeY.fetch_add(mv.dy);
             if (g_hwnd != nullptr) PostMessageW(g_hwnd, WM_CTM_NUDGE, 0, 0);
         }
         // ⛔ While steering, nothing else on the pad acts: the d-pad must not

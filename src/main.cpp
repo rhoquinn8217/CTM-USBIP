@@ -164,10 +164,12 @@ void ctm_rebind_ensure_keyboard_started();
 // ⛔ AFTER keyboard_device.inl, which it types through, and BEFORE rebind.inl,
 //    which calls into it. Both directions matter: the overlay needs the
 //    keyboard to exist, and rebind needs the overlay to exist.
+#include "app/window_move.inl"      // the Options tap/hold/steer gesture, shared by the two windows below
 #include "app/overlay_window.inl"  // --overlay-test: the always-on-top, never-focused window
 // ⚠️ AFTER keyboard_device: rebind pushes key state into it, so it must be
 // defined first. And after gyro_mouse, for device_section_for and the config
 // helpers.
+#include "app/config_move.inl"      // Options moves the settings page; rebind.inl calls it
 #include "input/rebind.inl"
 #include "input/touch_mouse.inl"   // touchpad cursor/scroll/taps; needs the mouse device and the gyro mailbox
 #include "input/stick_mouse.inl"   // stick cursor; needs the gyro gate and mailbox

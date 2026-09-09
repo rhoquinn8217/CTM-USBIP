@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.62.0 -- see the changelog at the bottom of this comment.
+  VERSION 2.63.0 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,14 @@
   tidy message about it.
 
   CHANGELOG
+    2.63.0 The pad legend says "☰ move window": Options now moves this window,
+           tap to snap left, centre, right, hold to steer with the stick or
+           the mouse -- the same gesture as the on-screen keyboard.
+           ⓘ Nothing in the PAGE moves it. The listener does, because only it
+           can see the mouse outside this window; the page just says so.
+           ⛔ "✕ again to leave a value" is gone from the legend. Oddly specific,
+           and obvious once you have done it once (rhoquinn8217, 2026-09-08);
+           its space is what the new entry uses.
     2.18.0 Controller tabs get a name -- "Kestrel - DualSense (Bluetooth)"
            instead of "ds5_usb_1".
            ⓘ A DISPLAY name only. The API keeps the ordinal, so linking, config
@@ -703,7 +711,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.62.0</span>
+  <span class="muted" style="font-size:12px">v2.63.0</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -4757,7 +4765,7 @@ function gpPoll() {
   // ⓘ The count comes from the browser when it can see the pads, and falls
   // back to the singular when only the gate knows one is there.
   hint.textContent = (live.length > 1 ? live.length + ' controllers' : 'controller') +
-                     ' — L1/R1 tabs, D-pad move, ✕ select, ✕ again to leave a value, □ on/off, ○ back';
+                     ' — L1/R1 tabs, D-pad move, ✕ select, □ on/off, ○ back, ☰ move window';
   bar.className = 'live';
   measureGpBar();
 
