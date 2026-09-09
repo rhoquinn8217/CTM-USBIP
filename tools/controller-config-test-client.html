@@ -1294,6 +1294,21 @@ function focusElement(el) {
 // ⓘ focusFirst is what a CLICK on a section title does: you named a section
 // because you want to be in it. ◄ ► leave focus on the strip instead, so
 // stepping through sections stays one axis rather than needing a step back up.
+// ⭐⭐ WHERE YOU WERE IN EACH SECTION (rhoquinn8217, 2026-09-08).
+//
+// **Leave Audio on `speaker_volume`, go to Rumble, come back -- and land on
+// `speaker_volume` again**, not on the section header.
+//
+// ⓘ The same idea as `GP_WANT`, kept once per section instead of once overall,
+// and storing a KEY rather than an element so it survives a rebuild.
+//
+// ⛔ **Cleared when the controller tab changes.** A place in "Audio" means
+// nothing once Audio belongs to a different controller: settings are
+// per-device, so the key would name a row that is not the same row.
+var SECT_PLACE = {};
+
+function forgetSectionPlaces() { SECT_PLACE = {}; }
+
 function showSection(name, focusFirst) {
   // ⭐ KEEP THE STRIP WHERE IT IS ON SCREEN (rhoquinn8217, 2026-09-01).
   //
@@ -1306,6 +1321,16 @@ function showSection(name, focusFirst) {
   // scroll back so it sits there still.
   // ⛔ The strip lookup that used to sit here asked the PANE for it; the strip
   // has been in the header since the merge, so it always found nothing.
+
+  // ⓘ Remember where we were in the section being LEFT, before anything moves.
+  // ⚠️ Never the section header itself, or coming back would land you on the
+  // header you were trying to get away from.
+  if (SECT_ACTIVE && SECT_ACTIVE !== name) {
+    var leaving = GP_FOCUS[GP_INDEX];
+    if (leaving && !leaving.getAttribute('data-sect')) {
+      SECT_PLACE[SECT_ACTIVE] = focusKeyOf(leaving);
+    }
+  }
 
   SECT_ACTIVE = name;
   // ⓘ Every pane, not just the one in view: the section choice is one value for
@@ -1331,7 +1356,29 @@ function showSection(name, focusFirst) {
   // ⛔ The view-holding code that stood here was dead for the same reason as
   // the lookup above, and holding the view where it was is the opposite of
   // what is wanted -- so it is removed rather than repaired.
-  if (!focusElement(focusFirst ? firstControlInSection() : sectBarButton(name))) {
+  // ⭐⭐ WHERE THE HALO LANDS, IN ORDER OF PREFERENCE:
+  //
+  //   1. **Where you were last time in this section** (rhoquinn8217,
+  //      2026-09-08) -- so ► then ◄ puts you back on the setting you left.
+  //   2. **The first SETTING** -- never the section header. ⓘ rhoquinn8217,
+  //      2026-09-08: *"when jumping to a section, the halo should automatically
+  //      choose the first setting -- I believe it was this way before we
+  //      switched from buttons."* ⛔ The header is a tab, not a thing you came
+  //      to change; landing there costs a press every single time.
+  //   3. **The header**, only if the section has no controls at all.
+  //
+  // ⚠️ `focusFirst` no longer decides between first-setting and header -- it now
+  // only says whether a REMEMBERED place may win. The section-tab click passes
+  // true and gets the first setting; ◄ ► pass false and get the memory.
+  var back = null;
+  var remembered = SECT_PLACE[name];
+  if (!focusFirst && remembered) {
+    for (var bi = 0; bi < GP_FOCUS.length; bi++) {
+      if (focusKeyOf(GP_FOCUS[bi]) === remembered) { back = GP_FOCUS[bi]; break; }
+    }
+  }
+
+  if (!focusElement(back || firstControlInSection() || sectBarButton(name))) {
     GP_INDEX = 0;
     gpPaint();
   }
@@ -1339,7 +1386,17 @@ function showSection(name, focusFirst) {
   // a scroll that runs before it can be undone by it -- the strip is sticky and
   // the browser should decide it is already visible, but "should" is how the
   // first two attempts at this failed.
-  scrollSettingsToTop();
+  //
+  // ⛔⛔ BUT NOT WHEN WE LANDED ON A REMEMBERED SETTING (rhoquinn8217,
+  // 2026-09-08). Scrolling to the top is right for a section you are ARRIVING
+  // at -- you want to see it from the beginning. ⚠️ It is wrong when the halo
+  // was just put back on a row near the bottom: this ran AFTER `focusElement`
+  // had scrolled that row into view, and scrolled it straight back out.
+  //
+  // ⓘ Which is exactly why it looked intermittent: it only showed when the
+  // remembered row fell outside the first screenful. And why moving the halo
+  // fixed it -- `gpPaint` scrolls again, with nothing left to undo it.
+  if (!back) scrollSettingsToTop();
 }
 
 // ◄ ► step through the sections in the order they are shown. Returns false
@@ -1984,6 +2041,11 @@ function measureSticky() {
 window.addEventListener('resize', measureSticky);
 
 function showTab(name) {
+  // ⛔ A PLACE IN "Audio" MEANS NOTHING ON ANOTHER CONTROLLER (rhoquinn8217,
+  // 2026-09-08). Settings are per-device, so a remembered row key would name a
+  // row belonging to the pad you just left. ⓘ Cleared on any tab change,
+  // including to Overview.
+  if (ACTIVE !== name) forgetSectionPlaces();
   ACTIVE = name;
   document.querySelectorAll('.pane').forEach(function(p) { p.classList.remove('on'); });
   var pane = document.getElementById('pane-' + name);
@@ -3175,6 +3237,29 @@ var GP_SELECT_WAS = 0;
 // ⓘ Settings controls have stable ids (dv-<ordinal>-<key>) and section buttons
 // carry data-sect, so most things can be named. Anything with neither keeps the
 // old positional behaviour, which is no worse than before.
+// ⛔⛔ EVERY FOCUSABLE MUST HAVE A KEY (T-148).
+//
+// ⭐ `GP_WANT` remembers the element the halo is on, and `gpCollect` hunts for
+// it again after a rebuild. **That mechanism already exists to survive exactly
+// the fault this ticket is about** -- a late `gpCollect()` at the end of
+// `renderConfigEditor`, which runs in a `.then()` on a config GET and therefore
+// lands AFTER `restorePlace` has finished.
+//
+// ⛔ It could not do its job. **MEASURED 2026-09-04: 21 of 25 focusables had NO
+// KEY.** `gpCollect` gathers `button, select, input`; the selects and inputs
+// carry `dv-…` ids, and the BUTTONS largely do not -- so this returned `''` for
+// most of the page, and an empty key can never be matched in the rebuilt list.
+// The halo then landed wherever the stale index happened to point.
+//
+// ➡️ A keyless element now gets a key from its SHAPE: what it is, whose row it
+// is in, and what it says -- `k:BUTTON:stickyHead:Reset`. ⓘ Stable across a
+// rebuild, because a rebuild recreates the same shape. That is what an id would
+// have given us, without adding ids to every button on the page.
+//
+// ⚠️ **This is NOT the "cancel the restore" approach that was tried and
+// reverted twice.** It touches no flag, adds no timer, and does not care
+// whether a person is driving: it simply lets the existing mechanism identify
+// what it is already looking for.
 function focusKeyOf(el) {
   if (!el) return '';
   if (el.id) return el.id;
@@ -3182,7 +3267,10 @@ function focusKeyOf(el) {
     var sect = el.getAttribute('data-sect');
     if (sect) return 'sect:' + sect;
   }
-  return '';
+  var row = el.closest ? el.closest('[id]') : null;
+  var text = (el.textContent || el.value || '').trim().slice(0, 24);
+  return 'k:' + (el.tagName || '?') + ':' +
+         (row && row.id ? row.id : '-') + ':' + text;
 }
 
 // ⭐ The halo's INTENDED target, remembered even while it is briefly absent --
@@ -4256,7 +4344,26 @@ function restorePlace() {
     // ⭐ The section first: with one shown at a time, the focus list is built
     // from the visible one, so restoring the halo before the section would
     // index into the wrong list entirely.
-    if (want.sect && want.sect !== SECT_ACTIVE) showSection(want.sect, false);
+    // ⛔⛔ SHOWING THE SECTION MUST NOT FORGET WHERE WE ARE GOING (T-148).
+    //
+    // `showSection` parks the halo on the section's header -- by design, since
+    // switching sections normally means you want the header. ⚠️ **But it goes
+    // through `focusElement`, which REWRITES `GP_WANT`.** So the restore's own
+    // first act erased the place it was about to restore, and any later
+    // `gpCollect` -- notably the one at the end of `renderConfigEditor`, which
+    // runs in a `.then()` and lands after all of this -- hunted for the HEADER
+    // and found it.
+    //
+    // ➡️ That is the whole fault: nothing was ever lost, and no restore was
+    // racing a person. **The restore overwrote its own target.**
+    //
+    // ⓘ Put back afterwards. `settle()` below moves the halo properly and sets
+    // GP_WANT itself; this only has to survive the gap between the two.
+    if (want.sect && want.sect !== SECT_ACTIVE) {
+      var keepWant = GP_WANT;
+      showSection(want.sect, false);
+      GP_WANT = keepWant;
+    }
 
     var settle = function () {
       gpCollect();
