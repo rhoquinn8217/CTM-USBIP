@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.64.6 -- see the changelog at the bottom of this comment.
+  VERSION 2.64.7 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,11 @@
   tidy message about it.
 
   CHANGELOG
+    2.64.7 Compact does not scroll: a stick on the wheel was creeping the
+           page in every direction. The empty state reads "Create a custom
+           controller config" over a Start button of its own, with no Edit
+           until there is something to edit; the selector's title is
+           "Controller Config" (rhoquinn8217, 2026-09-09).
     2.64.6 Compact: Configurator moves to the footer's bottom-left corner,
            the legend is green as the configurator's is, the selector is two
            thirds its size under a "Linked config" title and slides with the
@@ -439,7 +444,12 @@
      never reaches the page, so the page cannot be told the size -- but it does
      not need to be: vh follows the window, so when R3 resizes it, every line
      here grows or shrinks with it. */
-  body.compact { padding:0; }
+  /* ⭐ COMPACT DOES NOT SCROLL (rhoquinn8217, 2026-09-09): a stick bound to
+     the wheel still turns it in config mode, on purpose, and a page a pixel
+     taller than its window crept in every direction under it. The view is
+     sized to fit; the preset boxes scroll inside themselves. ⓘ On body, which
+     the viewport takes as its own while html says nothing. */
+  body.compact { padding:0; overflow:hidden; }
   body.compact #compactBox { display:flex; flex-direction:column; align-items:center;
     justify-content:flex-start; gap:0; padding:4vh 4vw 3vh; min-height:100vh;
     box-sizing:border-box; }
@@ -871,7 +881,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.64.6</span>
+  <span class="muted" style="font-size:12px">v2.64.7</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -5080,12 +5090,12 @@ function paintCompact() {
     if (!kindOk.length) {
       // ⭐ The empty state is DELIBERATELY different: a first preset deserves
       // a button that looks like it will do something, not a footer button.
-      // Same words as the footer's, so one action has one name -- only its
-      // room changes. It opens the preset selector, info page and confirm
-      // that already exist.
-      html += '<div class="cempty">This controller has no config yet.</div>' +
-              '<button class="cbig go" onclick="newConfigFor(\'' + esc(d.ordinal) + '\')">New</button>' +
-              foot(false, d.ordinal);
+      // ⓘ It is "Start", its own button that shows only here and hides itself
+      // once a config exists; the footer's New stays New (rhoquinn8217,
+      // 2026-09-09). No Edit here: there is nothing to edit yet. It opens the
+      // preset selector, info page and confirm that already exist.
+      html += '<div class="cempty">Create a custom controller config</div>' +
+              '<button class="cbig go" onclick="newConfigFor(\'' + esc(d.ordinal) + '\')">Start</button>';
     } else {
       var opts = '<option value="">(no config)</option>';
       kindOk.forEach(function (c) {
@@ -5093,7 +5103,7 @@ function paintCompact() {
                 (c.name === d.linked_config ? ' selected' : '') + '>' + esc(c.name) + '</option>';
       });
       // The selector under a title, sliding with the ring (rhoquinn8217, 2026-09-09).
-      html += '<div class="csel' + slide + '"><div class="ctitle">Linked config</div>' +
+      html += '<div class="csel' + slide + '"><div class="ctitle">Controller Config</div>' +
               '<select id="cpick" data-ordinal="' + esc(d.ordinal) + '" onchange="compactPick()">' +
               opts + '</select></div>' + foot(true, d.ordinal);
     }
