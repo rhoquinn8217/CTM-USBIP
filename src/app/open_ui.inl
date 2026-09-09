@@ -365,10 +365,21 @@ inline void open_new(uint16_t restPort, bool withToken = true)
     GetTempPathW(MAX_PATH, profile);
     const std::wstring dataDir = std::wstring(profile) + L"ctm-usbip-ui";
 
+    // ⭐ The same size the page's Fit window computes -- four fifths of the
+    // screen tall, a tenth wider than it was (rhoquinn8217, 2026-09-08) --
+    // so the window opens right rather than being fitted after it appears.
+    // ⚠️ These fractions are duplicated in the page's wantSize(); the two
+    // must move together. The work area, so the taskbar is not counted.
+    RECT wa = { 0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN) };
+    SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0);
+    const int waW = wa.right - wa.left, waH = wa.bottom - wa.top;
+    int winW = (int)(waW * 0.605);
+    if (winW > 1540) winW = 1540;
+    const int winH = (int)(waH * 0.8);
     const std::wstring args = L"--app=" + url +
                               L" --user-data-dir=\"" + dataDir + L"\"" +
                               L" --no-first-run --no-default-browser-check" +
-                              L" --window-size=1150,820";
+                              L" --window-size=" + std::to_wstring(winW) + L"," + std::to_wstring(winH);
     // ⛔ CHECK THE RESULT. This logged "settings page opened" unconditionally,
     // so a launch that never happened looked identical to one that did --
     // measured 2026-08-29, when no Chrome process and no profile folder
