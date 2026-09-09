@@ -39,10 +39,43 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <mutex>
+#include <unordered_map>
 
 namespace config_move {
 
 inline window_move::Mover g_mover;
+
+// ⭐ THREE SIZES ON R3, as the keyboard has (rhoquinn8217, 2026-09-08), as a
+// share of the work area rather than pixels so 250% scaling and an unscaled 4K
+// screen get the same proportion.
+//
+//   small   0.55 x 0.66   the page's first size, before it grew
+//   medium  0.68 x 0.73   halfway
+//   large   0.80 x 0.80   four fifths both ways -- the size it opens at, and
+//                         the size the page's own Fit window restores
+//
+// ⓘ The index lives here for the life of the listener, like the keyboard's
+// g_size. The page does not know it: Fit window means "large, centred" and
+// says so. ⛔ Starts at LARGE, unlike the keyboard's medium, because large is
+// what was on screen when the sizes were asked for.
+struct SizeShare { double w; double h; };
+inline const SizeShare kSizes[3] = { { 0.55, 0.66 }, { 0.68, 0.73 }, { 0.80, 0.80 } };
+inline std::atomic_int g_size{2};
+
+// ⓘ Own edge tracking for R3 rather than ctm_overlay::edge(): that table's
+// slots are the keyboard's, and slot 11 is already R3 there.
+inline std::mutex g_r3Mutex;
+inline std::unordered_map<const void *, bool> g_r3Down;
+
+inline bool r3_edge(const void *deviceKey, bool downNow)
+{
+    std::lock_guard<std::mutex> lock(g_r3Mutex);
+    bool &was = g_r3Down[deviceKey];
+    const bool rising = downNow && !was;
+    was = downNow;
+    return rising;
+}
 
 // The settings page's window, found the way focus_existing() finds it: by the
 // marker the page appends to its own title when we opened it. nullptr when
@@ -114,6 +147,25 @@ inline void snap_next(HWND hwnd)
     place(hwnd, x, y);
 }
 
+// R3: the next size, applied about the window's CENTRE so it grows and
+// shrinks in place, then clamped fully on screen.
+inline void resize_next(HWND hwnd)
+{
+    RECT rc;
+    if (!GetWindowRect(hwnd, &rc)) return;
+    const int idx = (g_size.load() + 1) % 3;
+    g_size.store(idx);
+    const RECT wa = work_area();
+    const int w = (int)((wa.right - wa.left) * kSizes[idx].w);
+    const int h = (int)((wa.bottom - wa.top) * kSizes[idx].h);
+    const int cx = rc.left + (rc.right - rc.left) / 2;
+    const int cy = rc.top + (rc.bottom - rc.top) / 2;
+    int x = cx - w / 2;
+    int y = cy - h / 2;
+    clamp_into(wa, w, h, x, y);
+    SetWindowPos(hwnd, nullptr, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
 inline void nudge(HWND hwnd, int dx, int dy)
 {
     RECT rc;
@@ -131,14 +183,20 @@ inline void nudge(HWND hwnd, int dx, int dy)
 // be walking the page's settings.
 inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len)
 {
-    (void)deviceKey;
     if (data == nullptr || len < 11) return false;
 
     if (!ctm_rebind_config_mode_effective()) {
         // ⛔ Not our window in front. Forget any hold in progress, so a release
         // seen later -- with the page back in front -- is not read as a tap.
         if (g_mover.held.load()) g_mover.abandon();
+        r3_edge(deviceKey, false);
         return false;
+    }
+
+    // ⓘ R3 is free on the page as Options is: it never reads index 10 or 11.
+    if (r3_edge(deviceKey, ctm_overlay::button_down(data, len, 11))) {
+        if (HWND h = page_window()) resize_next(h);
+        // The press goes through; the page ignores R3.
     }
 
     const window_move::Step mv = g_mover.step(ctm_overlay::button_down(data, len, 9), data, len);
