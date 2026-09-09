@@ -64,6 +64,7 @@ static bool device_config_bool(const char *, const char *key, bool fallback)
     return it->second == "true";
 }
 static bool ctm_rebind_config_mode_effective() { return g_configModeEffective; }
+static bool ctm_window_steering(const void *) { return false; }   // no window is being steered in a test
 static void ctm_gyro_mouse_ensure_mouse_started() {}
 
 // The gate machinery the stick shares with gyro. Mirrors the real enum and the

@@ -392,6 +392,15 @@ void ctm_stick_mouse_apply(const void *deviceKey,
                            const std::string &linkedConfig,
                            const uint8_t *data, size_t len)
 {
+    // ⭐ NOT WHILE THE STICK IS STEERING A WINDOW (rhoquinn8217, 2026-09-09).
+    // With Options held, the left stick moves the settings page or the
+    // keyboard, and the report is blanked before the game sees it -- but this
+    // hook runs before either window looks, so the same stick was also
+    // driving the mouse into whatever was under the cursor. The pad's mover
+    // knows; it is asked first. ⓘ Through a plain function rather than the
+    // window_move namespace, because this file's test builds without it and
+    // stubs the answer the way it stubs the gate.
+    if (ctm_window_steering(deviceKey)) return;
     ctm_stick_mouse::on_ds5_input(deviceKey, descriptor, linkedConfig, data, len);
 }
 

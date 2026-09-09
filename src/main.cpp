@@ -168,6 +168,9 @@ void ctm_rebind_ensure_keyboard_started();
 //    which calls into it. Both directions matter: the overlay needs the
 //    keyboard to exist, and rebind needs the overlay to exist.
 #include "app/window_move.inl"      // the Options tap/hold/steer gesture, shared by the two windows below
+// Asked by the stick-to-mouse hook, included further down: is this pad steering
+// a window with Options? Its test stubs this the way it stubs the gate.
+static bool ctm_window_steering(const void *deviceKey) { return window_move::steering(deviceKey); }
 #include "app/overlay_window.inl"  // --overlay-test: the always-on-top, never-focused window
 // ⚠️ AFTER keyboard_device: rebind pushes key state into it, so it must be
 // defined first. And after gyro_mouse, for device_section_for and the config
