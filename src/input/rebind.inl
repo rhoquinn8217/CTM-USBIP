@@ -1125,5 +1125,12 @@ void ctm_rebind_apply(const void *deviceKey,
         ctm_overlay::blank_report(data, len);
         return;
     }
+    // ⭐ Options moves the settings page while it is up and in front, the way
+    // it moves the keyboard (2026-09-08). ⓘ After the keyboard on purpose: if
+    // both are showing, the keyboard has the pad, as it always has.
+    if (config_move::handle_report(deviceKey, data, len)) {
+        ctm_overlay::blank_report(data, len);
+        return;
+    }
     ctm_rebind::apply(deviceKey, descriptor, linkedConfig, data, len);
 }

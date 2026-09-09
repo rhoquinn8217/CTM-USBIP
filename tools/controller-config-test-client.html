@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.62.0 -- see the changelog at the bottom of this comment.
+  VERSION 2.63.3 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,26 @@
   tidy message about it.
 
   CHANGELOG
+    2.63.3 The pad legend gains "R3 size": the listener cycles this window
+           through three sizes, as it does the keyboard's (rhoquinn8217,
+           2026-09-08). Fit window is the large one, centred.
+    2.63.2 Four fifths of the screen wide as well as tall, with no pixel cap.
+           Measured at Windows 250% scaling, the likely setting on a large TV:
+           the page is the main event there, not a side panel, and a cap that
+           made sense on an unscaled monitor made it one (rhoquinn8217,
+           2026-09-08). The listener's snap has its centre position back.
+    2.63.1 The pad legend uses " | " between entries, as the keyboard's does.
+           The window is taller -- four fifths of the screen -- and a tenth
+           wider; Fit window, the on-load check and the listener's spawn size
+           now all come from one set of fractions (rhoquinn8217, 2026-09-08).
+    2.63.0 The pad legend says "☰ move window": Options now moves this window,
+           tap to snap left, centre, right, hold to steer with the stick or
+           the mouse -- the same gesture as the on-screen keyboard.
+           ⓘ Nothing in the PAGE moves it. The listener does, because only it
+           can see the mouse outside this window; the page just says so.
+           ⛔ "✕ again to leave a value" is gone from the legend. Oddly specific,
+           and obvious once you have done it once (rhoquinn8217, 2026-09-08);
+           its space is what the new entry uses.
     2.18.0 Controller tabs get a name -- "Kestrel - DualSense (Bluetooth)"
            instead of "ds5_usb_1".
            ⓘ A DISPLAY name only. The API keeps the ordinal, so linking, config
@@ -703,7 +723,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.62.0</span>
+  <span class="muted" style="font-size:12px">v2.63.3</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -956,9 +976,22 @@ function call(method, path, body, quiet) {
 //
 // ⚠️ Only in an APP window. A normal browser tab silently ignores moveTo and
 // resizeTo, so this does nothing there rather than failing loudly.
+// ⭐ ONE PLACE FOR THE SIZE: four fifths of the screen in BOTH directions
+// (rhoquinn8217, 2026-09-08). Measured at Windows 250% scaling, which is what
+// a large TV will run: the page cannot be a side panel there, it is the main
+// event, so it takes most of the screen. ⛔ No pixel cap -- a cap is what made
+// it a side panel on an unscaled 4K screen. Fit window and the on-load check
+// both read this, and the listener's spawn line uses the same fractions -- if
+// these numbers change, open_ui.inl's --window-size changes with them.
+// ⓘ This is the LARGE of the three sizes R3 cycles in the listener; Fit window
+// therefore means "large, centred". The listener keeps the other two.
+function wantSize() {
+  return { w: Math.round(screen.availWidth * 0.8),
+           h: Math.round(screen.availHeight * 0.8) };
+}
 function fitWindow() {
-  var w = Math.round(Math.min(1400, screen.availWidth * 0.55));
-  var h = Math.round(screen.availHeight * 0.66);
+  var w = wantSize().w;
+  var h = wantSize().h;
 
   window.resizeTo(w, h);
   window.moveTo(Math.round((screen.availWidth  - w) / 2),
@@ -1081,8 +1114,8 @@ function offerRealWindow() {
 }
 
 function fitWindowIfOversized() {
-  var wantW = Math.min(1400, screen.availWidth * 0.55);
-  var wantH = screen.availHeight * 0.66;
+  var wantW = wantSize().w;
+  var wantH = wantSize().h;
   if (window.outerWidth > wantW * 1.15 || window.outerHeight > wantH * 1.15) {
     fitWindow();
   }
@@ -4757,7 +4790,7 @@ function gpPoll() {
   // ⓘ The count comes from the browser when it can see the pads, and falls
   // back to the singular when only the gate knows one is there.
   hint.textContent = (live.length > 1 ? live.length + ' controllers' : 'controller') +
-                     ' — L1/R1 tabs, D-pad move, ✕ select, ✕ again to leave a value, □ on/off, ○ back';
+                     ' — L1/R1 tabs | D-pad move | ✕ select | □ on/off | ○ back | ☰ move window | R3 size';
   bar.className = 'live';
   measureGpBar();
 
