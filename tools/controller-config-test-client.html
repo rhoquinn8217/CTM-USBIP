@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.64.8 -- see the changelog at the bottom of this comment.
+  VERSION 2.64.9 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,12 @@
   tidy message about it.
 
   CHANGELOG
+    2.64.9 Compact has a listener-not-connected screen of its own. Its
+           content is centred under a strip kept for the bubbles. Every
+           preset section is two columns. The leaving box centres its title
+           over buttons of one width: "Custom config applied!" with two, and
+           "Pre-set config created!" with three, "Customize it" opening the
+           configurator on the controller (rhoquinn8217, 2026-09-09).
     2.64.8 The preset description lists its buttons in two columns, in both
            views. Compact's leaving box is title and buttons only, and a new
            preset asks "Pre-set config created!" with "Try it out now" or
@@ -444,6 +450,12 @@
      pad's focus list by itself -- gpCollect skips what has no offsetParent. */
   body.compact #tabs, body.compact #stickyHead, body.compact #sectBar,
   body.compact #renameRow, body.compact .pane, body.compact #gpbar { display:none !important; }
+  /* Compact has a down screen of its own; the full page's cover and help stay hidden. */
+  body.compact #downCover, body.compact #offlineHelp { display:none !important; }
+  #compactBox .cbad { color:#ff8f8f; }
+  #compactBox .csub { font-size:3vh; color:#c8c9ce; text-align:center; line-height:1.4; max-width:80vw; }
+  #compactBox .ccmd { font-family:ui-monospace, Consolas, monospace; font-size:3vh; color:#cfe0f5;
+    background:#1c1e26; padding:1vh 2vw; border-radius:1vh; }
   #compactBox { display:none; }
   /* ⭐ SIZED IN VIEWPORT UNITS, ON PURPOSE (rhoquinn8217, 2026-09-09: too much
      empty space; and R3 must change the text too). R3 lives in the listener and
@@ -461,8 +473,10 @@
     box-sizing:border-box; }
   /* ⭐ The content centres in the room above the footer; the footer is pinned
      to the bottom of the page (rhoquinn8217, 2026-09-09). */
+  /* ⓘ Centred in the room UNDER the bubbles: the top tenth is theirs, so a
+     notice never sits on a controller's name (rhoquinn8217, 2026-09-09). */
   #compactBox .cmain { flex:1 1 auto; width:100%; display:flex; flex-direction:column;
-    align-items:center; justify-content:flex-start; padding-top:2vh; gap:4.5vh; }
+    align-items:center; justify-content:center; padding-top:10vh; gap:4.5vh; }
   /* ⓘ Every size here is 1.5x the first cut (rhoquinn8217, 2026-09-09). */
   /* ⭐ THE CAROUSEL: the controller in focus stays in the centre, its
      neighbours sit dimmed either side under L1 and R1, and L1/R1 rotate the
@@ -822,6 +836,14 @@
   #presetInfoBox .confirmCard { max-width:640px; }
   /* A confirm box with nothing to say under its title says nothing. */
   #confirmText:empty { display:none; }
+  /* ⭐ The leaving box: a centred title over buttons of ONE width
+     (rhoquinn8217, 2026-09-09). A grid, so every button is as wide as the
+     widest, however many there are. */
+  #confirmBox.cexit .confirmCard h2 { text-align:center; }
+  #confirmBox.cexit .confirmBtns { display:grid; grid-auto-flow:column; grid-auto-columns:1fr; }
+  #confirmBox.cexit .confirmBtns button { white-space:nowrap; }
+  body.compact #confirmBox.cexit .confirmCard { max-width:94vw; }
+  body.compact #confirmBox.cexit .confirmCard button { font-size:4.2vh; padding:1.2vh 2vw; }
   /* ⛔ WITHOUT THIS the sticky header swallows a jumped-to section. Every
      control already has the same margin; the section wrapper did not, so
      scrollIntoView put it at the very top of the viewport -- underneath the
@@ -899,7 +921,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.64.8</span>
+  <span class="muted" style="font-size:12px">v2.64.9</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -2100,9 +2122,9 @@ function presetTable(title, rows) {
     return t + '</table>';
   };
   var html = '<h4>' + esc(title) + '</h4>';
-  // ⭐ The buttons split into two columns once there are enough to be a list
-  // (rhoquinn8217, 2026-09-09); the first column takes the odd one.
-  if (title === 'Buttons' && rows.length >= 4) {
+  // ⭐ Every section is two columns (rhoquinn8217, 2026-09-09); the first
+  // column takes the odd one, and a single row stays a single row.
+  if (rows.length >= 2) {
     var half = Math.ceil(rows.length / 2);
     return html + '<div class="ptwo">' + table(rows.slice(0, half)) +
            table(rows.slice(half)) + '</div>';
@@ -2187,7 +2209,12 @@ function createFromPreset(ordinal, preset) {
       loadConfigs(); loadDevices();
       // ⭐ The same ending as picking one, in a new config's words: try it in
       // the game, or stay and customise it (rhoquinn8217, 2026-09-09).
-      if (COMPACT) compactAskExit('Pre-set config created!', 'Try it out now', 'Customize it');
+      // "Customize it" is the configurator on this controller, where the
+      // new config's settings are; "Go back" is the compact view as it was.
+      if (COMPACT) compactAskExit('Pre-set config created!', [
+        { label: 'Try it out now', act: park },
+        { label: 'Customize it', act: function () { setCompact(false); } },
+        { label: 'Go back' }]);
     })
     .catch(function(){});
 }
@@ -5086,21 +5113,40 @@ function park() {
 // back afterwards; askConfirm() already focuses the declining button.
 var CONFIRM_ON_NO = null;
 // ⓘ The title is the whole question and the buttons are the answers; there
-// is no line under the title (rhoquinn8217, 2026-09-09). The labels are the
-// caller's: a pick and a fresh preset ask in different words.
-function compactAskExit(title, goLabel, stayLabel) {
+// is no line under the title (rhoquinn8217, 2026-09-09). The buttons are the
+// caller's: the first is the confirm box's own OK, the last its Cancel, and
+// any between are added for the asking and removed after -- so a fresh
+// preset can offer three where a pick offers two, on the one dialog the pad
+// already knows how to walk.
+function compactAskExit(title, buttons) {
+  var box = document.getElementById('confirmBox');
+  var row = box ? box.querySelector('.confirmBtns') : null;
   var yes = document.getElementById('confirmYes');
   var no = document.querySelector('#confirmBox button:last-of-type');
-  var yesWas = yes ? yes.textContent : '';
-  var noWas = no ? no.textContent : '';
+  if (!row || !yes || !no) return;
+  var yesWas = yes.textContent;
+  var noWas = no.textContent;
+  var extra = [];
   var restore = function () {
-    if (yes) yes.textContent = yesWas;
-    if (no) no.textContent = noWas;
+    yes.textContent = yesWas;
+    no.textContent = noWas;
+    extra.forEach(function (b) { if (b.parentNode) b.parentNode.removeChild(b); });
+    extra = [];
+    box.classList.remove('cexit');
   };
-  if (yes) yes.textContent = goLabel;
-  if (no) no.textContent = stayLabel;
+  yes.textContent = buttons[0].label;
+  no.textContent = buttons[buttons.length - 1].label;
+  buttons.slice(1, -1).forEach(function (b) {
+    var el = document.createElement('button');
+    el.textContent = b.label;
+    el.onclick = function () { confirmNo(); if (b.act) b.act(); };   // confirmNo restores
+    row.insertBefore(el, no);
+    extra.push(el);
+  });
+  box.classList.add('cexit');
   CONFIRM_ON_NO = restore;
-  askConfirm(title, '', function () { restore(); park(); });
+  var go = buttons[0].act;
+  askConfirm(title, '', function () { restore(); if (go) go(); });
 }
 
 function compactPick() {
@@ -5112,7 +5158,8 @@ function compactPick() {
   var ordinal = sel.dataset.ordinal;
   var body = sel.value ? { config: sel.value } : {};
   call('POST', '/api/v1/devices/' + encodeURIComponent(ordinal) + '/link', body)
-    .then(function () { loadDevices(); loadConfigs(); if (sel.value) compactAskExit('Config applied', 'Back to the game', 'Stay here'); })
+    .then(function () { loadDevices(); loadConfigs(); if (sel.value) compactAskExit('Custom config applied!', [
+      { label: 'Back to the game', act: park }, { label: 'Stay here' }]); })
     .catch(function () {});
 }
 
@@ -5130,7 +5177,15 @@ function paintCompact() {
       (ordinal ? '<button onclick="setCompact(false)">Edit</button>' : '') + '</div>';
   };
   var html = '<div class="cmain">';
-  if (!d) {
+  if (IS_DOWN) {
+    // ⭐ THE LISTENER IS NOT ANSWERING (rhoquinn8217, 2026-09-09). The full
+    // page has its cover; compact says the same thing at its own size, with
+    // the address that failed and the line that starts the listener.
+    html += '<div class="cempty"><span class="cbad">\u2717</span> Listener not connected</div>' +
+            '<div class="csub">No reply from ' + esc(base()) + '. Start it, or restart it ' +
+            'if it was just rebuilt:</div>' +
+            '<div class="ccmd">ctm-usbip.exe agent 48054 --rest 48055 --ui</div>';
+  } else if (!d) {
     html += '<div class="cempty">Bridge a controller to start.</div>' + foot(false, '');
   } else {
     var kindOk = CONFIGS.filter(function (c) { return settingsKindOf(d.kind) === c.kind; });
@@ -5557,6 +5612,7 @@ function setDown(down) {
   // visible on every controller tab afterwards -- showTab dutifully removed the
   // class and nothing happened.
   if (pane) pane.style.display = down ? 'none' : '';
+  if (COMPACT) paintCompact();   // compact paints its own down screen
   if (!down) {
     // ⭐ RELOAD, rather than repainting.
     //
