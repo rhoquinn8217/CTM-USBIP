@@ -111,7 +111,10 @@ inline std::atomic_int g_nudgeX{0}, g_nudgeY{0};
 // ⭐ The tap/hold/steer gesture itself lives in window_move.inl now, shared
 // with the settings page (2026-09-08). This is the keyboard's instance of it;
 // what the keyboard does with a tap or a nudge stays below.
-inline window_move::Mover g_mover;
+// ⭐ One mover PER PAD (T-162, 2026-09-09): two bridged pads sharing one made
+// a hold on either flip top/bottom on every report of the other. See
+// window_move::Movers.
+inline window_move::Movers g_movers;
 
 // ⭐ THREE SIZES, as a share of the screen rather than pixels: 1080p and 4K
 // want very different pixel counts and the same proportion.
@@ -1661,7 +1664,7 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
     // ⭐ The gesture is window_move::Mover, shared with the settings page. What
     // stays here is what the KEYBOARD does with it: a tap flips top/bottom,
     // a nudge is queued for the window's own thread.
-    const window_move::Step mv = g_mover.step(button_down(data, len, 9), data, len);
+    const window_move::Step mv = g_movers.for_key(deviceKey).step(button_down(data, len, 9), data, len);
     if (mv.tapped) {
         g_atTop.store(!g_atTop.load());
         if (g_hwnd != nullptr) PostMessageW(g_hwnd, WM_CTM_REPOSITION, 0, 0);

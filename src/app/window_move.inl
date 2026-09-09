@@ -29,6 +29,9 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
+#include <unordered_map>
+#include <vector>
 
 namespace window_move {
 
@@ -109,5 +112,67 @@ struct Mover {
         return out;
     }
 };
+
+// ⭐⭐ ONE MOVER PER PAD (T-162, 2026-09-09). A single Mover shared between two
+// bridged pads read pad A holding Options and pad B's next report -- Options
+// up, as it always is on the pad NOT being held -- as a release, fired a tap,
+// then pad A's next report set it held again: a snap on every report of the
+// other pad, six milliseconds apart in device.log, for as long as Options was
+// down. ⓘ The keyboard's key latch went per device for the same reason on
+// 2026-09-04 ("a static would let one pad's press decide the other's key");
+// this is the same shape one file over. Each window keeps one of these and
+// asks for its pad's mover by key.
+//
+// ⓘ The map's nodes are stable, so a reference handed out survives later
+// pads arriving; a Mover holds atomics and is neither copied nor moved.
+struct Movers {
+    Movers() { registry().push_back(this); }
+
+    Mover &for_key(const void *key)
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        return byKey[key];
+    }
+
+    // Drop every hold without a tap: the window these serve stopped being the
+    // one in front, whichever pad was holding.
+    void abandon_all()
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        for (auto &kv : byKey) kv.second.abandon();
+    }
+
+    bool holding(const void *key)
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        auto it = byKey.find(key);
+        return it != byKey.end() && it->second.held.load();
+    }
+
+    // Every Movers there is -- one per window -- so a hook that runs before
+    // either window sees the report can still ask whether a pad is steering.
+    static std::vector<Movers *> &registry()
+    {
+        static std::vector<Movers *> all;
+        return all;
+    }
+
+    std::mutex mutex;
+    std::unordered_map<const void *, Mover> byKey;
+};
+
+// ⭐ IS THIS PAD STEERING A WINDOW? (rhoquinn8217, 2026-09-09: the left stick
+// went to the game while Options was held.) The stick steers the window during
+// the hold and the report is blanked after -- but the stick-to-mouse hook runs
+// BEFORE either window sees the report, so it drove the mouse with the same
+// stick, into whatever was under the cursor. It asks here and stands aside
+// while the answer is yes.
+inline bool steering(const void *key)
+{
+    for (Movers *m : Movers::registry()) {
+        if (m->holding(key)) return true;
+    }
+    return false;
+}
 
 } // namespace window_move

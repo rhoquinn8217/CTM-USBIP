@@ -38,14 +38,14 @@
 #include <climits>
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
 #include <cstdlib>
 #include <mutex>
 #include <unordered_map>
 
 namespace config_move {
 
-inline window_move::Mover g_mover;
+// ⭐ One mover PER PAD (T-162): see window_move::Movers for why.
+inline window_move::Movers g_movers;
 
 // ⭐ THREE SIZES ON R3, as the keyboard has (rhoquinn8217, 2026-09-08), as a
 // share of the work area rather than pixels so 250% scaling and an unscaled 4K
@@ -99,43 +99,6 @@ inline bool r3_edge(const void *deviceKey, bool downNow)
     const bool rising = downNow && !was;
     was = downNow;
     return rising;
-}
-
-// ⚠️ DIAGNOSTIC, T-162 (2026-09-09), remove with the fix. Options "rapid-fires"
-// while held -- the window snaps over and over -- with ONE pad bridged, which
-// a mover shared between pads cannot explain. This writes a device.log line
-// each time the Options bit CHANGES as this function sees it, with the report
-// id, its length, bytes 8 to 10 and the mover's state, and one line per tap.
-// Read back: a bit that flips every report names a second report shape from
-// the pad or the dongle; a steady bit with taps names something downstream.
-// Capped, so a real flap cannot fill the disk.
-inline std::atomic_int g_diagLines{0};
-inline std::unordered_map<const void *, int> g_diagLast;   // per device: 0 up, 1 down
-
-inline void diag_line(const char *line)
-{
-    if (g_diagLines.fetch_add(1) > 600) return;
-    device_log::input(line);
-}
-
-inline void diag_options(const void *deviceKey, const uint8_t *data, size_t len, bool down, bool effective)
-{
-    int was;
-    {
-        std::lock_guard<std::mutex> lock(g_r3Mutex);
-        auto it = g_diagLast.find(deviceKey);
-        was = (it == g_diagLast.end()) ? -1 : it->second;
-        g_diagLast[deviceKey] = down ? 1 : 0;
-    }
-    if (was == (down ? 1 : 0)) return;
-    char line[200];
-    std::snprintf(line, sizeof(line),
-                  "T-162 options %s key=%p id=0x%02x len=%u b8=0x%02x b9=0x%02x b10=0x%02x "
-                  "effective=%d held=%d moved=%d",
-                  down ? "DOWN" : "up", deviceKey, (unsigned)data[0], (unsigned)len,
-                  (unsigned)data[8], (unsigned)data[9], (unsigned)data[10],
-                  (int)effective, (int)g_mover.held.load(), (int)g_mover.moved.load());
-    diag_line(line);
 }
 
 // The settings page's window, found the way focus_existing() finds it: by the
@@ -249,13 +212,11 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
 {
     if (data == nullptr || len < 11) return false;
 
-    const bool effective = ctm_rebind_config_mode_effective();
-    diag_options(deviceKey, data, len, ctm_overlay::button_down(data, len, 9), effective);   // T-162
-
-    if (!effective) {
-        // ⛔ Not our window in front. Forget any hold in progress, so a release
-        // seen later -- with the page back in front -- is not read as a tap.
-        if (g_mover.held.load()) g_mover.abandon();
+    if (!ctm_rebind_config_mode_effective()) {
+        // ⛔ Not our window in front. Forget any hold in progress, on any pad,
+        // so a release seen later -- with the page back in front -- is not
+        // read as a tap.
+        g_movers.abandon_all();
         r3_edge(deviceKey, false);
         return false;
     }
@@ -266,10 +227,12 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
         // The press goes through; the page ignores R3.
     }
 
-    const window_move::Step mv = g_mover.step(ctm_overlay::button_down(data, len, 9), data, len);
+    // ⭐ THIS pad's mover, so another pad's reports -- Options up, as always on
+    // the pad not being held -- cannot end this pad's hold (T-162).
+    const window_move::Step mv =
+        g_movers.for_key(deviceKey).step(ctm_overlay::button_down(data, len, 9), data, len);
 
     if (mv.tapped) {
-        diag_line("T-162 options TAP -> snap");
         if (HWND h = page_window()) snap_next(h);
         return false;   // the release itself goes through; the page ignores Options anyway
     }
