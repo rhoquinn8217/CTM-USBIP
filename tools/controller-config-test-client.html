@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.64.1 -- see the changelog at the bottom of this comment.
+  VERSION 2.64.2 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,13 @@
   tidy message about it.
 
   CHANGELOG
+    2.64.2 Compact fills its window: everything in it is sized in viewport
+           units, so R3 changes the text with the window and there is no empty
+           space left. The legend moves into a footer area at the same size,
+           with the way back written out beside it -- two fingers on the
+           touchpad and Options, or the taskbar. "Full view" is "Configure". A
+           pick applies at once and then ASKS before going back to the game;
+           declined, the window stays (rhoquinn8217, 2026-09-09).
     2.64.1 The page tells the listener which view it is in (ui/view), so R3
            cycles compact-sized windows in compact and the full sizes in full,
            each with its own position (rhoquinn8217, 2026-09-09: at 250%
@@ -405,17 +412,34 @@
   body.compact #tabs, body.compact #stickyHead, body.compact #sectBar,
   body.compact #renameRow, body.compact .pane, body.compact #gpbar { display:none !important; }
   #compactBox { display:none; }
+  /* ⭐ SIZED IN VIEWPORT UNITS, ON PURPOSE (rhoquinn8217, 2026-09-09: too much
+     empty space; and R3 must change the text too). R3 lives in the listener and
+     never reaches the page, so the page cannot be told the size -- but it does
+     not need to be: vh follows the window, so when R3 resizes it, every line
+     here grows or shrinks with it. */
+  body.compact { padding:0; }
   body.compact #compactBox { display:flex; flex-direction:column; align-items:center;
-    justify-content:center; gap:18px; padding:28px 20px 20px; min-height:calc(100vh - 40px);
+    justify-content:center; gap:2.4vh; padding:3vh 4vw; min-height:100vh;
     box-sizing:border-box; }
-  #compactBox .cname { font-size:24px; font-weight:600; text-align:center; }
-  #compactBox .ckind { font-size:13px; color:#71737c; text-align:center; margin-top:4px; }
-  #compactBox select { font-size:20px; padding:10px 14px; min-width:min(560px, 90vw); }
-  #compactBox .cbig { font-size:22px; padding:18px 44px; }
-  #compactBox .cfoot { display:flex; gap:10px; margin-top:6px; }
-  #compactBox .cfoot button { padding:8px 18px; font-size:14px; }
-  #compactBox .cempty { color:#c8c9ce; font-size:15px; }
-  #compactBox .clegend { font-size:12px; color:#71737c; margin-top:10px; }
+  #compactBox .cname { font-size:6vh; font-weight:600; text-align:center; line-height:1.15; }
+  #compactBox .ckind { font-size:3vh; color:#71737c; text-align:center; margin-top:0.8vh; }
+  #compactBox select { font-size:4.2vh; padding:1.2vh 2vw; min-width:70vw; }
+  #compactBox .cbig { font-size:5.4vh; padding:2vh 5vw; }
+  #compactBox .cfoot { display:flex; gap:2vw; margin-top:1vh; }
+  #compactBox .cfoot button { padding:1.4vh 3vw; font-size:3.6vh; }
+  #compactBox .cempty { color:#c8c9ce; font-size:3.6vh; text-align:center; }
+  /* ⭐ The footer area: the legend and the way back, at the same size as the
+     rest of the view rather than a small line underneath it. */
+  #compactBox .cbar { width:100%; border-top:1px solid #2c2e36; margin-top:1vh;
+    padding-top:2vh; display:flex; flex-direction:column; gap:1.4vh; align-items:center; }
+  #compactBox .clegend { font-size:3vh; color:#71737c; text-align:center; }
+  #compactBox .cinfo { font-size:3vh; color:#c8c9ce; text-align:center; line-height:1.4;
+    max-width:90vw; }
+  #compactBox .cinfo b { color:#e8e8ea; }
+  body.compact .confirmCard { font-size:3.4vh; max-width:82vw; }
+  body.compact .confirmCard h2 { font-size:4.2vh; }
+  body.compact .confirmCard p { font-size:3.4vh; }
+  body.compact .confirmCard button { font-size:3.4vh; padding:1.4vh 3vw; }
   /* ⭐ Sits under the tabs and stays with them. Which controller you are
      editing, and which config it is reading, are the two things you must not
      lose track of while scrolling a long settings list. */
@@ -755,7 +779,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.64.1</span>
+  <span class="muted" style="font-size:12px">v2.64.2</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -2030,7 +2054,7 @@ function createFromPreset(ordinal, preset) {
     .then(function() {
       setConn('created ' + name + (preset ? ' from ' + preset : ''), 'good');
       loadConfigs(); loadDevices();
-      if (COMPACT) park();   // ⭐ the same ending as picking one: back to the game
+      if (COMPACT) compactAskExit('Config created');   // ⭐ the same ending as picking one
     })
     .catch(function(){});
 }
@@ -3249,6 +3273,9 @@ function confirmNo() {
   OVERLAY_OPENER = null;
   setTimeout(function () { restoreOpener(opener); }, 0);
   CONFIRM_CB = null;
+  var onNo = CONFIRM_ON_NO;
+  CONFIRM_ON_NO = null;
+  if (onNo) onNo();
   document.getElementById('confirmBox').style.display = 'none';
   gpCollect();
 }
@@ -4880,6 +4907,26 @@ function park() {
   fetch(base() + '/api/v1/ui/park', { method: 'POST' }).catch(function () {});
 }
 
+// ⭐ ASK BEFORE LEAVING (rhoquinn8217, 2026-09-09). A pick applies at once, then
+// asks whether to go back to the game; declined, the window stays up. ⓘ The
+// page's own confirm box, with its buttons renamed for the question and put
+// back afterwards; askConfirm() already focuses the declining button.
+var CONFIRM_ON_NO = null;
+function compactAskExit(title) {
+  var yes = document.getElementById('confirmYes');
+  var no = document.querySelector('#confirmBox button:last-of-type');
+  var yesWas = yes ? yes.textContent : '';
+  var noWas = no ? no.textContent : '';
+  var restore = function () {
+    if (yes) yes.textContent = yesWas;
+    if (no) no.textContent = noWas;
+  };
+  if (yes) yes.textContent = 'Back to the game';
+  if (no) no.textContent = 'Stay here';
+  CONFIRM_ON_NO = restore;
+  askConfirm(title, 'Back to the game?', function () { restore(); park(); });
+}
+
 function compactPick() {
   var sel = document.getElementById('cpick');
   if (!sel || !COMPACT) return;
@@ -4889,7 +4936,7 @@ function compactPick() {
   var ordinal = sel.dataset.ordinal;
   var body = sel.value ? { config: sel.value } : {};
   call('POST', '/api/v1/devices/' + encodeURIComponent(ordinal) + '/link', body)
-    .then(function () { loadDevices(); loadConfigs(); if (sel.value) park(); })
+    .then(function () { loadDevices(); loadConfigs(); if (sel.value) compactAskExit('Config applied'); })
     .catch(function () {});
 }
 
@@ -4898,10 +4945,12 @@ function paintCompact() {
   if (!box || !COMPACT) return;
   var d = (LAST_DEVICES || []).filter(function (x) { return x.ordinal === ACTIVE; })[0];
   var many = TABS.filter(isControllerTab).length > 1;
+  // ⓘ "Configure", not "Full view": the other page is where a config is
+  // edited, and the word should say so (rhoquinn8217, 2026-09-09).
   var foot = function (withNew, ordinal) {
     return '<div class="cfoot">' +
       (withNew ? '<button onclick="newConfigFor(\'' + esc(ordinal) + '\')">New config</button>' : '') +
-      '<button onclick="setCompact(false)">Full view</button>' +
+      '<button onclick="setCompact(false)">Configure</button>' +
       '<button onclick="park()">Close</button></div>';
   };
   var html = '';
@@ -4932,8 +4981,15 @@ function paintCompact() {
               opts + '</select>' + foot(true, d.ordinal);
     }
   }
-  html += '<div class="clegend">L1/R1 controller | \u2715 select | \u25cb close | ' +
-          '\\|/ full view | \u2630 move | R3 size</div>';
+  // ⭐ The footer area: the legend and the way back, as large as the rest.
+  // The way back is written out because someone who parked this window and
+  // is not used to the chord has no other way to learn it (rhoquinn8217).
+  html += '<div class="cbar">' +
+          '<div class="clegend">L1/R1 controller | \u2715 select | \u25cb close | ' +
+          '\\|/ configure | \u2630 move | R3 size</div>' +
+          '<div class="cinfo">To bring this window back: <b>hold two fingers on the touchpad ' +
+          'and press Options</b>, or click it in the taskbar.</div>' +
+          '</div>';
   box.innerHTML = html;
   gpCollect();
   // ⭐ Focus lands where the next press should go: the selector when there is
