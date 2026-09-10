@@ -104,6 +104,7 @@ inline HWND page_window();              // all four are defined below, with the 
 inline void apply_size(HWND hwnd);
 inline void place_default(HWND hwnd);
 inline void place_exact(HWND hwnd, int x, int y);
+inline void place_centre(HWND hwnd);
 
 // ⭐⭐ THIS FILE IS THE MEMORY (rhoquinn8217, 2026-09-09: "when closing
 // remember advance/simple/quick and size"). The window is closed and made
@@ -367,10 +368,20 @@ inline void place_default(HWND hwnd)
         place(hwnd, x, y);
         return;
     }
-    (void)w; (void)h;
     if (g_compact.load()) { place_at(hwnd, 1); return; }
-    x = wa.left + ((wa.right - wa.left) - w) / 2;
-    y = wa.top + ((wa.bottom - wa.top) - h) / 2;
+    place_centre(hwnd);
+}
+
+// The middle of the screen, whatever is remembered. Advanced's one place.
+inline void place_centre(HWND hwnd)
+{
+    RECT rc;
+    if (!GetWindowRect(hwnd, &rc)) return;
+    const int w = rc.right - rc.left;
+    const int h = rc.bottom - rc.top;
+    const RECT wa = work_area();
+    int x = wa.left + ((wa.right - wa.left) - w) / 2;
+    int y = wa.top + ((wa.bottom - wa.top) - h) / 2;
     clamp_into(wa, w, h, x, y);
     place(hwnd, x, y);
 }
@@ -382,7 +393,12 @@ inline void place_default(HWND hwnd)
 // counter said. ⓘ The choice is kept, so the window comes back to it.
 inline void snap_next(HWND hwnd)
 {
-    if (!g_compact.load()) { place_default(hwnd); return; }
+    // ⛔ ADVANCED CENTRES, always -- never "back to where it was remembered"
+    // (rhoquinn8217, 2026-09-09: "advanced should only center"). ⓘ The two
+    // pulled apart once the exact place was remembered: coming BACK to a
+    // dragged window is the memory doing its job, but a tap is a person
+    // asking for the one place this layout has.
+    if (!g_compact.load()) { place_centre(hwnd); return; }
 
     RECT rc;
     if (!GetWindowRect(hwnd, &rc)) return;
