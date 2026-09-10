@@ -69,6 +69,17 @@ inline void add_click(uint8_t mask) { g_clickPending.fetch_or(mask, std::memory_
 inline std::atomic<uint8_t> g_dragMask{0};
 inline void set_drag(uint8_t mask) { g_dragMask.store(mask, std::memory_order_relaxed); }
 
+// ⭐ AND A LEVEL FOR THE TRIGGERS, held the same way a drag is but by a
+// different owner. ⛔ It cannot share g_dragMask: both write the WHOLE mask
+// every report, so whichever ran second would erase the other's button, and
+// the touchpad runs first on the input path. Its own level is the same answer
+// the comment above gives for the rebinder.
+inline std::atomic<uint8_t> g_triggerMask{0};
+inline void set_trigger_buttons(uint8_t mask)
+{
+    g_triggerMask.store(mask, std::memory_order_relaxed);
+}
+
 inline void pump_loop()
 {
     // The mouse endpoint from the profile. Kept in one place so it matches the
@@ -102,7 +113,8 @@ inline void pump_loop()
             clickDown = 0;
         }
         buttons = static_cast<uint8_t>(buttons | clickDown |
-                                       g_dragMask.load(std::memory_order_relaxed));
+                                       g_dragMask.load(std::memory_order_relaxed) |
+                                       g_triggerMask.load(std::memory_order_relaxed));
 
         static uint8_t lastButtons = 0;
         const bool buttonsChanged = buttons != lastButtons;

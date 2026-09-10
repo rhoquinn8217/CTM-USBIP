@@ -225,6 +225,7 @@ public:
         // clean calibration and the per-device map does not grow forever.
         ctm_gyro_mouse::forget_device(this);
         ctm_touch_mouse_forget(this);
+        trigger_click_forget(this);
         ctm_stick_mouse_forget(this);
         // ⛔ And this controller's held KEYS. They are kept per device now, so
         // leaving them behind would hold a key down forever with no controller
@@ -465,6 +466,12 @@ public:
         // the same synthetic mouse. No-op unless a touchpad_* key is set.
         ctm_touch_mouse_apply(this, profile_.device_descriptor, linked_config(),
                               report.data, report.length);
+
+        // Trigger-to-click: read-only as well. Holds a mouse button and, while
+        // it does, asks the gyro gate to keep the cursor still. No-op unless
+        // trigger_r2_click or trigger_l2_click is on.
+        trigger_click_apply(this, profile_.device_descriptor, linked_config(),
+                            report.data, report.length);
 
         // Stick-to-mouse: same shape again -- read-only, same synthetic mouse.
         // No-op unless stick_to_mouse names a stick.

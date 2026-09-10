@@ -21,6 +21,8 @@ int run_stick_mouse_tests();
 int run_osk_tests();
 int run_nickname_tests();
 int run_host_audio_settings_tests();
+int run_trigger_effect_tests();
+int run_trigger_click_tests();
 
 // ⛔⛔ THE TEST BINARY RUNS FROM THE SAME DIRECTORY AS THE AGENT.
 //
@@ -81,6 +83,8 @@ int main(int argc, char **argv)
     run_config_store_tests();
     run_gyro_mouse_tests();
     run_touch_mouse_tests();
+    run_trigger_effect_tests();
+    run_trigger_click_tests();
     run_stick_mouse_tests();
     run_osk_tests();
     run_nickname_tests();
