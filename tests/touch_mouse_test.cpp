@@ -103,7 +103,7 @@ namespace {
 
 // The gate the touchpad now shares with gyro and the stick. Enough of it to
 // exercise the touch paths; the real parser has its own suite.
-enum class Gate { Off, Always, L2, R2, L1, R1, Touchpad, NotTouchpad, TouchpadClick, PS };
+enum class Gate { Off, Always, L2, R2, L1, R1, Touchpad, NotTouchpad, TouchpadClick, PS, Steady };
 
 inline Gate parse_gate(const std::string &raw)
 {

@@ -140,8 +140,15 @@ inline void step(const void *deviceKey, const std::string &section,
     // but the touchpad features have their own switches -- so an absent gate
     // here means "no extra condition", never "disabled".
     const std::string gateRaw = device_config_str(section.c_str(), "touchpad_to_mouse_gate");
-    const ctm_gyro_mouse::Gate gate =
+    const ctm_gyro_mouse::Gate gateAsked =
         gateRaw.empty() ? ctm_gyro_mouse::Gate::Always : ctm_gyro_mouse::parse_gate(gateRaw);
+    // ⛔ THE TOUCHPAD CANNOT BE GATED BY "steady" (T-149). That gate is the
+    // touchpad's OWN doing -- a finger on the pad freezes the gyro -- and
+    // applying it here would freeze the pad the moment it was touched, so it
+    // could never click. The schema does not offer it for this key; guarded
+    // anyway, because a hand-edited file can say anything.
+    const ctm_gyro_mouse::Gate gate =
+        (gateAsked == ctm_gyro_mouse::Gate::Steady) ? ctm_gyro_mouse::Gate::Always : gateAsked;
 
     const bool cursorOn = device_config_bool(section.c_str(), "touchpad_to_mouse", false);
     // ⭐⭐ HOW MANY FINGERS SCROLL: 0 off, 1 one finger, 2 two fingers

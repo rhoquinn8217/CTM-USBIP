@@ -176,6 +176,29 @@ int run_gyro_mouse_tests()
         CTM_CHECK(!gate_open(Gate::L2, r.data(), r.size()));
     }
 
+    // ⭐ T-149. Steady is the ratchet with a way back: a finger freezes the
+    // gyro, and a drag -- flagged by the touchpad -- hands it back. ⓘ A fresh
+    // report has byte 33 at zero, which is a finger DOWN (bit 0x80 clear), so
+    // "no finger" has to be written on purpose.
+    section("gyro-mouse: the steady gate freezes on touch and returns for a drag");
+    {
+        const void *k = reinterpret_cast<const void *>(0x51);
+        auto r = make_report(0, 0);
+        r[33] = 0x80;                                          // no finger
+        CTM_CHECK(gate_open(Gate::Steady, r.data(), r.size(), k));
+        r[33] = 0x00;                                          // finger down
+        CTM_CHECK(!gate_open(Gate::Steady, r.data(), r.size(), k));
+        set_drag_gate(k, true);                                // the touchpad says: dragging
+        CTM_CHECK(gate_open(Gate::Steady, r.data(), r.size(), k));
+        set_drag_gate(k, false);
+        CTM_CHECK(!gate_open(Gate::Steady, r.data(), r.size(), k));
+        // A drag belongs to a pad: another pad's flag does not open this one.
+        set_drag_gate(reinterpret_cast<const void *>(0x52), true);
+        CTM_CHECK(!gate_open(Gate::Steady, r.data(), r.size(), k));
+        set_drag_gate(reinterpret_cast<const void *>(0x52), false);
+        CTM_CHECK(parse_gate("steady") == Gate::Steady);
+    }
+
     section("gyro-mouse: gate off is inert");
     {
         g_gate = "";

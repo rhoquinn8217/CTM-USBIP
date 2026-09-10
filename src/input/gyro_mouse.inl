@@ -646,6 +646,12 @@ inline void forget_device(const void *deviceKey)
         std::lock_guard<std::mutex> lock(r.mutex);
         r.instances.erase(deviceKey);
     }
+    // ⛔ And the drag flag, or a pad that unbridged mid-drag leaves a stale
+    // "true" behind -- and the key is a device POINTER, which the next pad to
+    // bridge can be handed. A stale true would open its steady gate until the
+    // first release event, which is a cursor that moves under a resting
+    // finger. The touchpad clears it too; this is the belt to that brace.
+    set_drag_gate(deviceKey, false);
     // The calibration belongs to the physical controller, so it goes when the
     // device does -- a different pad on the same slot must not inherit it.
     ctm_gyro_calib::forget(deviceKey);
