@@ -118,6 +118,13 @@ inline const Setting kTouchpadMouseMode[] = {
     /* ⓘ TWO fingers here, and it has no choice: one finger is already moving
        the cursor, so one-finger scrolling would make every swipe do both. */
     { "touchpad_scroll", "2" },
+    /* ⭐ NATURAL, the phone convention: the content follows the fingers
+       (rhoquinn8217, 2026-09-09). ⓘ This is the one preset where it is not a
+       matter of taste. The other two scroll with a STICK, where there is
+       nothing under the hand to push and a wheel is the better metaphor. Here
+       the fingers are ON the surface, and every trackpad a person has used
+       for a decade moves the page with them. */
+    { "touchpad_scroll_natural", "true" },
     { "touchpad_tap_click", "true" },
     // ⭐ Click the pad in to grab, move, lift the finger to drop. The pad's
     // click is free here because there is no gyro to recentre.
@@ -187,9 +194,10 @@ inline const Preset kPresets[] = {
       "opens the on-screen keyboard.",
       true, true, kGyroMouseMode, CTM_PRESET_COUNT_OF(kGyroMouseMode) },
     { "touchpad-mouse",
-      "The touchpad behaves like a laptop trackpad. The most familiar of the "
-      "three, and the easiest to pick up, but your hand leaves the sticks to "
-      "use it. Square opens the on-screen keyboard.",
+      "The touchpad behaves like a laptop trackpad: one finger moves the "
+      "cursor, two fingers scroll the page with them, and a tap clicks. The "
+      "most familiar of the three, and the easiest to pick up, but your hand "
+      "leaves the sticks to use it. Square opens the on-screen keyboard.",
       true, true, kTouchpadMouseMode, CTM_PRESET_COUNT_OF(kTouchpadMouseMode) },
     { "stick-to-mouse",
       "Right stick moves the cursor, left stick scrolls -- both thumbs where "
