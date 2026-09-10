@@ -151,6 +151,7 @@ void ctm_osk_toggle(const std::string &section, int button, int program);
 #include "usbip/server.inl"
 #include "app/open_ui.inl"      // --ui: open the settings page, or focus one already open
 #include "app/cli.inl"
+#include "input/trigger_effect.inl"   // the settings report carries these; must precede it
 #include "audio/ds5_apply_settings.inl"
 #include "config/config_store.inl"   // per-controller config files; needs device_log + g_device_config
 #include "config/config_presets.inl"  // what a new config can start from; needs nothing but strings

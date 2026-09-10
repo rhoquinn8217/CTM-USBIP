@@ -84,7 +84,13 @@ static void ds5_apply_initial_settings(CtmBackend *backend,
     // microphone that never works. Default stays false until the button lands.
     const bool micMuted = device_config_bool(section, "mic_muted", false);
 
-    if (output == Ds5AudioOutput::Auto && speakerPercent < 0 && headsetPercent < 0 && !micMuted) {
+    // ⭐ A trigger effect alone is enough to send a report. Without this line
+    // the effect only reached a controller that also had audio configured,
+    // which is a coupling nobody would guess at from either setting's name.
+    const bool wantsTriggers = trigger_effect::wants_anything(resolved);
+
+    if (output == Ds5AudioOutput::Auto && speakerPercent < 0 && headsetPercent < 0 &&
+        !micMuted && !wantsTriggers) {
         return;   // nothing configured
     }
 
@@ -104,6 +110,16 @@ static void ds5_apply_initial_settings(CtmBackend *backend,
         report[kDs5IdxHeadsetVolume] = ds5_volume_raw_from_percent(headsetPercent, kDs5HeadsetVolumeMax, kDs5HeadsetVolumeFloor);
     }
     claim = static_cast<uint8_t>(claim & ~(kDs5ClaimRumbleA | kDs5ClaimRumbleB));
+
+    // ⭐ The adaptive triggers, on the same report rather than a second one.
+    // ⓘ Claimed ONLY when this section asks for something, by the same rule the
+    // rumble bits follow one line above: claiming a field applies it, so
+    // claiming these when we have nothing to say would stamp a zeroed effect
+    // over whatever the game is doing.
+    const uint8_t triggerClaim =
+        trigger_effect::apply_to_report(resolved, report.data(), report.size());
+    claim = static_cast<uint8_t>(claim | triggerClaim);
+
     report[kDs5IdxValidFlag0] = claim;
 
     // Mute lives in the OTHER flag panel, so it is claimed separately. Panel 2
@@ -160,6 +176,16 @@ static void ds5_apply_initial_settings(CtmBackend *backend,
     if (micMuted) {
         device_log::report(device_log::msg()
             << section << ": settings: microphone MUTED at the controller, light on");
+    }
+    // ⓘ Says which trigger was written, not what it was written with. "Nothing
+    // happened" otherwise has two causes that look identical from outside: the
+    // report never carried an effect, or it carried one that feels like
+    // nothing. Those need different fixes.
+    if (triggerClaim != 0) {
+        device_log::report(device_log::msg()
+            << section << ": settings: adaptive trigger effect sent for"
+            << ((triggerClaim & trigger_effect::kClaimR2) != 0 ? " R2" : "")
+            << ((triggerClaim & trigger_effect::kClaimL2) != 0 ? " L2" : ""));
     }
     device_log::report(device_log::msg()
         << section << ": settings: sent audio to "
