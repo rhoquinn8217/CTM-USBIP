@@ -100,9 +100,10 @@ inline const SizeShare kQuickSizes[2] = { { 0.185, 0.150 }, { 0.230, 0.187 } };
 inline std::atomic_int  g_sizeQuick{0};
 inline std::atomic_bool g_quick{false};
 
-inline HWND page_window();              // all three are defined below, with the placing
+inline HWND page_window();              // all four are defined below, with the placing
 inline void apply_size(HWND hwnd);
 inline void place_default(HWND hwnd);
+inline void place_exact(HWND hwnd, int x, int y);
 
 // ⭐⭐ THIS FILE IS THE MEMORY (rhoquinn8217, 2026-09-09: "when closing
 // remember advance/simple/quick and size"). The window is closed and made
@@ -199,8 +200,18 @@ inline void restore_geometry_soon()
     std::thread([] {
         for (int i = 0; i < 30; ++i) {
             if (HWND h = page_window()) {
+                // ⛔⛔ READ THE PLACE BEFORE RESIZING (rhoquinn8217,
+                // 2026-09-09: a window dragged somewhere came back where
+                // OPTIONS had last put it, not where the mouse had). Resizing
+                // moves a window -- it grows about its centre -- and while
+                // apply_size() was also writing the memory, the restore's own
+                // first act overwrote the place it was about to read. The
+                // write is gone from apply_size(); reading first as well
+                // means no future one can do it again.
+                int x = 0, y = 0;
+                const bool had = last_pos(&x, &y);
                 apply_size(h);
-                place_default(h);
+                if (had) place_exact(h, x, y); else place_default(h);
                 return;
             }
             Sleep(100);
@@ -304,6 +315,17 @@ inline int bottom_gap(const RECT &wa)
     return (wa.bottom - wa.top) / 100;
 }
 
+// A place asked for outright, kept on screen. ⓘ place() itself does not
+// clamp: nudge() steers a pixel at a time and has already done it.
+inline void place_exact(HWND hwnd, int x, int y)
+{
+    RECT rc;
+    if (!GetWindowRect(hwnd, &rc)) return;
+    const RECT wa = work_area();
+    clamp_into(wa, rc.right - rc.left, rc.bottom - rc.top, x, y);
+    place(hwnd, x, y);
+}
+
 // One of the three places along the bottom, for Simple and Quick.
 inline void place_at(HWND hwnd, int idx)
 {
@@ -345,6 +367,7 @@ inline void place_default(HWND hwnd)
         place(hwnd, x, y);
         return;
     }
+    (void)w; (void)h;
     if (g_compact.load()) { place_at(hwnd, 1); return; }
     x = wa.left + ((wa.right - wa.left) - w) / 2;
     y = wa.top + ((wa.bottom - wa.top) - h) / 2;
@@ -412,7 +435,10 @@ inline void apply_size(HWND hwnd)
     int y = cy - h / 2;
     clamp_into(wa, w, h, x, y);
     SetWindowPos(hwnd, nullptr, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
-    note_pos(x, y);
+    // ⛔ AND IT DOES NOT REMEMBER WHERE THAT LEFT IT. Growing about the centre
+    // moves a window without anyone having chosen a place; recording it here
+    // overwrote a place someone HAD chosen. Deliberate placings write the
+    // memory -- place() below -- and so does the last look on the way out.
 }
 
 // R3: the next of this layout's two sizes.
