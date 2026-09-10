@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.64.24 -- see the changelog at the bottom of this comment.
+  VERSION 2.64.25 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,8 @@
   tidy message about it.
 
   CHANGELOG
+    2.64.25 Quick's window is a quarter narrower; its text, sized to the
+            height, stays as it was (rhoquinn8217, 2026-09-09).
     2.64.24 Quick's window is a third shorter, closing the gap above the
             footer; its text stays where it was on screen, and the Advanced
             button is the legend's size (rhoquinn8217, 2026-09-09).
@@ -1058,7 +1060,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.64.24</span>
+  <span class="muted" style="font-size:12px">v2.64.25</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -5233,7 +5235,7 @@ function compactSize() {
 // medium and large (2026-09-09) -- the half-of-Simple heights, an eighth
 // off the width; the listener's table agrees.
 function quickSize() {
-  var w = Math.round(screen.availWidth * 0.197);
+  var w = Math.round(screen.availWidth * 0.148);
   var h = Math.round(screen.availHeight * 0.15);
   window.resizeTo(w, h);
   window.moveTo(Math.round((screen.availWidth - w) / 2),
