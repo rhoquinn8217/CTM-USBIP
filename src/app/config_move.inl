@@ -79,14 +79,13 @@ inline const SizeShare kCompactSizes[2] = { { 0.45, 0.45 }, { 0.56, 0.56 } };
 inline std::atomic_int  g_sizeCompact{0};
 inline std::atomic_bool g_compact{false};
 
-// ⭐ QUICK HAS SIZES OF ITS OWN (rhoquinn8217, 2026-09-09): half Simple's
-// each way, so the window hugs the little it shows -- a name, a selector, a
-// footer. ⓘ It was a third of Simple's height first, then half again as
-// tall the same evening.
+// ⭐ QUICK HAS SIZES OF ITS OWN (rhoquinn8217, 2026-09-09), so the window
+// hugs the little it shows -- the ring, a selector, a footer. ⓘ Half of
+// Simple's for an hour; then two thirds of that, to a mock-up.
 //
-//   medium  0.225 x 0.225   what the page opens Quick at
-//   large   0.280 x 0.280
-inline const SizeShare kQuickSizes[2] = { { 0.225, 0.225 }, { 0.280, 0.280 } };
+//   medium  0.15 x 0.15   what the page opens Quick at
+//   large   0.19 x 0.19
+inline const SizeShare kQuickSizes[2] = { { 0.15, 0.15 }, { 0.19, 0.19 } };
 inline std::atomic_int  g_sizeQuick{0};
 inline std::atomic_bool g_quick{false};
 

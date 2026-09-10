@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.64.20 -- see the changelog at the bottom of this comment.
+  VERSION 2.64.21 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,10 @@
   tidy message about it.
 
   CHANGELOG
+    2.64.21 Quick hugs its content, to rhoquinn8217's mock-up: a window two
+            thirds the size, the same text on screen, the kind under the
+            name and the L1/R1 neighbours back, name, selector and footer
+            sharing the height evenly (2026-09-09).
     2.64.20 Quick's text is back to what it was on screen: the window had
             doubled in height and, being sized to the window, the text had
             doubled with it. Every Quick size is halved; the content centres
@@ -529,28 +533,36 @@
      2026-09-09). The name, the selector with its auto-link button, and a
      footer of a small Advanced and a four-item legend. Margins trimmed, no
      bubbles, no way-back hint, no New, Edit or Close: Circle closes. */
-  /* ⓘ QUICK'S WINDOW IS HALF SIMPLE'S each way (rhoquinn8217, 2026-09-09: a
-     third as tall first, then taller). Text here is sized to the window, so
-     when the window doubled in height every size below was HALVED to keep
-     the text where it was on screen -- rhoquinn8217 wanted the box bigger,
-     not the text. R3 still scales it with the window. */
-  body.quick #compactBox { padding:1.5vh 3vw 1vh; }
-  body.quick #compactBox .cmain { padding-top:0; gap:2.5vh; justify-content:center; }
-  body.quick #compactBox .cmain.centre { gap:1.5vh; }
-  body.quick #compactBox .cname { font-size:12vh; line-height:1.1; }
+  /* ⓘ QUICK'S WINDOW HUGS ITS CONTENT (rhoquinn8217, 2026-09-09, from a
+     mock-up): two thirds of the half-of-Simple box it had for an hour, with
+     the same text on screen -- so every size here is half again what that
+     box used -- and the ring back in full: the kind under the name, the L1
+     and R1 neighbours either side. The name, the selector and the footer
+     share the height out evenly. R3 still scales it all with the window. */
+  body.quick #compactBox { padding:1.5vh 2.5vw 1vh; }
+  body.quick #compactBox .cmain { padding-top:0; gap:0; justify-content:space-evenly; }
+  body.quick #compactBox .cmain.centre { gap:2vh; justify-content:center; }
+  body.quick #compactBox .ccar { gap:2vw; }
+  body.quick #compactBox .cname { font-size:18vh; line-height:1.1; }
+  body.quick #compactBox .ccur .ckind { font-size:7vh; margin-top:0.5vh; }
+  body.quick #compactBox .cside { font-size:7vh; }
+  body.quick #compactBox .cside small { font-size:5vh; }
+  body.quick #compactBox .cside .ckind { font-size:5vh; margin-top:0.3vh; }
+  body.quick #compactBox .cside.l { padding-right:1ch; }
+  body.quick #compactBox .cside.r { padding-left:1ch; }
   body.quick #compactBox .csel { gap:0; }
   body.quick #compactBox .cselrow { gap:2vw; width:100%; justify-content:center; }
   /* The selector may shrink below its longest name rather than push the
      button off the edge; a long name is clipped inside it. */
-  body.quick #compactBox select { font-size:6.5vh; padding:0.75vh 1.5vw; min-width:0;
+  body.quick #compactBox select { font-size:9.75vh; padding:1.1vh 1.5vw; min-width:0;
     max-width:80vw; flex:0 1 auto; }
-  body.quick #compactBox .cauto-btn { font-size:6.5vh; padding:0.6vh 1.6vw; }
-  body.quick #compactBox .cbar { padding-top:1.5vh; gap:3vw; }
-  body.quick #compactBox .cbar > button { font-size:4vh; padding:0.75vh 2vw; }
-  body.quick #compactBox .clegend { font-size:4vh; }
-  body.quick #compactBox .cempty { font-size:6vh; }
-  body.quick #compactBox .csub, body.quick #compactBox .ccmd { font-size:4vh; }
-  body.quick #compactBox .cbig { font-size:7vh; padding:1vh 4vw; }
+  body.quick #compactBox .cauto-btn { font-size:9.75vh; padding:0.9vh 1.6vw; }
+  body.quick #compactBox .cbar { padding-top:2.25vh; gap:3vw; }
+  body.quick #compactBox .cbar > button { font-size:6vh; padding:1.1vh 2vw; }
+  body.quick #compactBox .clegend { font-size:6vh; }
+  body.quick #compactBox .cempty { font-size:9vh; }
+  body.quick #compactBox .csub, body.quick #compactBox .ccmd { font-size:6vh; }
+  body.quick #compactBox .cbig { font-size:10.5vh; padding:1.5vh 4vw; }
   body.quick #bubbles { display:none !important; }
   /* A screen that is only a message sits in the middle of the room
      (rhoquinn8217, 2026-09-09); the controller screen keeps its place. */
@@ -628,11 +640,11 @@
   /* The confirm box in Quick's small window: the auto-link questions live
      here. Sized to the window like the rest of Quick, and it scrolls inside
      itself rather than past the window's edge. */
-  body.quick #confirmBox .confirmCard { font-size:5.5vh; max-width:94vw; padding:1vh 3vw;
+  body.quick #confirmBox .confirmCard { font-size:8.25vh; max-width:94vw; padding:1.5vh 3vw;
     max-height:96vh; overflow:auto; box-sizing:border-box; }
-  body.quick #confirmBox .confirmCard h2 { font-size:6.5vh; margin-bottom:0.5vh; }
-  body.quick #confirmBox .confirmCard p { font-size:5vh; margin-bottom:1vh; }
-  body.quick #confirmBox .confirmCard button { font-size:5vh; padding:0.75vh 2vw; }
+  body.quick #confirmBox .confirmCard h2 { font-size:9.75vh; margin-bottom:0.75vh; }
+  body.quick #confirmBox .confirmCard p { font-size:7.5vh; margin-bottom:1.5vh; }
+  body.quick #confirmBox .confirmCard button { font-size:7.5vh; padding:1.1vh 2vw; }
   /* ⭐ THE PRESET BOXES FIT THE COMPACT WINDOW (rhoquinn8217, 2026-09-09).
      ⛔ They share .confirmCard with the confirm box, so the rule above once
      scaled them too: the preset description came out at the size of a
@@ -1024,7 +1036,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.64.20</span>
+  <span class="muted" style="font-size:12px">v2.64.21</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -5195,11 +5207,12 @@ function compactSize() {
                 Math.round((screen.availHeight - h) / 2));
 }
 
-// ⓘ Quick's window: half Simple's each way, the smaller of its two sizes
-// (rhoquinn8217, 2026-09-09: a third as tall first, then half again as tall).
+// ⓘ Quick's window: a sixth-and-a-half of the screen each way, the smaller
+// of its two sizes -- two thirds of the half-of-Simple box, from
+// rhoquinn8217's mock-up of 2026-09-09; the listener's table agrees.
 function quickSize() {
-  var w = Math.round(screen.availWidth * 0.225);
-  var h = Math.round(screen.availHeight * 0.225);
+  var w = Math.round(screen.availWidth * 0.15);
+  var h = Math.round(screen.availHeight * 0.15);
   window.resizeTo(w, h);
   window.moveTo(Math.round((screen.availWidth - w) / 2),
                 Math.round((screen.availHeight - h) / 2));
@@ -5415,12 +5428,13 @@ function paintCompact() {
     };
     var slide = COMPACT_SLIDE > 0 ? ' slide-r' : COMPACT_SLIDE < 0 ? ' slide-l' : '';
     COMPACT_SLIDE = 0;
-    // ⓘ Quick keeps the name alone: no sides, no kind. L1/R1 still rotate.
+    // ⓘ Quick shows the whole ring too (rhoquinn8217, 2026-09-09): the kind
+    // under the name, and the L1 and R1 neighbours with theirs.
     html += '<div class="ccar' + slide + '">' +
-            (QUICK ? '' : side(prev, 'l', '\u25c2 L1')) +
+            side(prev, 'l', '\u25c2 L1') +
             '<div class="ccur"><div class="cname">' + esc(nameFor(d.ordinal)) + '</div>' +
-            (QUICK ? '' : '<div class="ckind">' + esc(deviceLabelShort(d)) + '</div>') + '</div>' +
-            (QUICK ? '' : side(next, 'r', 'R1 \u25b8')) +
+            '<div class="ckind">' + esc(deviceLabelShort(d)) + '</div></div>' +
+            side(next, 'r', 'R1 \u25b8') +
             '</div>';
     if (!kindOk.length) {
       // ⭐ The empty state is DELIBERATELY different: a first preset deserves
