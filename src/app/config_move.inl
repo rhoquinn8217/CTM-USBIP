@@ -51,18 +51,26 @@ namespace config_move {
 // ⭐ One mover PER PAD (T-162): see window_move::Movers for why.
 inline window_move::Movers g_movers;
 
-// ⭐ TWO SIZES ON R3 per layout (rhoquinn8217, 2026-09-09: three had been
-// one too many), as a share of the work area rather than pixels so 250%
-// scaling and an unscaled 4K screen get the same proportion.
+// ⭐ TWO SIZES ON R3, and THREE FOR ADVANCED, as a share of the work area
+// rather than pixels so 250% scaling and an unscaled 4K screen get the same
+// proportion.
 //
 //   small   0.55 x 0.66   the page's first size, before it grew
 //   medium  0.68 x 0.73   the size Advanced opens at
+//   large   0.90 x 0.94   nearly the screen
 //
-// ⓘ Advanced keeps its small and medium; the four-fifths large of 2026-09-08
-// is gone. The index lives here for the life of the listener, like the
-// keyboard's g_size; the page does not know it, it only opens at medium.
+// ⓘ Three had been one too many and Advanced went to two (rhoquinn8217,
+// 2026-09-09); the large came back the same day, from the test run: at 250%
+// scaling on a television the medium is CRAMPED, and Advanced is the layout
+// with a whole page to show. ⛔ Simple and Quick keep their two -- they show
+// one controller and one selector, and a third size would only be a bigger
+// version of the same three lines.
+//
+// ⓘ It still OPENS at medium, and R3's index lives here for the life of the
+// listener, so a large chosen once survives every close until the listener
+// restarts.
 struct SizeShare { double w; double h; };
-inline const SizeShare kSizes[2] = { { 0.55, 0.66 }, { 0.68, 0.73 } };
+inline const SizeShare kSizes[3] = { { 0.55, 0.66 }, { 0.68, 0.73 }, { 0.90, 0.94 } };
 inline std::atomic_int g_size{1};
 
 // ⭐ COMPACT HAS SIZES OF ITS OWN (rhoquinn8217, 2026-09-09): at 250% scaling on
@@ -457,11 +465,17 @@ inline void apply_size(HWND hwnd)
     // memory -- place() below -- and so does the last look on the way out.
 }
 
-// R3: the next of this layout's two sizes.
+// How many sizes this layout cycles: three in Advanced, two in the others.
+inline int size_count()
+{
+    return g_compact.load() ? 2 : 3;
+}
+
+// R3: the next of this layout's sizes.
 inline void resize_next(HWND hwnd)
 {
     std::atomic_int &slot = size_slot();
-    slot.store((slot.load() + 1) % 2);
+    slot.store((slot.load() + 1) % size_count());
     apply_size(hwnd);
 }
 

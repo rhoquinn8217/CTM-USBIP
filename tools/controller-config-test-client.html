@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.64.34 -- see the changelog at the bottom of this comment.
+  VERSION 2.64.35 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,10 @@
   tidy message about it.
 
   CHANGELOG
+    2.64.35 The hamburger is "position", not a second "move" -- the d-pad
+            already had that word. The way back names the tray icon, not a
+            taskbar entry that a closed window no longer has. Advanced gets a
+            third and larger R3 size (rhoquinn8217, 2026-09-09).
     2.64.34 The identifier says MODE: "ADVANCED MODE", "SIMPLE MODE", "QUICK
             MODE" (rhoquinn8217, 2026-09-09).
     2.64.33 A window dragged somewhere comes back there: resizing no longer
@@ -1122,7 +1126,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.64.34</span>
+  <span class="muted" style="font-size:12px">v2.64.35</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -5683,7 +5687,7 @@ function paintCompact() {
     // after a pick.
     html += '<div class="cbar"><button class="cconf" onclick="openConfigurator()">Advanced</button>' +
             '<div class="cbarText"><div class="clegend">' +
-            '<span class="cmode">Quick Mode</span>\u2630 move | R3 resize | ' +
+            '<span class="cmode">Quick Mode</span>\u2630 position | R3 resize | ' +
             '\u25cb close</div></div>' +
             '<button class="cclose" onclick="setMode(\'simple\')">Simple</button></div>';
   } else {
@@ -5691,9 +5695,10 @@ function paintCompact() {
             '<div class="cbarText">' +
             '<div class="clegend"><span class="cmode">Simple Mode</span>' +
             'L1/R1 controller | \u2715 select | d-pad move | ' +
-            '\u2630 move | R3 resize | \\|/ quick mode | \u25cb close</div>' +
+            '\u2630 position | R3 resize | \\|/ quick mode | \u25cb close</div>' +
             '<div class="cinfo">To bring this window back: <b>hold two fingers on the touchpad ' +
-            'and press Options</b> (DS5 only), or open it with the taskbar icon.</div>' +
+            'and press Options</b> (DS5 only), or right-click the tray icon and choose ' +
+            '<b>Open settings</b>.</div>' +
             '</div><button class="cclose" onclick="setMode(\'quick\')">Quick</button></div>';
   }
   box.innerHTML = html;
@@ -5803,7 +5808,7 @@ function gpPoll() {
   // a number and the rest is a constant -- so there is nothing to escape.
   hint.innerHTML = '<span class="cmode">Advanced Mode</span>' +
                      (live.length > 1 ? live.length + ' controllers' : 'controller') +
-                     ' — L1/R1 controller | ✕ select | d-pad move | □ on/off | ☰ move | R3 resize | \\|/ quick mode | ○ footer/close';
+                     ' — L1/R1 controller | ✕ select | d-pad move | □ on/off | ☰ position | R3 resize | \\|/ quick mode | ○ footer/close';
   bar.className = 'live';
   measureGpBar();
 
