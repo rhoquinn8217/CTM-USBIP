@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.64.12 -- see the changelog at the bottom of this comment.
+  VERSION 2.64.13 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,9 @@
   tidy message about it.
 
   CHANGELOG
+    2.64.13 No green in the config list: the auto-linked config carries its
+            mark in white like the rest, and the lit button beside the
+            selector is the green (rhoquinn8217, 2026-09-09).
     2.64.12 The auto-link mark is 🗘. Only the claimed config's line is green
             in the open list and the selector stays white; lit, the 🗘 button
             removes the claim after asking (rhoquinn8217, 2026-09-09).
@@ -497,15 +500,16 @@
   /* ⭐ AUTO LINK beside the selector (rhoquinn8217, 2026-09-09): the 🗘 button
      claims this controller for the chosen config, so it gets that config the
      next time it bridges; lit, it removes the claim. The claimed config
-     carries a green 🗘 in the list. */
+     carries a 🗘 after its name in the list. */
   #compactBox .cselrow { display:flex; align-items:center; gap:1.5vw; }
   #compactBox .cauto-btn { font-size:4.2vh; padding:0.6vh 1.4vw; line-height:1; }
   #compactBox .cauto-btn.on { color:#7fd18c; border-color:#7fd18c; opacity:1; }
-  /* ⓘ Only the claimed config's line is green, and only in the open list: a
-     native option is one run of text in one colour, so the 🗘 and the name it
-     follows share it; the selector itself stays white whatever is chosen
-     (rhoquinn8217, 2026-09-09: colouring the selector coloured every line). */
-  #cpick option.cauto { color:#7fd18c; }
+  /* ⛔ NO GREEN IN THE LIST (rhoquinn8217, 2026-09-09). A native option is
+     one run of text in one colour, so the mark could never be green on its
+     own: colouring the option coloured the name with it, colouring the
+     selector coloured every line, and the closed selector ignores option
+     colour altogether. The mark alone says which config auto links; the lit
+     button beside the selector is where the green lives. */
   /* ⓘ Every size here is 1.5x the first cut (rhoquinn8217, 2026-09-09). */
   /* ⭐ THE CAROUSEL: the controller in focus stays in the centre, its
      neighbours sit dimmed either side under L1 and R1, and L1/R1 rotate the
@@ -950,7 +954,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.64.12</span>
+  <span class="muted" style="font-size:12px">v2.64.13</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -5298,7 +5302,7 @@ function paintCompact() {
       var opts = '<option value="">(no config)</option>';
       kindOk.forEach(function (c) {
         var mine = c.name === claimedBy;
-        opts += '<option value="' + esc(c.name) + '"' + (mine ? ' class="cauto"' : '') +
+        opts += '<option value="' + esc(c.name) + '"' +
                 (c.name === d.linked_config ? ' selected' : '') + '>' + esc(c.name) +
                 (mine ? ' \ud83d\uddd8' : '') + '</option>';
       });
