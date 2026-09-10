@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.64.16 -- see the changelog at the bottom of this comment.
+  VERSION 2.64.17 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,12 @@
   tidy message about it.
 
   CHANGELOG
+    2.64.17 A third layout, QUICK: Simple with almost everything cut out --
+            the name, the selector with its auto-link button, a small
+            Advanced and a four-item legend; trimmed margins, no bubbles.
+            Create cycles Simple, Quick, Advanced. Advanced's footer offers
+            Simple, Quick and Close; Simple has a Quick Mode button beside
+            Edit. First start is Simple (rhoquinn8217, 2026-09-09).
     2.64.16 The two views are SIMPLE and ADVANCED (rhoquinn8217, 2026-09-09):
             the buttons and legends say so. Simple's text is back to its
             2.64.14 size.
@@ -506,6 +512,16 @@
      2026-09-09, third placing). */
   #compactBox .cmain { flex:1 1 auto; width:100%; display:flex; flex-direction:column;
     align-items:center; justify-content:flex-start; padding-top:13vh; gap:4.5vh; }
+  /* ⭐ QUICK: Simple with almost everything cut out (rhoquinn8217,
+     2026-09-09). The name, the selector with its auto-link button, and a
+     footer of a small Advanced and a four-item legend. Margins trimmed, no
+     bubbles, no way-back hint, no New, Edit or Close: Circle closes. */
+  body.quick #compactBox { padding:2vh 1.5vw 1.5vh; }
+  body.quick #compactBox .cmain { padding-top:1vh; gap:2.5vh; }
+  body.quick #compactBox select { min-width:72vw; }
+  body.quick #compactBox .cbar { padding-top:1.6vh; gap:2vw; }
+  body.quick #compactBox .cbar > button { font-size:2.6vh; padding:0.8vh 1.8vw; }
+  body.quick #bubbles { display:none !important; }
   /* A screen that is only a message sits in the middle of the room
      (rhoquinn8217, 2026-09-09); the controller screen keeps its place. */
   #compactBox .cmain.centre { justify-content:center; padding-top:0; }
@@ -724,7 +740,7 @@
      third child to a space-between row moves the hint to the centre and the
      bar reads as three unrelated things. */
   #gpbar #gphint { margin-left:auto; }
-  #fitBtn, #closeBtn { padding:2px 8px; font-size:11px; margin-left:8px; }
+  #fitBtn, #quickBtn, #closeBtn { padding:2px 8px; font-size:11px; margin-left:8px; }
   /* ⓘ Sized like the page's own buttons -- New, Rename, Reset -- not like the
      small footer ones it briefly lived beside. */
   /* Locked: the page has the pads. Mirrored: the game still sees them. */
@@ -970,7 +986,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.64.16</span>
+  <span class="muted" style="font-size:12px">v2.64.17</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -1087,8 +1103,10 @@
        naming the mechanism: "gated" means nothing to someone who did not build
        it, and this is the one piece of state that changes under you. -->
   <span id="padDest" class="muted">controllers → game</span>
-  <button id="fitBtn" onclick="setCompact(true); setFooterMode(false);"
+  <button id="fitBtn" onclick="setMode('simple'); setFooterMode(false);"
           title="Simple: one controller, one config, nothing else">Simple</button>
+  <button id="quickBtn" onclick="setMode('quick'); setFooterMode(false);"
+          title="Quick: the name and the selector, nothing else">Quick</button>
   <!-- ⓘ Closing releases the gate on the way out, via the pagehide beacon, so
        this is a safe exit rather than a way to strand yourself. -->
   <button id="closeBtn" onclick="window.close()" title="close this window">Close</button>
@@ -5081,19 +5099,44 @@ document.addEventListener('keydown', function (ev) {
 // ⭐ REMEMBERED without the run id: ctm_place forgets on a listener restart,
 // which is right for a place and wrong for a preference. Default is full.
 var COMPACT = false;
+// ⭐ QUICK is Simple with almost everything cut out (rhoquinn8217,
+// 2026-09-09); it implies COMPACT. Three layouts, then: Advanced (COMPACT
+// off), Simple (COMPACT on), Quick (COMPACT and QUICK on).
+var QUICK = false;
 var COMPACT_HOLD_RESTORE = false;
 var COMPACT_SLIDE = 0;   // +1 after R1, -1 after L1: which way the ring slides in
 var GP_SELECT_COMMIT = true;
 
 function isControllerTab(t) { return t !== 'overview' && t !== 'editor'; }
 
-function saveMode() {
-  try { localStorage.setItem('ctm_mode', COMPACT ? 'compact' : 'full'); } catch (e) {}
+function modeName() {
+  return !COMPACT ? 'advanced' : (QUICK ? 'quick' : 'simple');
 }
+function saveMode() {
+  try { localStorage.setItem('ctm_mode', modeName()); } catch (e) {}
+}
+// ⭐ FIRST START IS SIMPLE (rhoquinn8217, 2026-09-09): nothing saved yet means
+// Simple. ⓘ 'compact' and 'full' are what earlier pages saved for Simple and
+// Advanced before Quick existed, and still read as those.
 function applySavedMode() {
-  var m = '';
-  try { m = localStorage.getItem('ctm_mode') || ''; } catch (e) {}
-  if (m === 'compact') setCompact(true);
+  var m = null;
+  try { m = localStorage.getItem('ctm_mode'); } catch (e) {}
+  if (m === null || m === 'compact' || m === 'simple') setMode('simple');
+  else if (m === 'quick') setMode('quick');
+}
+
+// ⭐ ONE PLACE THAT SETS A LAYOUT. Advanced, Simple or Quick; the body carries
+// a class for each of the two compact ones; setCompact does the window work
+// when the compact/advanced line is crossed, and a change within compact --
+// Simple to Quick -- only repaints.
+function setMode(m) {
+  var quick = (m === 'quick');
+  var compact = (m !== 'advanced');
+  var quickChanged = (quick !== QUICK);
+  QUICK = quick;
+  document.body.classList.toggle('quick', quick);
+  if (compact !== COMPACT) { setCompact(compact); return; }
+  if (quickChanged) { saveMode(); if (COMPACT) paintCompact(); }
 }
 
 // ⓘ A third of the screen each way, centred -- the SMALL of the listener's
@@ -5145,6 +5188,11 @@ function setCompact(on) {
     compactSize();
     compactEnsureController();
   } else {
+    // Advanced is never Quick; a caller that came here directly, not through
+    // setMode, still leaves Quick behind.
+    QUICK = false;
+    document.body.classList.remove('quick');
+    saveMode();
     if (COMPACT_HOLD_RESTORE) { COMPACT_HOLD_RESTORE = false; setGateHold(true); }
     fitWindow();
     gpCollect();
@@ -5154,12 +5202,14 @@ function setCompact(on) {
 }
 // The whole tool, from the top: the full page on its Overview.
 function openConfigurator() {
-  setCompact(false);
+  setMode('advanced');
   showTab('overview');
 }
+// ⭐ THE CYCLE on the pad's Create (rhoquinn8217, 2026-09-09): Simple, Quick,
+// Advanced, and round to Simple.
 function toggleCompact() {
   if (PRESET_OPEN || PRESET_INFO_OPEN || CONFIRM_CB || RENAMING) return;
-  setCompact(!COMPACT);
+  setMode(!COMPACT ? 'simple' : (QUICK ? 'advanced' : 'quick'));
 }
 
 // Compact shows a controller or nothing: never Overview or the Editor.
@@ -5277,7 +5327,8 @@ function paintCompact() {
   var foot = function (withNew, ordinal) {
     return '<div class="cfoot">' +
       (withNew ? '<button onclick="newConfigFor(\'' + esc(ordinal) + '\')">New</button>' : '') +
-      (ordinal ? '<button onclick="setCompact(false)">Edit</button>' : '') + '</div>';
+      (ordinal ? '<button onclick="setCompact(false)">Edit</button>' : '') +
+      (ordinal ? '<button onclick="setMode(\'quick\')">Quick Mode</button>' : '') + '</div>';
   };
   var html = '<div class="cmain' + (!IS_DOWN && !d ? ' centre' : '') + '">';
   if (IS_DOWN) {
@@ -5307,11 +5358,12 @@ function paintCompact() {
     };
     var slide = COMPACT_SLIDE > 0 ? ' slide-r' : COMPACT_SLIDE < 0 ? ' slide-l' : '';
     COMPACT_SLIDE = 0;
+    // ⓘ Quick keeps the name alone: no sides, no kind. L1/R1 still rotate.
     html += '<div class="ccar' + slide + '">' +
-            side(prev, 'l', '\u25c2 L1') +
+            (QUICK ? '' : side(prev, 'l', '\u25c2 L1')) +
             '<div class="ccur"><div class="cname">' + esc(nameFor(d.ordinal)) + '</div>' +
-            '<div class="ckind">' + esc(deviceLabelShort(d)) + '</div></div>' +
-            side(next, 'r', 'R1 \u25b8') +
+            (QUICK ? '' : '<div class="ckind">' + esc(deviceLabelShort(d)) + '</div>') + '</div>' +
+            (QUICK ? '' : side(next, 'r', 'R1 \u25b8')) +
             '</div>';
     if (!kindOk.length) {
       // ⭐ The empty state is DELIBERATELY different: a first preset deserves
@@ -5360,23 +5412,32 @@ function paintCompact() {
                   esc(d.linked_config) + ' to this controller">\ud83d\uddd8</button>';
       }
       // The selector under a title, sliding with the ring (rhoquinn8217, 2026-09-09).
-      html += '<div class="csel' + slide + '"><div class="ctitle">Controller Config</div>' +
+      html += '<div class="csel' + slide + '">' +
+              (QUICK ? '' : '<div class="ctitle">Controller Config</div>') +
               '<div class="cselrow"><select id="cpick" data-ordinal="' + esc(d.ordinal) + '"' +
               ' onchange="compactPick()">' +
-              opts + '</select>' + autoBtn + '</div></div>' + foot(true, d.ordinal);
+              opts + '</select>' + autoBtn + '</div></div>' + (QUICK ? '' : foot(true, d.ordinal));
     }
   }
   // ⭐ The footer area: the legend and the way back, as large as the rest.
   // The way back is written out because someone who parked this window and
   // is not used to the chord has no other way to learn it (rhoquinn8217).
   html += '</div>';   // .cmain
-  html += '<div class="cbar"><button class="cconf" onclick="openConfigurator()">Advanced</button>' +
-          '<div class="cbarText">' +
-          '<div class="clegend">L1/R1 controller | \u2715 select | d-pad move | ' +
-          '\u2630 move | R3 resize | \\|/ advanced | \u25cb close</div>' +
-          '<div class="cinfo">To bring this window back: <b>hold two fingers on the touchpad ' +
-          'and press Options</b> (DS5 only), or open it with the taskbar icon.</div>' +
-          '</div><button class="cclose" onclick="park()">Close</button></div>';
+  if (QUICK) {
+    // ⭐ Quick's footer: a small Advanced and a four-item legend, nothing else.
+    // ⓘ The legend names where Create goes, which in the cycle is Advanced.
+    html += '<div class="cbar"><button class="cconf" onclick="openConfigurator()">Advanced</button>' +
+            '<div class="cbarText"><div class="clegend">\u2630 move | R3 resize | ' +
+            '\\|/ advanced | \u25cb close</div></div></div>';
+  } else {
+    html += '<div class="cbar"><button class="cconf" onclick="openConfigurator()">Advanced</button>' +
+            '<div class="cbarText">' +
+            '<div class="clegend">L1/R1 controller | \u2715 select | d-pad move | ' +
+            '\u2630 move | R3 resize | \\|/ quick | \u25cb close</div>' +
+            '<div class="cinfo">To bring this window back: <b>hold two fingers on the touchpad ' +
+            'and press Options</b> (DS5 only), or open it with the taskbar icon.</div>' +
+            '</div><button class="cclose" onclick="park()">Close</button></div>';
+  }
   box.innerHTML = html;
   gpCollect();
   // ⭐ THE HALO STAYS WHERE IT WAS across a repaint (rhoquinn8217, 2026-09-09:
