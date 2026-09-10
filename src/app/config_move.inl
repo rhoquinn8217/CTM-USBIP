@@ -82,10 +82,26 @@ inline const SizeShare kCompactSizes[3] = { { 0.34, 0.34 }, { 0.45, 0.45 }, { 0.
 inline std::atomic_int  g_sizeCompact{0};
 inline std::atomic_bool g_compact{false};
 
-inline void set_compact(bool on)
+// ⭐ QUICK HAS SIZES OF ITS OWN (rhoquinn8217, 2026-09-09): half Simple's width
+// and a third of its height at each step, so the window hugs the little it
+// shows -- a name, a selector, a footer.
+//
+//   small   0.170 x 0.113   what the page opens quick at
+//   medium  0.225 x 0.150
+//   large   0.280 x 0.187
+inline const SizeShare kQuickSizes[3] = { { 0.170, 0.113 }, { 0.225, 0.150 }, { 0.280, 0.187 } };
+inline std::atomic_int  g_sizeQuick{0};
+inline std::atomic_bool g_quick{false};
+
+// The page names its layout: Advanced, Simple or Quick. Each switch resets
+// that layout's slot to its entry size, which is what the page resizes to.
+inline void set_view(bool compact, bool quick)
 {
-    g_compact.store(on);
-    if (on) g_sizeCompact.store(0); else g_size.store(2);
+    g_compact.store(compact);
+    g_quick.store(compact && quick);
+    if (!compact) g_size.store(2);
+    else if (quick) g_sizeQuick.store(0);
+    else g_sizeCompact.store(0);
 }
 
 // ⓘ Own edge tracking for R3 rather than ctm_overlay::edge(): that table's
@@ -179,8 +195,9 @@ inline void resize_next(HWND hwnd)
     RECT rc;
     if (!GetWindowRect(hwnd, &rc)) return;
     const bool compact = g_compact.load();
-    std::atomic_int &slot = compact ? g_sizeCompact : g_size;
-    const SizeShare *table = compact ? kCompactSizes : kSizes;
+    const bool quick = g_quick.load();
+    std::atomic_int &slot = !compact ? g_size : (quick ? g_sizeQuick : g_sizeCompact);
+    const SizeShare *table = !compact ? kSizes : (quick ? kQuickSizes : kCompactSizes);
     const int idx = (slot.load() + 1) % 3;
     slot.store(idx);
     const RECT wa = work_area();

@@ -657,10 +657,13 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
                 return true;
             }
             auto cv = json.bools.find("compact");
+            auto qv = json.bools.find("quick");
             const bool compact = (cv != json.bools.end()) && cv->second;
-            ui_view_set_compact(compact);
-            *out = rest_http_response(200, compact ? R"({"ok":true,"compact":true})"
-                                                   : R"({"ok":true,"compact":false})");
+            const bool quick = compact && (qv != json.bools.end()) && qv->second;
+            ui_view_set(compact, quick);
+            *out = rest_http_response(200, std::string("{\"ok\":true,\"compact\":") +
+                                               (compact ? "true" : "false") +
+                                               ",\"quick\":" + (quick ? "true" : "false") + "}");
             return true;
         }
 
