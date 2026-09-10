@@ -240,9 +240,9 @@ int run_trigger_effect_tests()
 
     section("trigger effect: a click on R2 only");
     reset_config();
-    g_strings["ds5.trigger_r2_effect"] = "click";
-    g_ints["ds5.trigger_r2_effect_at"] = 50;
-    g_ints["ds5.trigger_r2_effect_strength"] = 6;
+    g_strings["ds5.trigger_right_effect"] = "click";
+    g_ints["ds5.trigger_right_effect_at"] = 50;
+    g_ints["ds5.trigger_right_effect_strength"] = 6;
     {
         std::vector<uint8_t> report = blank_report();
         CTM_CHECK(wants_anything("ds5"));
@@ -261,7 +261,7 @@ int run_trigger_effect_tests()
     section("trigger effect: off clears only what we set");
     // Still holding the R2 effect from the section above.
     reset_config();
-    g_strings["ds5.trigger_r2_effect"] = "off";
+    g_strings["ds5.trigger_right_effect"] = "off";
     {
         std::vector<uint8_t> report = blank_report();
         const uint8_t claim = apply_to_report("ds5", report.data(), report.size());
@@ -279,9 +279,9 @@ int run_trigger_effect_tests()
 
     section("trigger effect: both triggers, and a short report");
     reset_config();
-    g_strings["ds5.trigger_r2_effect"] = "click";
-    g_strings["ds5.trigger_l2_effect"] = "wall";
-    g_ints["ds5.trigger_l2_effect_at"] = 30;
+    g_strings["ds5.trigger_right_effect"] = "click";
+    g_strings["ds5.trigger_left_effect"] = "wall";
+    g_ints["ds5.trigger_left_effect_at"] = 30;
     {
         std::vector<uint8_t> report = blank_report();
         const uint8_t claim = apply_to_report("ds5", report.data(), report.size());
@@ -304,7 +304,7 @@ int run_trigger_effect_tests()
     // controller until something changes it, so "absent means leave alone" let
     // one config's setting follow the pad into the next one.
     reset_config();
-    g_strings["ds5.trigger_r2_effect"] = "click";
+    g_strings["ds5.trigger_right_effect"] = "click";
     {
         std::vector<uint8_t> report = blank_report();
         const uint8_t claim = apply_to_report("ds5", report.data(), report.size());
@@ -314,7 +314,7 @@ int run_trigger_effect_tests()
     }
     // The same the other way round.
     reset_config();
-    g_strings["ds5.trigger_l2_effect"] = "wall";
+    g_strings["ds5.trigger_left_effect"] = "wall";
     {
         std::vector<uint8_t> report = blank_report();
         const uint8_t claim = apply_to_report("ds5", report.data(), report.size());
@@ -334,8 +334,8 @@ int run_trigger_effect_tests()
 
     section("trigger effect: sections do not leak into each other");
     reset_config();
-    g_strings["ds5.trigger_r2_effect"] = "click";
-    g_strings["edge.trigger_r2_effect"] = "off";
+    g_strings["ds5.trigger_right_effect"] = "click";
+    g_strings["edge.trigger_right_effect"] = "off";
     {
         std::vector<uint8_t> report = blank_report();
         apply_to_report("ds5", report.data(), report.size());

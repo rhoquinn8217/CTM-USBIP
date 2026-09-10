@@ -55,7 +55,7 @@ constexpr size_t kR2Position = 6;
 constexpr int    kFullPull   = 255;
 
 struct Side {
-    const char *name;      // "r2" or "l2", which is also the config key stem
+    const char *name;      // "right" or "left": also the config key stem
     size_t position;       // where its pull sits in the report
 };
 
@@ -258,8 +258,8 @@ inline void on_ds5_input(const void *deviceKey,
 
     probe_report(deviceKey, section, data, len);
 
-    static const Side kR2{ "r2", kR2Position };
-    static const Side kL2{ "l2", kL2Position };
+    static const Side kR2{ "right", kR2Position };
+    static const Side kL2{ "left", kL2Position };
 
     const Bound boundR2 =
         bound_for(device_config_str(section.c_str(), bind_key_for(kR2.name).c_str()));
@@ -299,9 +299,9 @@ inline void on_ds5_input(const void *deviceKey,
     // ordinary press rather than just above a tap.
     const int holdMs = device_config_int(section.c_str(), "trigger_click_hold_ms", 600);
     const int clickR2 = raw_from_percent(
-        device_config_int(section.c_str(), "trigger_r2_click_at", 90));
+        device_config_int(section.c_str(), "trigger_right_click_at", 90));
     const int clickL2 = raw_from_percent(
-        device_config_int(section.c_str(), "trigger_l2_click_at", 90));
+        device_config_int(section.c_str(), "trigger_left_click_at", 90));
     const long long nowMs = now_ms();
 
     uint8_t buttons = 0;

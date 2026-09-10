@@ -37,6 +37,7 @@ namespace {
 // Config stubs standing in for device_config_*. The real ones read a file.
 std::map<std::string, std::string> g_strings;
 std::map<std::string, int> g_ints;
+std::map<std::string, bool> g_bools;
 
 std::string device_config_str(const char *section, const char *key)
 {
@@ -48,6 +49,13 @@ int device_config_int(const char *section, const char *key, int fallback)
 {
     auto it = g_ints.find(std::string(section) + "." + key);
     return it == g_ints.end() ? fallback : it->second;
+}
+
+// The probe reads this; the tests leave it false so the probe stays silent.
+bool device_config_bool(const char *section, const char *key, bool fallback)
+{
+    auto it = g_bools.find(std::string(section) + "." + key);
+    return it == g_bools.end() ? fallback : it->second;
 }
 
 const char *device_section_for(const std::vector<unsigned char> &) { return "ds5"; }
@@ -140,6 +148,7 @@ void reset_all()
 {
     g_strings.clear();
     g_ints.clear();
+    g_bools.clear();
     g_buttons = 0;
     g_held.clear();
     g_keys.clear();
@@ -164,7 +173,7 @@ struct Out { bool down; bool freeze; };
 // One step of the R2 side with time and thresholds supplied.
 Out pull(State &st, int r2, long long nowMs, int holdMs = 200, int clickAt = 90)
 {
-    static const Side side{ "r2", kR2Position };
+    static const Side side{ "right", kR2Position };
     const std::vector<uint8_t> d = report_with(0, r2);
     Out out{ false, false };
     out.down = step_side(side, st, d.data(), nowMs, raw_from_percent(5),
@@ -193,7 +202,7 @@ int run_trigger_click_tests()
     reset_all();
     {
         State st;
-        static const Side side{ "r2", kR2Position };
+        static const Side side{ "right", kR2Position };
         const std::vector<uint8_t> d = report_with(0, 255);
         bool freeze = false;
         const bool down = step_side(side, st, d.data(), 0, raw_from_percent(5),
@@ -297,7 +306,7 @@ int run_trigger_click_tests()
         State st;
         const int engage = raw_from_percent(12);       // 30
         const int release = (engage * 2) / 3;          // 20
-        static const Side side{ "r2", kR2Position };
+        static const Side side{ "right", kR2Position };
         bool freeze = false;
 
         // A trigger wandering below the engage point never engages at all.
@@ -344,7 +353,7 @@ int run_trigger_click_tests()
 
     section("trigger click: a mouse binding, end to end");
     reset_all();
-    g_strings["ds5.trigger_r2_click"] = "MouseLeft";
+    g_strings["ds5.trigger_right_click"] = "MouseLeft";
     {
         const std::vector<unsigned char> descriptor(12, 0);
         int pad = 0;
@@ -356,7 +365,7 @@ int run_trigger_click_tests()
 
     section("trigger click: a keyboard binding, end to end");
     reset_all();
-    g_strings["ds5.trigger_r2_click"] = "Enter";
+    g_strings["ds5.trigger_right_click"] = "Enter";
     {
         const std::vector<unsigned char> descriptor(12, 0);
         int pad = 0;
@@ -372,8 +381,8 @@ int run_trigger_click_tests()
 
     section("trigger click: both triggers, bound differently");
     reset_all();
-    g_strings["ds5.trigger_r2_click"] = "MouseLeft";
-    g_strings["ds5.trigger_l2_click"] = "MouseRight";
+    g_strings["ds5.trigger_right_click"] = "MouseLeft";
+    g_strings["ds5.trigger_left_click"] = "MouseRight";
     {
         const std::vector<unsigned char> descriptor(12, 0);
         int pad = 0;
@@ -383,7 +392,7 @@ int run_trigger_click_tests()
 
     section("trigger click: two pads do not freeze each other");
     reset_all();
-    g_strings["ds5.trigger_r2_click"] = "MouseLeft";
+    g_strings["ds5.trigger_right_click"] = "MouseLeft";
     {
         const std::vector<unsigned char> descriptor(12, 0);
         int padA = 0, padB = 0;

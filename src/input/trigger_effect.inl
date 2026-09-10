@@ -445,11 +445,11 @@ inline uint8_t apply_to_report(const std::string &section, uint8_t *report, size
     if (report == nullptr || len < kL2Offset + kBlockLen) return 0;
 
     const bool ownsTriggers =
-        side_wants_effect(section, "r2") || side_wants_effect(section, "l2");
+        side_wants_effect(section, "right") || side_wants_effect(section, "left");
 
     uint8_t claim = 0;
-    claim = static_cast<uint8_t>(claim | apply_one(section, "r2", report, kR2Offset, kClaimR2));
-    claim = static_cast<uint8_t>(claim | apply_one(section, "l2", report, kL2Offset, kClaimL2));
+    claim = static_cast<uint8_t>(claim | apply_one(section, "right", report, kR2Offset, kClaimR2));
+    claim = static_cast<uint8_t>(claim | apply_one(section, "left", report, kL2Offset, kClaimL2));
 
     if (ownsTriggers) {
         if ((claim & kClaimR2) == 0) {
@@ -468,7 +468,7 @@ inline uint8_t apply_to_report(const std::string &section, uint8_t *report, size
 // has nothing to send, so a trigger effect alone is enough to send one.
 inline bool wants_anything(const std::string &section)
 {
-    const char *sides[] = { "r2", "l2" };
+    const char *sides[] = { "right", "left" };
     for (const char *side : sides) {
         const std::string key = std::string("trigger_") + side + "_effect";
         const Shape shape = shape_from(device_config_str(section.c_str(), key.c_str()));

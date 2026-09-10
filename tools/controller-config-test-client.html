@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.64.37 -- see the changelog at the bottom of this comment.
+  VERSION 2.64.38 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,11 @@
   tidy message about it.
 
   CHANGELOG
+    2.64.38 The trigger settings read RIGHT and LEFT rather than r2 and l2,
+            right first then left, and the L2/R2 remaps moved in beside them.
+            One letter was too little to tell them apart, and a remap two
+            sections away from the trigger it binds was two places to set
+            one button.
     2.64.37 Int settings show and enforce the schema's range. The min and max
             were never emitted, so every number box took anything -- a
             strength of 50 went into a 1-to-8 setting and saved.
@@ -2741,7 +2746,11 @@ var BTN_GROUP = {
   0: 'Face buttons', 1: 'Face buttons', 2: 'Face buttons', 3: 'Face buttons',
   12: 'Face buttons', 13: 'Face buttons', 14: 'Face buttons', 15: 'Face buttons',
   4: 'Shoulder/stick buttons', 5: 'Shoulder/stick buttons',
-  6: 'Shoulder/stick buttons', 7: 'Shoulder/stick buttons',
+  // ⭐ L2 and R2 live with the TRIGGER settings, not with the shoulders.
+  // ⛔ They were two places to bind one button: a remap here and a trigger
+  // press over there, both firing. rhoquinn8217 found the duplicate
+  // 2026-09-10. One place to look is the smallest fix for that.
+  6: 'Triggers', 7: 'Triggers',
   10: 'Shoulder/stick buttons', 11: 'Shoulder/stick buttons',
   8: 'System buttons', 9: 'System buttons', 16: 'System buttons'
 };
