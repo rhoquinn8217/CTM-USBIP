@@ -38,9 +38,8 @@
 //   0x25  weapon       start and stop as one bitmap (2) + one strength byte
 //   0x26  vibration    like feedback, plus a frequency byte at index 9
 //   0x22  bow          weapon plus a snap-back force meant to reset the
-//                     trigger. ⛔ TRIED AND WITHDRAWN 2026-09-10, but NOT
-//                     disproven -- read the note at the bottom of this comment
-//                     before writing it off or trying it again.
+//                     trigger. ⚠️ ON TRIAL -- read the note at the bottom of
+//                     this comment before drawing any conclusion from it.
 //   0x23  galloping    two feet and a frequency, an oscillation
 //   0x27  machine      two amplitudes, a frequency and a period
 //   0x01/0x02/0x06     the simple forms of feedback, weapon and vibration
@@ -104,6 +103,8 @@ constexpr uint8_t kClaimL2 = 0x08;
 constexpr uint8_t kModeOff      = 0x05;
 constexpr uint8_t kModeFeedback = 0x21;
 constexpr uint8_t kModeWeapon   = 0x25;
+// ⚠️ Listed as unofficial, and on trial. See the bow note in the header.
+constexpr uint8_t kModeBow      = 0x22;
 
 // ---- the travel, in zones ---------------------------------------------------
 //
@@ -136,6 +137,12 @@ constexpr int kWeaponEndMax   = 9;
 // what actually went out was an effect asking for nothing, twice.
 // ⭐ So the setting IS the hardware value, 1 to 7, sent verbatim. Off is a
 // MODE, never a strength of zero.
+// ⛔ THE BOW KEEPS THE DOCUMENTED LIMITS where weapon does not, so that a
+// failure can only be the mode or the packing, never the zone.
+constexpr int kBowStartMin = 0;
+constexpr int kBowStartMax = 7;
+constexpr int kBowEndMax   = 8;
+
 constexpr int kStrengthMin = 1;
 constexpr int kStrengthMax = 7;
 
@@ -252,6 +259,42 @@ inline void build_detent_wall(uint8_t *block, int detentZone, int strength)
     block[6] = static_cast<uint8_t>((forces >> 24) & 0xff);
 }
 
+// A break at the point, plus a push meant to carry the trigger back to rest.
+//
+// ⭐ WHY IT IS WORTH HAVING (rhoquinn8217, 2026-09-10). The R2 gesture only
+// hands the cursor back when the trigger goes ALL THE WAY home. A finger that
+// relaxes but rests part way leaves the cursor frozen with nothing on screen
+// explaining why, which is the exact complaint that made the touchpad version
+// feel broken. A trigger that returns itself removes that state.
+//
+// ⛔⛔ SECOND ATTEMPT, AND THE PACKING IS THE VARIABLE. The first put both
+// forces in byte 3, three bits each, from a written description. On hardware
+// the trigger never returned AND the break got harder as the snap force rose --
+// which is what you would feel if the pad reads byte 3 as ONE number, since our
+// snap of 7 made that byte 63 where every other mode there takes 0 to 7.
+// ➡️ So the snap force now sits in byte 4 and byte 3 is a plain strength, like
+// weapon's. **Two observables decide it:** the break should stop getting harder
+// as the snap force rises, and the trigger should return.
+// ⚠️ If the break still hardens with the snap force, byte 4 is not the field
+// either and the mode should be dropped rather than guessed at a third time.
+inline void build_snap(uint8_t *block, int startZone, int endZone,
+                       int strength, int snapForce)
+{
+    startZone = clamp_to(startZone, kBowStartMin, kBowStartMax);
+    endZone   = clamp_to(endZone, startZone + 1, kBowEndMax);
+    strength  = clamp_to(strength, kStrengthMin, kStrengthMax);
+    snapForce = clamp_to(snapForce, kStrengthMin, kStrengthMax);
+
+    const uint16_t zones = static_cast<uint16_t>((1u << startZone) | (1u << endZone));
+
+    memset(block, 0, kBlockLen);
+    block[0] = kModeBow;
+    block[1] = static_cast<uint8_t>(zones & 0xff);
+    block[2] = static_cast<uint8_t>((zones >> 8) & 0xff);
+    block[3] = static_cast<uint8_t>(strength);
+    block[4] = static_cast<uint8_t>(snapForce);
+}
+
 // ---- what a config asks for -------------------------------------------------
 
 enum class Shape {
@@ -260,6 +303,7 @@ enum class Shape {
     Click,    // a break at the point, so the finger can find it
     Wall,     // resistance from the point down
     Notch,    // a flat wall with one firm zone in it, at the point
+    Snap,     // a break at the point, and a push meant to return the trigger
 };
 
 inline Shape shape_from(const std::string &value)
@@ -269,6 +313,7 @@ inline Shape shape_from(const std::string &value)
     if (value == "click" || value == "weapon") return Shape::Click;
     if (value == "wall" || value == "feedback") return Shape::Wall;
     if (value == "notch" || value == "both") return Shape::Notch;
+    if (value == "snap" || value == "bow") return Shape::Snap;
     return Shape::Absent;     // a typo leaves the trigger alone, never breaks it
 }
 
@@ -325,6 +370,11 @@ inline uint8_t apply_one(const std::string &section, const char *sideKey,
         build_weapon(report + offset, zone - 1, zone, strength);
     } else if (shape == Shape::Notch) {
         build_detent_wall(report + offset, zone, strength);
+    } else if (shape == Shape::Snap) {
+        const std::string snapKey =
+            std::string("trigger_") + sideKey + "_snap_force";
+        build_snap(report + offset, zone - 1, zone, strength,
+                   device_config_int(section.c_str(), snapKey.c_str(), 3));
     } else {
         build_feedback(report + offset, zone, strength);
     }
@@ -338,7 +388,7 @@ inline bool side_wants_effect(const std::string &section, const char *sideKey)
     const std::string key = std::string("trigger_") + sideKey + "_effect";
     const Shape shape = shape_from(device_config_str(section.c_str(), key.c_str()));
     return shape == Shape::Click || shape == Shape::Wall ||
-           shape == Shape::Notch;
+           shape == Shape::Notch || shape == Shape::Snap;
 }
 
 // Adds whatever the section asks for to an output report already being built.
@@ -393,7 +443,7 @@ inline bool wants_anything(const std::string &section)
         const std::string key = std::string("trigger_") + side + "_effect";
         const Shape shape = shape_from(device_config_str(section.c_str(), key.c_str()));
         if (shape == Shape::Click || shape == Shape::Wall ||
-            shape == Shape::Notch) return true;
+            shape == Shape::Notch || shape == Shape::Snap) return true;
         if (shape == Shape::Off && has_set_effect(section + "/" + side)) return true;
     }
     return false;
