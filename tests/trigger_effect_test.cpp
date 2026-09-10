@@ -186,29 +186,6 @@ int run_trigger_effect_tests()
     // Zone 0 stays free, so the trigger is not heavy at rest.
     CTM_CHECK_EQ((int)(block[1] & 0x01), 0);
 
-    section("trigger effect: the snap breaks, then returns the trigger");
-    // Two forces in one byte, three bits each: the resistance you push through
-    // sits low, the push back sits above it.
-    build_snap(block, 2, 8, 7, 3);
-    CTM_CHECK_EQ((int)block[0], 0x22);
-    CTM_CHECK_EQ((int)(block[1] | (block[2] << 8)), (1 << 2) | (1 << 8));
-    CTM_CHECK_EQ((int)(block[3] & 0x07), 7);          // resistance
-    CTM_CHECK_EQ((int)((block[3] >> 3) & 0x07), 3);   // the snap back
-    // Neither force can reach the other's bits, whatever is asked for.
-    build_snap(block, 2, 8, 7, 7);
-    CTM_CHECK_EQ((int)block[3], 7 | (7 << 3));
-    build_snap(block, 2, 8, 1, 1);
-    CTM_CHECK_EQ((int)block[3], 1 | (1 << 3));
-    // ⛔ The bow keeps the DOCUMENTED zone limits where weapon does not: this
-    // mode has never been seen working, so a snap that does nothing should be
-    // one unknown rather than two. Zone 9 is refused, unlike a click.
-    build_snap(block, 8, 9, 7, 3);
-    CTM_CHECK_EQ((int)(block[1] | (block[2] << 8)), (1 << 7) | (1 << 8));
-    // A force outside the range clamps into it, never to zero.
-    build_snap(block, 2, 4, 0, 99);
-    CTM_CHECK_EQ((int)(block[3] & 0x07), 1);
-    CTM_CHECK_EQ((int)((block[3] >> 3) & 0x07), 7);
-
     section("trigger effect: reading the config");
     CTM_CHECK(shape_from("") == Shape::Absent);
     CTM_CHECK(shape_from("off") == Shape::Off);
@@ -218,11 +195,13 @@ int run_trigger_effect_tests()
     CTM_CHECK(shape_from("feedback") == Shape::Wall);
     CTM_CHECK(shape_from("notch") == Shape::Notch);
     CTM_CHECK(shape_from("both") == Shape::Notch);
-    CTM_CHECK(shape_from("snap") == Shape::Snap);
-    CTM_CHECK(shape_from("bow") == Shape::Snap);
     // ⛔ A typo must leave the trigger alone. Treating it as an effect would
     // put resistance on a trigger nobody asked to change.
     CTM_CHECK(shape_from("clik") == Shape::Absent);
+    // ⛔ "snap" was a shape and was dropped: the bow mode never returned
+    // the trigger and only made the break harder. An old config still
+    // naming it must leave the trigger alone rather than guess.
+    CTM_CHECK(shape_from("snap") == Shape::Absent);
 
     section("trigger effect: an unconfigured trigger is never claimed");
     reset_config();

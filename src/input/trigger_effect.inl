@@ -37,7 +37,10 @@
 //   0x21  feedback     zones bitmap (2 bytes) + 3 bits of force per zone (4)
 //   0x25  weapon       start and stop as one bitmap (2) + one strength byte
 //   0x26  vibration    like feedback, plus a frequency byte at index 9
-//   0x22  bow          weapon plus a snap-back force that resets the trigger
+//   0x22  bow          weapon plus a snap-back force meant to reset the
+//                     trigger. ⛔ TRIED AND WITHDRAWN 2026-09-10, but NOT
+//                     disproven -- read the note at the bottom of this comment
+//                     before writing it off or trying it again.
 //   0x23  galloping    two feet and a frequency, an oscillation
 //   0x27  machine      two amplitudes, a frequency and a period
 //   0x01/0x02/0x06     the simple forms of feedback, weapon and vibration
@@ -54,6 +57,22 @@
 //   2. **Weapon's deep end.** They cap the start at zone 7 and the stop at 8.
 //      We allow 8 and 9, because rhoquinn8217 asked for a deeper click and it
 //      was then confirmed on hardware at both 30% and 90% (2026-09-10).
+//
+// ⛔⛔ THE BOW, AND WHY IT PROBABLY FAILED ON OUR SIDE (2026-09-10).
+// It was really sent -- `22 80 01 1f` and `22 80 01 3f` are in the log, zones 7
+// and 8, from a config that was genuinely linked. On the pad it gave resistance
+// but never returned the trigger, and rhoquinn8217 reported the break getting
+// HARDER as the snap force went up.
+// ⭐ That last part is the clue, and it points at OUR ENCODING rather than at
+// the mode. We packed two three-bit forces into byte 3, resistance low and snap
+// high, on the strength of one written description. If the pad instead reads
+// that byte as ONE number, then 0x1f is 31 and 0x3f is 63 where the other modes
+// take 0 to 7 -- so raising the snap force would raise the resistance, which is
+// exactly what was felt.
+// ➡️ **The cheap retry is to put the snap force in byte 4 instead** and leave
+// byte 3 as a plain strength. If the break then stops getting harder, the
+// packing was the fault and the mode is fine. Do that before concluding the
+// mode does nothing.
 //
 // ⭐⭐ AND ONE THING WE DO NOT YET USE. The INPUT report carries a trigger
 // STATUS nybble beside the stop zone -- the controller says whether the finger
@@ -85,9 +104,6 @@ constexpr uint8_t kClaimL2 = 0x08;
 constexpr uint8_t kModeOff      = 0x05;
 constexpr uint8_t kModeFeedback = 0x21;
 constexpr uint8_t kModeWeapon   = 0x25;
-// ⚠️ Listed as UNOFFICIAL where the others are not, and never seen in a capture
-// of ours. It is a weapon that also pushes the trigger back toward rest.
-constexpr uint8_t kModeBow      = 0x22;
 
 // ---- the travel, in zones ---------------------------------------------------
 //
@@ -120,15 +136,6 @@ constexpr int kWeaponEndMax   = 9;
 // what actually went out was an effect asking for nothing, twice.
 // ⭐ So the setting IS the hardware value, 1 to 7, sent verbatim. Off is a
 // MODE, never a strength of zero.
-// ⛔ THE BOW KEEPS THE DOCUMENTED LIMITS, deliberately, where weapon does not.
-// Weapon was pushed to zone 9 and confirmed on hardware; this mode has never
-// been seen working at all, so it gets ONE unknown rather than two. ➡️ If a
-// snap does nothing, that is the mode failing, not the zone -- and if it works,
-// trying 9 afterwards is a one-line change.
-constexpr int kBowStartMin = 0;
-constexpr int kBowStartMax = 7;
-constexpr int kBowEndMax   = 8;
-
 constexpr int kStrengthMin = 1;
 constexpr int kStrengthMax = 7;
 
@@ -245,35 +252,6 @@ inline void build_detent_wall(uint8_t *block, int detentZone, int strength)
     block[6] = static_cast<uint8_t>((forces >> 24) & 0xff);
 }
 
-// A break at the point, plus a push that carries the trigger back to rest.
-//
-// ⭐ WHY IT IS WORTH HAVING (rhoquinn8217, 2026-09-10). The R2 gesture only
-// hands the cursor back when the trigger goes ALL THE WAY home. A finger that
-// relaxes but rests part way leaves the cursor frozen with nothing on screen
-// explaining why -- which is the exact complaint that made the touchpad version
-// feel broken. A trigger that returns itself removes that state instead of
-// asking the user to remember it.
-//
-// ⓘ Two forces, and they are different things: `strength` is the resistance you
-// push through, `snapForce` is what pushes back afterwards. They share one byte,
-// three bits each.
-inline void build_snap(uint8_t *block, int startZone, int endZone,
-                       int strength, int snapForce)
-{
-    startZone = clamp_to(startZone, kBowStartMin, kBowStartMax);
-    endZone   = clamp_to(endZone, startZone + 1, kBowEndMax);
-    strength  = clamp_to(strength, kStrengthMin, kStrengthMax);
-    snapForce = clamp_to(snapForce, kStrengthMin, kStrengthMax);
-
-    const uint16_t zones = static_cast<uint16_t>((1u << startZone) | (1u << endZone));
-
-    memset(block, 0, kBlockLen);
-    block[0] = kModeBow;
-    block[1] = static_cast<uint8_t>(zones & 0xff);
-    block[2] = static_cast<uint8_t>((zones >> 8) & 0xff);
-    block[3] = static_cast<uint8_t>((strength & 0x07) | ((snapForce & 0x07) << 3));
-}
-
 // ---- what a config asks for -------------------------------------------------
 
 enum class Shape {
@@ -282,7 +260,6 @@ enum class Shape {
     Click,    // a break at the point, so the finger can find it
     Wall,     // resistance from the point down
     Notch,    // a flat wall with one firm zone in it, at the point
-    Snap,     // a break at the point, and the trigger returns itself after
 };
 
 inline Shape shape_from(const std::string &value)
@@ -292,7 +269,6 @@ inline Shape shape_from(const std::string &value)
     if (value == "click" || value == "weapon") return Shape::Click;
     if (value == "wall" || value == "feedback") return Shape::Wall;
     if (value == "notch" || value == "both") return Shape::Notch;
-    if (value == "snap" || value == "bow") return Shape::Snap;
     return Shape::Absent;     // a typo leaves the trigger alone, never breaks it
 }
 
@@ -317,11 +293,6 @@ inline void note_set_effect(const std::string &marker, bool on)
     std::lock_guard<std::mutex> lock(g_setMutex);
     if (on) g_setEffect[marker] = true;
     else g_setEffect.erase(marker);
-}
-
-inline std::string stem_snap(const char *sideKey)
-{
-    return std::string("trigger_") + sideKey + "_snap_force";
 }
 
 // Writes one trigger's block and says which claim bit to raise. Returns 0 when
@@ -354,10 +325,6 @@ inline uint8_t apply_one(const std::string &section, const char *sideKey,
         build_weapon(report + offset, zone - 1, zone, strength);
     } else if (shape == Shape::Notch) {
         build_detent_wall(report + offset, zone, strength);
-    } else if (shape == Shape::Snap) {
-        const int snapForce =
-            device_config_int(section.c_str(), (stem_snap(sideKey)).c_str(), 3);
-        build_snap(report + offset, zone - 1, zone, strength, snapForce);
     } else {
         build_feedback(report + offset, zone, strength);
     }
@@ -371,7 +338,7 @@ inline bool side_wants_effect(const std::string &section, const char *sideKey)
     const std::string key = std::string("trigger_") + sideKey + "_effect";
     const Shape shape = shape_from(device_config_str(section.c_str(), key.c_str()));
     return shape == Shape::Click || shape == Shape::Wall ||
-           shape == Shape::Notch || shape == Shape::Snap;
+           shape == Shape::Notch;
 }
 
 // Adds whatever the section asks for to an output report already being built.
@@ -426,7 +393,7 @@ inline bool wants_anything(const std::string &section)
         const std::string key = std::string("trigger_") + side + "_effect";
         const Shape shape = shape_from(device_config_str(section.c_str(), key.c_str()));
         if (shape == Shape::Click || shape == Shape::Wall ||
-            shape == Shape::Notch || shape == Shape::Snap) return true;
+            shape == Shape::Notch) return true;
         if (shape == Shape::Off && has_set_effect(section + "/" + side)) return true;
     }
     return false;

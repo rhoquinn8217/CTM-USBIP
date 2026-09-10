@@ -1,12 +1,12 @@
-// Tests for the trigger-click gesture: freeze, click, double click, drag.
+// Tests for the trigger gesture: freeze, press, double press, drag.
 //
 // ⭐ WHAT THESE PROTECT. The whole design rests on one rule -- the cursor is
-// frozen for as long as the finger is committed to clicking, and only a FULL
+// frozen for as long as the finger is committed to pressing, and only a FULL
 // release hands it back. Every outcome falls out of that, so the tests are
 // written as transitions rather than as states: what a press does, what letting
 // back up without going home does, what holding does.
 //
-// ⛔ THE ONE THAT MATTERS MOST is the double click. A press, a partial lift and
+// ⛔ THE ONE THAT MATTERS MOST is the double press. A press, a partial lift and
 // a second press must keep the cursor frozen throughout. Thawing in the gap is
 // exactly what stops a double click landing on a gyro pointer, and it would not
 // show up as a failure anywhere else.
@@ -15,8 +15,8 @@
 // the window feels right, or that a real trigger reaches the values used here.
 // Those are hardware questions. These protect the state machine.
 //
-// ⓘ Time is passed in rather than read, so nothing here sleeps and the window
-// can be crossed exactly rather than approximately.
+// ⓘ Time and thresholds are passed in rather than read, so nothing here sleeps
+// and the window can be crossed exactly rather than approximately.
 
 #include "harness.h"
 
@@ -35,12 +35,11 @@ namespace {
 // Config stubs standing in for device_config_*. The real ones read a file.
 std::map<std::string, std::string> g_strings;
 std::map<std::string, int> g_ints;
-std::map<std::string, bool> g_bools;
 
-bool device_config_bool(const char *section, const char *key, bool fallback)
+std::string device_config_str(const char *section, const char *key)
 {
-    auto it = g_bools.find(std::string(section) + "." + key);
-    return it == g_bools.end() ? fallback : it->second;
+    auto it = g_strings.find(std::string(section) + "." + key);
+    return it == g_strings.end() ? std::string() : it->second;
 }
 
 int device_config_int(const char *section, const char *key, int fallback)
@@ -59,9 +58,38 @@ std::string device_settings_section(const char *kind, const std::string &linked)
 // What the module drives, recorded rather than performed.
 uint8_t g_buttons = 0;
 std::map<const void *, bool> g_held;
+std::map<const void *, std::vector<uint8_t>> g_keys;
 int g_mouseStarts = 0;
+int g_keyboardStarts = 0;
 
 }  // namespace
+
+// Standing in for the rebinder's name lookup, with just enough vocabulary to
+// prove the binding is resolved rather than assumed.
+namespace ctm_rebind {
+enum MouseAction { kMouseNone = 0, kMouseLeft, kMouseRight, kMouseMiddle,
+                   kMouseWheelUp, kMouseWheelDown };
+
+inline MouseAction mouse_action_for(const std::string &code)
+{
+    if (code == "MouseLeft")      return kMouseLeft;
+    if (code == "MouseRight")     return kMouseRight;
+    if (code == "MouseMiddle")    return kMouseMiddle;
+    if (code == "MouseWheelUp")   return kMouseWheelUp;
+    return kMouseNone;
+}
+
+struct KeyName { const char *code; uint8_t usage; uint8_t modifier; };
+
+inline const KeyName *key_for(const std::string &code)
+{
+    static const KeyName kEnter{ "Enter", 0x28, 0x00 };
+    static const KeyName kShiftA{ "ShiftA", 0x04, 0x02 };
+    if (code == "Enter") return &kEnter;
+    if (code == "ShiftA") return &kShiftA;
+    return nullptr;
+}
+}  // namespace ctm_rebind
 
 namespace ctm_mouse_device {
 inline void set_trigger_buttons(uint8_t mask) { g_buttons = mask; }
@@ -75,7 +103,19 @@ inline void set_gyro_hold(const void *key, bool held)
 }
 }
 
+namespace ctm_keyboard_device {
+inline void set_trigger_keys_for(const void *key, uint8_t /*mods*/,
+                                 const uint8_t *keys, size_t count)
+{
+    std::vector<uint8_t> v;
+    for (size_t i = 0; i < count && keys != nullptr; ++i) v.push_back(keys[i]);
+    if (v.empty()) g_keys.erase(key);
+    else g_keys[key] = v;
+}
+}
+
 inline void ctm_gyro_mouse_ensure_mouse_started() { ++g_mouseStarts; }
+inline void ctm_rebind_ensure_keyboard_started() { ++g_keyboardStarts; }
 
 #include "../src/input/trigger_click.inl"
 
@@ -87,15 +127,15 @@ void reset_all()
 {
     g_strings.clear();
     g_ints.clear();
-    g_bools.clear();
     g_buttons = 0;
     g_held.clear();
+    g_keys.clear();
     g_mouseStarts = 0;
+    g_keyboardStarts = 0;
     std::lock_guard<std::mutex> lock(g_mutex);
     g_pads.clear();
 }
 
-// A report long enough to carry both trigger positions.
 std::vector<uint8_t> report_with(int l2, int r2)
 {
     std::vector<uint8_t> d(16, 0);
@@ -104,23 +144,18 @@ std::vector<uint8_t> report_with(int l2, int r2)
     return d;
 }
 
-bool held_for(const void *key)
-{
-    return g_held.find(key) != g_held.end();
-}
+bool held_for(const void *key) { return g_held.find(key) != g_held.end(); }
 
-// One step of the R2 side, with time supplied. Returns the button mask and
-// whether the cursor was asked to freeze.
-struct Out { uint8_t buttons; bool freeze; };
+struct Out { bool down; bool freeze; };
 
+// One step of the R2 side with time and thresholds supplied.
 Out pull(State &st, int r2, long long nowMs, int holdMs = 200, int clickAt = 90)
 {
-    g_ints["ds5.trigger_r2_click_at"] = clickAt;
-    static const Side side{ "r2", kR2Position, kButtonLeft };
+    static const Side side{ "r2", kR2Position };
     const std::vector<uint8_t> d = report_with(0, r2);
-    Out out{ 0, false };
-    step_side("ds5", side, st, d.data(), nowMs,
-              raw_from_percent(5), holdMs, &out.buttons, &out.freeze);
+    Out out{ false, false };
+    out.down = step_side(side, st, d.data(), nowMs, raw_from_percent(5),
+                         raw_from_percent(clickAt), holdMs, true, &out.freeze);
     return out;
 }
 
@@ -128,57 +163,71 @@ Out pull(State &st, int r2, long long nowMs, int holdMs = 200, int clickAt = 90)
 
 int run_trigger_click_tests()
 {
-    section("trigger click: an unconfigured trigger does nothing");
+    section("trigger click: what a binding resolves to");
+    CTM_CHECK(!bound_for("").set());
+    CTM_CHECK_EQ((int)bound_for("MouseLeft").mouseBit, 0x01);
+    CTM_CHECK_EQ((int)bound_for("MouseRight").mouseBit, 0x02);
+    CTM_CHECK_EQ((int)bound_for("MouseMiddle").mouseBit, 0x04);
+    CTM_CHECK_EQ((int)bound_for("Enter").keyUsage, 0x28);
+    CTM_CHECK_EQ((int)bound_for("ShiftA").keyModifier, 0x02);
+    // ⛔ A wheel tick is a pulse and this gesture is built on holding, so it is
+    // left unbound rather than made to half work.
+    CTM_CHECK(!bound_for("MouseWheelUp").set());
+    // A name nobody recognises binds nothing, rather than guessing.
+    CTM_CHECK(!bound_for("Bananas").set());
+
+    section("trigger click: an unbound trigger does nothing");
     reset_all();
     {
         State st;
-        const Out out = pull(st, 255, 0);         // fully pulled, and still inert
-        CTM_CHECK_EQ((int)out.buttons, 0);
-        CTM_CHECK(!out.freeze);
+        static const Side side{ "r2", kR2Position };
+        const std::vector<uint8_t> d = report_with(0, 255);
+        bool freeze = false;
+        const bool down = step_side(side, st, d.data(), 0, raw_from_percent(5),
+                                    raw_from_percent(90), 200, false, &freeze);
+        CTM_CHECK(!down);
+        CTM_CHECK(!freeze);       // fully pulled, and still inert
     }
 
-    // Everything below has R2 turned on.
-    g_bools["ds5.trigger_r2_click"] = true;
-
-    section("trigger click: the freeze arrives before the click");
+    section("trigger click: the freeze arrives before the press");
     {
         State st;
         // A tenth of the way in: past the engage point, nowhere near the click.
         Out out = pull(st, 26, 0);
         CTM_CHECK(out.freeze);                     // cursor already still
-        CTM_CHECK_EQ((int)out.buttons, 0);         // and nothing clicked yet
+        CTM_CHECK(!out.down);                      // and nothing pressed yet
         // ⭐ That ordering is the whole design: the jolt of the press lands on a
         // cursor that stopped moving before the finger got there.
         out = pull(st, 240, 10);
         CTM_CHECK(out.freeze);
-        CTM_CHECK_EQ((int)out.buttons, (int)kButtonLeft);
+        CTM_CHECK(out.down);
     }
 
-    section("trigger click: a single click, released home");
+    section("trigger click: a single press, released home");
     {
         State st;
         pull(st, 240, 0);
         const Out out = pull(st, 0, 20);
-        CTM_CHECK_EQ((int)out.buttons, 0);
+        CTM_CHECK(!out.down);
         CTM_CHECK(!out.freeze);                    // home, so the cursor is back
     }
 
-    section("trigger click: a double click keeps the cursor still throughout");
+    section("trigger click: a double press keeps the cursor still throughout");
     {
         State st;
         Out out = pull(st, 240, 0);
-        CTM_CHECK_EQ((int)out.buttons, (int)kButtonLeft);
+        CTM_CHECK(out.down);
         // Lifted back over the click point but NOT home.
         out = pull(st, 60, 30);
-        CTM_CHECK_EQ((int)out.buttons, 0);         // the button released
+        CTM_CHECK(!out.down);                      // the binding released
         CTM_CHECK(out.freeze);                     // ⭐ and the cursor did not move
         // The second press of the pair.
         out = pull(st, 240, 60);
-        CTM_CHECK_EQ((int)out.buttons, (int)kButtonLeft);
+        CTM_CHECK(out.down);
         CTM_CHECK(out.freeze);
         // Only going home hands the cursor back.
         out = pull(st, 0, 80);
-        CTM_CHECK_EQ((int)out.buttons, 0);
+        CTM_CHECK(!out.down);
         CTM_CHECK(!out.freeze);
     }
 
@@ -187,21 +236,21 @@ int run_trigger_click_tests()
         State st;
         Out out = pull(st, 240, 1000, 200);
         CTM_CHECK(out.freeze);
-        // One millisecond short of the window is still a click.
+        // One millisecond short of the window is still a press.
         out = pull(st, 240, 1199, 200);
         CTM_CHECK(out.freeze);
-        CTM_CHECK_EQ((int)out.buttons, (int)kButtonLeft);
-        // ⭐ Exactly ON the window, the cursor comes back and the button stays.
+        CTM_CHECK(out.down);
+        // ⭐ Exactly ON the window, the cursor comes back and the binding stays.
         out = pull(st, 240, 1200, 200);
         CTM_CHECK(!out.freeze);
-        CTM_CHECK_EQ((int)out.buttons, (int)kButtonLeft);
+        CTM_CHECK(out.down);
         // ⛔ Lifting over the click point mid-drag must NOT drop what is being
         // dragged. Only going home does.
         out = pull(st, 60, 1300, 200);
-        CTM_CHECK_EQ((int)out.buttons, (int)kButtonLeft);
+        CTM_CHECK(out.down);
         CTM_CHECK(!out.freeze);
         out = pull(st, 0, 1400, 200);
-        CTM_CHECK_EQ((int)out.buttons, 0);
+        CTM_CHECK(!out.down);
         CTM_CHECK(!out.freeze);
     }
 
@@ -210,28 +259,66 @@ int run_trigger_click_tests()
         State st;
         pull(st, 240, 0, 0);
         const Out out = pull(st, 240, 100000, 0);  // held a very long time
-        CTM_CHECK_EQ((int)out.buttons, (int)kButtonLeft);
+        CTM_CHECK(out.down);
         CTM_CHECK(out.freeze);                     // never hands the cursor back
     }
 
     section("trigger click: the click point is honoured");
     {
         State st;
-        // At 50%, a pull to 40% clicks nothing but still freezes.
+        // At 50%, a pull to 40% presses nothing but still freezes.
         Out out = pull(st, 102, 0, 200, 50);
         CTM_CHECK(out.freeze);
-        CTM_CHECK_EQ((int)out.buttons, 0);
+        CTM_CHECK(!out.down);
         out = pull(st, 130, 10, 200, 50);
-        CTM_CHECK_EQ((int)out.buttons, (int)kButtonLeft);
+        CTM_CHECK(out.down);
+    }
+
+    section("trigger click: a mouse binding, end to end");
+    reset_all();
+    g_strings["ds5.trigger_r2_click"] = "MouseLeft";
+    {
+        const std::vector<unsigned char> descriptor(12, 0);
+        int pad = 0;
+        on_ds5_input(&pad, descriptor, "", report_with(0, 240).data(), 16);
+        CTM_CHECK_EQ((int)g_buttons, 0x01);
+        CTM_CHECK(held_for(&pad));
+        CTM_CHECK(g_keys.empty());                 // the keyboard is untouched
+    }
+
+    section("trigger click: a keyboard binding, end to end");
+    reset_all();
+    g_strings["ds5.trigger_r2_click"] = "Enter";
+    {
+        const std::vector<unsigned char> descriptor(12, 0);
+        int pad = 0;
+        on_ds5_input(&pad, descriptor, "", report_with(0, 240).data(), 16);
+        CTM_CHECK_EQ((int)g_buttons, 0);           // no mouse button held
+        CTM_CHECK(g_keys.find(&pad) != g_keys.end());
+        CTM_CHECK_EQ((int)g_keys[&pad][0], 0x28);
+        // Releasing home lets the key go.
+        on_ds5_input(&pad, descriptor, "", report_with(0, 0).data(), 16);
+        CTM_CHECK(g_keys.find(&pad) == g_keys.end());
+        CTM_CHECK(!held_for(&pad));
+    }
+
+    section("trigger click: both triggers, bound differently");
+    reset_all();
+    g_strings["ds5.trigger_r2_click"] = "MouseLeft";
+    g_strings["ds5.trigger_l2_click"] = "MouseRight";
+    {
+        const std::vector<unsigned char> descriptor(12, 0);
+        int pad = 0;
+        on_ds5_input(&pad, descriptor, "", report_with(240, 240).data(), 16);
+        CTM_CHECK_EQ((int)g_buttons, 0x03);
     }
 
     section("trigger click: two pads do not freeze each other");
     reset_all();
-    g_bools["ds5.trigger_r2_click"] = true;
+    g_strings["ds5.trigger_r2_click"] = "MouseLeft";
     {
         const std::vector<unsigned char> descriptor(12, 0);
         int padA = 0, padB = 0;
-        // A is pulling; B is at rest.
         on_ds5_input(&padA, descriptor, "", report_with(0, 240).data(), 16);
         CTM_CHECK(held_for(&padA));
         on_ds5_input(&padB, descriptor, "", report_with(0, 0).data(), 16);
@@ -241,17 +328,6 @@ int run_trigger_click_tests()
         forget(&padA);
         CTM_CHECK(!held_for(&padA));
         CTM_CHECK_EQ((int)g_buttons, 0);
-    }
-
-    section("trigger click: L2 clicks the other button");
-    reset_all();
-    g_bools["ds5.trigger_l2_click"] = true;
-    {
-        const std::vector<unsigned char> descriptor(12, 0);
-        int pad = 0;
-        on_ds5_input(&pad, descriptor, "", report_with(240, 0).data(), 16);
-        CTM_CHECK_EQ((int)g_buttons, (int)kButtonRight);
-        CTM_CHECK(held_for(&pad));
     }
 
     reset_all();
