@@ -695,10 +695,16 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
             return true;
         }
 
-        // ⭐ PARK: the compact view picked a config and is done. Behind the
-        // game, not closed -- config mode stays armed for the way back.
-        if (what == "park") {
-            const bool ok = ctm_open_ui::park_window();
+        // ⭐ CLOSE: Circle, in Simple or Quick. The window ENDS -- it does not
+        // hide behind the game (rhoquinn8217, 2026-09-09, reversing that
+        // morning's park). The ways back are the chord and the tray icon's
+        // "Open settings", and the listener remembers the layout, the size,
+        // the place and the controller, so the next one comes back as this
+        // one left. ⓘ WM_CLOSE through close_existing(), which matches on the
+        // [ctm-app] marker and so can only ever reach our own window; the
+        // page's teardown beacon releases the gate on the way out.
+        if (what == "close") {
+            const bool ok = ctm_open_ui::close_existing();
             *out = rest_http_response(200, ok ? R"({"ok":true})" : R"({"ok":false})");
             return true;
         }

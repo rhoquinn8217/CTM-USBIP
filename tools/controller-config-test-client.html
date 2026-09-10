@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.64.30 -- see the changelog at the bottom of this comment.
+  VERSION 2.64.31 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,10 @@
   tidy message about it.
 
   CHANGELOG
+    2.64.31 Circle CLOSES the window rather than parking it behind the game,
+            reversing 2.64.0: the chord and the tray icon are the ways back,
+            and the listener already remembers what was on screen
+            (rhoquinn8217, 2026-09-09).
     2.64.30 The window comes back as it went away, for real this time: the
             LISTENER remembers the layout, the size, the place and the
             controller, and the page asks it on load. It had been the page's
@@ -1098,7 +1102,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.64.30</span>
+  <span class="muted" style="font-size:12px">v2.64.31</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -2395,7 +2399,7 @@ function createFromPreset(ordinal, preset) {
       // "Customize it" is the configurator on this controller, where the
       // new config's settings are; "Go back" is the compact view as it was.
       if (COMPACT) compactAskExit('Pre-set config created!', [
-        { label: 'Try it out now', act: park },
+        { label: 'Try it out now', act: closeWindow },
         { label: 'Customize it', act: function () { setCompact(false); } },
         { label: 'Go back' }]);
     })
@@ -4573,9 +4577,10 @@ function gpKeyBack() {
   }
   if (GP_SELECTING) { gpSelectEnd(false); return; }
   if (RENAMING) { cancelRename(); return; }
-  // ⭐ In compact, Circle parks the window: the same word, the same act, as
-  // Close in the footer and Circle on the keyboard.
-  if (COMPACT) { park(); return; }
+  // ⭐ In compact, Circle CLOSES the window -- the word the legend uses, and
+  // what it now does. ⓘ Not the keyboard's Circle, which hides an overlay
+  // that has no other way back; this window has two.
+  if (COMPACT) { closeWindow(); return; }
 
   // ⛔ CIRCLE LETS GO OF A TEXT BOX (rhoquinn8217, 2026-09-03: "circle should
   // remove the white focus on the box but it doesn't").
@@ -5202,12 +5207,16 @@ document.addEventListener('keydown', function (ev) {
 // strip, the pagehide beacon -- is inherited. ⓘ gpCollect() skips anything
 // with no offsetParent, so the hidden page simply leaves the focus list.
 //
-// ⭐ PARK, NOT CLOSE. Picking a config sends the window behind the game rather
-// than closing it: the gate stops the moment we are not in front, so the game
-// gets its pad back, and the taskbar or Alt-Tab is a way back for anyone not
-// used to the chord. The page cannot lower its own window, so the listener
-// minimises it on ui/park. Close and Circle park too -- the same word means
-// the same thing on the keyboard, whose Circle hides rather than destroys.
+// ⛔ CLOSE, NOT PARK -- and it was the other way round for a morning. The
+// window went BEHIND the game, minimised, so the taskbar entry was a way back
+// for anyone not used to the chord. rhoquinn8217 reversed it the same day:
+// "closing closes it and the only ways to get it back is through the task bar
+// icon or the chord". ⓘ What made the reversal safe is the memory that
+// arrived with it -- the LISTENER holds the layout, the size, the place and
+// the controller, so a window that ends is not a state that is lost. The page
+// cannot be relied on to close itself, so the listener does it on ui/close.
+// ⓘ Not the keyboard's Circle, which hides an overlay that has no other way
+// back; this window has two.
 //
 // ⭐ CREATE ON THE PAD SWITCHES VIEWS, as it cycles the keyboard's layout. It
 // arrives here as the gated key KeyC, the way L1/R1 and the d-pad do, because
@@ -5407,8 +5416,12 @@ function compactEnsureController() {
   paintCompact();
 }
 
-function park() {
-  fetch(base() + '/api/v1/ui/park', { method: 'POST' }).catch(function () {});
+// ⛔ CLOSE, NOT HIDE (rhoquinn8217, 2026-09-09, reversing the morning's
+// park): Circle ends this window. The chord and the tray icon's "Open
+// settings" are the ways back, and the listener remembers what it was
+// showing, so the next one opens where this one left off.
+function closeWindow() {
+  fetch(base() + '/api/v1/ui/close', { method: 'POST' }).catch(function () {});
 }
 
 // ⭐ ASK BEFORE LEAVING (rhoquinn8217, 2026-09-09). A pick applies at once, then
