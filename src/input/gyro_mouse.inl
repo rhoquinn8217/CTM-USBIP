@@ -62,7 +62,37 @@ enum class Gate {
     NotTouchpad,
     TouchpadClick,
     PS,
+    // ⭐ TRIGGER: the gyro moves the cursor EXCEPT while a trigger is being
+    // worked, so a click lands on a cursor that is already still. Unlike every
+    // gate above, this one is not a function of the report bytes -- the trigger
+    // logic owns a small state machine (a press, a double click, a drag are all
+    // different) and simply says whether it wants the cursor held.
+    TriggerHold,
 };
+
+// ⭐ WHOSE FLAG THIS IS. trigger_click.inl decides when the cursor should be
+// frozen, because it is the code that knows whether a pull is a click, the
+// second half of a double click, or a drag. But the GATE is asked here, several
+// files earlier in the include order, so the flag lives here and the trigger
+// writes it. That keeps the dependency pointing one way.
+inline std::mutex g_gyroHoldMutex;
+inline std::map<const void *, bool> g_gyroHold;
+
+inline void set_gyro_hold(const void *deviceKey, bool held)
+{
+    std::lock_guard<std::mutex> lock(g_gyroHoldMutex);
+    if (held) g_gyroHold[deviceKey] = true;
+    else g_gyroHold.erase(deviceKey);
+}
+
+// ⚠️ Per pad, never global. Two bridged controllers must not freeze each
+// other's cursor -- the same fault T-162 fixed for the settings window.
+inline bool gyro_hold(const void *deviceKey)
+{
+    if (deviceKey == nullptr) return false;
+    std::lock_guard<std::mutex> lock(g_gyroHoldMutex);
+    return g_gyroHold.find(deviceKey) != g_gyroHold.end();
+}
 
 inline Gate parse_gate(const std::string &raw)
 {
@@ -82,6 +112,7 @@ inline Gate parse_gate(const std::string &raw)
     if (v == "touchpad") return Gate::Touchpad;
     if (v == "!touchpad" || v == "not_touchpad") return Gate::NotTouchpad;
     if (v == "touchpad_click" || v == "click") return Gate::TouchpadClick;
+    if (v == "trigger") return Gate::TriggerHold;
     if (v == "ps") return Gate::PS;
     // Unknown value is OFF, never an error -- a typo silently disables the
     // feature, it never breaks a session. Same rule as every config lookup.
@@ -91,7 +122,10 @@ inline Gate parse_gate(const std::string &raw)
 // True when the gate condition says gyro should be producing movement right
 // now. `d` is the mapped DS5 report (id at [0]); `len` must cover the gate
 // byte the chosen gate reads.
-inline bool gate_open(Gate gate, const uint8_t *d, size_t len)
+// ⓘ The device key is optional because every gate but one is a pure function of
+// the report bytes, and every existing caller passes only those. Gate::TriggerHold
+// is the exception: whose trigger is being worked is a question about a pad.
+inline bool gate_open(Gate gate, const uint8_t *d, size_t len, const void *deviceKey = nullptr)
 {
     switch (gate) {
         case Gate::Off:
@@ -114,6 +148,10 @@ inline bool gate_open(Gate gate, const uint8_t *d, size_t len)
             return len > 10 && (d[10] & 0x02);           // pad pressed in
         case Gate::PS:
             return len > 10 && (d[10] & 0x01);
+        case Gate::TriggerHold:
+            // Open unless the trigger logic is holding the cursor still. A drag
+            // clears the hold, which is how the cursor comes back mid-press.
+            return !gyro_hold(deviceKey);
     }
     return false;
 }
@@ -215,6 +253,15 @@ inline void warp_cursor_to_centre()
 
 class GyroMouse {
 public:
+    // ⭐ WHICH PAD THIS IS. Every gate but one is a pure function of the report
+    // bytes, so this class never needed to know. Gate::TriggerHold does: the
+    // trigger state machine keeps its answer per pad, and two bridged
+    // controllers must not freeze each other's cursor.
+    // ⓘ Set once per report by gyro_for(), which is the only place a key and an
+    // instance are both in hand.
+    const void *key_ = nullptr;
+    void set_key(const void *k) { key_ = k; }
+
     GyroMouse()
     {
         // Stillness auto-calibration: the filter watches for the controller
@@ -254,7 +301,7 @@ public:
                           << " btn[9]=0x" << std::hex << (len > 9 ? (int)d[9] : 0)
                           << " btn[10]=0x" << (len > 10 ? (int)d[10] : 0) << std::dec
                           << " touch[33]=0x" << std::hex << (len > 33 ? (int)d[33] : 0) << std::dec
-                          << " gateOpen=" << (gate_open(cfg.gate, d, len) ? 1 : 0)
+                          << " gateOpen=" << (gate_open(cfg.gate, d, len, key_) ? 1 : 0)
                           << std::endl;
             }
         }
@@ -329,7 +376,7 @@ public:
 
         // Gate AFTER processing, so calibration is continuous but movement only
         // emits when the player is actually aiming.
-        if (!gate_open(cfg.gate, d, len)) {
+        if (!gate_open(cfg.gate, d, len, key_)) {
             reset_remainder();
             return false;
         }
@@ -578,6 +625,7 @@ inline GyroRegistry &registry()
     return r;
 }
 
+// Declared here so forget_device below can clear the trigger hold too.
 inline GyroMouse &gyro_for(const void *deviceKey)
 {
     GyroRegistry &r = registry();
@@ -594,6 +642,11 @@ inline GyroMouse &gyro_for(const void *deviceKey)
 // a stale bias, and the map does not grow across a long session of reconnects.
 inline void forget_device(const void *deviceKey)
 {
+    // A pad that goes away must not leave its cursor frozen for whatever lands
+    // on the same pointer next. The trigger clears this too, so this is belt
+    // and braces -- and a stale hold is invisible until someone wonders why
+    // their gyro stopped working.
+    set_gyro_hold(deviceKey, false);
     GyroRegistry &r = registry();
     {
         std::lock_guard<std::mutex> lock(r.mutex);
@@ -670,6 +723,7 @@ inline void on_ds5_input(const void *deviceKey,
     const char *section = resolved.c_str();
     MouseDelta delta;
     GyroMouse &g = gyro_for(deviceKey);
+    g.set_key(deviceKey);
     // Cheap: a struct copy per report, and it keeps the calibration lookup off
     // the report path where it would need a mutex 250 times a second.
     g.set_calibration(ctm_gyro_calib::scale_for(deviceKey));

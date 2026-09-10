@@ -127,6 +127,13 @@ void ctm_touch_mouse_apply(const void *deviceKey,
                            const std::string &linkedConfig,
                            const uint8_t *data, size_t len);
 void ctm_touch_mouse_forget(const void *deviceKey);
+// ⓘ Same shape again for the trigger click. No ctm_ prefix: that namespace is
+// upstream's, and this file is ours.
+void trigger_click_apply(const void *deviceKey,
+                         const std::vector<unsigned char> &descriptor,
+                         const std::string &linkedConfig,
+                         const uint8_t *data, size_t len);
+void trigger_click_forget(const void *deviceKey);
 // ⓘ Releases only THIS controller's held keys -- they are kept per device so
 // two gated pads cannot cancel each other.
 void ctm_keyboard_forget_device(const void *deviceKey);
@@ -188,6 +195,7 @@ static bool ctm_window_steering(const void *deviceKey) { return window_move::ste
 #include "app/config_move.inl"      // Options moves the settings page; rebind.inl calls it
 #include "input/rebind.inl"
 #include "input/touch_mouse.inl"   // touchpad cursor/scroll/taps; needs the mouse device and the gyro mailbox
+#include "input/trigger_click.inl" // the trigger as a mouse click; needs the mouse device and the gyro gate
 #include "input/stick_mouse.inl"   // stick cursor; needs the gyro gate and mailbox
 // ⛔ AFTER the three mouse hooks, whose sources it blanks -- see the note in
 // the file. It must not run before they have read the motion.
