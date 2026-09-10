@@ -65,17 +65,18 @@ inline std::atomic_int g_size{1};
 // a large screen the compact view still needs to be sized to the room, so R3
 // cycles a second table while the page is compact, with a position of its own.
 //
-//   medium  0.3375 x 0.45   what the page opens Simple at, so the two agree
-//   large   0.42   x 0.56
+//   medium  0.3375 x 0.374   what the page opens Simple at, so the two agree
+//   large   0.42   x 0.465
 // ⓘ Simple keeps its medium and large (rhoquinn8217, 2026-09-09); the
-// 0.34 small is gone, and a quarter came off the width the same evening.
+// 0.34 small is gone, a quarter came off the width the same evening, and a
+// sixth off the height to halve the paddings above and below its content.
 //
 // ⓘ The page says which view it is in (ui/view); the listener cannot tell by
 // looking. Each switch resets that view's position to its entry size -- small
 // for compact (rhoquinn8217, 2026-09-09: smallest first), large for full --
 // which is exactly the size the page resizes to on the switch, so R3 always
 // cycles from where the window actually is.
-inline const SizeShare kCompactSizes[2] = { { 0.3375, 0.45 }, { 0.42, 0.56 } };
+inline const SizeShare kCompactSizes[2] = { { 0.3375, 0.374 }, { 0.42, 0.465 } };
 inline std::atomic_int  g_sizeCompact{0};
 inline std::atomic_bool g_compact{false};
 

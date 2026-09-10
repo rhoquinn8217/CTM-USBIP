@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.64.27 -- see the changelog at the bottom of this comment.
+  VERSION 2.64.28 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,12 @@
   tidy message about it.
 
   CHANGELOG
+    2.64.28 Create goes straight to Quick from Advanced or Simple and does
+            nothing in Quick; the legends say "quick mode" and Quick's drops
+            it. Quick's room above the name equals its room under the
+            selector. Simple's two paddings are halved and equal, with the
+            window a sixth shorter and its text held on screen
+            (rhoquinn8217, 2026-09-09).
     2.64.27 No question after a pick, again: Circle closes. Advanced's
             legend says "○ footer/close". Simple is a quarter narrower with
             its text unchanged; Left from New lands on Advanced and Right
@@ -526,9 +532,9 @@
   /* Compact has a down screen of its own; the full page's cover and help stay hidden. */
   body.compact #downCover, body.compact #offlineHelp { display:none !important; }
   #compactBox .cbad { color:#ff8f8f; }
-  #compactBox .csub { font-size:3vh; color:#c8c9ce; text-align:center; line-height:1.4; max-width:80vw; }
-  #compactBox .ccmd { font-family:ui-monospace, Consolas, monospace; font-size:3vh; color:#cfe0f5;
-    background:#1c1e26; padding:1vh 2vw; border-radius:1vh; }
+  #compactBox .csub { font-size:3.6vh; color:#c8c9ce; text-align:center; line-height:1.4; max-width:80vw; }
+  #compactBox .ccmd { font-family:ui-monospace, Consolas, monospace; font-size:3.6vh; color:#cfe0f5;
+    background:#1c1e26; padding:1.2vh 2vw; border-radius:1.2vh; }
   #compactBox { display:none; }
   /* ⭐ SIZED IN VIEWPORT UNITS, ON PURPOSE (rhoquinn8217, 2026-09-09: too much
      empty space; and R3 must change the text too). R3 lives in the listener and
@@ -542,7 +548,7 @@
      the viewport takes as its own while html says nothing. */
   body.compact { padding:0; overflow:hidden; }
   body.compact #compactBox { display:flex; flex-direction:column; align-items:center;
-    justify-content:flex-start; gap:0; padding:4vh 4vw 3vh; min-height:100vh;
+    justify-content:flex-start; gap:0; padding:0 4vw 3.6vh; min-height:100vh;
     box-sizing:border-box; }
   /* ⭐ The content centres in the room above the footer; the footer is pinned
      to the bottom of the page (rhoquinn8217, 2026-09-09). */
@@ -550,8 +556,14 @@
      is theirs, a two-line notice included, and the ring sits right against
      that line so no room is wasted between the two (rhoquinn8217,
      2026-09-09, third placing). */
+  /* ⭐ HALF THE ROOM, AND THE SAME ABOVE AND BELOW (rhoquinn8217, 2026-09-09):
+     no fixed padding at the top, the content centred in what is left above
+     the footer, and the window a sixth shorter so what is left is half what
+     it was -- every Simple figure below grew by a fifth to hold its size on
+     screen. ⚠️ The strip once kept for the bubbles is gone with it; a
+     notice now sits over the top of the ring while it shows. */
   #compactBox .cmain { flex:1 1 auto; width:100%; display:flex; flex-direction:column;
-    align-items:center; justify-content:flex-start; padding-top:13vh; gap:4.5vh; }
+    align-items:center; justify-content:center; padding-top:0; gap:5.4vh; }
   /* ⭐ QUICK: Simple with almost everything cut out (rhoquinn8217,
      2026-09-09). The name, the selector with its auto-link button, and a
      footer of a small Advanced and a four-item legend. Margins trimmed, no
@@ -567,14 +579,17 @@
      footer -- which has grown, and the box keeps a margin under it so the
      halo's outline (3px plus 2px offset) never clips on the bottom edge.
      ⛔ NO LARGER THAN SIMPLE'S on screen (rhoquinn8217, same evening).
-     Simple's window is three times as tall now, so the cap on any size here
-     is three times Simple's figure for the same thing: name 27, kind and
-     sides 13.5, selector and button 12.6, legend 6.9. The Advanced button
-     is the legend's size, by request. ⓘ The window lost a third of its
+     Simple's window is two and a half times as tall, so the cap on any size
+     here is two and a half times Simple's figure for the same thing --
+     which is what these are, on screen. The Advanced button is the
+     legend's size, by request. ⓘ The window lost a third of its
      height on 2026-09-09 to close the gap above the footer, and every
      figure here grew by half to stay where it was on screen. */
-  body.quick #compactBox { padding:2.25vh 2.5vw 5.25vh; }
-  body.quick #compactBox .cmain { padding-top:0; gap:3.75vh; justify-content:flex-start; }
+  /* ⓘ The room above the name and the room under the selector are the same
+     (rhoquinn8217, 2026-09-09): no fixed padding at the top, and the content
+     centred in what is left above the footer. */
+  body.quick #compactBox { padding:0 2.5vw 5.25vh; }
+  body.quick #compactBox .cmain { padding-top:0; gap:3.75vh; justify-content:center; }
   body.quick #compactBox .cmain.centre { gap:3vh; justify-content:center; }
   body.quick #compactBox .ccar { gap:2vw; }
   /* ⓘ The name a little larger than the kind under it, no more
@@ -608,7 +623,7 @@
      next time it bridges; lit, it removes the claim. The claimed config
      carries a 🗘 after its name in the list. */
   #compactBox .cselrow { display:flex; align-items:center; gap:1.5vw; }
-  #compactBox .cauto-btn { font-size:4.2vh; padding:0.6vh 1.4vw; line-height:1; }
+  #compactBox .cauto-btn { font-size:5.04vh; padding:0.72vh 1.4vw; line-height:1; }
   #compactBox .cauto-btn.on { color:#7fd18c; border-color:#7fd18c; opacity:1; }
   /* ⛔ NO GREEN IN THE LIST (rhoquinn8217, 2026-09-09). A native option is
      one run of text in one colour, so the mark could never be green on its
@@ -617,7 +632,9 @@
      colour altogether. The mark alone says which config auto links; the lit
      button beside the selector is where the green lives. */
   /* ⓘ Every size here is 1.5x the first cut (rhoquinn8217, 2026-09-09). A
-     further quarter was tried the same day and taken back. */
+     further quarter was tried the same day and taken back. ⓘ Then a fifth
+     more, the same evening, to hold the size on screen when the window
+     lost a sixth of its height for the paddings. */
   /* ⭐ THE CAROUSEL: the controller in focus stays in the centre, its
      neighbours sit dimmed either side under L1 and R1, and L1/R1 rotate the
      ring. One controller shows nothing at the sides; two show the same name
@@ -626,15 +643,15 @@
     width:100%; overflow:hidden; }
   /* ⓘ The sides sit three characters further out than the gap alone would put
      them (rhoquinn8217, 2026-09-09), and carry the kind under the nickname. */
-  #compactBox .cside { flex:1 1 0; min-width:0; color:#4e515b; font-size:4.5vh;
+  #compactBox .cside { flex:1 1 0; min-width:0; color:#4e515b; font-size:5.4vh;
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   #compactBox .cside.l { text-align:right; padding-right:3ch; }
   #compactBox .cside.r { text-align:left; padding-left:3ch; }
   /* The sides are the ring's own buttons for a mouse (rhoquinn8217, 2026-09-09). */
   #compactBox .cside[onclick] { cursor:pointer; }
   #compactBox .cside[onclick]:hover { color:#9aa4b2; }
-  #compactBox .cside small { display:block; font-size:3vh; color:#3d4049; }
-  #compactBox .cside .ckind { font-size:3vh; color:#3d4049; text-align:inherit; margin-top:0.4vh; }
+  #compactBox .cside small { display:block; font-size:3.6vh; color:#3d4049; }
+  #compactBox .cside .ckind { font-size:3.6vh; color:#3d4049; text-align:inherit; margin-top:0.48vh; }
   #compactBox .ccur { flex:0 1 auto; min-width:0; text-align:center; }
   /* ⭐ THE RING SLIDES the way it was pushed: R1 brings the next one in from the
      right, L1 from the left. A short, decisive move -- long enough to read as
@@ -644,35 +661,35 @@
   #compactBox .ccar.slide-r, #compactBox .csel.slide-r { animation:cslide-r .26s ease-out; }
   #compactBox .ccar.slide-l, #compactBox .csel.slide-l { animation:cslide-l .26s ease-out; }
   /* The selector and its title travel with the ring (rhoquinn8217, 2026-09-09). */
-  #compactBox .csel { display:flex; flex-direction:column; align-items:center; gap:1.2vh; }
-  #compactBox .ctitle { font-size:3vh; color:#71737c; text-align:center; }
-  #compactBox .cname { font-size:9vh; font-weight:600; text-align:center; line-height:1.1; }
-  #compactBox .ckind { font-size:4.5vh; color:#71737c; text-align:center; margin-top:0.8vh; }
+  #compactBox .csel { display:flex; flex-direction:column; align-items:center; gap:1.44vh; }
+  #compactBox .ctitle { font-size:3.6vh; color:#71737c; text-align:center; }
+  #compactBox .cname { font-size:10.8vh; font-weight:600; text-align:center; line-height:1.1; }
+  #compactBox .ckind { font-size:5.4vh; color:#71737c; text-align:center; margin-top:0.96vh; }
   /* ⓘ Two thirds of what it was (rhoquinn8217, 2026-09-09). */
-  #compactBox select { font-size:4.2vh; padding:0.8vh 1.4vw; min-width:47vw; }
-  #compactBox .cbig { font-size:8.1vh; padding:2vh 5vw; }
-  #compactBox .cfoot { display:flex; gap:3vw; margin-top:1.5vh; }
-  #compactBox .cfoot button { padding:1.4vh 3vw; font-size:5.4vh; }
-  #compactBox .cempty { color:#c8c9ce; font-size:5.4vh; text-align:center; }
+  #compactBox select { font-size:5.04vh; padding:0.96vh 1.4vw; min-width:47vw; }
+  #compactBox .cbig { font-size:9.72vh; padding:2.4vh 5vw; }
+  #compactBox .cfoot { display:flex; gap:3vw; margin-top:1.8vh; }
+  #compactBox .cfoot button { padding:1.68vh 3vw; font-size:6.48vh; }
+  #compactBox .cempty { color:#c8c9ce; font-size:6.48vh; text-align:center; }
   /* ⭐ The footer area: the legend and the way back, at the same size as the
      rest of the view, with room around the rule (rhoquinn8217, 2026-09-09). */
   #compactBox .cbar { width:100%; border-top:1px solid #2c2e36; margin-top:auto;
-    padding-top:2.4vh; display:flex; flex-direction:row; align-items:center; gap:3vw; }
+    padding-top:2.88vh; display:flex; flex-direction:row; align-items:center; gap:3vw; }
   #compactBox .cbarText { flex:1 1 auto; min-width:0; display:flex; flex-direction:column;
-    gap:1.4vh; align-items:center; }
+    gap:1.68vh; align-items:center; }
   /* ⓘ Half the size of the rest (rhoquinn8217, 2026-09-09), and green as the
      configurator's legend is while the pad is live. */
-  #compactBox .clegend { font-size:2.3vh; color:#7fd18c; text-align:center; }
-  #compactBox .cinfo { font-size:2.3vh; color:#c8c9ce; text-align:center; line-height:1.4;
+  #compactBox .clegend { font-size:2.76vh; color:#7fd18c; text-align:center; }
+  #compactBox .cinfo { font-size:2.76vh; color:#c8c9ce; text-align:center; line-height:1.4;
     max-width:80vw; }
   #compactBox .cinfo b { color:#e8e8ea; }
   /* ⭐ The footer's two corners: Configurator bottom-left, Close bottom-right,
      away from the actions under the selector (rhoquinn8217, 2026-09-09). */
-  #compactBox .cbar > button { flex:0 0 auto; font-size:3.4vh; padding:1.2vh 2.6vw; }
-  body.compact #confirmBox .confirmCard { font-size:5.1vh; max-width:86vw; }
-  body.compact #confirmBox .confirmCard h2 { font-size:6.3vh; }
-  body.compact #confirmBox .confirmCard p { font-size:5.1vh; }
-  body.compact #confirmBox .confirmCard button { font-size:5.1vh; padding:1.4vh 3vw; }
+  #compactBox .cbar > button { flex:0 0 auto; font-size:4.08vh; padding:1.44vh 2.6vw; }
+  body.compact #confirmBox .confirmCard { font-size:6.12vh; max-width:86vw; }
+  body.compact #confirmBox .confirmCard h2 { font-size:7.56vh; }
+  body.compact #confirmBox .confirmCard p { font-size:6.12vh; }
+  body.compact #confirmBox .confirmCard button { font-size:6.12vh; padding:1.68vh 3vw; }
   /* The confirm box in Quick's small window: the auto-link questions live
      here. Sized to the window like the rest of Quick, and it scrolls inside
      itself rather than past the window's edge. */
@@ -688,19 +705,19 @@
      that scrolls inside the window, and a table whose two columns sit
      together rather than at opposite edges. */
   body.compact #presetInfoBox .confirmCard, body.compact #presetBox .confirmCard {
-    font-size:2.6vh; width:auto; max-width:62vw; max-height:88vh; overflow:auto; box-sizing:border-box; }
-  body.compact #presetInfoBox .confirmCard h2, body.compact #presetBox .confirmCard h2 { font-size:3.8vh; }
-  body.compact #presetInfoBox .confirmCard p { font-size:2.6vh; line-height:1.4; }
-  body.compact #presetInfoTables h4 { font-size:2.2vh; margin:2vh 0 0.6vh; }
+    font-size:3.12vh; width:auto; max-width:62vw; max-height:88vh; overflow:auto; box-sizing:border-box; }
+  body.compact #presetInfoBox .confirmCard h2, body.compact #presetBox .confirmCard h2 { font-size:4.56vh; }
+  body.compact #presetInfoBox .confirmCard p { font-size:3.12vh; line-height:1.4; }
+  body.compact #presetInfoTables h4 { font-size:2.64vh; margin:2vh 0 0.6vh; }
   body.compact #presetInfoTables table { width:auto; margin:0; }
-  body.compact #presetInfoTables td { font-size:2.6vh; padding:0.3vh 1.5vw; }
+  body.compact #presetInfoTables td { font-size:3.12vh; padding:0.36vh 1.5vw; }
   body.compact #presetInfoTables td:last-child { text-align:left; }
   body.compact #presetInfoBox .confirmCard { max-width:80vw; }
   body.compact #presetInfoTables .ptwo { gap:3vw; }
   body.compact #presetInfoBox .confirmCard button, body.compact #presetBox .confirmCard button {
-    font-size:3vh; padding:1.2vh 2.5vw; }
-  body.compact #presetList .prow > button:first-child { font-size:3vh; padding:1.4vh 2vw; }
-  body.compact #presetList small { font-size:2.4vh; }
+    font-size:3.6vh; padding:1.44vh 2.5vw; }
+  body.compact #presetList .prow > button:first-child { font-size:3.6vh; padding:1.68vh 2vw; }
+  body.compact #presetList small { font-size:2.88vh; }
   /* ⭐ Sits under the tabs and stays with them. Which controller you are
      editing, and which config it is reading, are the two things you must not
      lose track of while scrolling a long settings list. */
@@ -945,11 +962,11 @@
   /* ⭐ IN COMPACT, NOTICES ARE BUBBLES; in the configurator they stay the
      slide-out strip (rhoquinn8217, 2026-09-09). Same element, same code that
      fills it -- only where it sits and how it is drawn changes. */
-  body.compact #bubbles { top:2vh; right:2vw; left:auto; bottom:auto; width:auto;
-    max-width:60vw; flex-direction:column; align-items:flex-end; gap:1.2vh;
+  body.compact #bubbles { top:2.4vh; right:2vw; left:auto; bottom:auto; width:auto;
+    max-width:60vw; flex-direction:column; align-items:flex-end; gap:1.44vh;
     transform:none; transition:none; pointer-events:none; }
-  body.compact #bubbles > div { flex:0 0 auto; border-radius:1.4vh; font-size:2.6vh;
-    line-height:1.4; padding:1.4vh 2.2vw; border:1px solid rgba(255,255,255,.14);
+  body.compact #bubbles > div { flex:0 0 auto; border-radius:1.68vh; font-size:3.12vh;
+    line-height:1.4; padding:1.68vh 2.2vw; border:1px solid rgba(255,255,255,.14);
     border-top-width:2px; box-shadow:0 1vh 3vh rgba(0,0,0,.45); }
   body.compact #bubbles > div + div { border-left:1px solid rgba(255,255,255,.14); }
   /* Each bubble pops in from its corner; the strip slides, a bubble appears. */
@@ -994,7 +1011,7 @@
   #confirmBox.cexit .confirmBtns { display:grid; grid-auto-flow:column; grid-auto-columns:1fr; }
   #confirmBox.cexit .confirmBtns button { white-space:nowrap; }
   body.compact #confirmBox.cexit .confirmCard { max-width:94vw; }
-  body.compact #confirmBox.cexit .confirmCard button { font-size:4.2vh; padding:1.2vh 2vw; }
+  body.compact #confirmBox.cexit .confirmCard button { font-size:5.04vh; padding:1.44vh 2vw; }
   /* ⛔ WITHOUT THIS the sticky header swallows a jumped-to section. Every
      control already has the same margin; the section wrapper did not, so
      scrollIntoView put it at the very top of the viewport -- underneath the
@@ -1072,7 +1089,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.64.27</span>
+  <span class="muted" style="font-size:12px">v2.64.28</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -5246,7 +5263,7 @@ function setMode(m) {
 // is (rhoquinn8217, 2026-09-09: two sizes per layout).
 function compactSize() {
   var w = Math.round(screen.availWidth * 0.3375);   // a quarter off (rhoquinn8217, 2026-09-09)
-  var h = Math.round(screen.availHeight * 0.45);
+  var h = Math.round(screen.availHeight * 0.374);   // a sixth off, for the paddings (same evening)
   window.resizeTo(w, h);
   window.moveTo(Math.round((screen.availWidth - w) / 2),
                 Math.round((screen.availHeight - h) / 2));
@@ -5321,11 +5338,13 @@ function openConfigurator() {
   setMode('advanced');
   showTab('overview');
 }
-// ⭐ THE CYCLE on the pad's Create (rhoquinn8217, 2026-09-09): Simple, Quick,
-// Advanced, and round to Simple.
+// ⭐ CREATE IS QUICK (rhoquinn8217, 2026-09-09, replacing the cycle): from
+// Advanced or Simple it goes straight to Quick -- the view wanted mid-game
+// -- and in Quick it does nothing; the buttons and Circle lead out.
 function toggleCompact() {
   if (PRESET_OPEN || PRESET_INFO_OPEN || CONFIRM_CB || RENAMING) return;
-  setMode(!COMPACT ? 'simple' : (QUICK ? 'advanced' : 'quick'));
+  if (QUICK) return;
+  setMode('quick');
 }
 
 // Compact shows a controller or nothing: never Overview or the Editor.
@@ -5559,13 +5578,13 @@ function paintCompact() {
     // after a pick.
     html += '<div class="cbar"><button class="cconf" onclick="openConfigurator()">Advanced</button>' +
             '<div class="cbarText"><div class="clegend">\u2630 move | R3 resize | ' +
-            '\\|/ advanced | \u25cb close</div></div>' +
+            '\u25cb close</div></div>' +
             '<button class="cclose" onclick="setMode(\'simple\')">Simple</button></div>';
   } else {
     html += '<div class="cbar"><button class="cconf" onclick="openConfigurator()">Advanced</button>' +
             '<div class="cbarText">' +
             '<div class="clegend">L1/R1 controller | \u2715 select | d-pad move | ' +
-            '\u2630 move | R3 resize | \\|/ quick | \u25cb close</div>' +
+            '\u2630 move | R3 resize | \\|/ quick mode | \u25cb close</div>' +
             '<div class="cinfo">To bring this window back: <b>hold two fingers on the touchpad ' +
             'and press Options</b> (DS5 only), or open it with the taskbar icon.</div>' +
             '</div><button class="cclose" onclick="setMode(\'quick\')">Quick</button></div>';
@@ -5673,7 +5692,7 @@ function gpPoll() {
   // ⓘ The count comes from the browser when it can see the pads, and falls
   // back to the singular when only the gate knows one is there.
   hint.textContent = (live.length > 1 ? live.length + ' controllers' : 'controller') +
-                     ' — L1/R1 controller | ✕ select | d-pad move | □ on/off | ☰ move | R3 resize | \\|/ simple | ○ footer/close';
+                     ' — L1/R1 controller | ✕ select | d-pad move | □ on/off | ☰ move | R3 resize | \\|/ quick mode | ○ footer/close';
   bar.className = 'live';
   measureGpBar();
 
