@@ -213,7 +213,14 @@ inline void on_ds5_input(const void *deviceKey,
     // hand, not of which trigger it is, and two of them could disagree.
     const int engageRaw = raw_from_percent(
         device_config_int(section.c_str(), "trigger_engage_at", 5));
-    const int holdMs = device_config_int(section.c_str(), "trigger_click_hold_ms", 200);
+    // ⛔ 600, AND 200 WAS MEASURED WRONG (2026-09-10). The window came from the
+    // touchpad, where a click is a tap. A trigger is not: rhoquinn8217's
+    // QUICKEST deliberate press in the capture held for 538 ms, and every one of
+    // four pulls turned into a drag about 200 ms after the press. The cursor
+    // coming back mid-press was read as the freeze failing.
+    // ⭐ A drag has to be something you MEAN, so the window must sit clear of an
+    // ordinary press rather than just above a tap.
+    const int holdMs = device_config_int(section.c_str(), "trigger_click_hold_ms", 600);
     const int clickR2 = raw_from_percent(
         device_config_int(section.c_str(), "trigger_r2_click_at", 90));
     const int clickL2 = raw_from_percent(
@@ -253,6 +260,46 @@ inline void on_ds5_input(const void *deviceKey,
         // second would take the keyboard's lock for nothing.
         wantsKeys = (keyCount > 0) || pad.heldKeys;
         pad.heldKeys = keyCount > 0;
+    }
+
+    // ⭐ WHAT THE GESTURE ACTUALLY DID, logged only when it CHANGES. The state
+    // machine reads correct and the gate reads correct, so a report of the
+    // cursor coming back early can only be settled by watching the transitions
+    // rather than by reading either again (2026-09-10).
+    // ⓘ Four states and a position. A pull that never crosses the click point
+    // should show engaged going true and nothing else moving.
+    {
+        static std::mutex sayMutex;
+        static std::map<const void *, int> lastSaid;
+        const int now = (freeze ? 1 : 0) | (buttons != 0 ? 2 : 0) |
+                        (keyCount > 0 ? 4 : 0);
+        int r2State = 0;
+        {
+            std::lock_guard<std::mutex> lock(g_mutex);
+            const Pad &pad = g_pads[deviceKey];
+            r2State = (pad.r2.engaged ? 8 : 0) | (pad.r2.down ? 16 : 0) |
+                      (pad.r2.dragging ? 32 : 0);
+        }
+        const int combined = now | r2State;
+        bool changed = false;
+        {
+            std::lock_guard<std::mutex> lock(sayMutex);
+            auto it = lastSaid.find(deviceKey);
+            if (it == lastSaid.end() || it->second != combined) {
+                lastSaid[deviceKey] = combined;
+                changed = true;
+            }
+        }
+        if (changed) {
+            device_log::input_s()
+                << "[trigger-click] r2=" << (int)data[kR2Position]
+                << " engage>=" << engageRaw << " click>=" << clickR2
+                << " engaged=" << ((combined & 8) ? 1 : 0)
+                << " down=" << ((combined & 16) ? 1 : 0)
+                << " drag=" << ((combined & 32) ? 1 : 0)
+                << " freeze=" << ((combined & 1) ? 1 : 0)
+                << std::endl;
+        }
     }
 
     ctm_mouse_device::set_trigger_buttons(buttons);

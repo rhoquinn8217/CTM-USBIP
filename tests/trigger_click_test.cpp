@@ -21,6 +21,8 @@
 #include "harness.h"
 
 #include <chrono>
+#include <ostream>
+#include <sstream>
 #include <cstdint>
 #include <cstring>
 #include <map>
@@ -111,6 +113,17 @@ inline void set_trigger_keys_for(const void *key, uint8_t /*mods*/,
     for (size_t i = 0; i < count && keys != nullptr; ++i) v.push_back(keys[i]);
     if (v.empty()) g_keys.erase(key);
     else g_keys[key] = v;
+}
+}
+
+// The state log writes here in the product. The tests only need it to compile:
+// what it says is judged by eye in device.log, not asserted.
+namespace device_log {
+inline std::ostream &input_s()
+{
+    static std::ostringstream sink;
+    sink.str(std::string());
+    return sink;
 }
 }
 

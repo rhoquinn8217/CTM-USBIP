@@ -360,7 +360,21 @@ inline uint8_t apply_one(const std::string &section, const char *sideKey,
         return claimBit;
     }
 
-    const int percent  = device_config_int(section.c_str(), atKey.c_str(), 50);
+    // ⭐⭐ THE LANDMARK FOLLOWS THE CLICK unless it is told otherwise.
+    //
+    // ⛔ Two numbers for one place drifted apart three times in one evening: a
+    // break at 10 with a click at 90, then a break at 80 with a click at 90.
+    // Each time the report "I stopped just before the break" meant a different
+    // depth from "I stopped just before it clicked", and each time it cost a
+    // round of testing to notice.
+    // ⓘ A trigger holds ONE effect, so whatever it is set to is the only
+    // landmark a finger gets. Putting it anywhere but the click point is
+    // possible -- for marking where the cursor freezes, say -- but it should be
+    // something you ask for rather than something you inherit.
+    const std::string clickAtKey = std::string("trigger_") + sideKey + "_click_at";
+    const int percent = device_config_int(
+        section.c_str(), atKey.c_str(),
+        device_config_int(section.c_str(), clickAtKey.c_str(), 50));
     const int strength = device_config_int(section.c_str(), strengthKey.c_str(), 5);
     const int zone     = zone_from_percent(percent);
 
