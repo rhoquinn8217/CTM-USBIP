@@ -146,21 +146,45 @@ int run_trigger_effect_tests()
     build_feedback(block, 5, 0);
     CTM_CHECK(block[3] != 0 || block[4] != 0 || block[5] != 0 || block[6] != 0);
 
-    section("trigger effect: the notch climbs, then lets go");
-    // \u26d4 A shaped WALL was tried first and felt identical to a plain wall on
-    // hardware: a tenth of the pull is too short for a force step to register,
-    // and a click is a release rather than a firmer patch. So the notch is a
-    // wide weapon, and the point is where it breaks.
-    build_ramp_break(block, 4, 7);
-    CTM_CHECK_EQ(hex_of(block, 4), std::string("25 14 00 07"));   // zones 2 and 4
-    // It reaches further than a click does: the climb starts at the shallowest
-    // zone weapon mode allows, rather than one zone before the break.
-    build_ramp_break(block, 8, 7);
-    CTM_CHECK_EQ(hex_of(block, 4), std::string("25 04 01 07"));   // the capture's shotgun
-    // A point too shallow to break at still yields the shortest real climb
-    // rather than nothing.
-    build_ramp_break(block, 0, 5);
-    CTM_CHECK_EQ(hex_of(block, 3), std::string("25 0c 00"));
+    section("trigger effect: the notch is a flat wall with a detent in it");
+    // Two shapes failed on hardware before this one. A lip three steps firmer
+    // felt identical to a plain wall, and a climb to the point made a deeper
+    // point mean a HARDER pull rather than a further one. The wall is flat so
+    // that only the detent's POSITION changes with the setting.
+    build_detent_wall(block, 5, 7);
+    CTM_CHECK_EQ((int)block[0], 0x21);
+    CTM_CHECK_EQ((int)(block[1] | (block[2] << 8)), 0x03fe);   // zones 1-9
+    CTM_CHECK_EQ(hex_of(block + 3, 4), std::string("90 a4 4b 12"));
+    {
+        const uint32_t forces = (uint32_t)block[3] | ((uint32_t)block[4] << 8) |
+                                ((uint32_t)block[5] << 16) | ((uint32_t)block[6] << 24);
+        CTM_CHECK_EQ((int)((forces >> 15) & 0x7), 7);   // the detent, at zone 5
+        CTM_CHECK_EQ((int)((forces >> 12) & 0x7), 2);   // the wall before it
+        CTM_CHECK_EQ((int)((forces >> 18) & 0x7), 2);   // and after it
+    }
+    // Moving the point moves ONLY the detent: every other zone is unchanged, so
+    // the pull takes the same effort wherever it sits.
+    {
+        uint8_t deep[kBlockLen];
+        build_detent_wall(deep, 8, 7);
+        CTM_CHECK_EQ((int)(deep[1] | (deep[2] << 8)), 0x03fe);   // the same wall
+        const uint32_t forces = (uint32_t)deep[3] | ((uint32_t)deep[4] << 8) |
+                                ((uint32_t)deep[5] << 16) | ((uint32_t)deep[6] << 24);
+        CTM_CHECK_EQ((int)((forces >> 24) & 0x7), 7);   // the detent moved to 8
+        CTM_CHECK_EQ((int)((forces >> 15) & 0x7), 2);   // and zone 5 is wall again
+    }
+    // The contrast is the feature, so the wall must never reach the detent's
+    // own force, and must never fall to silence either.
+    {
+        uint8_t light[kBlockLen];
+        build_detent_wall(light, 5, 3);
+        const uint32_t forces = (uint32_t)light[3] | ((uint32_t)light[4] << 8) |
+                                ((uint32_t)light[5] << 16) | ((uint32_t)light[6] << 24);
+        CTM_CHECK_EQ((int)((forces >> 15) & 0x7), 3);
+        CTM_CHECK_EQ((int)((forces >> 12) & 0x7), 1);
+    }
+    // Zone 0 stays free, so the trigger is not heavy at rest.
+    CTM_CHECK_EQ((int)(block[1] & 0x01), 0);
 
     section("trigger effect: reading the config");
     CTM_CHECK(shape_from("") == Shape::Absent);

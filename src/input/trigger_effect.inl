@@ -26,6 +26,41 @@
 // ⛔ FEEDBACK MODE IS NOT CROSS-CHECKED. Only weapon mode appears in a capture
 // we took. The feedback encoder is written from the published layout alone, so
 // it is the one to distrust if something feels wrong.
+//
+// ---- THE WHOLE MODE SET, read up 2026-09-10 so the next person need not -----
+//
+// Eleven bytes per trigger, always. Byte 0 is the mode, the rest are its
+// parameters, and the pull is addressed as ten ZONES rather than as the 0-255
+// the input report gives back.
+//
+//   0x05  off          all zeros after the mode
+//   0x21  feedback     zones bitmap (2 bytes) + 3 bits of force per zone (4)
+//   0x25  weapon       start and stop as one bitmap (2) + one strength byte
+//   0x26  vibration    like feedback, plus a frequency byte at index 9
+//   0x22  bow          weapon plus a snap-back force that resets the trigger
+//   0x23  galloping    two feet and a frequency, an oscillation
+//   0x27  machine      two amplitudes, a frequency and a period
+//   0x01/0x02/0x06     the simple forms of feedback, weapon and vibration
+//
+// ⭐ ONLY 0x21 AND 0x25 ARE USED HERE, and between them they cover everything
+// this project wants: a break somewhere (weapon), and any shape at all made out
+// of ten per-zone forces (feedback). The oscillating modes are for guns.
+//
+// ⚠️ WHERE WE KNOWINGLY DIVERGE FROM THE PUBLISHED FACTORIES:
+//   1. **Strength.** They take 1-8 and send one less, so their 1 stores 0. We
+//      take 1-7 and send it verbatim. Same maximum, and no value in the range
+//      stores a zero -- which on this hardware is an effect that can neither be
+//      felt nor used to clear the last one. That cost a morning; see below.
+//   2. **Weapon's deep end.** They cap the start at zone 7 and the stop at 8.
+//      We allow 8 and 9, because rhoquinn8217 asked for a deeper click and it
+//      was then confirmed on hardware at both 30% and 90% (2026-09-10).
+//
+// ⭐⭐ AND ONE THING WE DO NOT YET USE. The INPUT report carries a trigger
+// STATUS nybble beside the stop zone -- the controller says whether the finger
+// is before, inside, or PAST the effect's stop zone. ➡️ That means a click
+// could fire exactly where the physical detent is, instead of at a percentage
+// chosen to match it. See T-168; the byte offset still needs confirming against
+// a real report before anything is built on it.
 
 #pragma once
 
@@ -150,23 +185,52 @@ inline void build_feedback(uint8_t *block, int startZone, int strength)
     block[6] = static_cast<uint8_t>((forces >> 24) & 0xff);
 }
 
-// Resistance that CLIMBS across the pull and then lets go at the point: a wall
-// and a click in the same effect.
+// A light wall the whole way down, with ONE firm zone in it: the finger meets
+// steady resistance, hits a distinct detent where the point is, and pushes on
+// through the same steady resistance.
 //
-// \u26d4 THE FIRST ATTEMPT WAS A SHAPED WALL and it failed on hardware
-// (2026-09-10). Feedback mode carries a force per zone, so a notch was written
-// as one zone at full force with the rest three lower. rhoquinn8217: *"wall and
-// notch feel exactly the same."* A tenth of the pull is too short for a step
-// from 7 to 4 to register, and nothing LETS GO afterwards -- and a click is a
-// release, not a firmer patch.
+// ⛔ TWO SHAPES WERE TRIED AND FELT WRONG FIRST, both on hardware 2026-09-10.
+//   1. A wall with a lip three steps firmer. rhoquinn8217: *"wall and notch
+//      feel exactly the same."* Seven against four across a tenth of the pull
+//      is not a step a finger notices.
+//   2. A weapon effect climbing from an early zone to the point. That DOES
+//      move its break, but the climb means a deeper point is a longer fight:
+//      *"trigger_r2_effect_at changes how hard you need to press the button
+//      for it to bump."* ⭐ The setting is called _at, so it has to change
+//      WHERE, and only where.
 //
-// \u2b50 Weapon mode is the one built for this, and the 2026-08-24 capture proves
-// it: the shotgun was zones 2 to 8, resistance across most of the travel ending
-// in a break. So the notch is a wide weapon rather than a shaped feedback, and
-// the configured point is where it breaks.
-inline void build_ramp_break(uint8_t *block, int endZone, int strength)
+// ⭐ SO THE WALL IS FLAT AND ONLY THE DETENT MOVES. The effort is the same
+// wherever the point sits, which is what leaves its position as the thing the
+// finger actually reads.
+//
+// ⓘ One knob. The detent takes the configured strength and the wall is a third
+// of it, floored at a real force. A ratio rather than a difference, because the
+// first failure above was a difference that turned out to be too small.
+inline void build_detent_wall(uint8_t *block, int detentZone, int strength)
 {
-    build_weapon(block, kWeaponStartMin, endZone, strength);
+    // ⓘ Zone 0 is left free so the trigger is not heavy at rest, which also
+    // means the detent cannot sit at the very top of the pull.
+    constexpr int kWallStart = 1;
+    detentZone = clamp_to(detentZone, kWallStart, kZoneCount - 1);
+    strength   = clamp_to(strength, kStrengthMin, kStrengthMax);
+    const int wall = clamp_to(strength / 3, kStrengthMin, kStrengthMax);
+
+    uint16_t active = 0;
+    uint32_t forces = 0;
+    for (int zone = kWallStart; zone < kZoneCount; ++zone) {
+        active |= static_cast<uint16_t>(1u << zone);
+        const int force = (zone == detentZone) ? strength : wall;
+        forces |= static_cast<uint32_t>(force) << (3 * zone);
+    }
+
+    memset(block, 0, kBlockLen);
+    block[0] = kModeFeedback;
+    block[1] = static_cast<uint8_t>(active & 0xff);
+    block[2] = static_cast<uint8_t>((active >> 8) & 0xff);
+    block[3] = static_cast<uint8_t>(forces & 0xff);
+    block[4] = static_cast<uint8_t>((forces >> 8) & 0xff);
+    block[5] = static_cast<uint8_t>((forces >> 16) & 0xff);
+    block[6] = static_cast<uint8_t>((forces >> 24) & 0xff);
 }
 
 // ---- what a config asks for -------------------------------------------------
@@ -176,7 +240,7 @@ enum class Shape {
     Off,      // asked for nothing: clear an effect WE set, and only that
     Click,    // a break at the point, so the finger can find it
     Wall,     // resistance from the point down
-    Notch,    // a long climb that lets go at the point: a wall AND a click
+    Notch,    // a flat wall with one firm zone in it, at the point
 };
 
 inline Shape shape_from(const std::string &value)
@@ -241,9 +305,7 @@ inline uint8_t apply_one(const std::string &section, const char *sideKey,
         // and the resistance starts one zone earlier.
         build_weapon(report + offset, zone - 1, zone, strength);
     } else if (shape == Shape::Notch) {
-        // \u2b50 The break is at the point, the climb starts as early as weapon
-        // mode allows, so the pull feels like a wall that finally gives.
-        build_ramp_break(report + offset, zone, strength);
+        build_detent_wall(report + offset, zone, strength);
     } else {
         build_feedback(report + offset, zone, strength);
     }
