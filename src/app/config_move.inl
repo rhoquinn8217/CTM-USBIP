@@ -80,12 +80,13 @@ inline std::atomic_int  g_sizeCompact{0};
 inline std::atomic_bool g_compact{false};
 
 // ⭐ QUICK HAS SIZES OF ITS OWN (rhoquinn8217, 2026-09-09), so the window
-// hugs the little it shows -- the ring, a selector, a footer. ⓘ Half of
-// Simple's for an hour; then two thirds of that, to a mock-up.
+// hugs the little it shows -- the ring, a selector, a footer. ⓘ Its medium
+// and large, by rhoquinn8217's naming: the half-of-Simple heights, with an
+// eighth taken off the width.
 //
-//   medium  0.15 x 0.15   what the page opens Quick at
-//   large   0.19 x 0.19
-inline const SizeShare kQuickSizes[2] = { { 0.15, 0.15 }, { 0.19, 0.19 } };
+//   medium  0.197 x 0.225   what the page opens Quick at
+//   large   0.245 x 0.280
+inline const SizeShare kQuickSizes[2] = { { 0.197, 0.225 }, { 0.245, 0.280 } };
 inline std::atomic_int  g_sizeQuick{0};
 inline std::atomic_bool g_quick{false};
 
