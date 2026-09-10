@@ -145,6 +145,30 @@ int run_trigger_effect_tests()
     build_feedback(block, 5, 0);
     CTM_CHECK(block[3] != 0 || block[4] != 0 || block[5] != 0 || block[6] != 0);
 
+    section("trigger effect: a wall with a notch in it");
+    // The notch takes the strength; the wall sits three below it, floored at 1.
+    build_notched_wall(block, 5, 7);
+    CTM_CHECK_EQ((int)block[0], 0x21);
+    CTM_CHECK_EQ((int)(block[1] | (block[2] << 8)), 0x03e0);   // same zones as a wall
+    {
+        // Zone 5 is the lip, zones 6-9 the wall below it.
+        const uint32_t forces = (uint32_t)block[3] | ((uint32_t)block[4] << 8) |
+                                ((uint32_t)block[5] << 16) | ((uint32_t)block[6] << 24);
+        CTM_CHECK_EQ((int)((forces >> 15) & 0x7), 7);
+        CTM_CHECK_EQ((int)((forces >> 18) & 0x7), 4);
+        CTM_CHECK_EQ((int)((forces >> 27) & 0x7), 4);
+        CTM_CHECK_EQ((int)(forces & 0x7fff), 0);               // nothing above the start
+    }
+    // A low strength must not floor the wall to silence: the notch still stands
+    // proud, and the wall stays a real force rather than nothing.
+    build_notched_wall(block, 5, 2);
+    {
+        const uint32_t forces = (uint32_t)block[3] | ((uint32_t)block[4] << 8) |
+                                ((uint32_t)block[5] << 16) | ((uint32_t)block[6] << 24);
+        CTM_CHECK_EQ((int)((forces >> 15) & 0x7), 2);
+        CTM_CHECK_EQ((int)((forces >> 18) & 0x7), 1);
+    }
+
     section("trigger effect: reading the config");
     CTM_CHECK(shape_from("") == Shape::Absent);
     CTM_CHECK(shape_from("off") == Shape::Off);
@@ -152,6 +176,8 @@ int run_trigger_effect_tests()
     CTM_CHECK(shape_from("weapon") == Shape::Click);
     CTM_CHECK(shape_from("wall") == Shape::Wall);
     CTM_CHECK(shape_from("feedback") == Shape::Wall);
+    CTM_CHECK(shape_from("notch") == Shape::Notch);
+    CTM_CHECK(shape_from("both") == Shape::Notch);
     // ⛔ A typo must leave the trigger alone. Treating it as an effect would
     // put resistance on a trigger nobody asked to change.
     CTM_CHECK(shape_from("clik") == Shape::Absent);

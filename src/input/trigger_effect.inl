@@ -141,6 +141,42 @@ inline void build_feedback(uint8_t *block, int startZone, int strength)
     block[6] = static_cast<uint8_t>((forces >> 24) & 0xff);
 }
 
+// A wall with a firmer LIP at its top edge: the finger meets a distinct notch
+// at the point, pushes through it, and lands in steady resistance below.
+//
+// ⭐ THIS IS WHY FEEDBACK MODE CARRIES TEN FORCES rather than one. A click and
+// a wall cannot run at the same time -- a trigger has ONE effect block with ONE
+// mode byte -- but they were never two effects. Vary the force per zone and the
+// notch and the wall are a single shape, which is what a pad is doing when it
+// feels like both at once (rhoquinn8217, 2026-09-10).
+//
+// ⓘ One knob, not two. The notch takes the configured strength and the wall
+// sits below it, because a strength that only moved one of the two would need
+// the other to be guessed at anyway.
+inline void build_notched_wall(uint8_t *block, int startZone, int strength)
+{
+    startZone = clamp_to(startZone, 0, kZoneCount - 1);
+    strength  = clamp_to(strength, kStrengthMin, kStrengthMax);
+    const int wall = clamp_to(strength - 3, kStrengthMin, kStrengthMax);
+
+    uint16_t active = 0;
+    uint32_t forces = 0;
+    for (int zone = startZone; zone < kZoneCount; ++zone) {
+        active |= static_cast<uint16_t>(1u << zone);
+        const int force = (zone == startZone) ? strength : wall;
+        forces |= static_cast<uint32_t>(force) << (3 * zone);
+    }
+
+    memset(block, 0, kBlockLen);
+    block[0] = kModeFeedback;
+    block[1] = static_cast<uint8_t>(active & 0xff);
+    block[2] = static_cast<uint8_t>((active >> 8) & 0xff);
+    block[3] = static_cast<uint8_t>(forces & 0xff);
+    block[4] = static_cast<uint8_t>((forces >> 8) & 0xff);
+    block[5] = static_cast<uint8_t>((forces >> 16) & 0xff);
+    block[6] = static_cast<uint8_t>((forces >> 24) & 0xff);
+}
+
 // ---- what a config asks for -------------------------------------------------
 
 enum class Shape {
@@ -148,6 +184,7 @@ enum class Shape {
     Off,      // asked for nothing: clear an effect WE set, and only that
     Click,    // a break at the point, so the finger can find it
     Wall,     // resistance from the point down
+    Notch,    // a firm lip at the point, then a wall below it
 };
 
 inline Shape shape_from(const std::string &value)
@@ -156,6 +193,7 @@ inline Shape shape_from(const std::string &value)
     if (value == "off" || value == "none") return Shape::Off;
     if (value == "click" || value == "weapon") return Shape::Click;
     if (value == "wall" || value == "feedback") return Shape::Wall;
+    if (value == "notch" || value == "both") return Shape::Notch;
     return Shape::Absent;     // a typo leaves the trigger alone, never breaks it
 }
 
@@ -210,6 +248,8 @@ inline uint8_t apply_one(const std::string &section, const char *sideKey,
         // ⭐ The break lands at the END zone, so the requested point IS the end
         // and the resistance starts one zone earlier.
         build_weapon(report + offset, zone - 1, zone, strength);
+    } else if (shape == Shape::Notch) {
+        build_notched_wall(report + offset, zone, strength);
     } else {
         build_feedback(report + offset, zone, strength);
     }
@@ -236,7 +276,8 @@ inline bool wants_anything(const std::string &section)
     for (const char *side : sides) {
         const std::string key = std::string("trigger_") + side + "_effect";
         const Shape shape = shape_from(device_config_str(section.c_str(), key.c_str()));
-        if (shape == Shape::Click || shape == Shape::Wall) return true;
+        if (shape == Shape::Click || shape == Shape::Wall ||
+            shape == Shape::Notch) return true;
         if (shape == Shape::Off && has_set_effect(section + "/" + side)) return true;
     }
     return false;
