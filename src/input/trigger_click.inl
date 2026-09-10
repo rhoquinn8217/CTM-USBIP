@@ -44,6 +44,8 @@
 
 #pragma once
 
+#include <cstdio>   // snprintf, for the probe below
+
 namespace trigger_click {
 
 // L2 and R2 analog positions in the DualSense input report: 0 at rest, 255 at
@@ -190,6 +192,59 @@ inline std::string bind_key_for(const char *sideName)
     return std::string("trigger_") + sideName + "_click";
 }
 
+// ⭐ A PROBE FOR THE TRIGGER STATUS BYTE, off unless `trigger_probe` is set.
+//
+// ⛔ WHY IT EXISTS. A game was observed firing from the adaptive trigger's
+// BREAK rather than from how far the trigger travelled (`trigger_fire.inl`,
+// 2026-08-24), and the encoding research says the input report carries a status
+// saying whether the finger is before, inside or past an effect's stop zone.
+// ➡️ If that is real, a press can fire exactly where the finger feels the break
+// instead of at a percentage kept in step by hand -- which is the root of every
+// confusion this ticket has had.
+// ⚠️ The byte offset was read in a summary, never in a capture of ours, and
+// this project's rule is to confirm a field against a real report first.
+//
+// ⓘ Logs any byte that CHANGES outside the ones that change constantly anyway.
+// The sticks, the triggers, the counter, the clock, the motion and the touch
+// points are all excluded, or the one byte worth seeing would be buried.
+inline void probe_report(const void *deviceKey, const std::string &section,
+                         const uint8_t *data, size_t len)
+{
+    if (!device_config_bool(section.c_str(), "trigger_probe", false)) return;
+    if (data == nullptr || len < 48) return;
+
+    static std::mutex probeMutex;
+    static std::map<const void *, std::vector<uint8_t>> lastSeen;
+
+    std::vector<uint8_t> now(data, data + len);
+    std::vector<uint8_t> before;
+    {
+        std::lock_guard<std::mutex> lock(probeMutex);
+        auto it = lastSeen.find(deviceKey);
+        if (it != lastSeen.end()) before = it->second;
+        lastSeen[deviceKey] = now;
+    }
+    if (before.size() != now.size()) return;      // first report: nothing to diff
+
+    std::string changes;
+    for (size_t i = 0; i < now.size(); ++i) {
+        // Sticks, triggers, counter, timestamps, motion, touch: all busy.
+        if (i <= 7) continue;
+        if (i >= 12 && i <= 31) continue;
+        if (i >= 33 && i <= 40) continue;
+        if (now[i] == before[i]) continue;
+        char buf[48];
+        snprintf(buf, sizeof(buf), " [%u] %02x->%02x",
+                 (unsigned)i, before[i], now[i]);
+        changes += buf;
+    }
+    if (changes.empty()) return;
+
+    device_log::input_s() << "[trigger-probe] r2=" << (int)data[kR2Position]
+                          << " l2=" << (int)data[kL2Position]
+                          << changes << std::endl;
+}
+
 inline void on_ds5_input(const void *deviceKey,
                          const std::vector<unsigned char> &descriptor,
                          const std::string &linkedConfig,
@@ -200,6 +255,8 @@ inline void on_ds5_input(const void *deviceKey,
     const char *kind = device_section_for(descriptor);
     if (kind == nullptr) return;                    // not a DualSense
     const std::string section = device_settings_section(kind, linkedConfig);
+
+    probe_report(deviceKey, section, data, len);
 
     static const Side kR2{ "r2", kR2Position };
     static const Side kL2{ "l2", kL2Position };

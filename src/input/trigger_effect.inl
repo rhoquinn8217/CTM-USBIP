@@ -73,12 +73,28 @@
 // packing was the fault and the mode is fine. Do that before concluding the
 // mode does nothing.
 //
-// ⭐⭐ AND ONE THING WE DO NOT YET USE. The INPUT report carries a trigger
-// STATUS nybble beside the stop zone -- the controller says whether the finger
-// is before, inside, or PAST the effect's stop zone. ➡️ That means a click
-// could fire exactly where the physical detent is, instead of at a percentage
-// chosen to match it. See T-168; the byte offset still needs confirming against
-// a real report before anything is built on it.
+// ⭐⭐⭐ THE CONTROLLER REPORTS WHEN THE TRIGGER CROSSES A BREAK, and the byte
+// is CONFIRMED on our own hardware (2026-09-10, ten pulls, a probe over the
+// whole input report):
+//
+//     byte 42, HIGH NYBBLE  ->  R2's adaptive trigger status
+//        0   short of the effect
+//        1   crossed it
+//        2   at the bottom of the travel
+//
+// ⓘ Measured with a weapon break at 80%: it went 08 -> 18 as the break gave
+// way, 18 -> 28 at full travel, and straight back to 0 on the way out. On five
+// pulls that stopped SHORT of the break it never left 0, which is what makes it
+// the break rather than the travel -- travel we already have in byte 6.
+// ⛔ THE LOW NYBBLE IS A COUNTER, not the stop zone. It increments on its own
+// with the trigger at rest. Mask it off; do not read it.
+// ⚠️ Byte 43 is presumed to be L2's and is NOT confirmed: no L2 effect was set
+// during the probe, so it never moved. Prove it the same way before using it.
+//
+// ➡️ WHAT IT IS FOR. A press can fire where the finger FEELS the break, rather
+// than at a percent someone keeps in step with it by hand. Those two numbers
+// drifted apart three times in one evening and each time it cost a round of
+// testing. Asking the controller makes them the same event. See T-168.
 
 #pragma once
 
