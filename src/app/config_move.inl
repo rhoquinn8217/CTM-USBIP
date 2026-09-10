@@ -84,12 +84,13 @@ inline std::atomic_bool g_compact{false};
 // and large, by rhoquinn8217's naming: the half-of-Simple heights, with an
 // eighth taken off the width.
 //
-//   medium  0.148 x 0.150   what the page opens Quick at
-//   large   0.184 x 0.187
-// ⓘ A third shorter than first set, then a quarter narrower (rhoquinn8217,
-// 2026-09-09): the gap above the footer was the window's, not the content's,
-// and the width had room to spare.
-inline const SizeShare kQuickSizes[2] = { { 0.148, 0.150 }, { 0.184, 0.187 } };
+//   medium  0.185 x 0.150   what the page opens Quick at
+//   large   0.230 x 0.187
+// ⓘ A third shorter than first set (rhoquinn8217, 2026-09-09): the gap above
+// the footer was the window's, not the content's. The width went down a
+// quarter and back up a quarter the same evening, for a button in the
+// bottom-right corner.
+inline const SizeShare kQuickSizes[2] = { { 0.185, 0.150 }, { 0.230, 0.187 } };
 inline std::atomic_int  g_sizeQuick{0};
 inline std::atomic_bool g_quick{false};
 
