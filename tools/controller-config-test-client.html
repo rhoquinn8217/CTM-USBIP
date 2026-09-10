@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.64.22 -- see the changelog at the bottom of this comment.
+  VERSION 2.64.23 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,10 @@
   tidy message about it.
 
   CHANGELOG
+    2.64.23 Quick's text is no larger than Simple's on screen: the name,
+            the selector, its button and the legend were over, and are
+            capped at twice Simple's figures for Quick's half-height window
+            (rhoquinn8217, 2026-09-09).
     2.64.22 Quick tightened: the ring at the top, the selector close under
             it, a taller footer with room under it for the halo. Its two
             sizes are the medium and large, an eighth off the width
@@ -546,12 +550,16 @@
   /* ⓘ Tightened (rhoquinn8217, 2026-09-09): the ring starts at the top, the
      selector sits close under it, and what room is left lies above the
      footer -- which has grown, and the box keeps a margin under it so the
-     halo's outline (3px plus 2px offset) never clips on the bottom edge. */
+     halo's outline (3px plus 2px offset) never clips on the bottom edge.
+     ⛔ NO LARGER THAN SIMPLE'S on screen (rhoquinn8217, same evening).
+     Simple's window is twice as tall, so the cap on any size here is twice
+     Simple's figure for the same thing: name 18, kind and sides 9, selector
+     and button 8.4, legend 4.6, footer buttons 6.8. */
   body.quick #compactBox { padding:1.5vh 2.5vw 3.5vh; }
   body.quick #compactBox .cmain { padding-top:0; gap:2.5vh; justify-content:flex-start; }
   body.quick #compactBox .cmain.centre { gap:2vh; justify-content:center; }
   body.quick #compactBox .ccar { gap:2vw; }
-  body.quick #compactBox .cname { font-size:22vh; line-height:1.05; }
+  body.quick #compactBox .cname { font-size:18vh; line-height:1.05; }
   body.quick #compactBox .ccur .ckind { font-size:8vh; margin-top:0.3vh; }
   body.quick #compactBox .cside { font-size:8vh; }
   body.quick #compactBox .cside small { font-size:6vh; }
@@ -562,12 +570,12 @@
   body.quick #compactBox .cselrow { gap:2vw; width:100%; justify-content:center; }
   /* The selector may shrink below its longest name rather than push the
      button off the edge; a long name is clipped inside it. */
-  body.quick #compactBox select { font-size:12vh; padding:1.2vh 1.5vw; min-width:0;
+  body.quick #compactBox select { font-size:8.4vh; padding:1.2vh 1.5vw; min-width:0;
     max-width:80vw; flex:0 1 auto; }
-  body.quick #compactBox .cauto-btn { font-size:12vh; padding:1vh 1.6vw; }
+  body.quick #compactBox .cauto-btn { font-size:8.4vh; padding:1vh 1.6vw; }
   body.quick #compactBox .cbar { padding-top:2.5vh; gap:3vw; }
-  body.quick #compactBox .cbar > button { font-size:7vh; padding:1.4vh 2vw; }
-  body.quick #compactBox .clegend { font-size:7vh; }
+  body.quick #compactBox .cbar > button { font-size:6.8vh; padding:1.4vh 2vw; }
+  body.quick #compactBox .clegend { font-size:4.6vh; }
   body.quick #compactBox .cempty { font-size:9vh; }
   body.quick #compactBox .csub, body.quick #compactBox .ccmd { font-size:6vh; }
   body.quick #compactBox .cbig { font-size:10.5vh; padding:1.5vh 4vw; }
@@ -1044,7 +1052,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.64.22</span>
+  <span class="muted" style="font-size:12px">v2.64.23</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
