@@ -66,11 +66,15 @@ constexpr int kWeaponStartMin = 2;
 constexpr int kWeaponStartMax = 7;
 constexpr int kWeaponEndMax   = 8;
 
-// Strength is sent one less than it is written, so 1 is the lightest the
-// hardware will express and 0 would underflow rather than mean "none". Off is a
+// ⛔ THE BOTTOM OF THE RANGE MUST BE A REAL FORCE. The hardware takes 0 to 7
+// and treats 0 as no resistance at all, so an earlier scale of 1 to 8 sent one
+// less than it was given and made 1 mean silence. That cost most of a morning
+// on 2026-09-10: a wall set to 1 was read as "the change never arrived" when
+// what actually went out was an effect asking for nothing, twice.
+// ⭐ So the setting IS the hardware value, 1 to 7, sent verbatim. Off is a
 // MODE, never a strength of zero.
 constexpr int kStrengthMin = 1;
-constexpr int kStrengthMax = 8;
+constexpr int kStrengthMax = 7;
 
 inline int clamp_to(int value, int low, int high)
 {
@@ -108,7 +112,7 @@ inline void build_weapon(uint8_t *block, int startZone, int endZone, int strengt
     block[0] = kModeWeapon;
     block[1] = static_cast<uint8_t>(zones & 0xff);
     block[2] = static_cast<uint8_t>((zones >> 8) & 0xff);
-    block[3] = static_cast<uint8_t>(strength - 1);
+    block[3] = static_cast<uint8_t>(strength);
 }
 
 // Resistance that begins at startZone and stays for the rest of the pull.
@@ -124,7 +128,7 @@ inline void build_feedback(uint8_t *block, int startZone, int strength)
     uint32_t forces = 0;
     for (int zone = startZone; zone < kZoneCount; ++zone) {
         active |= static_cast<uint16_t>(1u << zone);
-        forces |= static_cast<uint32_t>(strength - 1) << (3 * zone);
+        forces |= static_cast<uint32_t>(strength) << (3 * zone);
     }
 
     memset(block, 0, kBlockLen);
@@ -199,7 +203,7 @@ inline uint8_t apply_one(const std::string &section, const char *sideKey,
     }
 
     const int percent  = device_config_int(section.c_str(), atKey.c_str(), 50);
-    const int strength = device_config_int(section.c_str(), strengthKey.c_str(), 6);
+    const int strength = device_config_int(section.c_str(), strengthKey.c_str(), 5);
     const int zone     = zone_from_percent(percent);
 
     if (shape == Shape::Click) {

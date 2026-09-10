@@ -120,6 +120,31 @@ static void ds5_apply_initial_settings(CtmBackend *backend,
         trigger_effect::apply_to_report(resolved, report.data(), report.size());
     claim = static_cast<uint8_t>(claim | triggerClaim);
 
+    // ⭐⭐ CLAIMING THE MOTORS TO WAKE THE TRIGGERS, at zero amplitude.
+    //
+    // ⛔ WHAT WAS MEASURED, 2026-09-10, in this order. On a live session: one
+    // report carrying a trigger effect does nothing; three reports 90 ms apart
+    // do nothing; the same three WITH a brief rumble beside them work every
+    // time. At session start, before the virtual device is attached, one
+    // report has always been enough. rhoquinn8217 also found that music
+    // playing through the controller speaker at the moment of the save works.
+    //
+    // ➡️ So the trigger side of the controller sleeps while idle, and touching
+    // the motors is what wakes it. The open question this answers is whether
+    // the wake comes from the MOTION or merely from the fields being CLAIMED.
+    // Zero amplitude is claimed but silent, which is the version worth having.
+    //
+    // ⚠️ CLAIMING RUMBLE IS REFUSED a few lines above, deliberately, because
+    // claiming it applies the zeroed motor fields and would kill rumble for a
+    // session that never asked for this. That is why this is confined to
+    // reports that CARRY a trigger effect, and it costs a game nothing: a game
+    // driving rumble re-sends it on its very next report, about 4 ms later.
+    if (triggerClaim != 0) {
+        claim = static_cast<uint8_t>(claim | kDs5ClaimRumbleA | kDs5ClaimRumbleB);
+        report[kDs5IdxRumbleRight] = 0;
+        report[kDs5IdxRumbleLeft]  = 0;
+    }
+
     report[kDs5IdxValidFlag0] = claim;
 
     // Mute lives in the OTHER flag panel, so it is claimed separately. Panel 2
@@ -182,10 +207,58 @@ static void ds5_apply_initial_settings(CtmBackend *backend,
     // report never carried an effect, or it carried one that feels like
     // nothing. Those need different fixes.
     if (triggerClaim != 0) {
+        // ⓘ The BYTES, not just the fact. "Sent" and "sent something the pad
+        // will act on" are different claims, and only one of them is worth
+        // anything when the trigger feels like nothing.
         device_log::report(device_log::msg()
             << section << ": settings: adaptive trigger effect sent for"
             << ((triggerClaim & trigger_effect::kClaimR2) != 0 ? " R2" : "")
             << ((triggerClaim & trigger_effect::kClaimL2) != 0 ? " L2" : ""));
+        // ⭐ THE BYTES, not just the fact. On 2026-09-10 an entire morning
+        // went into "the effect is not arriving" when every report had arrived
+        // and two of them asked for zero force, which the controller ignores.
+        // A log line saying "sent" could not tell those apart. This one can.
+        device_log::report(device_log::msg()
+            << section << ": settings: [trigger-out] flag0="
+            << ds5_hex(report.data() + kDs5IdxValidFlag0, 1)
+            << " R2=" << ds5_hex(report.data() + trigger_effect::kR2Offset, 11)
+            << " L2=" << ds5_hex(report.data() + trigger_effect::kL2Offset, 11));
+
+        // ⭐⭐ SENT THREE TIMES, AND THAT IS NOT BELT AND BRACES (2026-09-10).
+        //
+        // ⛔ THE MEASUREMENT. On a LIVE session a single report carrying a
+        // trigger effect does nothing at all -- proven with good values on
+        // 2026-09-10, three separate saves, none felt. The same bytes sent at
+        // session start, before the virtual device is attached, work every
+        // time. rhoquinn8217 found the other condition that always works:
+        // music playing through the controller speaker as the save happens.
+        //
+        // ⓘ That reads as the trigger side of the controller sleeping while
+        // idle and dropping the first report it gets. This project has met the
+        // shape twice: the speaker discards the first audio stream after
+        // enumeration and plays from the second on (T-122), and an idle amp
+        // was recorded starting a tone with a click.
+        //
+        // ⚠️ EMPIRICAL. We cannot see inside the controller. Take this out only
+        // against a measurement, never by reasoning -- it has already been
+        // removed once on a wrong diagnosis and had to come back.
+        //
+        // ⛔ Only for reports that CARRY a trigger effect, so an audio-only
+        // change keeps the timing it has had since August. The stall sits on
+        // the agent loop; see the warning above apply_pending_config_to_sessions().
+        for (int again = 0; again < 2; ++again) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(90));
+            std::wstring repeatError;
+            if (!backend->send_output_report(report, false, &repeatError)) {
+                device_log::report(device_log::msg()
+                    << section << ": settings: trigger repeat " << (again + 1)
+                    << " FAILED -- "
+                    << std::string(repeatError.begin(), repeatError.end()));
+                break;
+            }
+        }
+        device_log::report(device_log::msg()
+            << section << ": settings: trigger effect sent 3 times, 90 ms apart");
     }
     device_log::report(device_log::msg()
         << section << ": settings: sent audio to "

@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.64.36 -- see the changelog at the bottom of this comment.
+  VERSION 2.64.37 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,9 @@
   tidy message about it.
 
   CHANGELOG
+    2.64.37 Int settings show and enforce the schema's range. The min and max
+            were never emitted, so every number box took anything -- a
+            strength of 50 went into a 1-to-8 setting and saved.
     2.64.36 A Triggers section, for the adaptive trigger effect settings.
             Without it they group as "Other", which is where a setting goes
             to not be found.
@@ -2974,8 +2977,18 @@ function renderConfigEditor(hostId, configName, prefix, ordinal) {
                    '>' + c + '</option>';
           }).join('') + '</select>';
         } else {
+          // ⭐ THE SCHEMA'S RANGE, ON THE BOX. It was never emitted, so every
+          // int field accepted anything: a strength of 50 was typed into a
+          // 1-to-8 setting and saved (rhoquinn8217, 2026-09-10). The agent
+          // clamps, so nothing broke, but the config then said one thing and
+          // the controller did another.
+          var range = '';
+          if (meta.type === 'int') {
+            if (meta.min !== undefined && meta.min !== null) range += ' min="' + Number(meta.min) + '"';
+            if (meta.max !== undefined && meta.max !== null) range += ' max="' + Number(meta.max) + '"';
+          }
           control = '<input id="' + id + '" type="' + (meta.type === 'int' ? 'number' : 'text') +
-                    '" value="' + esc(shown) + '" size="9"' + onchange + dis + '>';
+                    '" value="' + esc(shown) + '" size="9"' + range + onchange + dis + '>';
         }
         // A controller tab knows its transport; Overview does not, so nothing is
         // marked there -- a config is not tied to one controller.
@@ -2983,9 +2996,19 @@ function renderConfigEditor(hostId, configName, prefix, ordinal) {
           ? (LAST_DEVICES.filter(function(x) { return x.ordinal === ordinal; })[0] || {})
           : {};
         var inert = inertReason(meta.key, dev2.kind);
+        // ⭐ And SAY the range, rather than only enforcing it. A box that
+        // silently refuses a number teaches nothing; the help is where someone
+        // looks to find out what a number is allowed to be.
+        var helpText = meta.help || '';
+        if (meta.type === 'int' &&
+            meta.min !== undefined && meta.min !== null &&
+            meta.max !== undefined && meta.max !== null) {
+          helpText = (helpText ? helpText + ' ' : '') +
+                     'Range ' + meta.min + ' to ' + meta.max + '.';
+        }
         var note = inert
           ? '<small class="warnc">' + esc(inert) + '</small>'
-          : '<small>' + esc(meta.help || '') + '</small>';
+          : '<small>' + esc(helpText) + '</small>';
 
         // ⭐ On the NAME, not only in the help. Someone changing a value reads
         // the label; the help is what you read when the value does not work.

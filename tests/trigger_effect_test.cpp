@@ -83,17 +83,19 @@ int run_trigger_effect_tests()
     uint8_t block[kBlockLen];
 
     section("trigger effect: the 2026-08-24 capture, decoded and rebuilt");
-    // Shotgun: resistance from zone 2 that gives way at zone 8, strength 8.
-    build_weapon(block, 2, 8, 8);
+    // Shotgun: resistance from zone 2 that gives way at zone 8, at full force.
+    build_weapon(block, 2, 8, 7);
     CTM_CHECK_EQ(hex_of(block, 4), std::string("25 04 01 07"));
     // Machine gun: a single short bump, zones 2 to 3.
     build_weapon(block, 2, 3, 1);
     CTM_CHECK_EQ(hex_of(block, 3), std::string("25 0c 00"));
-    // ⓘ Strength travels one lower than it is written, which is why a shotgun
-    // at full strength shows as 07 and the lightest possible shows as 00.
+    // ⭐ Strength goes out exactly as it is written, and the bottom of the
+    // range is a real force. It used to be sent one lower, which made a
+    // strength of 1 mean no resistance at all -- an effect that looks set,
+    // reads as set, and cannot be felt. That cost a morning on 2026-09-10.
     build_weapon(block, 2, 3, 1);
-    CTM_CHECK_EQ((int)block[3], 0);
-    build_weapon(block, 2, 3, 8);
+    CTM_CHECK_EQ((int)block[3], 1);
+    build_weapon(block, 2, 3, 7);
     CTM_CHECK_EQ((int)block[3], 7);
 
     section("trigger effect: percent to zone");
@@ -118,9 +120,11 @@ int run_trigger_effect_tests()
     CTM_CHECK_EQ((int)(block[1] | (block[2] << 8)), (1 << 5) | (1 << 6));
     build_weapon(block, 5, 2, 6);
     CTM_CHECK_EQ((int)(block[1] | (block[2] << 8)), (1 << 5) | (1 << 6));
-    // Strength outside 1-8 clamps rather than underflowing to 255.
+    // ⛔ Strength outside the range clamps INTO it, and never to zero: zero
+    // is the hardware's "no resistance", so clamping there would turn a
+    // mistyped number into a silent effect.
     build_weapon(block, 3, 4, 0);
-    CTM_CHECK_EQ((int)block[3], 0);
+    CTM_CHECK_EQ((int)block[3], 1);
     build_weapon(block, 3, 4, 99);
     CTM_CHECK_EQ((int)block[3], 7);
 
@@ -134,7 +138,12 @@ int run_trigger_effect_tests()
     build_feedback(block, 5, 6);
     CTM_CHECK_EQ((int)block[0], 0x21);
     CTM_CHECK_EQ((int)(block[1] | (block[2] << 8)), 0x03e0);
-    CTM_CHECK_EQ(hex_of(block + 3, 4), std::string("00 80 b6 2d"));
+    CTM_CHECK_EQ(hex_of(block + 3, 4), std::string("00 00 db 36"));
+    // ⛔ And a wall of zero force is not reachable from any setting. The
+    // controller ignores such a report, so it can neither set nor clear
+    // anything -- which is exactly how a whole morning was lost to it.
+    build_feedback(block, 5, 0);
+    CTM_CHECK(block[3] != 0 || block[4] != 0 || block[5] != 0 || block[6] != 0);
 
     section("trigger effect: reading the config");
     CTM_CHECK(shape_from("") == Shape::Absent);
@@ -170,7 +179,7 @@ int run_trigger_effect_tests()
         CTM_CHECK_EQ((int)report[kR2Offset], 0x25);
         CTM_CHECK_EQ((int)(report[kR2Offset + 1] | (report[kR2Offset + 2] << 8)),
                      (1 << 4) | (1 << 5));
-        CTM_CHECK_EQ((int)report[kR2Offset + 3], 5);
+        CTM_CHECK_EQ((int)report[kR2Offset + 3], 6);
         CTM_CHECK_EQ((int)report[kL2Offset], 0);            // the other block is untouched
     }
 

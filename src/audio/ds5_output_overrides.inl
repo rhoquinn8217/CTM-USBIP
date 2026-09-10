@@ -435,6 +435,64 @@ static uint8_t ds5_scale_rumble(uint8_t value, int gainPercent)
     return static_cast<uint8_t>(scaled);
 }
 
+// ⭐ WATCHING THE TRIGGER BLOCKS A HOST SENDS.
+//
+// ⛔ WHY IT HAD TO EXIST. Our own settings report sets a trigger effect, the
+// write succeeds, and the trigger feels like nothing (2026-09-10). Everything
+// checkable was checked and agreed: the claim bit, the offsets, an encoding
+// that rebuilds a real capture byte for byte. So the next question is not
+// answerable by reading -- it is what a KNOWN GOOD report looks like on this
+// hardware, and how it differs from ours.
+//
+// ⓘ Anything that drives the bridged controller reaches the pad through here,
+// including a browser talking to the virtual device over WebHID. That is what
+// makes this the place to watch from: it sees what a working tool sends.
+//
+// ⛔ LOGS ONLY WHAT CHANGED. The blocks are re-sent on every report, so logging
+// each one gives hundreds of identical lines a second and buries the moment a
+// tool actually set something.
+inline std::mutex g_ds5TriggerSeenMutex;
+inline std::map<std::string, std::vector<uint8_t>> g_ds5TriggerSeen;
+
+static std::string ds5_hex(const uint8_t *p, size_t n)
+{
+    static const char *digits = "0123456789abcdef";
+    std::string out;
+    for (size_t i = 0; i < n; ++i) {
+        if (i) out += ' ';
+        out += digits[p[i] >> 4];
+        out += digits[p[i] & 0x0f];
+    }
+    return out;
+}
+
+static void ds5_observe_trigger_blocks(const uint8_t *data, size_t length, const char *section)
+{
+    // 11..21 is R2, 22..32 is L2, both absolute within the report WITH the id
+    // at index 0.
+    if (data == nullptr || length < 33) return;
+    if (data[0] != kDs5OutReportId) return;
+
+    // The claim byte travels with them: a block full of bytes that is not
+    // claimed does nothing, and the two look identical without it.
+    std::vector<uint8_t> now(23, 0);
+    now[0] = data[kDs5IdxValidFlag0];
+    memcpy(now.data() + 1, data + 11, 22);
+
+    {
+        std::lock_guard<std::mutex> lock(g_ds5TriggerSeenMutex);
+        auto it = g_ds5TriggerSeen.find(section);
+        if (it != g_ds5TriggerSeen.end() && it->second == now) return;
+        g_ds5TriggerSeen[section] = now;
+    }
+
+    device_log::config(device_log::msg()
+        << "[trigger-in] " << section
+        << " flag0=" << ds5_hex(now.data(), 1)
+        << " R2=" << ds5_hex(now.data() + 1, 11)
+        << " L2=" << ds5_hex(now.data() + 12, 11));
+}
+
 static void ds5_override_rumble(uint8_t *data, size_t length, const char *section)
 {
     if (data == nullptr || length <= kDs5IdxRumbleLeft) {
@@ -543,6 +601,8 @@ static void ds5_apply_output_overrides(uint8_t *data, size_t length,
     }
     const std::string resolved = device_settings_section(kind, linkedConfig);
     const char *section = resolved.c_str();
+    // First, so the log shows what the HOST sent rather than what we left.
+    ds5_observe_trigger_blocks(data, length, section);
     ds5_override_audio_control(data, length, section);
     ds5_override_speaker_volume(data, length, section);
     ds5_override_headset_volume(data, length, section);
