@@ -17,14 +17,16 @@
 // ⓘ Options was free on the page. Measured 2026-09-08: the page reads gamepad
 // indices 0-5 and 12-15 and never consults 9, so nothing there loses a button.
 //
-// ⭐ THREE POSITIONS, LEFT, CENTRE, RIGHT, at whatever size the window is,
-// the outer two held in from the edge by a margin, all centred vertically.
-// ⓘ It went to two positions and back in one evening (rhoquinn8217,
-// 2026-09-08): at Windows 250% scaling, the likely setting on a large TV, the
-// page cannot be a side panel and is four fifths of the screen both ways, so
-// centre is where it lives and left and right are a small shift to glance at
-// the game. ⭐ ALWAYS THE MAIN MONITOR: this streams to one large screen, and
-// the keyboard already snaps to the primary display.
+// ⭐ WHERE A TAP PUTS IT DEPENDS ON THE LAYOUT (rhoquinn8217, 2026-09-09).
+// ADVANCED has ONE place, the centre: it is most of the screen, so left and
+// right were a shuffle rather than a choice, and a tap now means "put it back
+// in the middle". SIMPLE and QUICK have three, along the BOTTOM -- left,
+// centre, right -- which is where a small window belongs while a game is
+// running: out of the way, and reachable without crossing the screen.
+// ⓘ The outer two are held in from the edge by a margin, and all three sit
+// the same margin up from the bottom of the work area.
+// ⭐ ALWAYS THE MAIN MONITOR: this streams to one large screen, and the
+// keyboard already snaps to the primary display.
 // ⛔ FULLY ON SCREEN, unlike the keyboard, which is allowed to overhang by a
 // third: a keyboard is parked, a page is read.
 //
@@ -65,18 +67,19 @@ inline std::atomic_int g_size{1};
 // a large screen the compact view still needs to be sized to the room, so R3
 // cycles a second table while the page is compact, with a position of its own.
 //
-//   medium  0.3375 x 0.374   what the page opens Simple at, so the two agree
-//   large   0.42   x 0.465
-// ⓘ Simple keeps its medium and large (rhoquinn8217, 2026-09-09); the
-// 0.34 small is gone, a quarter came off the width the same evening, and a
-// sixth off the height to halve the paddings above and below its content.
+//   medium  0.45 x 0.45   what the page opens Simple at, so the two agree
+//   large   0.56 x 0.56
+// ⓘ Simple keeps its medium and large (rhoquinn8217, 2026-09-09); the 0.34
+// small is gone. ⛔ A quarter came off the width and a sixth off the height
+// the same evening and both went straight back: Simple holds the preset
+// description, which is sized by its content and not by the window.
 //
 // ⓘ The page says which view it is in (ui/view); the listener cannot tell by
 // looking. Each switch resets that view's position to its entry size -- small
 // for compact (rhoquinn8217, 2026-09-09: smallest first), large for full --
 // which is exactly the size the page resizes to on the switch, so R3 always
 // cycles from where the window actually is.
-inline const SizeShare kCompactSizes[2] = { { 0.3375, 0.374 }, { 0.42, 0.465 } };
+inline const SizeShare kCompactSizes[2] = { { 0.45, 0.45 }, { 0.56, 0.56 } };
 inline std::atomic_int  g_sizeCompact{0};
 inline std::atomic_bool g_compact{false};
 
@@ -95,12 +98,34 @@ inline const SizeShare kQuickSizes[2] = { { 0.185, 0.150 }, { 0.230, 0.187 } };
 inline std::atomic_int  g_sizeQuick{0};
 inline std::atomic_bool g_quick{false};
 
-// The page names its layout: Advanced, Simple or Quick. Each switch resets
-// that layout's slot to its entry size, which is what the page resizes to.
-inline void set_view(bool compact, bool quick)
+inline HWND page_window();              // all three are defined below, with the placing
+inline void apply_size(HWND hwnd);
+inline void place_default(HWND hwnd);
+
+// The page names its layout: Advanced, Simple or Quick.
+//
+// ⭐ A SWITCH resets that layout's slot to its entry size, which is what the
+// page resizes the window to; the two then agree, and R3 cycles from where the
+// window actually is.
+//
+// ⭐ A RESTORE -- the window closed and came back -- resets NOTHING. The
+// layout is remembered by the page, the SIZE by this file (rhoquinn8217,
+// 2026-09-09: "when closing remember advance/simple/quick and size"), so the
+// window is put back at the size that layout was left at, in that layout's
+// home place. ⓘ The page cannot do this half: R3 never reaches it, so it does
+// not know the index. It sends `restore` and leaves the window alone.
+inline void set_view(bool compact, bool quick, bool restore)
 {
+    quick = compact && quick;
+    const bool changed = (compact != g_compact.load()) || (quick != g_quick.load());
     g_compact.store(compact);
-    g_quick.store(compact && quick);
+    g_quick.store(quick);
+
+    if (restore) {
+        if (HWND h = page_window()) { apply_size(h); place_default(h); }
+        return;
+    }
+    if (!changed) return;
     if (!compact) g_size.store(1);
     else if (quick) g_sizeQuick.store(0);
     else g_sizeCompact.store(0);
@@ -161,10 +186,27 @@ inline int snap_margin(const RECT &wa)
     return (wa.right - wa.left) / 20;
 }
 
-// A tap: the NEXT of left, centre, right -- judged from where the window IS,
-// so one that was steered somewhere still goes somewhere sensible rather than
-// to whatever a stale counter said; and centred vertically, which is what a
-// snap to a defined place means.
+// Where this layout lives when nothing has been steered: Advanced in the
+// middle of the screen, Simple and Quick at the bottom centre.
+inline void place_default(HWND hwnd)
+{
+    RECT rc;
+    if (!GetWindowRect(hwnd, &rc)) return;
+    const int w = rc.right - rc.left;
+    const int h = rc.bottom - rc.top;
+    const RECT wa = work_area();
+    int x = wa.left + ((wa.right - wa.left) - w) / 2;
+    int y = g_compact.load() ? (wa.bottom - snap_margin(wa) - h)
+                             : (wa.top + ((wa.bottom - wa.top) - h) / 2);
+    clamp_into(wa, w, h, x, y);
+    place(hwnd, x, y);
+}
+
+// A tap. In Advanced there is one place and this is "put it back in the
+// middle". In Simple and Quick it is the NEXT of bottom left, bottom centre,
+// bottom right -- judged from where the window IS, so one that was steered
+// somewhere still goes somewhere sensible rather than to whatever a stale
+// counter said.
 inline void snap_next(HWND hwnd)
 {
     RECT rc;
@@ -173,6 +215,12 @@ inline void snap_next(HWND hwnd)
     const int h = rc.bottom - rc.top;
     const RECT wa = work_area();
     const int margin = snap_margin(wa);
+
+    if (!g_compact.load()) {
+        place_default(hwnd);
+        return;
+    }
+
     const int targets[3] = {
         wa.left + margin,
         wa.left + ((wa.right - wa.left) - w) / 2,
@@ -185,23 +233,34 @@ inline void snap_next(HWND hwnd)
         if (d < best) { best = d; nearest = i; }
     }
     int x = targets[(nearest + 1) % 3];
-    int y = wa.top + ((wa.bottom - wa.top) - h) / 2;
+    int y = wa.bottom - margin - h;
     clamp_into(wa, w, h, x, y);
     place(hwnd, x, y);
 }
 
-// R3: the next size, applied about the window's CENTRE so it grows and
-// shrinks in place, then clamped fully on screen.
-inline void resize_next(HWND hwnd)
+// This layout's slot, and the table it indexes.
+inline std::atomic_int &size_slot()
+{
+    const bool compact = g_compact.load();
+    const bool quick = g_quick.load();
+    return !compact ? g_size : (quick ? g_sizeQuick : g_sizeCompact);
+}
+
+inline const SizeShare *size_table()
+{
+    const bool compact = g_compact.load();
+    const bool quick = g_quick.load();
+    return !compact ? kSizes : (quick ? kQuickSizes : kCompactSizes);
+}
+
+// The size this layout is at, applied about the window's CENTRE so it grows
+// and shrinks in place, then clamped fully on screen.
+inline void apply_size(HWND hwnd)
 {
     RECT rc;
     if (!GetWindowRect(hwnd, &rc)) return;
-    const bool compact = g_compact.load();
-    const bool quick = g_quick.load();
-    std::atomic_int &slot = !compact ? g_size : (quick ? g_sizeQuick : g_sizeCompact);
-    const SizeShare *table = !compact ? kSizes : (quick ? kQuickSizes : kCompactSizes);
-    const int idx = (slot.load() + 1) % 2;
-    slot.store(idx);
+    const SizeShare *table = size_table();
+    const int idx = size_slot().load();
     const RECT wa = work_area();
     const int w = (int)((wa.right - wa.left) * table[idx].w);
     const int h = (int)((wa.bottom - wa.top) * table[idx].h);
@@ -211,6 +270,14 @@ inline void resize_next(HWND hwnd)
     int y = cy - h / 2;
     clamp_into(wa, w, h, x, y);
     SetWindowPos(hwnd, nullptr, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+// R3: the next of this layout's two sizes.
+inline void resize_next(HWND hwnd)
+{
+    std::atomic_int &slot = size_slot();
+    slot.store((slot.load() + 1) % 2);
+    apply_size(hwnd);
 }
 
 inline void nudge(HWND hwnd, int dx, int dy)

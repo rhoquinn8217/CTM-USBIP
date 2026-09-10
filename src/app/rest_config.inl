@@ -658,9 +658,12 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
             }
             auto cv = json.bools.find("compact");
             auto qv = json.bools.find("quick");
+            auto rv = json.bools.find("restore");
             const bool compact = (cv != json.bools.end()) && cv->second;
             const bool quick = compact && (qv != json.bools.end()) && qv->second;
-            ui_view_set(compact, quick);
+            // The window coming back, not a switch: keep the size it was left at.
+            const bool restore = (rv != json.bools.end()) && rv->second;
+            ui_view_set(compact, quick, restore);
             *out = rest_http_response(200, std::string("{\"ok\":true,\"compact\":") +
                                                (compact ? "true" : "false") +
                                                ",\"quick\":" + (quick ? "true" : "false") + "}");

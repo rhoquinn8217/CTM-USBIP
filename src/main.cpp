@@ -93,9 +93,10 @@ void ctm_rebind_clear_provisional();
 // ⓘ rebind.inl runs on the input path and needs the window check from open_ui.
 bool ctm_ui_has_foreground();
 /* The page says which layout it is in -- Advanced, Simple or Quick -- so R3
- * sizes the window from that layout's table. Defined below, after
- * config_move.inl. */
-void ui_view_set(bool compact, bool quick);
+ * sizes the window from that layout's table; `restore` says the window has
+ * come back rather than switched, and keeps the size it was left at. Defined
+ * below, after config_move.inl. */
+void ui_view_set(bool compact, bool quick, bool restore);
 // ⓘ The chord calls this from the input path; the REST endpoint calls it too.
 // ⓘ Takes the controller that ran the chord, so the window can come up on its
 // tab. Empty means "no particular one" -- the REST spawn path has no controller
@@ -195,9 +196,9 @@ bool ctm_ui_has_foreground()
 {
     return ctm_open_ui::window_has_foreground();
 }
-void ui_view_set(bool compact, bool quick)
+void ui_view_set(bool compact, bool quick, bool restore)
 {
-    config_move::set_view(compact, quick);
+    config_move::set_view(compact, quick, restore);
 }
 
 
