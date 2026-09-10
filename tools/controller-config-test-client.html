@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.64.13 -- see the changelog at the bottom of this comment.
+  VERSION 2.64.14 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,10 @@
   tidy message about it.
 
   CHANGELOG
+    2.64.14 The auto-link questions set the serial and the config names as
+            names. Applying a config in compact asks nothing; Circle closes.
+            Compact opens at the smallest size. Both legends reordered to
+            read the same way (rhoquinn8217, 2026-09-09).
     2.64.13 No green in the config list: the auto-linked config carries its
             mark in white like the rest, and the lit button beside the
             selector is the green (rhoquinn8217, 2026-09-09).
@@ -630,6 +634,9 @@
                  padding:18px 22px; max-width:420px; }
   .confirmCard h2 { margin:0 0 8px; border:none; padding:0; font-size:15px; }
   .confirmCard p { margin:0 0 16px; color:#c8c9ce; }
+  /* Names in a question -- a config, a serial -- are set as names, at the
+     question's own size (rhoquinn8217, 2026-09-09). */
+  .confirmCard p code { font-size:inherit; color:#cfe0f5; }
   .confirmBtns { display:flex; gap:8px; justify-content:flex-end; }
   /* ⚠️ The label is the first child and takes the full width; everything after
      it wraps onto the line below and sits together. Without the 100% the label
@@ -954,7 +961,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.64.13</span>
+  <span class="muted" style="font-size:12px">v2.64.14</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -1837,8 +1844,9 @@ function normSerial(raw) {
 
 function stopAutoLink(configName, serial, who) {
   askConfirm('Remove auto link',
-             'Stop automatically setting ' + configName + ' for ' + (who || 'this controller') + '?',
-             function() { stopAutoLinkConfirmed(configName, serial); });
+             'Stop automatically setting <code>' + esc(configName) + '</code> for ' +
+             (who ? esc(who) : 'this controller') + '?',
+             function() { stopAutoLinkConfirmed(configName, serial); }, true);
 }
 
 function stopAutoLinkConfirmed(configName, serial) {
@@ -3408,15 +3416,23 @@ function whoIs(ordinal) {
   return (d && d.serial) ? (nick + ' (' + d.serial + ')') : nick;
 }
 
+// The same, for a question set as HTML: the serial as a name, the nickname
+// as text (rhoquinn8217, 2026-09-09).
+function whoIsHtml(ordinal) {
+  var d = (LAST_DEVICES || []).filter(function(x) { return x.ordinal === ordinal; })[0];
+  var nick = esc(nameFor(ordinal));
+  return (d && d.serial) ? (nick + ' (<code>' + esc(d.serial) + '</code>)') : nick;
+}
+
 // Sets the claim, asking only when it would REPLACE one. Setting a first claim
 // is unremarkable; changing one silently alters what a controller does next
 // time it bridges.
 function setAutoLink(ordinal, configName, serial, currentlyClaimedBy) {
   if (!currentlyClaimedBy) { claimAutoLink(ordinal, configName, serial); return; }
   askConfirm('Set auto link',
-             'Change auto linked config for ' + whoIs(ordinal) +
-             ' from ' + currentlyClaimedBy + ' to ' + configName + '?',
-             function() { claimAutoLink(ordinal, configName, serial); });
+             'Change auto linked config for ' + whoIsHtml(ordinal) +
+             ' from <code>' + esc(currentlyClaimedBy) + '</code> to <code>' + esc(configName) + '</code>?',
+             function() { claimAutoLink(ordinal, configName, serial); }, true);
 }
 
 // ⭐ TITLED WITH THE BUTTON THAT OPENED IT. "Controller config" was the same
@@ -3431,7 +3447,7 @@ function restoreOpener(el) {
   if (at >= 0) { GP_INDEX = at; gpPaint(); }
 }
 
-function askConfirm(title, message, onYes) {
+function askConfirm(title, message, onYes, html) {
   // ⭐ Whatever had focus when this opened. Archive, Remove auto link and Reset
   // all landed somewhere arbitrary on cancel, because gpCollect rebuilds the
   // list and the old index then points at whatever moved into that slot.
@@ -3441,7 +3457,10 @@ function askConfirm(title, message, onYes) {
   OVERLAY_OPENER = GP_FOCUS[GP_INDEX] || null;
   CONFIRM_CB = onYes;
   document.getElementById('confirmTitle').textContent = title;
-  document.getElementById('confirmText').textContent = message;
+  // ⓘ Plain text unless the caller says its message is HTML -- the few
+  // questions that name a config or a serial set those as names.
+  if (html) document.getElementById('confirmText').innerHTML = message;
+  else document.getElementById('confirmText').textContent = message;
   document.getElementById('confirmBox').style.display = 'flex';
   gpCollect();
   // ⭐ DEFAULT TO CANCEL. Everything this dialog guards destroys something, and
@@ -5068,13 +5087,13 @@ function applySavedMode() {
   if (m === 'compact') setCompact(true);
 }
 
-// ⓘ Half the screen wide, a little under half tall, centred -- the MEDIUM of
-// the listener's compact sizes, so R3 cycles from where the window actually
-// is. Small on purpose: a window that does one thing feels considered, a
-// shrunken full page feels truncated.
+// ⓘ A third of the screen each way, centred -- the SMALL of the listener's
+// compact sizes, so R3 cycles from where the window actually is
+// (rhoquinn8217, 2026-09-09: smallest first). Small on purpose: a window
+// that does one thing feels considered, a shrunken full page feels truncated.
 function compactSize() {
-  var w = Math.round(screen.availWidth * 0.45);
-  var h = Math.round(screen.availHeight * 0.45);
+  var w = Math.round(screen.availWidth * 0.34);
+  var h = Math.round(screen.availHeight * 0.34);
   window.resizeTo(w, h);
   window.moveTo(Math.round((screen.availWidth - w) / 2),
                 Math.round((screen.availHeight - h) / 2));
@@ -5227,8 +5246,10 @@ function compactPick() {
   var ordinal = sel.dataset.ordinal;
   var body = sel.value ? { config: sel.value } : {};
   call('POST', '/api/v1/devices/' + encodeURIComponent(ordinal) + '/link', body)
-    .then(function () { loadDevices(); loadConfigs(); if (sel.value) compactAskExit('Custom config applied!', [
-      { label: 'Back to the game', act: park }, { label: 'Stay here' }]); })
+    // ⓘ No question after a pick (rhoquinn8217, 2026-09-09): Circle closes
+    // the window and that is enough. A new preset still asks, because it
+    // has something to offer -- customising it.
+    .then(function () { loadDevices(); loadConfigs(); })
     .catch(function () {});
 }
 
@@ -5338,8 +5359,8 @@ function paintCompact() {
   html += '</div>';   // .cmain
   html += '<div class="cbar"><button class="cconf" onclick="openConfigurator()">Configurator</button>' +
           '<div class="cbarText">' +
-          '<div class="clegend">L1/R1 controller | \u2715 select | \u25cb close | ' +
-          '\\|/ edit | \u2630 move | R3 size</div>' +
+          '<div class="clegend">\u2715 select | d-pad move | L1/R1 controller | ' +
+          '\u2630 move | R3 resize | \\|/ configurator | \u25cb close</div>' +
           '<div class="cinfo">To bring this window back: <b>hold two fingers on the touchpad ' +
           'and press Options</b> (DS5 only), or open it with the taskbar icon.</div>' +
           '</div><button class="cclose" onclick="park()">Close</button></div>';
@@ -5439,7 +5460,7 @@ function gpPoll() {
   // ⓘ The count comes from the browser when it can see the pads, and falls
   // back to the singular when only the gate knows one is there.
   hint.textContent = (live.length > 1 ? live.length + ' controllers' : 'controller') +
-                     ' — L1/R1 tabs | D-pad move | ✕ select | □ on/off | ○ back | ☰ move window | R3 size | \\|/ compact';
+                     ' — ✕ select | d-pad move | □ on/off | L1/R1 controller | ☰ move | R3 resize | \\|/ compact | ○ close';
   bar.className = 'live';
   measureGpBar();
 
