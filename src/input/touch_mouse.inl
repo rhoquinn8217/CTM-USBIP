@@ -47,6 +47,11 @@ struct TouchPoint {
     int y = 0;
 };
 
+// ⓘ The pad's own coordinate space, from the report layout at the top of this
+// file: x runs 0..1919 left to right. Used to say which HALF a finger is on,
+// which is a question about the pad and not about the screen.
+constexpr int kPadWidth = 1920;
+
 inline TouchPoint read_point(const uint8_t *data, size_t base)
 {
     TouchPoint p;
@@ -87,6 +92,17 @@ struct TouchState {
     // at all -- the pad reports two touch points.
     bool dragging = false;
 
+    // ⭐ CLICK BY HALF, AND THE HOLD THAT MAKES IT A DRAG (T-149). Pressing the
+    // pad in clicks the button the finger is over; keeping it pressed past the
+    // delay hands the cursor back so the same press becomes a drag.
+    // ⓘ Which half is decided ONCE, at the moment of the press, and not
+    // re-read: a finger that slides across the middle mid-drag must not change
+    // which button is held.
+    bool clickHeld = false;
+    uint8_t clickMask = 0;
+    long long clickStart = 0;
+    bool clickDrag = false;
+
     bool sessionActive = false;
     long long sessionStart = 0;
     int sessionMaxFingers = 0;
@@ -105,7 +121,10 @@ inline void forget(const void *deviceKey)
     auto it = g_touch.find(deviceKey);
     // ⛔ A controller that unbridges mid-drag must not leave the mouse button
     // held down on the desktop with nothing able to release it.
-    if (it != g_touch.end() && it->second.dragging) ctm_mouse_device::set_drag(0x00);
+    if (it != g_touch.end() && (it->second.dragging || it->second.clickHeld)) {
+        ctm_mouse_device::set_drag(0x00);
+    }
+    ctm_gyro_mouse::set_drag_gate(deviceKey, false);
     g_touch.erase(deviceKey);
 }
 
@@ -144,15 +163,23 @@ inline void step(const void *deviceKey, const std::string &section,
         (scrollRaw == "2" || scrollRaw == "true")   ? 2 : 0;
     const bool scrollOn = scrollFingers > 0;
     const bool tapsOn = device_config_bool(section.c_str(), "touchpad_tap_click", false);
+    // ⭐ T-149. ⛔ This and touchpad_click_drag both hold a mouse button from
+    // the same physical click, so they cannot both run: this one wins, and the
+    // other is skipped rather than left to fight it.
+    const bool clickButtonsOn =
+        device_config_bool(section.c_str(), "touchpad_click_buttons", false);
+    const long long dragHoldMs =
+        (long long)device_config_int(section.c_str(), "touchpad_drag_hold_ms", 200);
 
     std::lock_guard<std::mutex> lock(g_touchMutex);
     TouchState &st = g_touch[deviceKey];
 
     // ⭐ Everything off: keep no state, so turning a feature on later starts
     // clean rather than against a stale anchor.
-    if (!cursorOn && !scrollOn && !tapsOn &&
+    if (!cursorOn && !scrollOn && !tapsOn && !clickButtonsOn &&
         !device_config_bool(section.c_str(), "touchpad_click_drag", false)) {
-        if (st.dragging) ctm_mouse_device::set_drag(0x00);
+        if (st.dragging || st.clickHeld) ctm_mouse_device::set_drag(0x00);
+        ctm_gyro_mouse::set_drag_gate(deviceKey, false);
         st = TouchState();
         return;
     }
@@ -175,8 +202,9 @@ inline void step(const void *deviceKey, const std::string &section,
     // ⛔ A SHUT GATE DROPS THE STATE, so re-opening it starts from a clean
     // anchor rather than measuring movement against where a finger was before
     // the gate closed -- which would arrive as one jump.
-    if (!ctm_gyro_mouse::gate_open(gate, data, len)) {
-        if (st.dragging) ctm_mouse_device::set_drag(0x00);
+    if (!ctm_gyro_mouse::gate_open(gate, data, len, deviceKey)) {
+        if (st.dragging || st.clickHeld) ctm_mouse_device::set_drag(0x00);
+        ctm_gyro_mouse::set_drag_gate(deviceKey, false);
         st = TouchState();
         return;
     }
@@ -184,7 +212,58 @@ inline void step(const void *deviceKey, const std::string &section,
     // ---- Drag ---------------------------------------------------------------
     // Read before anything else so a drag survives whatever the cursor and tap
     // paths decide to do with the same touch.
-    if (device_config_bool(section.c_str(), "touchpad_click_drag", false)) {
+    // ⭐ THE PAD'S CLICK IS A MOUSE BUTTON, chosen by which half the finger is
+    // on (T-149, cleared on hardware 2026-09-10: both thumbs reach their own
+    // side without a regrip). Held past the delay it becomes a drag, and the
+    // gyro comes back to do the dragging.
+    //
+    // ⛔ THE DELAY IS NOT A REFINEMENT. Measured 2026-09-10: the click moves
+    // the pad by a little, less than a trigger squeeze but not nothing. Hand
+    // the cursor back at the instant of the press and that jolt lands inside
+    // the drag, turning every click into a small one. The delay is the time
+    // the jolt needs to die away.
+    //
+    // ⓘ A press with NO finger on the pad is left alone -- there is no half to
+    // read, and it is the pad's own button rather than a click on something.
+    if (clickButtonsOn) {
+        const bool padPressed = len > 10 && (data[10] & 0x02) != 0;
+        const TouchPoint c1 = read_point(data, 33);
+        const TouchPoint c2 = read_point(data, 37);
+
+        if (!st.clickHeld) {
+            if (padPressed && (c1.down || c2.down)) {
+                const TouchPoint &f = c1.down ? c1 : c2;
+                st.clickHeld = true;
+                st.clickStart = nowMs;
+                st.clickDrag = false;
+                // ⓘ kPadWidth is the pad's own coordinate space, not pixels.
+                st.clickMask = (f.x >= kPadWidth / 2) ? 0x02 : 0x01;
+                ctm_mouse_device::set_drag(st.clickMask);
+                ctm_gyro_mouse_ensure_mouse_started();
+            }
+        } else if (!padPressed) {
+            // Release drops whatever was held, drag or not.
+            st.clickHeld = false;
+            st.clickMask = 0;
+            st.clickDrag = false;
+            ctm_mouse_device::set_drag(0x00);
+            ctm_gyro_mouse::set_drag_gate(deviceKey, false);
+        } else if (!st.clickDrag && dragHoldMs > 0 && nowMs - st.clickStart >= dragHoldMs) {
+            // Held long enough: this is a drag, so the cursor comes back.
+            st.clickDrag = true;
+            ctm_gyro_mouse::set_drag_gate(deviceKey, true);
+        }
+    } else if (st.clickHeld) {
+        // Turned off mid-click: never leave a button held.
+        st.clickHeld = false;
+        st.clickMask = 0;
+        st.clickDrag = false;
+        ctm_mouse_device::set_drag(0x00);
+        ctm_gyro_mouse::set_drag_gate(deviceKey, false);
+    }
+
+    if (!clickButtonsOn &&
+        device_config_bool(section.c_str(), "touchpad_click_drag", false)) {
         const bool padPressed = len > 10 && (data[10] & 0x02) != 0;
         const TouchPoint d1 = read_point(data, 33);
         const TouchPoint d2 = read_point(data, 37);

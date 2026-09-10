@@ -31,6 +31,7 @@ int g_pushCount = 0;
 int g_wheelSum = 0;
 uint8_t g_lastClick = 0;
 uint8_t g_dragMask = 0;
+bool g_dragGateOn = false;
 int g_clickCount = 0;
 int g_ensureCalls = 0;
 
@@ -44,6 +45,7 @@ void reset_stubs()
     g_wheelSum = 0;
     g_lastClick = 0;
     g_dragMask = 0;
+    g_dragGateOn = false;
     g_clickCount = 0;
     g_ensureCalls = 0;
 }
@@ -110,7 +112,7 @@ inline Gate parse_gate(const std::string &raw)
     return Gate::Off;
 }
 
-inline bool gate_open(Gate gate, const uint8_t *d, size_t len)
+inline bool gate_open(Gate gate, const uint8_t *d, size_t len, const void * = nullptr)
 {
     switch (gate) {
         case Gate::Always: return true;
@@ -118,6 +120,11 @@ inline bool gate_open(Gate gate, const uint8_t *d, size_t len)
         default: return false;
     }
 }
+
+// ⓘ The touchpad tells the gyro when a held click has become a drag, so the
+// cursor can come back to do the dragging. Nothing here reads it -- the real
+// one is exercised by the gyro's own suite -- but the calls must compile.
+inline void set_drag_gate(const void *, bool on) { g_dragGateOn = on; }
 
 struct MouseDelta {
     int32_t dx = 0;
@@ -513,6 +520,111 @@ int run_touch_mouse_tests()
         set_point(r, 0, true, 1, 500, 500);
         run_step(r, 16);
         CTM_CHECK(g_pushCount > 0);
+    }
+
+    // ⭐ T-149. The pad's click is a mouse button chosen by which half the
+    // finger is on, and holding it past the delay hands the cursor back so the
+    // same press drags.
+    section("touch: the pad's click clicks the half the finger is on");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_click_buttons"] = "true";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 200, 500);       // left half
+        r[10] |= 0x02;                            // pad pressed in
+        run_step(r, 0);
+        CTM_CHECK(g_dragMask == 0x01);
+
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_click_buttons"] = "true";
+        auto rr = rest_report();
+        set_point(rr, 0, true, 1, 1700, 500);     // right half
+        rr[10] |= 0x02;
+        run_step(rr, 0);
+        CTM_CHECK(g_dragMask == 0x02);
+    }
+
+    section("touch: a click with no finger on the pad is left alone");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_click_buttons"] = "true";
+        auto r = rest_report();
+        r[10] |= 0x02;                            // pressed, but nothing touching
+        run_step(r, 0);
+        CTM_CHECK(g_dragMask == 0);
+    }
+
+    // ⛔ The delay is what keeps the click's own jolt out of the drag: measured
+    // on hardware 2026-09-10, the click moves the pad a little.
+    section("touch: the cursor comes back only once the click passes the delay");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_click_buttons"] = "true";
+        g_cfg["touchpad_drag_hold_ms"] = "200";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 200, 500);
+        r[10] |= 0x02;
+        run_step(r, 0);
+        CTM_CHECK(!g_dragGateOn);                 // pressed, not yet a drag
+        run_step(r, 199);
+        CTM_CHECK(!g_dragGateOn);                 // one millisecond short
+        run_step(r, 200);
+        CTM_CHECK(g_dragGateOn);                  // and now it is a drag
+        CTM_CHECK(g_dragMask == 0x01);            // still the same button
+    }
+
+    section("touch: releasing the click drops the button and the drag");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_click_buttons"] = "true";
+        g_cfg["touchpad_drag_hold_ms"] = "200";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 200, 500);
+        r[10] |= 0x02;
+        run_step(r, 0);
+        run_step(r, 300);
+        CTM_CHECK(g_dragGateOn);
+        r[10] &= static_cast<uint8_t>(~0x02);     // let the click go
+        run_step(r, 320);
+        CTM_CHECK(g_dragMask == 0);
+        CTM_CHECK(!g_dragGateOn);
+    }
+
+    // ⓘ Which half is read ONCE, at the press: a finger that slides across the
+    // middle mid-drag must not swap which button is held.
+    section("touch: sliding across the middle does not change the button");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_click_buttons"] = "true";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 200, 500);       // pressed on the left
+        r[10] |= 0x02;
+        run_step(r, 0);
+        CTM_CHECK(g_dragMask == 0x01);
+        set_point(r, 0, true, 1, 1700, 500);      // slid to the right, still held
+        run_step(r, 50);
+        CTM_CHECK(g_dragMask == 0x01);
+    }
+
+    section("touch: a drag hold of zero clicks without ever dragging");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_click_buttons"] = "true";
+        g_cfg["touchpad_drag_hold_ms"] = "0";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 200, 500);
+        r[10] |= 0x02;
+        run_step(r, 0);
+        run_step(r, 5000);
+        CTM_CHECK(g_dragMask == 0x01);
+        CTM_CHECK(!g_dragGateOn);
     }
 
     return 0;

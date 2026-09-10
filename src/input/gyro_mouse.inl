@@ -62,7 +62,36 @@ enum class Gate {
     NotTouchpad,
     TouchpadClick,
     PS,
+    // ⭐ STEADY: the touchpad ratchet, plus a way back for a drag (T-149).
+    // A finger on the pad freezes the cursor -- which is the whole point, since
+    // that is how you steady it before clicking -- and the cursor comes back
+    // once a HELD click has lasted past the drag delay. Without that second
+    // half a drag would be impossible: the finger doing the dragging is the
+    // same finger holding the cursor still.
+    Steady,
 };
+
+// ⭐ WHOSE FLAG THIS IS. The touchpad decides when a press has become a drag --
+// it is the code that sees the press and owns the clock -- but the GATE is
+// asked here, one file earlier in the include order. So the flag lives here and
+// the touchpad writes it, which keeps the dependency pointing one way: the
+// touchpad already calls gate_open(), and nothing here calls the touchpad.
+inline std::mutex g_dragGateMutex;
+inline std::map<const void *, bool> g_dragGate;
+
+inline void set_drag_gate(const void *deviceKey, bool on)
+{
+    std::lock_guard<std::mutex> lock(g_dragGateMutex);
+    if (on) g_dragGate[deviceKey] = true;
+    else g_dragGate.erase(deviceKey);
+}
+
+inline bool drag_gate(const void *deviceKey)
+{
+    if (deviceKey == nullptr) return false;
+    std::lock_guard<std::mutex> lock(g_dragGateMutex);
+    return g_dragGate.find(deviceKey) != g_dragGate.end();
+}
 
 inline Gate parse_gate(const std::string &raw)
 {
@@ -82,6 +111,7 @@ inline Gate parse_gate(const std::string &raw)
     if (v == "touchpad") return Gate::Touchpad;
     if (v == "!touchpad" || v == "not_touchpad") return Gate::NotTouchpad;
     if (v == "touchpad_click" || v == "click") return Gate::TouchpadClick;
+    if (v == "steady") return Gate::Steady;
     if (v == "ps") return Gate::PS;
     // Unknown value is OFF, never an error -- a typo silently disables the
     // feature, it never breaks a session. Same rule as every config lookup.
@@ -91,7 +121,10 @@ inline Gate parse_gate(const std::string &raw)
 // True when the gate condition says gyro should be producing movement right
 // now. `d` is the mapped DS5 report (id at [0]); `len` must cover the gate
 // byte the chosen gate reads.
-inline bool gate_open(Gate gate, const uint8_t *d, size_t len)
+// ⓘ The device key is optional because most gates are a pure function of the
+// report bytes and every existing caller passes only those. Gate::Steady is the
+// one that needs to know WHICH pad is asking, since a drag belongs to a pad.
+inline bool gate_open(Gate gate, const uint8_t *d, size_t len, const void *deviceKey = nullptr)
 {
     switch (gate) {
         case Gate::Off:
@@ -114,6 +147,11 @@ inline bool gate_open(Gate gate, const uint8_t *d, size_t len)
             return len > 10 && (d[10] & 0x02);           // pad pressed in
         case Gate::PS:
             return len > 10 && (d[10] & 0x01);
+        case Gate::Steady:
+            // A drag outranks the ratchet: the finger is down, and it is down
+            // on purpose.
+            if (drag_gate(deviceKey)) return true;
+            return len > 33 && (d[33] & 0x80);           // no finger: cursor moves
     }
     return false;
 }
@@ -231,6 +269,10 @@ public:
     // defaults to the old fixed divisor so an uncalibrated pad still works.
     void set_calibration(const ctm_gyro_calib::Scale &s) { cal_ = s; }
 
+    // ⓘ Which pad this instance belongs to. Gate::Steady asks whether THIS pad
+    // is mid-drag, and on_report has never needed to know until now.
+    void set_key(const void *k) { key_ = k; }
+
     bool on_report(const uint8_t *d, size_t len, const char *section, MouseDelta *out)
     {
         if (d == nullptr || len < 28 || out == nullptr) {
@@ -329,7 +371,7 @@ public:
 
         // Gate AFTER processing, so calibration is continuous but movement only
         // emits when the player is actually aiming.
-        if (!gate_open(cfg.gate, d, len)) {
+        if (!gate_open(cfg.gate, d, len, key_)) {
             reset_remainder();
             return false;
         }
@@ -474,6 +516,10 @@ public:
     }
 
 private:
+    // ⓘ Which pad this instance is for. Gate::Steady asks whether THIS pad is
+    // mid-drag; every other gate is a pure function of the report bytes and
+    // never needed to know.
+    const void *key_ = nullptr;
     ctm_gyro_calib::Scale cal_;
 
     void reset_remainder()
@@ -585,6 +631,7 @@ inline GyroMouse &gyro_for(const void *deviceKey)
     auto it = r.instances.find(deviceKey);
     if (it == r.instances.end()) {
         it = r.instances.emplace(deviceKey, std::make_unique<GyroMouse>()).first;
+        it->second->set_key(deviceKey);
     }
     return *it->second;
 }
