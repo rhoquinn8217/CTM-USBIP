@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.64.26 -- see the changelog at the bottom of this comment.
+  VERSION 2.64.27 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,11 @@
   tidy message about it.
 
   CHANGELOG
+    2.64.27 No question after a pick, again: Circle closes. Advanced's
+            legend says "○ footer/close". Simple is a quarter narrower with
+            its text unchanged; Left from New lands on Advanced and Right
+            from Edit on Quick. Quick's name is a little larger than its
+            kind, no more (rhoquinn8217, 2026-09-09).
     2.64.26 Simple and Quick share one footer: Advanced bottom-left, the
             legend, the other view bottom-right, and no Close -- Circle and
             the question after a pick close. Quick's sides show the key
@@ -572,7 +577,9 @@
   body.quick #compactBox .cmain { padding-top:0; gap:3.75vh; justify-content:flex-start; }
   body.quick #compactBox .cmain.centre { gap:3vh; justify-content:center; }
   body.quick #compactBox .ccar { gap:2vw; }
-  body.quick #compactBox .cname { font-size:27vh; line-height:1.05; }
+  /* ⓘ The name a little larger than the kind under it, no more
+     (rhoquinn8217, 2026-09-09). */
+  body.quick #compactBox .cname { font-size:15vh; line-height:1.05; }
   body.quick #compactBox .ccur .ckind { font-size:12vh; margin-top:0.45vh; }
   body.quick #compactBox .cside { font-size:12vh; }
   body.quick #compactBox .cside small { font-size:9vh; }
@@ -1065,7 +1072,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.64.26</span>
+  <span class="muted" style="font-size:12px">v2.64.27</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -4407,7 +4414,16 @@ function compactMove(dx, dy) {
     r = Math.max(0, Math.min(rows.length - 1, r + dy));
     c = Math.min(c, rows[r].length - 1);
   } else if (dx) {
-    c = Math.max(0, Math.min(rows[r].length - 1, c + dx));
+    var nc = c + dx;
+    if (rows[r] === foot && bar.length && (nc < 0 || nc >= foot.length)) {
+      // ⭐ Off either end of New/Edit lands on the corner that side: Left
+      // from New is Advanced, Right from Edit is the other view
+      // (rhoquinn8217, 2026-09-09).
+      r = rows.indexOf(bar);
+      c = nc < 0 ? 0 : bar.length - 1;
+    } else {
+      c = Math.max(0, Math.min(rows[r].length - 1, nc));
+    }
   }
   return focusElement(rows[r][c]);
 }
@@ -5229,7 +5245,7 @@ function setMode(m) {
 // the listener's table agrees, so R3 cycles from where the window actually
 // is (rhoquinn8217, 2026-09-09: two sizes per layout).
 function compactSize() {
-  var w = Math.round(screen.availWidth * 0.45);
+  var w = Math.round(screen.availWidth * 0.3375);   // a quarter off (rhoquinn8217, 2026-09-09)
   var h = Math.round(screen.availHeight * 0.45);
   window.resizeTo(w, h);
   window.moveTo(Math.round((screen.availWidth - w) / 2),
@@ -5405,11 +5421,11 @@ function compactPick() {
   var ordinal = sel.dataset.ordinal;
   var body = sel.value ? { config: sel.value } : {};
   call('POST', '/api/v1/devices/' + encodeURIComponent(ordinal) + '/link', body)
-    // ⭐ A pick asks whether to go back to the game (rhoquinn8217,
-    // 2026-09-09, restored the same evening): with no Close button in the
-    // corners, this and Circle are the ways out.
-    .then(function () { loadDevices(); loadConfigs(); if (sel.value) compactAskExit('Custom config applied!', [
-      { label: 'Back to the game', act: park }, { label: 'Stay here' }]); })
+    // ⛔ NO QUESTION AFTER A PICK (rhoquinn8217, 2026-09-09, twice): Circle
+    // closes at once, as it does the keyboard, and "Stay here" was a press
+    // that gained nothing. A new preset still asks, because it has
+    // customising to offer.
+    .then(function () { loadDevices(); loadConfigs(); })
     .catch(function () {});
 }
 
@@ -5657,7 +5673,7 @@ function gpPoll() {
   // ⓘ The count comes from the browser when it can see the pads, and falls
   // back to the singular when only the gate knows one is there.
   hint.textContent = (live.length > 1 ? live.length + ' controllers' : 'controller') +
-                     ' — L1/R1 controller | ✕ select | d-pad move | □ on/off | ☰ move | R3 resize | \\|/ simple | ○ close';
+                     ' — L1/R1 controller | ✕ select | d-pad move | □ on/off | ☰ move | R3 resize | \\|/ simple | ○ footer/close';
   bar.className = 'live';
   measureGpBar();
 
