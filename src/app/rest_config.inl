@@ -704,6 +704,9 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
         // [ctm-app] marker and so can only ever reach our own window; the
         // page's teardown beacon releases the gate on the way out.
         if (what == "close") {
+            // ⓘ FIRST, while the window is still there: this is the one moment
+            // that catches a window someone dragged by its title bar.
+            ui_view_remember_pos();
             const bool ok = ctm_open_ui::close_existing();
             *out = rest_http_response(200, ok ? R"({"ok":true})" : R"({"ok":false})");
             return true;
@@ -716,6 +719,10 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
             // this is the path meant to be reliable.
             device_log::input(device_log::msg()
                 << "ui/closed: the page reported its own teardown");
+            // The other way out -- the X, or the browser going away. The
+            // window may still be up for a moment; if it is, its place is
+            // worth having.
+            ui_view_remember_pos();
             ctm_rebind_set_config_mode(false);
             *out = rest_http_response(200, R"({"ok":true,"config_mode":false})");
             return true;

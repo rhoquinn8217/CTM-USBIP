@@ -101,6 +101,9 @@ void ui_view_set(bool compact, bool quick, bool restore);
  * asks for when it comes back. */
 void ui_view_note_ordinal(const std::string &ordinal);
 bool ui_view_get(bool *compact, bool *quick, std::string *ordinal);
+/* Where the window stands right now, kept for the next one. Called on the way
+ * out, while it still exists. */
+void ui_view_remember_pos();
 // ⓘ The chord calls this from the input path; the REST endpoint calls it too.
 // ⓘ Takes the controller that ran the chord, so the window can come up on its
 // tab. Empty means "no particular one" -- the REST spawn path has no controller
@@ -211,6 +214,10 @@ void ui_view_note_ordinal(const std::string &ordinal)
 bool ui_view_get(bool *compact, bool *quick, std::string *ordinal)
 {
     return config_move::view_get(compact, quick, ordinal);
+}
+void ui_view_remember_pos()
+{
+    config_move::remember_pos_now();
 }
 
 

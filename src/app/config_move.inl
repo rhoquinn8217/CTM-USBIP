@@ -119,6 +119,58 @@ inline std::atomic_bool g_known{false};
 inline std::mutex g_ordinalMutex;
 inline std::string g_ordinal;
 
+// ⭐ AND THE EXACT PLACE, per layout (rhoquinn8217, 2026-09-09). Three snap
+// spots are what a CONTROLLER can reach; a mouse puts the window wherever it
+// likes, and coming back to a snap spot instead would be the same surprise as
+// coming back at the wrong size. ⓘ Position only -- the size belongs to R3's
+// index, and restoring a stale size would fight it.
+//
+// ⓘ Written from what we are ABOUT to set rather than read back afterwards:
+// SetWindowPos on another process's window need not have landed by the time
+// GetWindowRect answers, and a memory one step behind is worse than none.
+// The one read-back is remember_pos_now(), for a window someone dragged by
+// its title bar -- nothing is in flight then, and it is the last thing done
+// before the window is closed.
+struct Pos { int x = 0; int y = 0; bool have = false; };
+inline std::mutex g_posMutex;
+inline Pos g_posAdvanced, g_posSimple, g_posQuick;
+
+inline Pos &pos_slot()
+{
+    if (!g_compact.load()) return g_posAdvanced;
+    return g_quick.load() ? g_posQuick : g_posSimple;
+}
+
+inline void note_pos(int x, int y)
+{
+    std::lock_guard<std::mutex> lock(g_posMutex);
+    Pos &p = pos_slot();
+    p.x = x;
+    p.y = y;
+    p.have = true;
+}
+
+inline bool last_pos(int *x, int *y)
+{
+    std::lock_guard<std::mutex> lock(g_posMutex);
+    const Pos &p = pos_slot();
+    if (!p.have) return false;
+    if (x) *x = p.x;
+    if (y) *y = p.y;
+    return true;
+}
+
+// The window as it stands, dragged or not. Called while it still exists, on
+// the way out.
+inline void remember_pos_now()
+{
+    HWND h = page_window();
+    if (h == nullptr) return;
+    RECT rc;
+    if (!GetWindowRect(h, &rc)) return;
+    note_pos((int)rc.left, (int)rc.top);
+}
+
 inline void note_ordinal(const std::string &ordinal)
 {
     std::lock_guard<std::mutex> lock(g_ordinalMutex);
@@ -232,6 +284,7 @@ inline void clamp_into(const RECT &wa, int w, int h, int &x, int &y)
 inline void place(HWND hwnd, int x, int y)
 {
     SetWindowPos(hwnd, nullptr, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    note_pos(x, y);
 }
 
 // ⓘ The margin between the window and the screen edge on a snap, as a share
@@ -249,16 +302,6 @@ inline int snap_margin(const RECT &wa)
 inline int bottom_gap(const RECT &wa)
 {
     return (wa.bottom - wa.top) / 100;
-}
-
-// Which of the three the compact layouts were last put at. Simple and Quick
-// keep their own, so moving one does not move the other.
-inline std::atomic_int g_posCompact{1};
-inline std::atomic_int g_posQuick{1};
-
-inline std::atomic_int &pos_slot()
-{
-    return g_quick.load() ? g_posQuick : g_posCompact;
 }
 
 // One of the three places along the bottom, for Simple and Quick.
@@ -281,19 +324,30 @@ inline void place_at(HWND hwnd, int idx)
     place(hwnd, x, y);
 }
 
-// Where this layout lives when nothing has been steered since: Advanced in the
-// middle of the screen, Simple and Quick at whichever of the three they were
-// left at.
+// Where this layout goes when the window comes back: exactly where it was
+// left, whether that was one of the three or somewhere a mouse dragged it.
+// ⛔ CLAMPED, always: a remembered place is only as good as the screen it was
+// remembered on, and a display that changed resolution or scaling in between
+// would otherwise put the window out of reach. Failing that -- a layout not
+// yet seen -- Advanced takes the middle of the screen and the other two the
+// bottom centre.
 inline void place_default(HWND hwnd)
 {
-    if (g_compact.load()) { place_at(hwnd, pos_slot().load()); return; }
     RECT rc;
     if (!GetWindowRect(hwnd, &rc)) return;
     const int w = rc.right - rc.left;
     const int h = rc.bottom - rc.top;
     const RECT wa = work_area();
-    int x = wa.left + ((wa.right - wa.left) - w) / 2;
-    int y = wa.top + ((wa.bottom - wa.top) - h) / 2;
+
+    int x = 0, y = 0;
+    if (last_pos(&x, &y)) {
+        clamp_into(wa, w, h, x, y);
+        place(hwnd, x, y);
+        return;
+    }
+    if (g_compact.load()) { place_at(hwnd, 1); return; }
+    x = wa.left + ((wa.right - wa.left) - w) / 2;
+    y = wa.top + ((wa.bottom - wa.top) - h) / 2;
     clamp_into(wa, w, h, x, y);
     place(hwnd, x, y);
 }
@@ -323,9 +377,7 @@ inline void snap_next(HWND hwnd)
         const long d = labs((long)rc.left - (long)targets[i]);
         if (d < best) { best = d; nearest = i; }
     }
-    const int idx = (nearest + 1) % 3;
-    pos_slot().store(idx);
-    place_at(hwnd, idx);
+    place_at(hwnd, (nearest + 1) % 3);
 }
 
 // This layout's slot, and the table it indexes.
@@ -360,6 +412,7 @@ inline void apply_size(HWND hwnd)
     int y = cy - h / 2;
     clamp_into(wa, w, h, x, y);
     SetWindowPos(hwnd, nullptr, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
+    note_pos(x, y);
 }
 
 // R3: the next of this layout's two sizes.

@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.64.31 -- see the changelog at the bottom of this comment.
+  VERSION 2.64.32 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,10 @@
   tidy message about it.
 
   CHANGELOG
+    2.64.32 The window comes back exactly where it was left, per layout, a
+            mouse drag included, clamped in case the screen changed. And each
+            layout says which it is: in the title, which the taskbar reads
+            too, and at the head of the legend (rhoquinn8217, 2026-09-09).
     2.64.31 Circle CLOSES the window rather than parking it behind the game,
             reversing 2.64.0: the chord and the tray icon are the ways back,
             and the listener already remembers what was on screen
@@ -693,6 +697,12 @@
   /* ⓘ Half the size of the rest (rhoquinn8217, 2026-09-09), and green as the
      configurator's legend is while the pad is live. */
   #compactBox .clegend { font-size:2.3vh; color:#7fd18c; text-align:center; }
+  /* ⭐ WHICH LAYOUT THIS IS (rhoquinn8217, 2026-09-09). It leads the legend
+     rather than sitting on its own, so it costs no height in a window that
+     has none to spare -- and the corner button names the layout you would go
+     to, which is exactly what makes saying where you ARE worth the room. */
+  #compactBox .cmode { color:#e8e8ea; font-weight:600; letter-spacing:.08em;
+    margin-right:0.7em; }
   #compactBox .cinfo { font-size:2.3vh; color:#c8c9ce; text-align:center; line-height:1.4;
     max-width:80vw; }
   #compactBox .cinfo b { color:#e8e8ea; }
@@ -1102,7 +1112,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.64.31</span>
+  <span class="muted" style="font-size:12px">v2.64.32</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -5248,6 +5258,20 @@ function isControllerTab(t) { return t !== 'overview' && t !== 'editor'; }
 function modeName() {
   return !COMPACT ? 'advanced' : (QUICK ? 'quick' : 'simple');
 }
+
+// ⭐ THE WINDOW SAYS WHICH LAYOUT IT IS, in its title -- the one place every
+// layout has, and the one the taskbar reads too (rhoquinn8217, 2026-09-09).
+// ⛔ The [ctm-app] marker goes back on EVERY time: the listener finds this
+// window by looking for it, and a title rewritten without it makes the window
+// invisible to the chord, to Safe Edit Mode and to closing.
+var BASE_TITLE = '';
+function modeLabel() {
+  return !COMPACT ? 'Advanced' : (QUICK ? 'Quick' : 'Simple');
+}
+function paintTitle() {
+  if (!BASE_TITLE) return;
+  document.title = modeLabel() + ' \u2014 ' + BASE_TITLE + ' [ctm-app]';
+}
 function saveMode() {
   try { localStorage.setItem('ctm_mode', modeName()); } catch (e) {}
 }
@@ -5272,6 +5296,7 @@ function setMode(m, restore) {
   var quickChanged = (quick !== QUICK);
   QUICK = quick;
   document.body.classList.toggle('quick', quick);
+  paintTitle();
   if (compact !== COMPACT) { setCompact(compact, restore); return; }
   if (quickChanged || restore) {
     saveMode();
@@ -5360,6 +5385,7 @@ function setCompact(on, restore) {
   if (on === COMPACT) return;
   COMPACT = on;
   document.body.classList.toggle('compact', on);
+  paintTitle();
   saveMode();
   postView(restore);
   if (on) {
@@ -5646,13 +5672,15 @@ function paintCompact() {
     // Close: Circle closes, as the legend says, and so does the question
     // after a pick.
     html += '<div class="cbar"><button class="cconf" onclick="openConfigurator()">Advanced</button>' +
-            '<div class="cbarText"><div class="clegend">\u2630 move | R3 resize | ' +
+            '<div class="cbarText"><div class="clegend">' +
+            '<span class="cmode">QUICK</span>\u2630 move | R3 resize | ' +
             '\u25cb close</div></div>' +
             '<button class="cclose" onclick="setMode(\'simple\')">Simple</button></div>';
   } else {
     html += '<div class="cbar"><button class="cconf" onclick="openConfigurator()">Advanced</button>' +
             '<div class="cbarText">' +
-            '<div class="clegend">L1/R1 controller | \u2715 select | d-pad move | ' +
+            '<div class="clegend"><span class="cmode">SIMPLE</span>' +
+            'L1/R1 controller | \u2715 select | d-pad move | ' +
             '\u2630 move | R3 resize | \\|/ quick mode | \u25cb close</div>' +
             '<div class="cinfo">To bring this window back: <b>hold two fingers on the touchpad ' +
             'and press Options</b> (DS5 only), or open it with the taskbar icon.</div>' +
@@ -5760,7 +5788,8 @@ function gpPoll() {
   }
   // ⓘ The count comes from the browser when it can see the pads, and falls
   // back to the singular when only the gate knows one is there.
-  hint.textContent = (live.length > 1 ? live.length + ' controllers' : 'controller') +
+  hint.textContent = 'ADVANCED · ' +
+                     (live.length > 1 ? live.length + ' controllers' : 'controller') +
                      ' — L1/R1 controller | ✕ select | d-pad move | □ on/off | ☰ move | R3 resize | \\|/ quick mode | ○ footer/close';
   bar.className = 'live';
   measureGpBar();
@@ -6453,7 +6482,8 @@ function startPage() {
   // alone was "Controller config", which any window showing this page carries --
   // including a browser with it open in a tab, which is how closing "the
   // settings window" took someone's whole browser with it.
-  document.title = document.title + ' [ctm-app]';
+  BASE_TITLE = document.title;
+  paintTitle();
   fitWindowIfOversized();
   refreshAll();
   restorePlace();
