@@ -58,13 +58,22 @@ constexpr uint8_t kModeWeapon   = 0x25;
 constexpr int kZoneCount = 10;
 
 // ⚠️ WEAPON MODE CANNOT PUT ITS BREAK ANYWHERE. Start is limited to zones 2-7
-// and the end to at most 8, so a break can only land between zone 3 and zone 8,
-// which is 30% to 80% of the pull. A request outside that is clamped, not
+// and the end to at most 9, so a break can only land between zone 3 and zone 9,
+// which is 30% to 90% of the pull. A request outside that is clamped, not
 // refused: a trigger that quietly sits at 30% is better than one that does
 // nothing at all while the config looks right.
+//
+// ⛔ THE DEEP END IS OURS, NOT A DOCUMENTED LIMIT. Two public descriptions of
+// this encoding disagree -- one caps the end at zone 8, the other allows 9 --
+// and the 2026-08-24 capture only ever shows a game using 8. The pull has ten
+// zones and bit 9 is representable, so 9 is offered because rhoquinn8217 asked
+// for a deeper click (2026-09-10) and trying it is the only way to know.
+// ⚠️ If a break at 90% is ever found to do nothing, put these back to 7 and 8
+// rather than assuming the report was lost -- that mistake has already cost
+// this ticket a morning.
 constexpr int kWeaponStartMin = 2;
-constexpr int kWeaponStartMax = 7;
-constexpr int kWeaponEndMax   = 8;
+constexpr int kWeaponStartMax = 8;
+constexpr int kWeaponEndMax   = 9;
 
 // ⛔ THE BOTTOM OF THE RANGE MUST BE A REAL FORCE. The hardware takes 0 to 7
 // and treats 0 as no resistance at all, so an earlier scale of 1 to 8 sent one
@@ -141,40 +150,23 @@ inline void build_feedback(uint8_t *block, int startZone, int strength)
     block[6] = static_cast<uint8_t>((forces >> 24) & 0xff);
 }
 
-// A wall with a firmer LIP at its top edge: the finger meets a distinct notch
-// at the point, pushes through it, and lands in steady resistance below.
+// Resistance that CLIMBS across the pull and then lets go at the point: a wall
+// and a click in the same effect.
 //
-// ⭐ THIS IS WHY FEEDBACK MODE CARRIES TEN FORCES rather than one. A click and
-// a wall cannot run at the same time -- a trigger has ONE effect block with ONE
-// mode byte -- but they were never two effects. Vary the force per zone and the
-// notch and the wall are a single shape, which is what a pad is doing when it
-// feels like both at once (rhoquinn8217, 2026-09-10).
+// \u26d4 THE FIRST ATTEMPT WAS A SHAPED WALL and it failed on hardware
+// (2026-09-10). Feedback mode carries a force per zone, so a notch was written
+// as one zone at full force with the rest three lower. rhoquinn8217: *"wall and
+// notch feel exactly the same."* A tenth of the pull is too short for a step
+// from 7 to 4 to register, and nothing LETS GO afterwards -- and a click is a
+// release, not a firmer patch.
 //
-// ⓘ One knob, not two. The notch takes the configured strength and the wall
-// sits below it, because a strength that only moved one of the two would need
-// the other to be guessed at anyway.
-inline void build_notched_wall(uint8_t *block, int startZone, int strength)
+// \u2b50 Weapon mode is the one built for this, and the 2026-08-24 capture proves
+// it: the shotgun was zones 2 to 8, resistance across most of the travel ending
+// in a break. So the notch is a wide weapon rather than a shaped feedback, and
+// the configured point is where it breaks.
+inline void build_ramp_break(uint8_t *block, int endZone, int strength)
 {
-    startZone = clamp_to(startZone, 0, kZoneCount - 1);
-    strength  = clamp_to(strength, kStrengthMin, kStrengthMax);
-    const int wall = clamp_to(strength - 3, kStrengthMin, kStrengthMax);
-
-    uint16_t active = 0;
-    uint32_t forces = 0;
-    for (int zone = startZone; zone < kZoneCount; ++zone) {
-        active |= static_cast<uint16_t>(1u << zone);
-        const int force = (zone == startZone) ? strength : wall;
-        forces |= static_cast<uint32_t>(force) << (3 * zone);
-    }
-
-    memset(block, 0, kBlockLen);
-    block[0] = kModeFeedback;
-    block[1] = static_cast<uint8_t>(active & 0xff);
-    block[2] = static_cast<uint8_t>((active >> 8) & 0xff);
-    block[3] = static_cast<uint8_t>(forces & 0xff);
-    block[4] = static_cast<uint8_t>((forces >> 8) & 0xff);
-    block[5] = static_cast<uint8_t>((forces >> 16) & 0xff);
-    block[6] = static_cast<uint8_t>((forces >> 24) & 0xff);
+    build_weapon(block, kWeaponStartMin, endZone, strength);
 }
 
 // ---- what a config asks for -------------------------------------------------
@@ -184,7 +176,7 @@ enum class Shape {
     Off,      // asked for nothing: clear an effect WE set, and only that
     Click,    // a break at the point, so the finger can find it
     Wall,     // resistance from the point down
-    Notch,    // a firm lip at the point, then a wall below it
+    Notch,    // a long climb that lets go at the point: a wall AND a click
 };
 
 inline Shape shape_from(const std::string &value)
@@ -249,7 +241,9 @@ inline uint8_t apply_one(const std::string &section, const char *sideKey,
         // and the resistance starts one zone earlier.
         build_weapon(report + offset, zone - 1, zone, strength);
     } else if (shape == Shape::Notch) {
-        build_notched_wall(report + offset, zone, strength);
+        // \u2b50 The break is at the point, the climb starts as early as weapon
+        // mode allows, so the pull feels like a wall that finally gives.
+        build_ramp_break(report + offset, zone, strength);
     } else {
         build_feedback(report + offset, zone, strength);
     }

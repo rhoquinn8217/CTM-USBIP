@@ -111,9 +111,10 @@ int run_trigger_effect_tests()
     // It lands at the shallowest real break rather than doing nothing.
     build_weapon(block, zone_from_percent(10) - 1, zone_from_percent(10), 6);
     CTM_CHECK_EQ(hex_of(block, 3), std::string("25 0c 00"));   // zones 2 and 3
-    // Asked for 100%, which is past the deepest.
+    // Asked for 100%. The deepest break the ten zones can express is 9, so it
+    // lands there rather than being refused.
     build_weapon(block, zone_from_percent(100) - 1, zone_from_percent(100), 6);
-    CTM_CHECK_EQ(hex_of(block, 3), std::string("25 80 01"));   // zones 7 and 8
+    CTM_CHECK_EQ(hex_of(block, 3), std::string("25 00 03"));   // zones 8 and 9
     // An end at or before the start would encode one zone twice and mean
     // nothing, so it is pushed past the start instead.
     build_weapon(block, 5, 5, 6);
@@ -145,29 +146,21 @@ int run_trigger_effect_tests()
     build_feedback(block, 5, 0);
     CTM_CHECK(block[3] != 0 || block[4] != 0 || block[5] != 0 || block[6] != 0);
 
-    section("trigger effect: a wall with a notch in it");
-    // The notch takes the strength; the wall sits three below it, floored at 1.
-    build_notched_wall(block, 5, 7);
-    CTM_CHECK_EQ((int)block[0], 0x21);
-    CTM_CHECK_EQ((int)(block[1] | (block[2] << 8)), 0x03e0);   // same zones as a wall
-    {
-        // Zone 5 is the lip, zones 6-9 the wall below it.
-        const uint32_t forces = (uint32_t)block[3] | ((uint32_t)block[4] << 8) |
-                                ((uint32_t)block[5] << 16) | ((uint32_t)block[6] << 24);
-        CTM_CHECK_EQ((int)((forces >> 15) & 0x7), 7);
-        CTM_CHECK_EQ((int)((forces >> 18) & 0x7), 4);
-        CTM_CHECK_EQ((int)((forces >> 27) & 0x7), 4);
-        CTM_CHECK_EQ((int)(forces & 0x7fff), 0);               // nothing above the start
-    }
-    // A low strength must not floor the wall to silence: the notch still stands
-    // proud, and the wall stays a real force rather than nothing.
-    build_notched_wall(block, 5, 2);
-    {
-        const uint32_t forces = (uint32_t)block[3] | ((uint32_t)block[4] << 8) |
-                                ((uint32_t)block[5] << 16) | ((uint32_t)block[6] << 24);
-        CTM_CHECK_EQ((int)((forces >> 15) & 0x7), 2);
-        CTM_CHECK_EQ((int)((forces >> 18) & 0x7), 1);
-    }
+    section("trigger effect: the notch climbs, then lets go");
+    // \u26d4 A shaped WALL was tried first and felt identical to a plain wall on
+    // hardware: a tenth of the pull is too short for a force step to register,
+    // and a click is a release rather than a firmer patch. So the notch is a
+    // wide weapon, and the point is where it breaks.
+    build_ramp_break(block, 4, 7);
+    CTM_CHECK_EQ(hex_of(block, 4), std::string("25 14 00 07"));   // zones 2 and 4
+    // It reaches further than a click does: the climb starts at the shallowest
+    // zone weapon mode allows, rather than one zone before the break.
+    build_ramp_break(block, 8, 7);
+    CTM_CHECK_EQ(hex_of(block, 4), std::string("25 04 01 07"));   // the capture's shotgun
+    // A point too shallow to break at still yields the shortest real climb
+    // rather than nothing.
+    build_ramp_break(block, 0, 5);
+    CTM_CHECK_EQ(hex_of(block, 3), std::string("25 0c 00"));
 
     section("trigger effect: reading the config");
     CTM_CHECK(shape_from("") == Shape::Absent);
