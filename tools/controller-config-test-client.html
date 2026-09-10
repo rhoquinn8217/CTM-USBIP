@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.64.35 -- see the changelog at the bottom of this comment.
+  VERSION 2.64.36 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,9 @@
   tidy message about it.
 
   CHANGELOG
+    2.64.36 A Triggers section, for the adaptive trigger effect settings.
+            Without it they group as "Other", which is where a setting goes
+            to not be found.
     2.64.35 The hamburger is "position", not a second "move" -- the d-pad
             already had that word. The way back names the tray icon, not a
             taskbar entry that a closed window no longer has. Advanced gets a
@@ -2362,7 +2365,7 @@ function openPresetInfo(ordinal, presetName) {
   // ⓘ The preview STACKS its sections, so this reads as a list rather than a
   // layout -- but it matches the page's order anyway, because two orders for
   // the same thing is how they drift.
-  var order = ['Gyro', 'Touchpad', 'Left stick', 'Right stick',
+  var order = ['Gyro', 'Touchpad', 'Triggers', 'Left stick', 'Right stick',
                'Audio', 'Rumble', 'Buttons', 'Other'];
   var html = '';
   order.forEach(function(name) {
@@ -2754,6 +2757,9 @@ function sectionOf(key) {
   if (key.indexOf('left_stick') === 0) return 'Left stick';
   if (key.indexOf('touchpad') === 0) return 'Touchpad';
   if (key.indexOf('gyro') === 0) return 'Gyro';
+  // The trigger effect keys. Without this they land in "Other", which is where
+  // a setting goes to not be found.
+  if (key.indexOf('trigger') === 0) return 'Triggers';
   if (key.indexOf('rumble') === 0 || key.indexOf('master_rumble') === 0) return 'Rumble';
   if (key.indexOf('audio') === 0 || key.indexOf('speaker') === 0 ||
       key.indexOf('headset') === 0 || key.indexOf('force_echo') === 0) return 'Audio';
@@ -2836,7 +2842,7 @@ function renderConfigEditor(hostId, configName, prefix, ordinal) {
     //
     // ⓘ Right still comes first WITHIN each section -- mode, switch, gate, then
     // tuning -- so the top of whichever tab you open is the thing you wanted.
-    var order = ['Audio', 'Rumble', 'Gyro', 'Touchpad',
+    var order = ['Audio', 'Rumble', 'Gyro', 'Touchpad', 'Triggers',
                  'Left stick', 'Right stick',
                  'Face buttons', 'Shoulder/stick buttons', 'System buttons',
                  'Other'].filter(shows);
