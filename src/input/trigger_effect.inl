@@ -77,7 +77,8 @@
 // is CONFIRMED on our own hardware (2026-09-10, ten pulls, a probe over the
 // whole input report):
 //
-//     byte 42, HIGH NYBBLE  ->  R2's adaptive trigger status
+//     byte 42, HIGH NYBBLE  ->  the RIGHT trigger's adaptive status
+//     byte 43, HIGH NYBBLE  ->  the LEFT trigger's, same encoding
 //        0   short of the effect
 //        1   crossed it
 //        2   at the bottom of the travel
@@ -88,8 +89,12 @@
 // the break rather than the travel -- travel we already have in byte 6.
 // ⛔ THE LOW NYBBLE IS A COUNTER, not the stop zone. It increments on its own
 // with the trigger at rest. Mask it off; do not read it.
-// ⚠️ Byte 43 is presumed to be L2's and is NOT confirmed: no L2 effect was set
-// during the probe, so it never moved. Prove it the same way before using it.
+// ⭐ BOTH ARE CONFIRMED, each by its own run. With an effect on the LEFT
+// trigger only, byte 43 walked 08 -> 18 -> 29 and back while byte 42 never
+// moved at all -- which is what makes them a pair rather than an assumption.
+// ⓘ Byte 9's L2 bit moved in that run too, exactly as it should, which is the
+// cross-check that the capture was of the trigger being pulled and not of
+// something else happening at the same time.
 //
 // ➡️ WHAT IT IS FOR. A press can fire where the finger FEELS the break, rather
 // than at a percent someone keeps in step with it by hand. Those two numbers
