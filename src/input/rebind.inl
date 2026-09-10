@@ -423,6 +423,11 @@ inline const GateBinding kConfigModeKeys[] = {
     { kBtnR1,        "KeyE",  CTM_GATE_MODS },   // next tab
     { kBtnFaceDown,  "Enter", CTM_GATE_MODS },   // cross:  select
     { kBtnFaceRight, "KeyZ",  CTM_GATE_MODS },   // circle: back out
+    // ⭐ Create switches the page between its compact and full views, as it
+    // cycles the keyboard's layout (rhoquinn8217, 2026-09-09). It reaches the
+    // page the way the rest of these do; the pad report is blanked in config
+    // mode, so this is the only route a button has.
+    { kBtnSelect,    "KeyC",  CTM_GATE_MODS },   // create: compact / full view
     // ⭐⭐ SQUARE TOGGLES AGAIN (rhoquinn8217, 2026-09-03, same evening).
     //
     // ⓘ It moved to Triangle earlier that day to free Square for the on-screen

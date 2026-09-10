@@ -249,6 +249,12 @@ inline bool window_exists()
     return state.found != nullptr;
 }
 
+// ⛔ PARKING IS GONE (rhoquinn8217, 2026-09-09, reversing that morning's
+// decision): "closing closes it and the only ways to get it back is through
+// the task bar icon or the chord". The window minimised itself instead, and
+// close_existing() below is what does the closing now -- there is nothing
+// here a park needed that it does not already do.
+
 // ⭐ Bring our window ABOVE a borderless game.
 //
 // ⛔ Measured 2026-08-29: the window opened, took focus and HELD it for nine
@@ -374,8 +380,8 @@ inline void open_new(uint16_t restPort, bool withToken = true)
     RECT wa = { 0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN) };
     SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0);
     const int waW = wa.right - wa.left, waH = wa.bottom - wa.top;
-    const int winW = (int)(waW * 0.8);
-    const int winH = (int)(waH * 0.8);
+    const int winW = (int)(waW * 0.68);   // Advanced's medium, its opening size
+    const int winH = (int)(waH * 0.73);
     const std::wstring args = L"--app=" + url +
                               L" --user-data-dir=\"" + dataDir + L"\"" +
                               L" --no-first-run --no-default-browser-check" +

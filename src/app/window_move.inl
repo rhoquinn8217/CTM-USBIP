@@ -22,6 +22,19 @@
 // 0x80 at centre -- the same bytes the stick mouse reads and the keyboard read
 // before this. A pad with another layout does not steer; it also does not
 // break anything, because a centred stick is a zero delta.
+//
+// ⭐⭐ THE STICK MOVES THE WINDOW BY THE CLOCK, NOT BY THE REPORT
+// (rhoquinn8217, 2026-09-09, during the T-150 run: "sometimes it's very fast
+// and sometimes it's not"). It used to add lx/16 pixels PER REPORT, so the
+// speed was the deflection multiplied by whatever rate that pad happened to
+// deliver -- a pad through a DS5dongle and one cabled directly are not the
+// same, and a busy system drops reports. ➡️ Full deflection is now a fixed
+// number of pixels per SECOND, scaled by the time since that pad's last
+// report, so every pad steers at the same speed.
+//
+// ⓘ The fraction of a pixel each report earns is KEPT rather than dropped:
+// at 250Hz a gentle push is worth less than a whole pixel per report, and
+// truncating it would mean the window did not move at all.
 
 #pragma once
 
@@ -29,6 +42,10 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
+#include <mutex>
+#include <unordered_map>
+#include <vector>
 
 namespace window_move {
 
@@ -49,6 +66,11 @@ struct Mover {
     // the moment Options goes down.
     POINT from = { 0, 0 };
     bool  haveFrom = false;
+    // ⓘ When this pad was last seen steering, and the sub-pixel remainder it
+    // has earned since. Only the report thread touches these, under held.
+    unsigned long long lastTick = 0;
+    double accX = 0.0;
+    double accY = 0.0;
 
     // Drop a hold without firing a tap. For the moment the window this mover
     // serves stops being the one in front: a release seen later must not snap
@@ -58,6 +80,8 @@ struct Mover {
         held.store(false);
         moved.store(false);
         haveFrom = false;
+        lastTick = 0;
+        accX = accY = 0.0;
     }
 
     Step step(bool optionsDown, const uint8_t *data, size_t len)
@@ -67,9 +91,13 @@ struct Mover {
             held.store(true);
             moved.store(false);
             haveFrom = (GetCursorPos(&from) != 0);
+            lastTick = GetTickCount64();
+            accX = accY = 0.0;
         } else if (!optionsDown && held.load()) {
             held.store(false);
             haveFrom = false;
+            lastTick = 0;
+            accX = accY = 0.0;
             out.tapped = !moved.load();
             return out;
         }
@@ -77,13 +105,40 @@ struct Mover {
 
         out.holding = true;
 
+        // ⓘ How long since this pad's last report, in seconds. ⛔ Capped: a
+        // stall, or the window losing the foreground and getting it back,
+        // must not arrive as one enormous jump.
+        // ⓘ `tick`, not `now`: the mouse block below already owns that name
+        // for the cursor's POINT.
+        const unsigned long long tick = GetTickCount64();
+        double dt = (lastTick == 0) ? 0.0 : (double)(tick - lastTick) / 1000.0;
+        lastTick = tick;
+        if (dt > 0.10) dt = 0.10;
+
         // ⓘ The left stick, with a deadzone so a resting stick does not creep.
-        if (len > 2) {
+        // ⓘ 1100 px/s at full deflection: a 1080p screen crossed in under two
+        // seconds, and a gentle push still places a window by hand.
+        bool steered = false;
+        if (len > 2 && dt > 0.0) {
             const int lx = (int)data[1] - 128;
             const int ly = (int)data[2] - 128;
             const int dead = 18;
-            if (lx > dead || lx < -dead) out.dx = lx / 16;
-            if (ly > dead || ly < -dead) out.dy = ly / 16;
+            const double speed = 1100.0;
+            if (lx > dead || lx < -dead) {
+                accX += (double)lx / 127.0 * speed * dt;
+                steered = true;
+            }
+            if (ly > dead || ly < -dead) {
+                accY += (double)ly / 127.0 * speed * dt;
+                steered = true;
+            }
+            // ⓘ Whole pixels out, the remainder kept for the next report.
+            const int sx = (int)accX;
+            const int sy = (int)accY;
+            accX -= sx;
+            accY -= sy;
+            out.dx += sx;
+            out.dy += sy;
         }
 
         // ⭐⭐ AND THE MOUSE STEERS IT TOO, on the same hold. Whichever you reach
@@ -105,9 +160,75 @@ struct Mover {
             }
         }
 
-        if (out.dx != 0 || out.dy != 0) moved.store(true);
+        // ⛔ A DEFLECTED STICK COUNTS AS STEERING even when this report's
+        // share rounds to no pixel at all: otherwise a slow, careful push
+        // could end in a TAP, and the window would snap away from the place
+        // it had just been put.
+        if (steered || out.dx != 0 || out.dy != 0) moved.store(true);
         return out;
     }
 };
+
+// ⭐⭐ ONE MOVER PER PAD (T-162, 2026-09-09). A single Mover shared between two
+// bridged pads read pad A holding Options and pad B's next report -- Options
+// up, as it always is on the pad NOT being held -- as a release, fired a tap,
+// then pad A's next report set it held again: a snap on every report of the
+// other pad, six milliseconds apart in device.log, for as long as Options was
+// down. ⓘ The keyboard's key latch went per device for the same reason on
+// 2026-09-04 ("a static would let one pad's press decide the other's key");
+// this is the same shape one file over. Each window keeps one of these and
+// asks for its pad's mover by key.
+//
+// ⓘ The map's nodes are stable, so a reference handed out survives later
+// pads arriving; a Mover holds atomics and is neither copied nor moved.
+struct Movers {
+    Movers() { registry().push_back(this); }
+
+    Mover &for_key(const void *key)
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        return byKey[key];
+    }
+
+    // Drop every hold without a tap: the window these serve stopped being the
+    // one in front, whichever pad was holding.
+    void abandon_all()
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        for (auto &kv : byKey) kv.second.abandon();
+    }
+
+    bool holding(const void *key)
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        auto it = byKey.find(key);
+        return it != byKey.end() && it->second.held.load();
+    }
+
+    // Every Movers there is -- one per window -- so a hook that runs before
+    // either window sees the report can still ask whether a pad is steering.
+    static std::vector<Movers *> &registry()
+    {
+        static std::vector<Movers *> all;
+        return all;
+    }
+
+    std::mutex mutex;
+    std::unordered_map<const void *, Mover> byKey;
+};
+
+// ⭐ IS THIS PAD STEERING A WINDOW? (rhoquinn8217, 2026-09-09: the left stick
+// went to the game while Options was held.) The stick steers the window during
+// the hold and the report is blanked after -- but the stick-to-mouse hook runs
+// BEFORE either window sees the report, so it drove the mouse with the same
+// stick, into whatever was under the cursor. It asks here and stands aside
+// while the answer is yes.
+inline bool steering(const void *key)
+{
+    for (Movers *m : Movers::registry()) {
+        if (m->holding(key)) return true;
+    }
+    return false;
+}
 
 } // namespace window_move

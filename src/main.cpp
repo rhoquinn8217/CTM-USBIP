@@ -92,6 +92,18 @@ bool ctm_rebind_gate_hold();
 void ctm_rebind_clear_provisional();
 // ⓘ rebind.inl runs on the input path and needs the window check from open_ui.
 bool ctm_ui_has_foreground();
+/* The page says which layout it is in -- Advanced, Simple or Quick -- so R3
+ * sizes the window from that layout's table; `restore` says the window has
+ * come back rather than switched, and keeps the size it was left at. Defined
+ * below, after config_move.inl. */
+void ui_view_set(bool compact, bool quick, bool restore);
+/* The controller the compact layouts were showing, and everything the page
+ * asks for when it comes back. */
+void ui_view_note_ordinal(const std::string &ordinal);
+bool ui_view_get(bool *compact, bool *quick, std::string *ordinal);
+/* Where the window stands right now, kept for the next one. Called on the way
+ * out, while it still exists. */
+void ui_view_remember_pos();
 // ⓘ The chord calls this from the input path; the REST endpoint calls it too.
 // ⓘ Takes the controller that ran the chord, so the window can come up on its
 // tab. Empty means "no particular one" -- the REST spawn path has no controller
@@ -165,6 +177,9 @@ void ctm_rebind_ensure_keyboard_started();
 //    which calls into it. Both directions matter: the overlay needs the
 //    keyboard to exist, and rebind needs the overlay to exist.
 #include "app/window_move.inl"      // the Options tap/hold/steer gesture, shared by the two windows below
+// Asked by the stick-to-mouse hook, included further down: is this pad steering
+// a window with Options? Its test stubs this the way it stubs the gate.
+static bool ctm_window_steering(const void *deviceKey) { return window_move::steering(deviceKey); }
 #include "app/overlay_window.inl"  // --overlay-test: the always-on-top, never-focused window
 // ⚠️ AFTER keyboard_device: rebind pushes key state into it, so it must be
 // defined first. And after gyro_mouse, for device_section_for and the config
@@ -187,6 +202,22 @@ void ctm_rebind_ensure_keyboard_started();
 bool ctm_ui_has_foreground()
 {
     return ctm_open_ui::window_has_foreground();
+}
+void ui_view_set(bool compact, bool quick, bool restore)
+{
+    config_move::set_view(compact, quick, restore);
+}
+void ui_view_note_ordinal(const std::string &ordinal)
+{
+    config_move::note_ordinal(ordinal);
+}
+bool ui_view_get(bool *compact, bool *quick, std::string *ordinal)
+{
+    return config_move::view_get(compact, quick, ordinal);
+}
+void ui_view_remember_pos()
+{
+    config_move::remember_pos_now();
 }
 
 

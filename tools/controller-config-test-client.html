@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.63.3 -- see the changelog at the bottom of this comment.
+  VERSION 2.64.35 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,172 @@
   tidy message about it.
 
   CHANGELOG
+    2.64.35 The hamburger is "position", not a second "move" -- the d-pad
+            already had that word. The way back names the tray icon, not a
+            taskbar entry that a closed window no longer has. Advanced gets a
+            third and larger R3 size (rhoquinn8217, 2026-09-09).
+    2.64.34 The identifier says MODE: "ADVANCED MODE", "SIMPLE MODE", "QUICK
+            MODE" (rhoquinn8217, 2026-09-09).
+    2.64.33 A window dragged somewhere comes back there: resizing no longer
+            writes the place, which is what had overwritten it on the way in.
+            The layout identifier is bold, capital and yellow in all three,
+            Advanced's included (rhoquinn8217, 2026-09-09).
+    2.64.32 The window comes back exactly where it was left, per layout, a
+            mouse drag included, clamped in case the screen changed. And each
+            layout says which it is: in the title, which the taskbar reads
+            too, and at the head of the legend (rhoquinn8217, 2026-09-09).
+    2.64.31 Circle CLOSES the window rather than parking it behind the game,
+            reversing 2.64.0: the chord and the tray icon are the ways back,
+            and the listener already remembers what was on screen
+            (rhoquinn8217, 2026-09-09).
+    2.64.30 The window comes back as it went away, for real this time: the
+            LISTENER remembers the layout, the size, the place and the
+            controller, and the page asks it on load. It had been the page's
+            own record, which a killed window loses, and the size was applied
+            to a window whose title marker had not landed yet. Simple and
+            Quick sit just above the taskbar (rhoquinn8217, 2026-09-09).
+    2.64.29 Simple's padding and width are back to 2.64.26: the preset
+            description needs that room. A window that comes back returns to
+            the layout AND the size it was left at. Simple's auto-link button
+            reads its mark and "auto" (rhoquinn8217, 2026-09-09).
+    2.64.28 Create goes straight to Quick from Advanced or Simple and does
+            nothing in Quick; the legends say "quick mode" and Quick's drops
+            it. Quick's room above the name equals its room under the
+            selector. Simple's two paddings are halved and equal, with the
+            window a sixth shorter and its text held on screen
+            (rhoquinn8217, 2026-09-09).
+    2.64.27 No question after a pick, again: Circle closes. Advanced's
+            legend says "○ footer/close". Simple is a quarter narrower with
+            its text unchanged; Left from New lands on Advanced and Right
+            from Edit on Quick. Quick's name is a little larger than its
+            kind, no more (rhoquinn8217, 2026-09-09).
+    2.64.26 Simple and Quick share one footer: Advanced bottom-left, the
+            legend, the other view bottom-right, and no Close -- Circle and
+            the question after a pick close. Quick's sides show the key
+            alone, its empty state the Start button alone, and it is a
+            quarter wider (rhoquinn8217, 2026-09-09).
+    2.64.25 Quick's window is a quarter narrower; its text, sized to the
+            height, stays as it was (rhoquinn8217, 2026-09-09).
+    2.64.24 Quick's window is a third shorter, closing the gap above the
+            footer; its text stays where it was on screen, and the Advanced
+            button is the legend's size (rhoquinn8217, 2026-09-09).
+    2.64.23 Quick's text is no larger than Simple's on screen: the name,
+            the selector, its button and the legend were over, and are
+            capped at twice Simple's figures for Quick's half-height window
+            (rhoquinn8217, 2026-09-09).
+    2.64.22 Quick tightened: the ring at the top, the selector close under
+            it, a taller footer with room under it for the halo. Its two
+            sizes are the medium and large, an eighth off the width
+            (rhoquinn8217, 2026-09-09).
+    2.64.21 Quick hugs its content, to rhoquinn8217's mock-up: a window two
+            thirds the size, the same text on screen, the kind under the
+            name and the L1/R1 neighbours back, name, selector and footer
+            sharing the height evenly (2026-09-09).
+    2.64.20 Quick's text is back to what it was on screen: the window had
+            doubled in height and, being sized to the window, the text had
+            doubled with it. Every Quick size is halved; the content centres
+            in the room above the footer (rhoquinn8217, 2026-09-09).
+    2.64.19 Two R3 sizes per layout: Advanced keeps small and medium and
+            opens at medium; Simple and Quick keep medium and large and open
+            at medium. Quick is half again as tall, half Simple's each way
+            (rhoquinn8217, 2026-09-09).
+    2.64.18 Quick's window is half Simple's width and a third of its height,
+            with its own three R3 sizes in the listener, and its text sized
+            to stay the same on screen. Simple's Quick Mode button is gone;
+            Create and Advanced's footer reach Quick. Start from Quick goes
+            through Simple (rhoquinn8217, 2026-09-09).
+    2.64.17 A third layout, QUICK: Simple with almost everything cut out --
+            the name, the selector with its auto-link button, a small
+            Advanced and a four-item legend; trimmed margins, no bubbles.
+            Create cycles Simple, Quick, Advanced. Advanced's footer offers
+            Simple, Quick and Close; Simple has a Quick Mode button beside
+            Edit. First start is Simple (rhoquinn8217, 2026-09-09).
+    2.64.16 The two views are SIMPLE and ADVANCED (rhoquinn8217, 2026-09-09):
+            the buttons and legends say so. Simple's text is back to its
+            2.64.14 size.
+    2.64.15 The compact view is QUICK CONFIG (rhoquinn8217, 2026-09-09): the
+            configurator's button and legend say so. L1/R1 leads both
+            legends. Its halo stays where it was across a repaint instead of
+            jumping back to the selector, and the selector is never replaced
+            while open. Every size in it is a quarter larger.
+    2.64.14 The auto-link questions set the serial and the config names as
+            names. Applying a config in compact asks nothing; Circle closes.
+            Compact opens at the smallest size. Both legends reordered to
+            read the same way (rhoquinn8217, 2026-09-09).
+    2.64.13 No green in the config list: the auto-linked config carries its
+            mark in white like the rest, and the lit button beside the
+            selector is the green (rhoquinn8217, 2026-09-09).
+    2.64.12 The auto-link mark is 🗘. Only the claimed config's line is green
+            in the open list and the selector stays white; lit, the 🗘 button
+            removes the claim after asking (rhoquinn8217, 2026-09-09).
+    2.64.11 Compact: a ⟳ button beside the selector auto links the chosen
+            config to the controller, the claimed config carries a green ⟳
+            in the list and the selector reads green while it is chosen.
+            "Bridge a controller to start" sits centred; the down screen
+            says "Check if the listener is running or restart it"
+            (rhoquinn8217, 2026-09-09).
+    2.64.10 Compact's content starts just under the bubble strip instead of
+            centred below it, closing the gap between a notice and the
+            controller's name (rhoquinn8217, 2026-09-09).
+    2.64.9 Compact has a listener-not-connected screen of its own. Its
+           content is centred under a strip kept for the bubbles. Every
+           preset section is two columns. The leaving box centres its title
+           over buttons of one width: "Custom config applied!" with two, and
+           "Pre-set config created!" with three, "Customize it" opening the
+           configurator on the controller (rhoquinn8217, 2026-09-09).
+    2.64.8 The preset description lists its buttons in two columns, in both
+           views. Compact's leaving box is title and buttons only, and a new
+           preset asks "Pre-set config created!" with "Try it out now" or
+           "Customize it". The d-pad walks compact as a grid: down from New
+           is Configurator, down from Edit is Close. Less room above the
+           ring, and its sides take a click (rhoquinn8217, 2026-09-09).
+    2.64.7 Compact does not scroll: a stick on the wheel was creeping the
+           page in every direction. The empty state reads "Create a custom
+           controller config" over a Start button of its own, with no Edit
+           until there is something to edit; the selector's title is
+           "Controller Config" (rhoquinn8217, 2026-09-09).
+    2.64.6 Compact: Configurator moves to the footer's bottom-left corner,
+           the legend is green as the configurator's is, the selector is two
+           thirds its size under a "Linked config" title and slides with the
+           ring, the empty state reads "Bridge a controller to start", and
+           the way back names the DS5 chord and the taskbar icon
+           (rhoquinn8217, 2026-09-09).
+    2.64.5 Compact's footer is pinned to the bottom at half size, with Close
+           alone in its corner; under the selector sit New, Edit and
+           Configurator, Edit being this controller's settings and
+           Configurator the whole tool. The preset boxes no longer stretch.
+           Notices are bubbles in compact and the slide-out strip in the
+           configurator (rhoquinn8217, 2026-09-09). "New config" is "New".
+    2.64.4 More room everywhere in compact. The ring's side entries sit three
+           characters further out, carry the kind under the nickname, and
+           slide in from the side they were pushed from. The preset selector
+           and its info page fit the compact window at their own size, with
+           the table's columns together -- they had inherited the confirm
+           box's large text (rhoquinn8217, 2026-09-09).
+    2.64.3 Compact's text is half again as large, its window a tenth
+           narrower, and there is room around the footer rule. The other
+           controllers show either side of the one in focus, dimmed under L1
+           and R1, and rotate as you press (rhoquinn8217, 2026-09-09).
+    2.64.2 Compact fills its window: everything in it is sized in viewport
+           units, so R3 changes the text with the window and there is no empty
+           space left. The legend moves into a footer area at the same size,
+           with the way back written out beside it -- two fingers on the
+           touchpad and Options, or the taskbar. "Full view" is "Configure". A
+           pick applies at once and then ASKS before going back to the game;
+           declined, the window stays (rhoquinn8217, 2026-09-09).
+    2.64.1 The page tells the listener which view it is in (ui/view), so R3
+           cycles compact-sized windows in compact and the full sizes in full,
+           each with its own position (rhoquinn8217, 2026-09-09: at 250%
+           scaling on a large screen, compact needs sizes too).
+    2.64.0 The compact view: one controller, one config selector, three
+           buttons. Create on the pad switches between it and the full page,
+           and the Fit window button becomes Compact for the mouse. Picking a
+           config PARKS the window behind the game rather than closing it, as
+           do Close and Circle; the listener minimises it on ui/park. With no
+           config for the controller, a big New config button opens the preset
+           selector. Safe Edit stays on throughout compact. The view is
+           remembered. "New" is "New config" everywhere (rhoquinn8217,
+           2026-09-09).
     2.63.3 The pad legend gains "R3 size": the listener cycles this window
            through three sizes, as it does the keyboard's (rhoquinn8217,
            2026-09-08). Fit window is the large one, centred.
@@ -387,6 +553,208 @@
   .tabs button .tabkind { display:block; font-size:11px; color:#71737c;
                           font-style:italic; margin-left:14px; margin-top:1px; }
   .pane { display:none; } .pane.on { display:block; }
+  /* ⭐ COMPACT VIEW: hide the page, show the box. Everything hidden leaves the
+     pad's focus list by itself -- gpCollect skips what has no offsetParent. */
+  body.compact #tabs, body.compact #stickyHead, body.compact #sectBar,
+  body.compact #renameRow, body.compact .pane, body.compact #gpbar { display:none !important; }
+  /* Compact has a down screen of its own; the full page's cover and help stay hidden. */
+  body.compact #downCover, body.compact #offlineHelp { display:none !important; }
+  #compactBox .cbad { color:#ff8f8f; }
+  #compactBox .csub { font-size:3vh; color:#c8c9ce; text-align:center; line-height:1.4; max-width:80vw; }
+  #compactBox .ccmd { font-family:ui-monospace, Consolas, monospace; font-size:3vh; color:#cfe0f5;
+    background:#1c1e26; padding:1vh 2vw; border-radius:1vh; }
+  #compactBox { display:none; }
+  /* ⭐ SIZED IN VIEWPORT UNITS, ON PURPOSE (rhoquinn8217, 2026-09-09: too much
+     empty space; and R3 must change the text too). R3 lives in the listener and
+     never reaches the page, so the page cannot be told the size -- but it does
+     not need to be: vh follows the window, so when R3 resizes it, every line
+     here grows or shrinks with it. */
+  /* ⭐ COMPACT DOES NOT SCROLL (rhoquinn8217, 2026-09-09): a stick bound to
+     the wheel still turns it in config mode, on purpose, and a page a pixel
+     taller than its window crept in every direction under it. The view is
+     sized to fit; the preset boxes scroll inside themselves. ⓘ On body, which
+     the viewport takes as its own while html says nothing. */
+  body.compact { padding:0; overflow:hidden; }
+  body.compact #compactBox { display:flex; flex-direction:column; align-items:center;
+    justify-content:flex-start; gap:0; padding:4vh 4vw 3vh; min-height:100vh;
+    box-sizing:border-box; }
+  /* ⭐ The content centres in the room above the footer; the footer is pinned
+     to the bottom of the page (rhoquinn8217, 2026-09-09). */
+  /* ⓘ Starts just UNDER the bubbles rather than centred below them: the top
+     is theirs, a two-line notice included, and the ring sits right against
+     that line so no room is wasted between the two (rhoquinn8217,
+     2026-09-09, third placing). */
+  /* ⓘ Starts just UNDER the bubbles rather than centred below them: the top
+     is theirs, a two-line notice included, and the ring sits right against
+     that line so no room is wasted between the two (rhoquinn8217,
+     2026-09-09, third placing). ⛔ Halving this and the room under the
+     buttons was tried the same evening and TAKEN BACK: it costs the window
+     the height the preset description needs, and that description is the
+     one thing in Simple that cannot shrink. */
+  #compactBox .cmain { flex:1 1 auto; width:100%; display:flex; flex-direction:column;
+    align-items:center; justify-content:flex-start; padding-top:13vh; gap:4.5vh; }
+  /* ⭐ QUICK: Simple with almost everything cut out (rhoquinn8217,
+     2026-09-09). The name, the selector with its auto-link button, and a
+     footer of a small Advanced and a four-item legend. Margins trimmed, no
+     bubbles, no way-back hint, no New, Edit or Close: Circle closes. */
+  /* ⓘ QUICK'S WINDOW HUGS ITS CONTENT (rhoquinn8217, 2026-09-09, from a
+     mock-up): two thirds of the half-of-Simple box it had for an hour, with
+     the same text on screen -- so every size here is half again what that
+     box used -- and the ring back in full: the kind under the name, the L1
+     and R1 neighbours either side. The name, the selector and the footer
+     share the height out evenly. R3 still scales it all with the window. */
+  /* ⓘ Tightened (rhoquinn8217, 2026-09-09): the ring starts at the top, the
+     selector sits close under it, and what room is left lies above the
+     footer -- which has grown, and the box keeps a margin under it so the
+     halo's outline (3px plus 2px offset) never clips on the bottom edge.
+     ⛔ NO LARGER THAN SIMPLE'S on screen (rhoquinn8217, same evening).
+     Simple's window is three times as tall, so the cap on any size here is
+     three times Simple's figure for the same thing -- which is what these
+     are, on screen. The Advanced button is the legend's size, by request. ⓘ The window lost a third of its
+     height on 2026-09-09 to close the gap above the footer, and every
+     figure here grew by half to stay where it was on screen. */
+  /* ⓘ The room above the name and the room under the selector are the same
+     (rhoquinn8217, 2026-09-09): no fixed padding at the top, and the content
+     centred in what is left above the footer. */
+  body.quick #compactBox { padding:0 2.5vw 5.25vh; }
+  body.quick #compactBox .cmain { padding-top:0; gap:3.75vh; justify-content:center; }
+  body.quick #compactBox .cmain.centre { gap:3vh; justify-content:center; }
+  body.quick #compactBox .ccar { gap:2vw; }
+  /* ⓘ The name a little larger than the kind under it, no more
+     (rhoquinn8217, 2026-09-09). */
+  body.quick #compactBox .cname { font-size:15vh; line-height:1.05; }
+  body.quick #compactBox .ccur .ckind { font-size:12vh; margin-top:0.45vh; }
+  body.quick #compactBox .cside { font-size:12vh; }
+  body.quick #compactBox .cside small { font-size:9vh; }
+  body.quick #compactBox .cside .ckind { font-size:9vh; margin-top:0.45vh; }
+  body.quick #compactBox .cside.l { padding-right:1ch; }
+  body.quick #compactBox .cside.r { padding-left:1ch; }
+  body.quick #compactBox .csel { gap:0; }
+  body.quick #compactBox .cselrow { gap:2vw; width:100%; justify-content:center; }
+  /* The selector may shrink below its longest name rather than push the
+     button off the edge; a long name is clipped inside it. */
+  body.quick #compactBox select { font-size:12.6vh; padding:1.8vh 1.5vw; min-width:0;
+    max-width:80vw; flex:0 1 auto; }
+  body.quick #compactBox .cauto-btn { font-size:12.6vh; padding:1.5vh 1.6vw; }
+  body.quick #compactBox .cbar { padding-top:3.75vh; gap:3vw; }
+  body.quick #compactBox .cbar > button { font-size:6.9vh; padding:1.5vh 2vw; }
+  body.quick #compactBox .clegend { font-size:6.9vh; }
+  body.quick #compactBox .cempty { font-size:13.5vh; }
+  body.quick #compactBox .csub, body.quick #compactBox .ccmd { font-size:9vh; }
+  body.quick #compactBox .cbig { font-size:15.75vh; padding:2.25vh 4vw; }
+  body.quick #bubbles { display:none !important; }
+  /* A screen that is only a message sits in the middle of the room
+     (rhoquinn8217, 2026-09-09); the controller screen keeps its place. */
+  #compactBox .cmain.centre { justify-content:center; padding-top:0; }
+  /* ⭐ AUTO LINK beside the selector (rhoquinn8217, 2026-09-09): the 🗘 button
+     claims this controller for the chosen config, so it gets that config the
+     next time it bridges; lit, it removes the claim. The claimed config
+     carries a 🗘 after its name in the list. */
+  #compactBox .cselrow { display:flex; align-items:center; gap:1.5vw; }
+  #compactBox .cauto-btn { font-size:4.2vh; padding:0.6vh 1.4vw; line-height:1; }
+  #compactBox .cauto-btn.on { color:#7fd18c; border-color:#7fd18c; opacity:1; }
+  /* ⛔ NO GREEN IN THE LIST (rhoquinn8217, 2026-09-09). A native option is
+     one run of text in one colour, so the mark could never be green on its
+     own: colouring the option coloured the name with it, colouring the
+     selector coloured every line, and the closed selector ignores option
+     colour altogether. The mark alone says which config auto links; the lit
+     button beside the selector is where the green lives. */
+  /* ⓘ Every size here is 1.5x the first cut (rhoquinn8217, 2026-09-09). A
+     further quarter was tried the same day and taken back, and so was a
+     fifth the same evening. */
+  /* ⭐ THE CAROUSEL: the controller in focus stays in the centre, its
+     neighbours sit dimmed either side under L1 and R1, and L1/R1 rotate the
+     ring. One controller shows nothing at the sides; two show the same name
+     both sides, which is true -- either button reaches it. */
+  #compactBox .ccar { display:flex; align-items:center; justify-content:center; gap:3vw;
+    width:100%; overflow:hidden; }
+  /* ⓘ The sides sit three characters further out than the gap alone would put
+     them (rhoquinn8217, 2026-09-09), and carry the kind under the nickname. */
+  #compactBox .cside { flex:1 1 0; min-width:0; color:#4e515b; font-size:4.5vh;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #compactBox .cside.l { text-align:right; padding-right:3ch; }
+  #compactBox .cside.r { text-align:left; padding-left:3ch; }
+  /* The sides are the ring's own buttons for a mouse (rhoquinn8217, 2026-09-09). */
+  #compactBox .cside[onclick] { cursor:pointer; }
+  #compactBox .cside[onclick]:hover { color:#9aa4b2; }
+  #compactBox .cside small { display:block; font-size:3vh; color:#3d4049; }
+  #compactBox .cside .ckind { font-size:3vh; color:#3d4049; text-align:inherit; margin-top:0.4vh; }
+  #compactBox .ccur { flex:0 1 auto; min-width:0; text-align:center; }
+  /* ⭐ THE RING SLIDES the way it was pushed: R1 brings the next one in from the
+     right, L1 from the left. A short, decisive move -- long enough to read as
+     motion, short enough never to be waited for. */
+  @keyframes cslide-r { from { transform:translateX(12vw); opacity:.2; } to { transform:none; opacity:1; } }
+  @keyframes cslide-l { from { transform:translateX(-12vw); opacity:.2; } to { transform:none; opacity:1; } }
+  #compactBox .ccar.slide-r, #compactBox .csel.slide-r { animation:cslide-r .26s ease-out; }
+  #compactBox .ccar.slide-l, #compactBox .csel.slide-l { animation:cslide-l .26s ease-out; }
+  /* The selector and its title travel with the ring (rhoquinn8217, 2026-09-09). */
+  #compactBox .csel { display:flex; flex-direction:column; align-items:center; gap:1.2vh; }
+  #compactBox .ctitle { font-size:3vh; color:#71737c; text-align:center; }
+  #compactBox .cname { font-size:9vh; font-weight:600; text-align:center; line-height:1.1; }
+  #compactBox .ckind { font-size:4.5vh; color:#71737c; text-align:center; margin-top:0.8vh; }
+  /* ⓘ Two thirds of what it was (rhoquinn8217, 2026-09-09). */
+  #compactBox select { font-size:4.2vh; padding:0.8vh 1.4vw; min-width:47vw; }
+  #compactBox .cbig { font-size:8.1vh; padding:2vh 5vw; }
+  #compactBox .cfoot { display:flex; gap:3vw; margin-top:1.5vh; }
+  #compactBox .cfoot button { padding:1.4vh 3vw; font-size:5.4vh; }
+  #compactBox .cempty { color:#c8c9ce; font-size:5.4vh; text-align:center; }
+  /* ⭐ The footer area: the legend and the way back, at the same size as the
+     rest of the view, with room around the rule (rhoquinn8217, 2026-09-09). */
+  #compactBox .cbar { width:100%; border-top:1px solid #2c2e36; margin-top:auto;
+    padding-top:2.4vh; display:flex; flex-direction:row; align-items:center; gap:3vw; }
+  #compactBox .cbarText { flex:1 1 auto; min-width:0; display:flex; flex-direction:column;
+    gap:1.4vh; align-items:center; }
+  /* ⓘ Half the size of the rest (rhoquinn8217, 2026-09-09), and green as the
+     configurator's legend is while the pad is live. */
+  #compactBox .clegend { font-size:2.3vh; color:#7fd18c; text-align:center; }
+  /* ⭐ WHICH LAYOUT THIS IS (rhoquinn8217, 2026-09-09). It leads the legend
+     rather than sitting on its own, so it costs no height in a window that
+     has none to spare -- and the corner button names the layout you would go
+     to, which is exactly what makes saying where you ARE worth the room.
+     ⓘ ONE RULE FOR ALL THREE, and not scoped to the compact box: Advanced
+     says its name in the pad bar, which is green while the pad is live, and
+     the identifier has to read the same everywhere it appears. Yellow, bold
+     and capital, against every background it sits on. */
+  .cmode { color:#ffd166; font-weight:700; letter-spacing:.08em;
+    text-transform:uppercase; margin-right:0.7em; }
+  #compactBox .cinfo { font-size:2.3vh; color:#c8c9ce; text-align:center; line-height:1.4;
+    max-width:80vw; }
+  #compactBox .cinfo b { color:#e8e8ea; }
+  /* ⭐ The footer's two corners: Configurator bottom-left, Close bottom-right,
+     away from the actions under the selector (rhoquinn8217, 2026-09-09). */
+  #compactBox .cbar > button { flex:0 0 auto; font-size:3.4vh; padding:1.2vh 2.6vw; }
+  body.compact #confirmBox .confirmCard { font-size:5.1vh; max-width:86vw; }
+  body.compact #confirmBox .confirmCard h2 { font-size:6.3vh; }
+  body.compact #confirmBox .confirmCard p { font-size:5.1vh; }
+  body.compact #confirmBox .confirmCard button { font-size:5.1vh; padding:1.4vh 3vw; }
+  /* The confirm box in Quick's small window: the auto-link questions live
+     here. Sized to the window like the rest of Quick, and it scrolls inside
+     itself rather than past the window's edge. */
+  body.quick #confirmBox .confirmCard { font-size:12.38vh; max-width:94vw; padding:2.25vh 3vw;
+    max-height:96vh; overflow:auto; box-sizing:border-box; }
+  body.quick #confirmBox .confirmCard h2 { font-size:14.62vh; margin-bottom:1.12vh; }
+  body.quick #confirmBox .confirmCard p { font-size:11.25vh; margin-bottom:2.25vh; }
+  body.quick #confirmBox .confirmCard button { font-size:11.25vh; padding:1.65vh 2vw; }
+  /* ⭐ THE PRESET BOXES FIT THE COMPACT WINDOW (rhoquinn8217, 2026-09-09).
+     ⛔ They share .confirmCard with the confirm box, so the rule above once
+     scaled them too: the preset description came out at the size of a
+     question and its table stretched to the card. Their own sizes now, a card
+     that scrolls inside the window, and a table whose two columns sit
+     together rather than at opposite edges. */
+  body.compact #presetInfoBox .confirmCard, body.compact #presetBox .confirmCard {
+    font-size:2.6vh; width:auto; max-width:62vw; max-height:88vh; overflow:auto; box-sizing:border-box; }
+  body.compact #presetInfoBox .confirmCard h2, body.compact #presetBox .confirmCard h2 { font-size:3.8vh; }
+  body.compact #presetInfoBox .confirmCard p { font-size:2.6vh; line-height:1.4; }
+  body.compact #presetInfoTables h4 { font-size:2.2vh; margin:2vh 0 0.6vh; }
+  body.compact #presetInfoTables table { width:auto; margin:0; }
+  body.compact #presetInfoTables td { font-size:2.6vh; padding:0.3vh 1.5vw; }
+  body.compact #presetInfoTables td:last-child { text-align:left; }
+  body.compact #presetInfoBox .confirmCard { max-width:80vw; }
+  body.compact #presetInfoTables .ptwo { gap:3vw; }
+  body.compact #presetInfoBox .confirmCard button, body.compact #presetBox .confirmCard button {
+    font-size:3vh; padding:1.2vh 2.5vw; }
+  body.compact #presetList .prow > button:first-child { font-size:3vh; padding:1.4vh 2vw; }
+  body.compact #presetList small { font-size:2.4vh; }
   /* ⭐ Sits under the tabs and stays with them. Which controller you are
      editing, and which config it is reading, are the two things you must not
      lose track of while scrolling a long settings list. */
@@ -431,6 +799,9 @@
                  padding:18px 22px; max-width:420px; }
   .confirmCard h2 { margin:0 0 8px; border:none; padding:0; font-size:15px; }
   .confirmCard p { margin:0 0 16px; color:#c8c9ce; }
+  /* Names in a question -- a config, a serial -- are set as names, at the
+     question's own size (rhoquinn8217, 2026-09-09). */
+  .confirmCard p code { font-size:inherit; color:#cfe0f5; }
   .confirmBtns { display:flex; gap:8px; justify-content:flex-end; }
   /* ⚠️ The label is the first child and takes the full width; everything after
      it wraps onto the line below and sits together. Without the 100% the label
@@ -509,7 +880,7 @@
      third child to a space-between row moves the hint to the centre and the
      bar reads as three unrelated things. */
   #gpbar #gphint { margin-left:auto; }
-  #fitBtn, #closeBtn { padding:2px 8px; font-size:11px; margin-left:8px; }
+  #fitBtn, #quickBtn, #closeBtn { padding:2px 8px; font-size:11px; margin-left:8px; }
   /* ⓘ Sized like the page's own buttons -- New, Rename, Reset -- not like the
      small footer ones it briefly lived beside. */
   /* Locked: the page has the pads. Mirrored: the game still sees them. */
@@ -625,6 +996,20 @@
                    border-top-width:2px; border-bottom:none;
                    border-left:none; border-right:none; }
   #bubbles > div + div { border-left:1px solid rgba(255,255,255,.10); }
+  /* ⭐ IN COMPACT, NOTICES ARE BUBBLES; in the configurator they stay the
+     slide-out strip (rhoquinn8217, 2026-09-09). Same element, same code that
+     fills it -- only where it sits and how it is drawn changes. */
+  body.compact #bubbles { top:2vh; right:2vw; left:auto; bottom:auto; width:auto;
+    max-width:60vw; flex-direction:column; align-items:flex-end; gap:1.2vh;
+    transform:none; transition:none; pointer-events:none; }
+  body.compact #bubbles > div { flex:0 0 auto; border-radius:1.4vh; font-size:2.6vh;
+    line-height:1.4; padding:1.4vh 2.2vw; border:1px solid rgba(255,255,255,.14);
+    border-top-width:2px; box-shadow:0 1vh 3vh rgba(0,0,0,.45); }
+  body.compact #bubbles > div + div { border-left:1px solid rgba(255,255,255,.14); }
+  /* Each bubble pops in from its corner; the strip slides, a bubble appears. */
+  @keyframes cbubble { from { transform:translateY(-1.5vh) scale(.96); opacity:0; }
+                       to { transform:none; opacity:1; } }
+  body.compact #bubbles > div { animation:cbubble .2s ease-out; }
   #presetBox { position:fixed; inset:0; z-index:60; display:none;
                align-items:center; justify-content:center; background:#0009; }
   #presetList button { display:block; width:100%; text-align:left;
@@ -649,6 +1034,21 @@
   #presetInfoTables table { width:100%; border-collapse:collapse; }
   #presetInfoTables td { padding:2px 0; vertical-align:top; }
   #presetInfoTables td:last-child { color:#cfe0f5; text-align:right; }
+  /* ⭐ THE BUTTON LIST IS TWO COLUMNS, in both views (rhoquinn8217,
+     2026-09-09): it is the long table, and there is the width for it. */
+  #presetInfoTables .ptwo { display:flex; gap:24px; align-items:flex-start; }
+  #presetInfoTables .ptwo table { flex:1 1 0; min-width:0; }
+  #presetInfoBox .confirmCard { max-width:640px; }
+  /* A confirm box with nothing to say under its title says nothing. */
+  #confirmText:empty { display:none; }
+  /* ⭐ The leaving box: a centred title over buttons of ONE width
+     (rhoquinn8217, 2026-09-09). A grid, so every button is as wide as the
+     widest, however many there are. */
+  #confirmBox.cexit .confirmCard h2 { text-align:center; }
+  #confirmBox.cexit .confirmBtns { display:grid; grid-auto-flow:column; grid-auto-columns:1fr; }
+  #confirmBox.cexit .confirmBtns button { white-space:nowrap; }
+  body.compact #confirmBox.cexit .confirmCard { max-width:94vw; }
+  body.compact #confirmBox.cexit .confirmCard button { font-size:4.2vh; padding:1.2vh 2vw; }
   /* ⛔ WITHOUT THIS the sticky header swallows a jumped-to section. Every
      control already has the same margin; the section wrapper did not, so
      scrollIntoView put it at the very top of the viewport -- underneath the
@@ -694,6 +1094,9 @@
        step. -->
   <div id="sectBar" class="sectbar"></div>
   <div id="renameRow"></div>
+  <!-- ⭐ The compact view. Inside #stickyTop so the pad's focus list already
+       collects its controls; empty until body.compact. -->
+  <div id="compactBox"></div>
 </div>
 
 <!-- ⭐ Shown when the agent stops answering. Overview's contents describe
@@ -723,7 +1126,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.63.3</span>
+  <span class="muted" style="font-size:12px">v2.64.35</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -832,15 +1235,18 @@
 <div id="gpbar">
   <span id="health" class="muted">checking…</span>
   <span id="gphint">controller: press any button to connect</span>
-  <!-- ⭐ On demand. The load-time check only fires when the window is clearly
-       wrong, so a window nudged slightly off keeps its size -- this is how you
-       ask for it back without hunting for the right drag. -->
+  <!-- ⭐ THE COMPACT VIEW, for the mouse; Create on the pad does the same.
+       ⓘ This was Fit window. Its two jobs went to the listener with the move
+       gesture -- Options places, R3 sizes -- and the load-time oversize check
+       still runs without a button. -->
   <!-- ⭐ Where the controller's input is going. Says it plainly rather than
        naming the mechanism: "gated" means nothing to someone who did not build
        it, and this is the one piece of state that changes under you. -->
   <span id="padDest" class="muted">controllers → game</span>
-  <button id="fitBtn" onclick="fitWindow(); setFooterMode(false);"
-          title="centre this window and set a sensible size">Fit window</button>
+  <button id="fitBtn" onclick="setMode('simple'); setFooterMode(false);"
+          title="Simple: one controller, one config, nothing else">Simple</button>
+  <button id="quickBtn" onclick="setMode('quick'); setFooterMode(false);"
+          title="Quick: the name and the selector, nothing else">Quick</button>
   <!-- ⓘ Closing releases the gate on the way out, via the pagehide beacon, so
        this is a safe exit rather than a way to strand yourself. -->
   <button id="closeBtn" onclick="window.close()" title="close this window">Close</button>
@@ -985,9 +1391,12 @@ function call(method, path, body, quiet) {
 // these numbers change, open_ui.inl's --window-size changes with them.
 // ⓘ This is the LARGE of the three sizes R3 cycles in the listener; Fit window
 // therefore means "large, centred". The listener keeps the other two.
+// ⓘ Advanced's MEDIUM (rhoquinn8217, 2026-09-09: two sizes per layout, and
+// Advanced keeps small and medium). Duplicated in the listener's spawn size;
+// the two move together.
 function wantSize() {
-  return { w: Math.round(screen.availWidth * 0.8),
-           h: Math.round(screen.availHeight * 0.8) };
+  return { w: Math.round(screen.availWidth * 0.68),
+           h: Math.round(screen.availHeight * 0.73) };
 }
 function fitWindow() {
   var w = wantSize().w;
@@ -1554,6 +1963,7 @@ function renderTabs(devices) {
   // ⚠️ If the active tab's controller has gone, fall back rather than showing
   // nothing -- an unbridge should not leave a blank page.
   if (TABS.indexOf(ACTIVE) < 0) showTab('overview');
+  if (COMPACT) compactEnsureController();
 }
 
 // A SESSION kind ("ds5_usb") is not the kind a config is stored under ("ds5").
@@ -1604,8 +2014,9 @@ function normSerial(raw) {
 
 function stopAutoLink(configName, serial, who) {
   askConfirm('Remove auto link',
-             'Stop automatically setting ' + configName + ' for ' + (who || 'this controller') + '?',
-             function() { stopAutoLinkConfirmed(configName, serial); });
+             'Stop automatically setting <code>' + esc(configName) + '</code> for ' +
+             (who ? esc(who) : 'this controller') + '?',
+             function() { stopAutoLinkConfirmed(configName, serial); }, true);
 }
 
 function stopAutoLinkConfirmed(configName, serial) {
@@ -1914,11 +2325,22 @@ function presetInfoRows(settings) {
 
 function presetTable(title, rows) {
   if (!rows.length) return '';
-  var html = '<h4>' + esc(title) + '</h4><table>';
-  rows.forEach(function(r) {
-    html += '<tr><td>' + esc(r[0]) + '</td><td>' + esc(r[1]) + '</td></tr>';
-  });
-  return html + '</table>';
+  var table = function (list) {
+    var t = '<table>';
+    list.forEach(function(r) {
+      t += '<tr><td>' + esc(r[0]) + '</td><td>' + esc(r[1]) + '</td></tr>';
+    });
+    return t + '</table>';
+  };
+  var html = '<h4>' + esc(title) + '</h4>';
+  // ⭐ Every section is two columns (rhoquinn8217, 2026-09-09); the first
+  // column takes the odd one, and a single row stays a single row.
+  if (rows.length >= 2) {
+    var half = Math.ceil(rows.length / 2);
+    return html + '<div class="ptwo">' + table(rows.slice(0, half)) +
+           table(rows.slice(half)) + '</div>';
+  }
+  return html + table(rows);
 }
 
 function openPresetInfo(ordinal, presetName) {
@@ -1996,6 +2418,14 @@ function createFromPreset(ordinal, preset) {
     .then(function() {
       setConn('created ' + name + (preset ? ' from ' + preset : ''), 'good');
       loadConfigs(); loadDevices();
+      // ⭐ The same ending as picking one, in a new config's words: try it in
+      // the game, or stay and customise it (rhoquinn8217, 2026-09-09).
+      // "Customize it" is the configurator on this controller, where the
+      // new config's settings are; "Go back" is the compact view as it was.
+      if (COMPACT) compactAskExit('Pre-set config created!', [
+        { label: 'Try it out now', act: closeWindow },
+        { label: 'Customize it', act: function () { setCompact(false); } },
+        { label: 'Go back' }]);
     })
     .catch(function(){});
 }
@@ -2033,6 +2463,7 @@ function paintStickyHead() {
   // now rather than leaving it plain until the next poll.
   paintHoldControls();
   measureSticky();
+  paintCompact();    // ⓘ the head is rebuilt whenever configs or links change; so is the box
 }
 
 // ⭐ Measure the sticky block rather than hardcoding its height. A device row
@@ -3155,15 +3586,23 @@ function whoIs(ordinal) {
   return (d && d.serial) ? (nick + ' (' + d.serial + ')') : nick;
 }
 
+// The same, for a question set as HTML: the serial as a name, the nickname
+// as text (rhoquinn8217, 2026-09-09).
+function whoIsHtml(ordinal) {
+  var d = (LAST_DEVICES || []).filter(function(x) { return x.ordinal === ordinal; })[0];
+  var nick = esc(nameFor(ordinal));
+  return (d && d.serial) ? (nick + ' (<code>' + esc(d.serial) + '</code>)') : nick;
+}
+
 // Sets the claim, asking only when it would REPLACE one. Setting a first claim
 // is unremarkable; changing one silently alters what a controller does next
 // time it bridges.
 function setAutoLink(ordinal, configName, serial, currentlyClaimedBy) {
   if (!currentlyClaimedBy) { claimAutoLink(ordinal, configName, serial); return; }
   askConfirm('Set auto link',
-             'Change auto linked config for ' + whoIs(ordinal) +
-             ' from ' + currentlyClaimedBy + ' to ' + configName + '?',
-             function() { claimAutoLink(ordinal, configName, serial); });
+             'Change auto linked config for ' + whoIsHtml(ordinal) +
+             ' from <code>' + esc(currentlyClaimedBy) + '</code> to <code>' + esc(configName) + '</code>?',
+             function() { claimAutoLink(ordinal, configName, serial); }, true);
 }
 
 // ⭐ TITLED WITH THE BUTTON THAT OPENED IT. "Controller config" was the same
@@ -3178,7 +3617,7 @@ function restoreOpener(el) {
   if (at >= 0) { GP_INDEX = at; gpPaint(); }
 }
 
-function askConfirm(title, message, onYes) {
+function askConfirm(title, message, onYes, html) {
   // ⭐ Whatever had focus when this opened. Archive, Remove auto link and Reset
   // all landed somewhere arbitrary on cancel, because gpCollect rebuilds the
   // list and the old index then points at whatever moved into that slot.
@@ -3188,7 +3627,10 @@ function askConfirm(title, message, onYes) {
   OVERLAY_OPENER = GP_FOCUS[GP_INDEX] || null;
   CONFIRM_CB = onYes;
   document.getElementById('confirmTitle').textContent = title;
-  document.getElementById('confirmText').textContent = message;
+  // ⓘ Plain text unless the caller says its message is HTML -- the few
+  // questions that name a config or a serial set those as names.
+  if (html) document.getElementById('confirmText').innerHTML = message;
+  else document.getElementById('confirmText').textContent = message;
   document.getElementById('confirmBox').style.display = 'flex';
   gpCollect();
   // ⭐ DEFAULT TO CANCEL. Everything this dialog guards destroys something, and
@@ -3213,6 +3655,9 @@ function confirmNo() {
   OVERLAY_OPENER = null;
   setTimeout(function () { restoreOpener(opener); }, 0);
   CONFIRM_CB = null;
+  var onNo = CONFIRM_ON_NO;
+  CONFIRM_ON_NO = null;
+  if (onNo) onNo();
   document.getElementById('confirmBox').style.display = 'none';
   gpCollect();
 }
@@ -3721,7 +4166,11 @@ function gpSelectEnd(commit) {
   if (!commit) el.selectedIndex = GP_SELECT_WAS;
   el.classList.remove('gp-selecting');
   el.size = 0;                                  // collapse
+  // ⓘ The 'change' fires on a cancel too, to put the old value back; compact's
+  // pick reads this flag so a cancel never links or parks.
+  GP_SELECT_COMMIT = commit;
   el.dispatchEvent(new Event('change'));
+  GP_SELECT_COMMIT = true;
   GP_SELECTING = null;
 }
 
@@ -3760,6 +4209,7 @@ function gpSelectEnd(commit) {
 // click -- so this will fire more often than you would expect. Both states are
 // valid at any moment, so that is noise rather than a fault.
 function reportFocus(on) {
+  if (on) postView();   // ⓘ re-asserted on every regain, so a restarted listener learns it
   // ⓘ Shown in the footer rather than logged. Opening DevTools TAKES focus from
   // this page, so the console cannot observe focus without changing it -- the
   // measurement destroys what it measures.
@@ -3941,7 +4391,10 @@ var CONFIG_MODE_KEYS = {
   KeyE: function () { gpKeyCoarse(1); },
   Enter: function () { gpKeySelect(); },
   KeyZ: function () { gpKeyBack(); },
-  KeyX: function () { gpToggleManaged(); }
+  KeyX: function () { gpToggleManaged(); },
+  // ⭐ Create on the pad: compact / full view. The listener sends it as KeyC
+  // the way it sends the rest of these.
+  KeyC: function () { toggleCompact(); }
 };
 
 // ⭐ One place that steps the value being edited. It was inline in gpPoll; the
@@ -3975,7 +4428,58 @@ function gpKeyMove(delta) {
     GP_SELECTING.selectedIndex = (GP_SELECTING.selectedIndex + delta + n) % n;
     return;
   }
+  if (COMPACT && compactMove(0, delta)) return;
   gpMove(delta);
+}
+
+// ⭐ COMPACT IS A GRID (rhoquinn8217, 2026-09-09): the selector or Start on
+// top, New and Edit under it, Configurator and Close in the footer's corners.
+// Down from New lands on Configurator, down from Edit on Close -- the column
+// holds -- and Left/Right walk a row. ⓘ Rows are read off the page each time,
+// so whatever the state hides is simply not there. False when the halo is not
+// on the grid -- a dialog is up -- and the caller walks its list instead.
+function compactMove(dx, dy) {
+  var box = document.getElementById('compactBox');
+  if (!box) return false;
+  var rows = [];
+  var topRow = [];
+  var sel = box.querySelector('#cpick');
+  if (sel) topRow.push(sel);
+  var auto = box.querySelector('.cauto-btn:not([disabled])');
+  if (auto) topRow.push(auto);   // Right from the selector reaches 🗘 when it can act
+  if (!topRow.length) {
+    var big = box.querySelector('button.cbig');
+    if (big) topRow.push(big);
+  }
+  if (topRow.length) rows.push(topRow);
+  var foot = Array.prototype.slice.call(box.querySelectorAll('.cfoot button'));
+  if (foot.length) rows.push(foot);
+  var bar = Array.prototype.slice.call(box.querySelectorAll('.cbar > button'));
+  if (bar.length) rows.push(bar);
+  if (!rows.length) return false;
+  var cur = GP_FOCUS[GP_INDEX];
+  var r = -1, c = 0;
+  rows.forEach(function (row, i) {
+    var at = row.indexOf(cur);
+    if (at >= 0) { r = i; c = at; }
+  });
+  if (r < 0) return false;
+  if (dy) {
+    r = Math.max(0, Math.min(rows.length - 1, r + dy));
+    c = Math.min(c, rows[r].length - 1);
+  } else if (dx) {
+    var nc = c + dx;
+    if (rows[r] === foot && bar.length && (nc < 0 || nc >= foot.length)) {
+      // ⭐ Off either end of New/Edit lands on the corner that side: Left
+      // from New is Advanced, Right from Edit is the other view
+      // (rhoquinn8217, 2026-09-09).
+      r = rows.indexOf(bar);
+      c = nc < 0 ? 0 : bar.length - 1;
+    } else {
+      c = Math.max(0, Math.min(rows[r].length - 1, nc));
+    }
+  }
+  return focusElement(rows[r][c]);
 }
 
 // ⛔ Cross has TWO meanings and gpActivate only knows one: it OPENS a dropdown
@@ -4039,6 +4543,9 @@ function gpKeyStep(dir) {
     GP_SELECTING.selectedIndex = Math.max(0, Math.min(n - 1, next));
     return;
   }
+  // ⭐ In compact there is nothing to step: Left and Right move between the
+  // footer's buttons, as they do everywhere two things sit side by side.
+  if (COMPACT) { if (!compactMove(dir, 0)) gpMove(dir); return; }
   // ⭐ ◄ ► SWITCH SECTIONS (rhoquinn8217, 2026-08-31). Only one section is
   // shown at a time now, so this changes which one that is rather than jumping
   // the halo down the page to the next heading.
@@ -4094,6 +4601,10 @@ function gpKeyBack() {
   }
   if (GP_SELECTING) { gpSelectEnd(false); return; }
   if (RENAMING) { cancelRename(); return; }
+  // ⭐ In compact, Circle CLOSES the window -- the word the legend uses, and
+  // what it now does. ⓘ Not the keyboard's Circle, which hides an overlay
+  // that has no other way back; this window has two.
+  if (COMPACT) { closeWindow(); return; }
 
   // ⛔ CIRCLE LETS GO OF A TEXT BOX (rhoquinn8217, 2026-09-03: "circle should
   // remove the white focus on the box but it doesn't").
@@ -4490,6 +5001,7 @@ function restorePlace() {
 }
 
 function setFooterMode(on) {
+  if (on && COMPACT) return;   // the footer bar is hidden in compact; its buttons are in the box
   if (on && !FOOTER_MODE) {
     // ⭐ The SERIAL, not just the ordinal.
     //
@@ -4707,6 +5219,503 @@ document.addEventListener('keydown', function (ev) {
   fn();
 }, true);
 
+
+// ⭐⭐ COMPACT VIEW (rhoquinn8217, pre-designed 2026-09-09).
+//
+// One controller, one config selector, three buttons. The full page becomes a
+// setup tool you rarely visit; once the configs you need exist, compact is all
+// you would ever open.
+//
+// ⭐ THE SAME PAGE, NOT A SECOND WINDOW: a class on <body> hides everything but
+// #compactBox, and everything already solved -- the halo, the gate, the notice
+// strip, the pagehide beacon -- is inherited. ⓘ gpCollect() skips anything
+// with no offsetParent, so the hidden page simply leaves the focus list.
+//
+// ⛔ CLOSE, NOT PARK -- and it was the other way round for a morning. The
+// window went BEHIND the game, minimised, so the taskbar entry was a way back
+// for anyone not used to the chord. rhoquinn8217 reversed it the same day:
+// "closing closes it and the only ways to get it back is through the task bar
+// icon or the chord". ⓘ What made the reversal safe is the memory that
+// arrived with it -- the LISTENER holds the layout, the size, the place and
+// the controller, so a window that ends is not a state that is lost. The page
+// cannot be relied on to close itself, so the listener does it on ui/close.
+// ⓘ Not the keyboard's Circle, which hides an overlay that has no other way
+// back; this window has two.
+//
+// ⭐ CREATE ON THE PAD SWITCHES VIEWS, as it cycles the keyboard's layout. It
+// arrives here as the gated key KeyC, the way L1/R1 and the d-pad do, because
+// in config mode the listener blanks the pad report and re-sends the buttons
+// it knows as ctrl+alt+shift keys. ⛔ So the on-screen button is "New", never
+// "Create ..." -- once the pad's Create means "switch view", a button with
+// Create in its name under a legend that says otherwise is a trap.
+//
+// ⭐ SAFE EDIT MODE IS ON THROUGHOUT COMPACT. Off, every navigation press and
+// the pick itself mirror to the game. If it was off in full when we switched,
+// compact holds it on and hands the choice back on return.
+//
+// ⭐ REMEMBERED without the run id: ctm_place forgets on a listener restart,
+// which is right for a place and wrong for a preference. Default is full.
+var COMPACT = false;
+// ⭐ QUICK is Simple with almost everything cut out (rhoquinn8217,
+// 2026-09-09); it implies COMPACT. Three layouts, then: Advanced (COMPACT
+// off), Simple (COMPACT on), Quick (COMPACT and QUICK on).
+var QUICK = false;
+// The controller to show when the window comes back, from the listener.
+var WANT_ORDINAL = '';
+var LAST_VIEW_ORDINAL = '';
+var COMPACT_HOLD_RESTORE = false;
+var COMPACT_SLIDE = 0;   // +1 after R1, -1 after L1: which way the ring slides in
+var GP_SELECT_COMMIT = true;
+
+function isControllerTab(t) { return t !== 'overview' && t !== 'editor'; }
+
+function modeName() {
+  return !COMPACT ? 'advanced' : (QUICK ? 'quick' : 'simple');
+}
+
+// ⭐ THE WINDOW SAYS WHICH LAYOUT IT IS, in its title -- the one place every
+// layout has, and the one the taskbar reads too (rhoquinn8217, 2026-09-09).
+// ⛔ The [ctm-app] marker goes back on EVERY time: the listener finds this
+// window by looking for it, and a title rewritten without it makes the window
+// invisible to the chord, to Safe Edit Mode and to closing.
+var BASE_TITLE = '';
+function modeLabel() {
+  return !COMPACT ? 'Advanced' : (QUICK ? 'Quick' : 'Simple');
+}
+function paintTitle() {
+  if (!BASE_TITLE) return;
+  document.title = modeLabel() + ' \u2014 ' + BASE_TITLE + ' [ctm-app]';
+}
+function saveMode() {
+  try { localStorage.setItem('ctm_mode', modeName()); } catch (e) {}
+}
+// ⭐ FIRST START IS SIMPLE (rhoquinn8217, 2026-09-09): nothing saved yet means
+// Simple. ⓘ 'compact' and 'full' are what earlier pages saved for Simple and
+// Advanced before Quick existed, and still read as those.
+function applySavedMode() {
+  var m = null;
+  try { m = localStorage.getItem('ctm_mode'); } catch (e) {}
+  if (m === 'quick') setMode('quick', true);
+  else if (m === 'advanced' || m === 'full') postView(true);   // the layout it opened in
+  else setMode('simple', true);                                 // nothing saved: Simple
+}
+
+// ⭐ ONE PLACE THAT SETS A LAYOUT. Advanced, Simple or Quick; the body carries
+// a class for each of the two compact ones; setCompact does the window work
+// when the compact/advanced line is crossed, and a change within compact --
+// Simple to Quick -- only repaints.
+function setMode(m, restore) {
+  var quick = (m === 'quick');
+  var compact = (m !== 'advanced');
+  var quickChanged = (quick !== QUICK);
+  QUICK = quick;
+  document.body.classList.toggle('quick', quick);
+  paintTitle();
+  if (compact !== COMPACT) { setCompact(compact, restore); return; }
+  if (quickChanged || restore) {
+    saveMode();
+    postView(restore);             // the listener picks R3's table by layout
+    if (COMPACT) { if (!restore) sizeForMode(); paintCompact(); }
+  }
+}
+
+// ⓘ Simple opens at the smaller of its two sizes, 0.45 each way, centred --
+// the listener's table agrees, so R3 cycles from where the window actually
+// is (rhoquinn8217, 2026-09-09: two sizes per layout).
+// ⛔ The quarter off the width and the sixth off the height were both taken
+// back (rhoquinn8217, 2026-09-09): they broke the preset description, which
+// is the one thing in Simple sized by its content and not by the window.
+function compactSize() {
+  var w = Math.round(screen.availWidth * 0.45);
+  var h = Math.round(screen.availHeight * 0.45);
+  window.resizeTo(w, h);
+  window.moveTo(Math.round((screen.availWidth - w) / 2),
+                Math.round((screen.availHeight - h) / 2));
+}
+
+// ⓘ Quick's window: the smaller of its two sizes, which rhoquinn8217 named
+// medium and large (2026-09-09) -- the half-of-Simple heights, an eighth
+// off the width; the listener's table agrees.
+function quickSize() {
+  var w = Math.round(screen.availWidth * 0.185);
+  var h = Math.round(screen.availHeight * 0.15);
+  window.resizeTo(w, h);
+  window.moveTo(Math.round((screen.availWidth - w) / 2),
+                Math.round((screen.availHeight - h) / 2));
+}
+
+function sizeForMode() {
+  if (QUICK) quickSize(); else compactSize();
+}
+
+function setGateHold(hold) {
+  // toggleGateHold without the flip: the same request and the same follow-up.
+  fetch(base() + '/api/v1/ui/hold', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ hold: hold })
+  }).then(function () {
+    if (!hold) { LAST_FOCUS_SENT = null; syncFocus(); }
+    loadDevices();
+  }).catch(function () {});
+}
+
+// ⭐ Tell the listener which view this is: R3 sizes the compact window from a
+// table of its own, and the listener cannot tell by looking.
+// ⭐ `restore` MEANS "the window has just come back" (rhoquinn8217,
+// 2026-09-09): the listener then puts it at the size that layout was left at,
+// rather than resetting the layout to its entry size. The page cannot do this
+// itself -- R3 lives in the listener and the page never learns the index.
+function postView(restore) {
+  var body = { compact: COMPACT, quick: QUICK, restore: !!restore };
+  if (COMPACT && isControllerTab(ACTIVE)) { body.ordinal = ACTIVE; LAST_VIEW_ORDINAL = ACTIVE; }
+  fetch(base() + '/api/v1/ui/view', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  }).catch(function () {});
+}
+
+// ⭐ WHAT WAS THIS WINDOW SHOWING? (rhoquinn8217, 2026-09-09.) The chord makes
+// a NEW window every time, so the answer cannot be in it. The listener kept
+// the layout, the controller, the size and the place; this asks for the first
+// two and tells it to put back the other two.
+// ⓘ A listener that has just started knows nothing, and then the page's own
+// record is the best there is.
+function restoreView() {
+  fetch(base() + '/api/v1/ui/view')
+    .then(function (r) { return r.json(); })
+    .then(function (v) {
+      if (!v || !v.known) { applySavedMode(); return; }
+      if (v.ordinal) WANT_ORDINAL = v.ordinal;
+      setMode(v.compact ? (v.quick ? 'quick' : 'simple') : 'advanced', true);
+    })
+    .catch(function () { applySavedMode(); });
+}
+// ⓘ `restore` is the window coming back, not a switch: the listener sizes and
+// places it from what it remembers, so the page must not resize it here.
+function setCompact(on, restore) {
+  on = !!on;
+  if (on === COMPACT) return;
+  COMPACT = on;
+  document.body.classList.toggle('compact', on);
+  paintTitle();
+  saveMode();
+  postView(restore);
+  if (on) {
+    setFooterMode(false);
+    if (window.GATE_HELD === true) {
+      COMPACT_HOLD_RESTORE = true;
+      setGateHold(false);
+    }
+    if (!restore) sizeForMode();
+    compactEnsureController();
+  } else {
+    // Advanced is never Quick; a caller that came here directly, not through
+    // setMode, still leaves Quick behind.
+    QUICK = false;
+    document.body.classList.remove('quick');
+    saveMode();
+    if (COMPACT_HOLD_RESTORE) { COMPACT_HOLD_RESTORE = false; setGateHold(true); }
+    if (!restore) fitWindow();
+    gpCollect();
+    GP_INDEX = 0;
+    gpPaint();
+  }
+}
+// The whole tool, from the top: the full page on its Overview.
+function openConfigurator() {
+  setMode('advanced');
+  showTab('overview');
+}
+// ⭐ CREATE IS QUICK (rhoquinn8217, 2026-09-09, replacing the cycle): from
+// Advanced or Simple it goes straight to Quick -- the view wanted mid-game
+// -- and in Quick it does nothing; the buttons and Circle lead out.
+function toggleCompact() {
+  if (PRESET_OPEN || PRESET_INFO_OPEN || CONFIRM_CB || RENAMING) return;
+  if (QUICK) return;
+  setMode('quick');
+}
+
+// Compact shows a controller or nothing: never Overview or the Editor.
+function compactEnsureController() {
+  if (!COMPACT) return;
+  var tabs = TABS.filter(isControllerTab);
+  // ⭐ The controller this window was showing when it went away, if it is
+  // still bridged (rhoquinn8217, 2026-09-09). ⓘ Held until the controllers
+  // are actually known -- this runs before the first device poll answers --
+  // and dropped once used, or it would fight L1/R1 forever after.
+  if (WANT_ORDINAL && tabs.length) {
+    var want = WANT_ORDINAL;
+    WANT_ORDINAL = '';
+    if (tabs.indexOf(want) >= 0 && ACTIVE !== want) { showTab(want); return; }
+  }
+  if (!isControllerTab(ACTIVE)) {
+    if (tabs[0]) { showTab(tabs[0]); return; }
+  }
+  paintCompact();
+}
+
+// ⛔ CLOSE, NOT HIDE (rhoquinn8217, 2026-09-09, reversing the morning's
+// park): Circle ends this window. The chord and the tray icon's "Open
+// settings" are the ways back, and the listener remembers what it was
+// showing, so the next one opens where this one left off.
+function closeWindow() {
+  fetch(base() + '/api/v1/ui/close', { method: 'POST' }).catch(function () {});
+}
+
+// ⭐ ASK BEFORE LEAVING (rhoquinn8217, 2026-09-09). A pick applies at once, then
+// asks whether to go back to the game; declined, the window stays up. ⓘ The
+// page's own confirm box, with its buttons renamed for the question and put
+// back afterwards; askConfirm() already focuses the declining button.
+var CONFIRM_ON_NO = null;
+// ⓘ The title is the whole question and the buttons are the answers; there
+// is no line under the title (rhoquinn8217, 2026-09-09). The buttons are the
+// caller's: the first is the confirm box's own OK, the last its Cancel, and
+// any between are added for the asking and removed after -- so a fresh
+// preset can offer three where a pick offers two, on the one dialog the pad
+// already knows how to walk.
+function compactAskExit(title, buttons) {
+  var box = document.getElementById('confirmBox');
+  var row = box ? box.querySelector('.confirmBtns') : null;
+  var yes = document.getElementById('confirmYes');
+  var no = document.querySelector('#confirmBox button:last-of-type');
+  if (!row || !yes || !no) return;
+  var yesWas = yes.textContent;
+  var noWas = no.textContent;
+  var extra = [];
+  var restore = function () {
+    yes.textContent = yesWas;
+    no.textContent = noWas;
+    extra.forEach(function (b) { if (b.parentNode) b.parentNode.removeChild(b); });
+    extra = [];
+    box.classList.remove('cexit');
+  };
+  yes.textContent = buttons[0].label;
+  no.textContent = buttons[buttons.length - 1].label;
+  buttons.slice(1, -1).forEach(function (b) {
+    var el = document.createElement('button');
+    el.textContent = b.label;
+    el.onclick = function () { confirmNo(); if (b.act) b.act(); };   // confirmNo restores
+    row.insertBefore(el, no);
+    extra.push(el);
+  });
+  box.classList.add('cexit');
+  CONFIRM_ON_NO = restore;
+  var go = buttons[0].act;
+  askConfirm(title, '', function () { restore(); if (go) go(); });
+}
+
+// 🗘: claim this controller for the config it is reading. The full page's
+// setAutoLink does the asking when another config holds the claim, and the
+// claiming; the repaint that follows lights the 🗘.
+function compactAutoLink() {
+  var d = (LAST_DEVICES || []).filter(function (x) { return x.ordinal === ACTIVE; })[0];
+  if (!d || !d.linked_config) return;
+  var mySerial = normSerial(d.serial);
+  if (!mySerial) return;
+  var claimedBy = '';
+  CONFIGS.forEach(function (c) {
+    (c.auto_link || []).forEach(function (sn) {
+      if (normSerial(sn) === mySerial) claimedBy = c.name;
+    });
+  });
+  if (claimedBy === d.linked_config) return;
+  setAutoLink(d.ordinal, d.linked_config, mySerial, claimedBy);
+}
+
+// 🗘 lit: remove the claim. The full page's stopAutoLink asks first, then
+// drops it; the repaint that follows puts the button out.
+function compactAutoUnlink() {
+  var d = (LAST_DEVICES || []).filter(function (x) { return x.ordinal === ACTIVE; })[0];
+  if (!d || !d.linked_config) return;
+  var mySerial = normSerial(d.serial);
+  if (!mySerial) return;
+  stopAutoLink(d.linked_config, mySerial, nameFor(d.ordinal));
+}
+
+function compactPick() {
+  var sel = document.getElementById('cpick');
+  if (!sel || !COMPACT) return;
+  // ⛔ gpSelectEnd() dispatches 'change' on a CANCEL too, to put the old value
+  // back. That must not link and must not park.
+  if (!GP_SELECT_COMMIT) return;
+  var ordinal = sel.dataset.ordinal;
+  var body = sel.value ? { config: sel.value } : {};
+  call('POST', '/api/v1/devices/' + encodeURIComponent(ordinal) + '/link', body)
+    // ⛔ NO QUESTION AFTER A PICK (rhoquinn8217, 2026-09-09, twice): Circle
+    // closes at once, as it does the keyboard, and "Stay here" was a press
+    // that gained nothing. A new preset still asks, because it has
+    // customising to offer.
+    .then(function () { loadDevices(); loadConfigs(); })
+    .catch(function () {});
+}
+
+function paintCompact() {
+  var box = document.getElementById('compactBox');
+  if (!box || !COMPACT) return;
+  // ⛔ NOT WHILE THE SELECTOR IS OPEN. A repaint replaces it, and the open
+  // list would be closed under the person's hand with its choice lost. The
+  // next change repaints.
+  if (GP_SELECTING && box.contains(GP_SELECTING)) return;
+  var d = (LAST_DEVICES || []).filter(function (x) { return x.ordinal === ACTIVE; })[0];
+  // The listener remembers which controller was on screen, for the next
+  // window; L1/R1 change it without any layout changing, so it is told here.
+  if (d && d.ordinal !== LAST_VIEW_ORDINAL) postView(false);
+  var many = TABS.filter(isControllerTab).length > 1;
+  // ⭐ Under the selector: New and Edit (rhoquinn8217, 2026-09-09). Edit is
+  // the other page on THIS controller, its config's settings. Configurator,
+  // the whole tool from the top, and Close are the footer's two corners.
+  var foot = function (withNew, ordinal) {
+    return '<div class="cfoot">' +
+      (withNew ? '<button onclick="newConfigFor(\'' + esc(ordinal) + '\')">New</button>' : '') +
+      (ordinal ? '<button onclick="setCompact(false)">Edit</button>' : '') + '</div>';
+  };
+  var html = '<div class="cmain' + (!IS_DOWN && !d ? ' centre' : '') + '">';
+  if (IS_DOWN) {
+    // ⭐ THE LISTENER IS NOT ANSWERING (rhoquinn8217, 2026-09-09). The full
+    // page has its cover; compact says the same thing at its own size, with
+    // the address that failed and the line that starts the listener.
+    html += '<div class="cempty"><span class="cbad">\u2717</span> Listener not connected</div>' +
+            '<div class="csub">Check if the listener is running or restart it.</div>' +
+            '<div class="ccmd">ctm-usbip.exe agent 48054 --rest 48055 --ui</div>';
+  } else if (!d) {
+    html += '<div class="cempty">Bridge a controller to start.</div>' + foot(false, '');
+  } else {
+    var kindOk = CONFIGS.filter(function (c) { return settingsKindOf(d.kind) === c.kind; });
+    // ⭐ The ring: the controller in focus in the centre, the previous under
+    // L1 on the left, the next under R1 on the right, dimmed (rhoquinn8217,
+    // 2026-09-09: there is room to show the others).
+    var ring = TABS.filter(isControllerTab);
+    var at = Math.max(0, ring.indexOf(d.ordinal));
+    var prev = many ? ring[(at - 1 + ring.length) % ring.length] : '';
+    var next = many ? ring[(at + 1) % ring.length] : '';
+    var side = function (ord, cls, key) {
+      if (!ord) return '<div class="cside ' + cls + '"></div>';
+      var od = (LAST_DEVICES || []).filter(function (x) { return x.ordinal === ord; })[0];
+      // ⓘ Quick shows the key alone -- "◂ L1", "R1 ▸" -- the neighbour's name
+      // and kind will not fit its width (rhoquinn8217, 2026-09-09).
+      if (QUICK) {
+        return '<div class="cside ' + cls + '" onclick="gpTab(' + (cls === 'l' ? -1 : 1) + ')">' +
+               '<small>' + key + '</small></div>';
+      }
+      return '<div class="cside ' + cls + '" onclick="gpTab(' + (cls === 'l' ? -1 : 1) + ')">' +
+             '<small>' + key + '</small>' + esc(nameFor(ord)) +
+             (od ? '<div class="ckind">' + esc(deviceLabelShort(od)) + '</div>' : '') + '</div>';
+    };
+    var slide = COMPACT_SLIDE > 0 ? ' slide-r' : COMPACT_SLIDE < 0 ? ' slide-l' : '';
+    COMPACT_SLIDE = 0;
+    // ⓘ Quick shows the whole ring too (rhoquinn8217, 2026-09-09): the kind
+    // under the name, and the L1 and R1 neighbours with theirs.
+    html += '<div class="ccar' + slide + '">' +
+            side(prev, 'l', '\u25c2 L1') +
+            '<div class="ccur"><div class="cname">' + esc(nameFor(d.ordinal)) + '</div>' +
+            '<div class="ckind">' + esc(deviceLabelShort(d)) + '</div></div>' +
+            side(next, 'r', 'R1 \u25b8') +
+            '</div>';
+    if (!kindOk.length) {
+      // ⭐ The empty state is DELIBERATELY different: a first preset deserves
+      // a button that looks like it will do something, not a footer button.
+      // ⓘ It is "Start", its own button that shows only here and hides itself
+      // once a config exists; the footer's New stays New (rhoquinn8217,
+      // 2026-09-09). No Edit here: there is nothing to edit yet. It opens the
+      // preset selector, info page and confirm that already exist.
+      html += (QUICK ? '' : '<div class="cempty">Create a custom controller config</div>') +
+              // ⓘ From Quick, Start first goes to Simple: the preset list and its
+              // description do not fit a window a third as tall. Quick shows the
+              // button alone (rhoquinn8217, 2026-09-09).
+              '<button class="cbig go" onclick="' + (QUICK ? "setMode('simple'); " : '') +
+              'newConfigFor(\'' + esc(d.ordinal) + '\')">Start</button>';
+    } else {
+      // ⓘ Which config claims this controller's serial, the way the full
+      // page's device row works it out: that is the one that auto links.
+      var mySerial = normSerial(d.serial);
+      var claimedBy = '';
+      CONFIGS.forEach(function (c) {
+        (c.auto_link || []).forEach(function (sn) {
+          if (mySerial && normSerial(sn) === mySerial) claimedBy = c.name;
+        });
+      });
+      var autoOn = !!d.linked_config && d.linked_config === claimedBy;
+      var opts = '<option value="">(no config)</option>';
+      kindOk.forEach(function (c) {
+        var mine = c.name === claimedBy;
+        opts += '<option value="' + esc(c.name) + '"' +
+                (c.name === d.linked_config ? ' selected' : '') + '>' + esc(c.name) +
+                (mine ? ' \ud83d\uddd8' : '') + '</option>';
+      });
+      // ⭐ The 🗘 button sets the claim and, lit, REMOVES it (rhoquinn8217,
+      // 2026-09-09). ⓘ The full page's button only ever sets, because Remove
+      // sits beside the value there; compact has no other place to remove one,
+      // so here the lit button is the way. Removing always asks first, and
+      // setting asks when another config holds the claim. Greyed, with the
+      // reason, when there is nothing to claim.
+      // ⓘ The mark says what it is for in Simple, which has the width for it
+      // (rhoquinn8217, 2026-09-09); Quick shows the mark alone.
+      var autoLbl = '\ud83d\uddd8' + (QUICK ? '' : 'auto');
+      var autoBtn;
+      if (!mySerial) {
+        autoBtn = '<button class="cauto-btn" disabled title="this controller reports no serial, ' +
+                  'so there is nothing to remember it by">' + autoLbl + '</button>';
+      } else if (!d.linked_config) {
+        autoBtn = '<button class="cauto-btn" disabled title="pick a config first">' + autoLbl + '</button>';
+      } else if (autoOn) {
+        autoBtn = '<button class="cauto-btn on" onclick="compactAutoUnlink()" title="' +
+                  esc(d.linked_config) + ' auto links to this controller: press to remove">' + autoLbl + '</button>';
+      } else {
+        autoBtn = '<button class="cauto-btn" onclick="compactAutoLink()" title="auto link ' +
+                  esc(d.linked_config) + ' to this controller">' + autoLbl + '</button>';
+      }
+      // The selector under a title, sliding with the ring (rhoquinn8217, 2026-09-09).
+      html += '<div class="csel' + slide + '">' +
+              (QUICK ? '' : '<div class="ctitle">Controller Config</div>') +
+              '<div class="cselrow"><select id="cpick" data-ordinal="' + esc(d.ordinal) + '"' +
+              ' onchange="compactPick()">' +
+              opts + '</select>' + autoBtn + '</div></div>' + (QUICK ? '' : foot(true, d.ordinal));
+    }
+  }
+  // ⭐ The footer area: the legend and the way back, as large as the rest.
+  // The way back is written out because someone who parked this window and
+  // is not used to the chord has no other way to learn it (rhoquinn8217).
+  html += '</div>';   // .cmain
+  if (QUICK) {
+    // ⭐ Quick's footer: a small Advanced and a four-item legend, nothing else.
+    // ⓘ The legend names where Create goes, which in the cycle is Advanced.
+    // ⭐ Simple and Quick share one footer shape (rhoquinn8217, 2026-09-09):
+    // Advanced bottom-left, the legend, and the OTHER view bottom-right. No
+    // Close: Circle closes, as the legend says, and so does the question
+    // after a pick.
+    html += '<div class="cbar"><button class="cconf" onclick="openConfigurator()">Advanced</button>' +
+            '<div class="cbarText"><div class="clegend">' +
+            '<span class="cmode">Quick Mode</span>\u2630 position | R3 resize | ' +
+            '\u25cb close</div></div>' +
+            '<button class="cclose" onclick="setMode(\'simple\')">Simple</button></div>';
+  } else {
+    html += '<div class="cbar"><button class="cconf" onclick="openConfigurator()">Advanced</button>' +
+            '<div class="cbarText">' +
+            '<div class="clegend"><span class="cmode">Simple Mode</span>' +
+            'L1/R1 controller | \u2715 select | d-pad move | ' +
+            '\u2630 position | R3 resize | \\|/ quick mode | \u25cb close</div>' +
+            '<div class="cinfo">To bring this window back: <b>hold two fingers on the touchpad ' +
+            'and press Options</b> (DS5 only), or right-click the tray icon and choose ' +
+            '<b>Open settings</b>.</div>' +
+            '</div><button class="cclose" onclick="setMode(\'quick\')">Quick</button></div>';
+  }
+  box.innerHTML = html;
+  gpCollect();
+  // ⭐ THE HALO STAYS WHERE IT WAS across a repaint (rhoquinn8217, 2026-09-09:
+  // it jumped back to the selector whenever the device poll redrew the box,
+  // the T-148 shape again). gpCollect has just re-acquired it by key; only
+  // when that key found nothing on the box -- the first paint, or the control
+  // is gone -- does it land where the next press should go: the selector when
+  // there is something to pick, the big button when there is not.
+  var have = GP_FOCUS[GP_INDEX];
+  if (!(have && box.contains(have) && focusKeyOf(have) === GP_WANT)) {
+    var want = document.getElementById('cpick') || box.querySelector('button.cbig') || box.querySelector('button');
+    if (!focusElement(want)) { GP_INDEX = 0; gpPaint(); }
+  }
+}
+
 function gpTab(delta) {
   // ⛔ NOT WHILE SOMETHING IS OPEN (rhoquinn8217, 2026-09-01: L1/R1 still
   // switched controllers from inside the footer).
@@ -4722,9 +5731,14 @@ function gpTab(delta) {
   if (FOOTER_MODE || CONFIRM_CB || RENAMING || PRESET_OPEN || PRESET_INFO_OPEN) {
     return;
   }
-  var at = TABS.indexOf(ACTIVE);
+  // ⭐ In compact, L1/R1 step through CONTROLLERS only -- no Overview, no
+  // Editor (rhoquinn8217, 2026-09-09).
+  var tabs = COMPACT ? TABS.filter(isControllerTab) : TABS;
+  if (!tabs.length) return;
+  if (COMPACT) COMPACT_SLIDE = delta;
+  var at = tabs.indexOf(ACTIVE);
   if (at < 0) at = 0;
-  showTab(TABS[(at + delta + TABS.length) % TABS.length]);
+  showTab(tabs[(at + delta + tabs.length) % tabs.length]);
   GP_INDEX = 0;
   gpCollect();
 
@@ -4789,8 +5803,12 @@ function gpPoll() {
   }
   // ⓘ The count comes from the browser when it can see the pads, and falls
   // back to the singular when only the gate knows one is there.
-  hint.textContent = (live.length > 1 ? live.length + ' controllers' : 'controller') +
-                     ' — L1/R1 tabs | D-pad move | ✕ select | □ on/off | ○ back | ☰ move window | R3 size';
+  // ⓘ innerHTML, for the one span: the bar is green while the pad is live
+  // and the identifier must not be. Nothing here is user text -- the count is
+  // a number and the rest is a constant -- so there is nothing to escape.
+  hint.innerHTML = '<span class="cmode">Advanced Mode</span>' +
+                     (live.length > 1 ? live.length + ' controllers' : 'controller') +
+                     ' — L1/R1 controller | ✕ select | d-pad move | □ on/off | ☰ position | R3 resize | \\|/ quick mode | ○ footer/close';
   bar.className = 'live';
   measureGpBar();
 
@@ -5063,6 +6081,7 @@ function setDown(down) {
   // visible on every controller tab afterwards -- showTab dutifully removed the
   // class and nothing happened.
   if (pane) pane.style.display = down ? 'none' : '';
+  if (COMPACT) paintCompact();   // compact paints its own down screen
   if (!down) {
     // ⭐ RELOAD, rather than repainting.
     //
@@ -5481,10 +6500,12 @@ function startPage() {
   // alone was "Controller config", which any window showing this page carries --
   // including a browser with it open in a tab, which is how closing "the
   // settings window" took someone's whole browser with it.
-  document.title = document.title + ' [ctm-app]';
+  BASE_TITLE = document.title;
+  paintTitle();
   fitWindowIfOversized();
   refreshAll();
   restorePlace();
+  restoreView();      // ⭐ the layout, controller, size and place it went away in
 }
 
 if (location.search.indexOf('selftest') >= 0) {

@@ -478,12 +478,31 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
     // ⓘ The TV drives these. Until the TV side exists they are called by hand
     // with curl, which is deliberate: it lets both halves be proven separately.
     if (req.path.rfind("/api/v1/ui/", 0) == 0) {
-        if (req.method != "POST") {
-            *out = rest_error_response(405, "method not allowed", "Allow: POST, OPTIONS\r\n");
+        const std::string what = req.path.substr(11);
+
+        // ⭐ THE ONE GET HERE: the page, freshly made by the chord, asking what
+        // it was showing when it last went away -- which layout, and which
+        // controller. The SIZE and the PLACE are not in the answer: the page
+        // cannot set them in its own coordinates at every display scaling, so
+        // the listener applies those itself when the page says it has come
+        // back. ⓘ "known" is false on a listener that has just started and has
+        // never seen a page; the page then falls back to its own record.
+        if (req.method == "GET" && what == "view") {
+            bool compact = false, quick = false;
+            std::string ordinal;
+            const bool known = ui_view_get(&compact, &quick, &ordinal);
+            *out = rest_http_response(200,
+                std::string("{\"known\":") + (known ? "true" : "false") +
+                ",\"compact\":" + (compact ? "true" : "false") +
+                ",\"quick\":" + (quick ? "true" : "false") +
+                ",\"ordinal\":\"" + rest_json_escape(ordinal) + "\"}");
             return true;
         }
 
-        const std::string what = req.path.substr(11);
+        if (req.method != "POST") {
+            *out = rest_error_response(405, "method not allowed", "Allow: GET, POST, OPTIONS\r\n");
+            return true;
+        }
 
         // ⭐ RESET, not "open" -- named for what it does rather than what you
         // hoped for. It kills whatever window exists, sets the gate, and opens a
@@ -646,6 +665,53 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
             return true;
         }
 
+        // ⭐ VIEW: the page says whether it is compact, so R3 sizes it from the
+        // right table. Sent on every switch and whenever the page regains
+        // focus, so a restarted listener learns it too.
+        if (what == "view") {
+            RestJson json;
+            std::string parseError;
+            if (!rest_parse_flat_json(req.body, &json, &parseError)) {
+                *out = rest_error_response(400, parseError);
+                return true;
+            }
+            // ⓘ Noted whether or not the layout changed, and before the
+            // early return below: the controller moves under L1/R1 without any
+            // layout changing at all.
+            auto ov = json.strings.find("ordinal");
+            if (ov != json.strings.end()) ui_view_note_ordinal(ov->second);
+
+            auto cv = json.bools.find("compact");
+            auto qv = json.bools.find("quick");
+            auto rv = json.bools.find("restore");
+            const bool compact = (cv != json.bools.end()) && cv->second;
+            const bool quick = compact && (qv != json.bools.end()) && qv->second;
+            // The window coming back, not a switch: keep the size it was left at.
+            const bool restore = (rv != json.bools.end()) && rv->second;
+            ui_view_set(compact, quick, restore);
+            *out = rest_http_response(200, std::string("{\"ok\":true,\"compact\":") +
+                                               (compact ? "true" : "false") +
+                                               ",\"quick\":" + (quick ? "true" : "false") + "}");
+            return true;
+        }
+
+        // ⭐ CLOSE: Circle, in Simple or Quick. The window ENDS -- it does not
+        // hide behind the game (rhoquinn8217, 2026-09-09, reversing that
+        // morning's park). The ways back are the chord and the tray icon's
+        // "Open settings", and the listener remembers the layout, the size,
+        // the place and the controller, so the next one comes back as this
+        // one left. ⓘ WM_CLOSE through close_existing(), which matches on the
+        // [ctm-app] marker and so can only ever reach our own window; the
+        // page's teardown beacon releases the gate on the way out.
+        if (what == "close") {
+            // ⓘ FIRST, while the window is still there: this is the one moment
+            // that catches a window someone dragged by its title bar.
+            ui_view_remember_pos();
+            const bool ok = ctm_open_ui::close_existing();
+            *out = rest_http_response(200, ok ? R"({"ok":true})" : R"({"ok":false})");
+            return true;
+        }
+
         if (what == "closed") {
             // ⓘ Logged because it was silent: a close produced a focus report
             // but no beacon line, so there was no way to tell whether the
@@ -653,6 +719,10 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
             // this is the path meant to be reliable.
             device_log::input(device_log::msg()
                 << "ui/closed: the page reported its own teardown");
+            // The other way out -- the X, or the browser going away. The
+            // window may still be up for a moment; if it is, its place is
+            // worth having.
+            ui_view_remember_pos();
             ctm_rebind_set_config_mode(false);
             *out = rest_http_response(200, R"({"ok":true,"config_mode":false})");
             return true;
