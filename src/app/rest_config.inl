@@ -478,12 +478,31 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
     // ⓘ The TV drives these. Until the TV side exists they are called by hand
     // with curl, which is deliberate: it lets both halves be proven separately.
     if (req.path.rfind("/api/v1/ui/", 0) == 0) {
-        if (req.method != "POST") {
-            *out = rest_error_response(405, "method not allowed", "Allow: POST, OPTIONS\r\n");
+        const std::string what = req.path.substr(11);
+
+        // ⭐ THE ONE GET HERE: the page, freshly made by the chord, asking what
+        // it was showing when it last went away -- which layout, and which
+        // controller. The SIZE and the PLACE are not in the answer: the page
+        // cannot set them in its own coordinates at every display scaling, so
+        // the listener applies those itself when the page says it has come
+        // back. ⓘ "known" is false on a listener that has just started and has
+        // never seen a page; the page then falls back to its own record.
+        if (req.method == "GET" && what == "view") {
+            bool compact = false, quick = false;
+            std::string ordinal;
+            const bool known = ui_view_get(&compact, &quick, &ordinal);
+            *out = rest_http_response(200,
+                std::string("{\"known\":") + (known ? "true" : "false") +
+                ",\"compact\":" + (compact ? "true" : "false") +
+                ",\"quick\":" + (quick ? "true" : "false") +
+                ",\"ordinal\":\"" + rest_json_escape(ordinal) + "\"}");
             return true;
         }
 
-        const std::string what = req.path.substr(11);
+        if (req.method != "POST") {
+            *out = rest_error_response(405, "method not allowed", "Allow: GET, POST, OPTIONS\r\n");
+            return true;
+        }
 
         // ⭐ RESET, not "open" -- named for what it does rather than what you
         // hoped for. It kills whatever window exists, sets the gate, and opens a
@@ -656,6 +675,12 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
                 *out = rest_error_response(400, parseError);
                 return true;
             }
+            // ⓘ Noted whether or not the layout changed, and before the
+            // early return below: the controller moves under L1/R1 without any
+            // layout changing at all.
+            auto ov = json.strings.find("ordinal");
+            if (ov != json.strings.end()) ui_view_note_ordinal(ov->second);
+
             auto cv = json.bools.find("compact");
             auto qv = json.bools.find("quick");
             auto rv = json.bools.find("restore");

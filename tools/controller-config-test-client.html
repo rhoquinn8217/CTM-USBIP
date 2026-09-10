@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.64.29 -- see the changelog at the bottom of this comment.
+  VERSION 2.64.30 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,12 @@
   tidy message about it.
 
   CHANGELOG
+    2.64.30 The window comes back as it went away, for real this time: the
+            LISTENER remembers the layout, the size, the place and the
+            controller, and the page asks it on load. It had been the page's
+            own record, which a killed window loses, and the size was applied
+            to a window whose title marker had not landed yet. Simple and
+            Quick sit just above the taskbar (rhoquinn8217, 2026-09-09).
     2.64.29 Simple's padding and width are back to 2.64.26: the preset
             description needs that room. A window that comes back returns to
             the layout AND the size it was left at. Simple's auto-link button
@@ -1092,7 +1098,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.64.29</span>
+  <span class="muted" style="font-size:12px">v2.64.30</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -5221,6 +5227,9 @@ var COMPACT = false;
 // 2026-09-09); it implies COMPACT. Three layouts, then: Advanced (COMPACT
 // off), Simple (COMPACT on), Quick (COMPACT and QUICK on).
 var QUICK = false;
+// The controller to show when the window comes back, from the listener.
+var WANT_ORDINAL = '';
+var LAST_VIEW_ORDINAL = '';
 var COMPACT_HOLD_RESTORE = false;
 var COMPACT_SLIDE = 0;   // +1 after R1, -1 after L1: which way the ring slides in
 var GP_SELECT_COMMIT = true;
@@ -5310,11 +5319,30 @@ function setGateHold(hold) {
 // rather than resetting the layout to its entry size. The page cannot do this
 // itself -- R3 lives in the listener and the page never learns the index.
 function postView(restore) {
+  var body = { compact: COMPACT, quick: QUICK, restore: !!restore };
+  if (COMPACT && isControllerTab(ACTIVE)) { body.ordinal = ACTIVE; LAST_VIEW_ORDINAL = ACTIVE; }
   fetch(base() + '/api/v1/ui/view', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ compact: COMPACT, quick: QUICK, restore: !!restore })
+    body: JSON.stringify(body)
   }).catch(function () {});
+}
+
+// ⭐ WHAT WAS THIS WINDOW SHOWING? (rhoquinn8217, 2026-09-09.) The chord makes
+// a NEW window every time, so the answer cannot be in it. The listener kept
+// the layout, the controller, the size and the place; this asks for the first
+// two and tells it to put back the other two.
+// ⓘ A listener that has just started knows nothing, and then the page's own
+// record is the best there is.
+function restoreView() {
+  fetch(base() + '/api/v1/ui/view')
+    .then(function (r) { return r.json(); })
+    .then(function (v) {
+      if (!v || !v.known) { applySavedMode(); return; }
+      if (v.ordinal) WANT_ORDINAL = v.ordinal;
+      setMode(v.compact ? (v.quick ? 'quick' : 'simple') : 'advanced', true);
+    })
+    .catch(function () { applySavedMode(); });
 }
 // ⓘ `restore` is the window coming back, not a switch: the listener sizes and
 // places it from what it remembers, so the page must not resize it here.
@@ -5363,9 +5391,18 @@ function toggleCompact() {
 // Compact shows a controller or nothing: never Overview or the Editor.
 function compactEnsureController() {
   if (!COMPACT) return;
+  var tabs = TABS.filter(isControllerTab);
+  // ⭐ The controller this window was showing when it went away, if it is
+  // still bridged (rhoquinn8217, 2026-09-09). ⓘ Held until the controllers
+  // are actually known -- this runs before the first device poll answers --
+  // and dropped once used, or it would fight L1/R1 forever after.
+  if (WANT_ORDINAL && tabs.length) {
+    var want = WANT_ORDINAL;
+    WANT_ORDINAL = '';
+    if (tabs.indexOf(want) >= 0 && ACTIVE !== want) { showTab(want); return; }
+  }
   if (!isControllerTab(ACTIVE)) {
-    var first = TABS.filter(isControllerTab)[0];
-    if (first) { showTab(first); return; }
+    if (tabs[0]) { showTab(tabs[0]); return; }
   }
   paintCompact();
 }
@@ -5469,6 +5506,9 @@ function paintCompact() {
   // next change repaints.
   if (GP_SELECTING && box.contains(GP_SELECTING)) return;
   var d = (LAST_DEVICES || []).filter(function (x) { return x.ordinal === ACTIVE; })[0];
+  // The listener remembers which controller was on screen, for the next
+  // window; L1/R1 change it without any layout changing, so it is told here.
+  if (d && d.ordinal !== LAST_VIEW_ORDINAL) postView(false);
   var many = TABS.filter(isControllerTab).length > 1;
   // ⭐ Under the selector: New and Edit (rhoquinn8217, 2026-09-09). Edit is
   // the other page on THIS controller, its config's settings. Configurator,
@@ -6404,7 +6444,7 @@ function startPage() {
   fitWindowIfOversized();
   refreshAll();
   restorePlace();
-  applySavedMode();   // ⭐ compact if that is where you left it
+  restoreView();      // ⭐ the layout, controller, size and place it went away in
 }
 
 if (location.search.indexOf('selftest') >= 0) {

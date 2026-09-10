@@ -42,6 +42,8 @@
 #include <cstdint>
 #include <cstdlib>
 #include <mutex>
+#include <string>
+#include <thread>
 #include <unordered_map>
 
 namespace config_move {
@@ -102,6 +104,58 @@ inline HWND page_window();              // all three are defined below, with the
 inline void apply_size(HWND hwnd);
 inline void place_default(HWND hwnd);
 
+// ⭐⭐ THIS FILE IS THE MEMORY (rhoquinn8217, 2026-09-09: "when closing
+// remember advance/simple/quick and size"). The window is closed and made
+// again by the chord, so nothing inside it can remember anything; the LISTENER
+// outlives it, and holds the layout, the size, the place and the controller
+// that was on screen. The page asks on load (GET ui/view) rather than telling.
+//
+// ⛔ THE PAGE'S OWN localStorage IS NOT ENOUGH, and was the first attempt:
+// a window killed rather than closed -- which is how this one usually ends,
+// on a rebuild or a token mismatch -- can lose the last write, and a fresh
+// window then starts from nothing. It stays as the fallback for a listener
+// that has just started and knows nothing yet.
+inline std::atomic_bool g_known{false};
+inline std::mutex g_ordinalMutex;
+inline std::string g_ordinal;
+
+inline void note_ordinal(const std::string &ordinal)
+{
+    std::lock_guard<std::mutex> lock(g_ordinalMutex);
+    g_ordinal = ordinal;
+}
+
+inline bool view_get(bool *compact, bool *quick, std::string *ordinal)
+{
+    if (compact) *compact = g_compact.load();
+    if (quick) *quick = g_quick.load();
+    if (ordinal) {
+        std::lock_guard<std::mutex> lock(g_ordinalMutex);
+        *ordinal = g_ordinal;
+    }
+    return g_known.load();
+}
+
+// ⭐ THE WINDOW IS NOT THERE YET when the page says it has come back. It is
+// found by the marker in its TITLE, and a brand new window has not always
+// finished carrying it to the desktop by the time the page's first request
+// lands -- measured 2026-09-09, when a restore silently did nothing and the
+// window sat at the size Chrome had opened it. So: look for it for three
+// seconds, and stop at the first sight of it.
+inline void restore_geometry_soon()
+{
+    std::thread([] {
+        for (int i = 0; i < 30; ++i) {
+            if (HWND h = page_window()) {
+                apply_size(h);
+                place_default(h);
+                return;
+            }
+            Sleep(100);
+        }
+    }).detach();
+}
+
 // The page names its layout: Advanced, Simple or Quick.
 //
 // ⭐ A SWITCH resets that layout's slot to its entry size, which is what the
@@ -121,8 +175,10 @@ inline void set_view(bool compact, bool quick, bool restore)
     g_compact.store(compact);
     g_quick.store(quick);
 
+    g_known.store(true);
+
     if (restore) {
-        if (HWND h = page_window()) { apply_size(h); place_default(h); }
+        restore_geometry_soon();
         return;
     }
     if (!changed) return;
@@ -186,18 +242,58 @@ inline int snap_margin(const RECT &wa)
     return (wa.right - wa.left) / 20;
 }
 
-// Where this layout lives when nothing has been steered: Advanced in the
-// middle of the screen, Simple and Quick at the bottom centre.
-inline void place_default(HWND hwnd)
+// ⓘ How far the bottom three sit above the taskbar: a hundredth of the work
+// area, about ten pixels on a 1080p screen (rhoquinn8217, 2026-09-09: "just a
+// little above the windows task bar"). It was the side margin, a twentieth of
+// the WIDTH, which left them floating well clear of it.
+inline int bottom_gap(const RECT &wa)
+{
+    return (wa.bottom - wa.top) / 100;
+}
+
+// Which of the three the compact layouts were last put at. Simple and Quick
+// keep their own, so moving one does not move the other.
+inline std::atomic_int g_posCompact{1};
+inline std::atomic_int g_posQuick{1};
+
+inline std::atomic_int &pos_slot()
+{
+    return g_quick.load() ? g_posQuick : g_posCompact;
+}
+
+// One of the three places along the bottom, for Simple and Quick.
+inline void place_at(HWND hwnd, int idx)
 {
     RECT rc;
     if (!GetWindowRect(hwnd, &rc)) return;
     const int w = rc.right - rc.left;
     const int h = rc.bottom - rc.top;
     const RECT wa = work_area();
+    const int margin = snap_margin(wa);
+    const int targets[3] = {
+        wa.left + margin,
+        wa.left + ((wa.right - wa.left) - w) / 2,
+        wa.right - margin - w,
+    };
+    int x = targets[(idx % 3 + 3) % 3];
+    int y = wa.bottom - bottom_gap(wa) - h;
+    clamp_into(wa, w, h, x, y);
+    place(hwnd, x, y);
+}
+
+// Where this layout lives when nothing has been steered since: Advanced in the
+// middle of the screen, Simple and Quick at whichever of the three they were
+// left at.
+inline void place_default(HWND hwnd)
+{
+    if (g_compact.load()) { place_at(hwnd, pos_slot().load()); return; }
+    RECT rc;
+    if (!GetWindowRect(hwnd, &rc)) return;
+    const int w = rc.right - rc.left;
+    const int h = rc.bottom - rc.top;
+    const RECT wa = work_area();
     int x = wa.left + ((wa.right - wa.left) - w) / 2;
-    int y = g_compact.load() ? (wa.bottom - snap_margin(wa) - h)
-                             : (wa.top + ((wa.bottom - wa.top) - h) / 2);
+    int y = wa.top + ((wa.bottom - wa.top) - h) / 2;
     clamp_into(wa, w, h, x, y);
     place(hwnd, x, y);
 }
@@ -206,21 +302,16 @@ inline void place_default(HWND hwnd)
 // middle". In Simple and Quick it is the NEXT of bottom left, bottom centre,
 // bottom right -- judged from where the window IS, so one that was steered
 // somewhere still goes somewhere sensible rather than to whatever a stale
-// counter said.
+// counter said. ⓘ The choice is kept, so the window comes back to it.
 inline void snap_next(HWND hwnd)
 {
+    if (!g_compact.load()) { place_default(hwnd); return; }
+
     RECT rc;
     if (!GetWindowRect(hwnd, &rc)) return;
     const int w = rc.right - rc.left;
-    const int h = rc.bottom - rc.top;
     const RECT wa = work_area();
     const int margin = snap_margin(wa);
-
-    if (!g_compact.load()) {
-        place_default(hwnd);
-        return;
-    }
-
     const int targets[3] = {
         wa.left + margin,
         wa.left + ((wa.right - wa.left) - w) / 2,
@@ -232,10 +323,9 @@ inline void snap_next(HWND hwnd)
         const long d = labs((long)rc.left - (long)targets[i]);
         if (d < best) { best = d; nearest = i; }
     }
-    int x = targets[(nearest + 1) % 3];
-    int y = wa.bottom - margin - h;
-    clamp_into(wa, w, h, x, y);
-    place(hwnd, x, y);
+    const int idx = (nearest + 1) % 3;
+    pos_slot().store(idx);
+    place_at(hwnd, idx);
 }
 
 // This layout's slot, and the table it indexes.

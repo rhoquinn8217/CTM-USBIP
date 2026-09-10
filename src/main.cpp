@@ -97,6 +97,10 @@ bool ctm_ui_has_foreground();
  * come back rather than switched, and keeps the size it was left at. Defined
  * below, after config_move.inl. */
 void ui_view_set(bool compact, bool quick, bool restore);
+/* The controller the compact layouts were showing, and everything the page
+ * asks for when it comes back. */
+void ui_view_note_ordinal(const std::string &ordinal);
+bool ui_view_get(bool *compact, bool *quick, std::string *ordinal);
 // ⓘ The chord calls this from the input path; the REST endpoint calls it too.
 // ⓘ Takes the controller that ran the chord, so the window can come up on its
 // tab. Empty means "no particular one" -- the REST spawn path has no controller
@@ -199,6 +203,14 @@ bool ctm_ui_has_foreground()
 void ui_view_set(bool compact, bool quick, bool restore)
 {
     config_move::set_view(compact, quick, restore);
+}
+void ui_view_note_ordinal(const std::string &ordinal)
+{
+    config_move::note_ordinal(ordinal);
+}
+bool ui_view_get(bool *compact, bool *quick, std::string *ordinal)
+{
+    return config_move::view_get(compact, quick, ordinal);
 }
 
 
