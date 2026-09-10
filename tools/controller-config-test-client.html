@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.64.18 -- see the changelog at the bottom of this comment.
+  VERSION 2.64.19 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,10 @@
   tidy message about it.
 
   CHANGELOG
+    2.64.19 Two R3 sizes per layout: Advanced keeps small and medium and
+            opens at medium; Simple and Quick keep medium and large and open
+            at medium. Quick is half again as tall, half Simple's each way
+            (rhoquinn8217, 2026-09-09).
     2.64.18 Quick's window is half Simple's width and a third of its height,
             with its own three R3 sizes in the listener, and its text sized
             to stay the same on screen. Simple's Quick Mode button is gone;
@@ -521,17 +525,21 @@
      2026-09-09). The name, the selector with its auto-link button, and a
      footer of a small Advanced and a four-item legend. Margins trimmed, no
      bubbles, no way-back hint, no New, Edit or Close: Circle closes. */
-  /* ⓘ QUICK'S WINDOW IS A THIRD AS TALL as Simple's and half as wide
-     (rhoquinn8217, 2026-09-09), and text here is sized to the window, so
-     every size below is about three times Simple's: the same on screen,
-     in a window that hugs it. R3 still scales it with the window. */
+  /* ⓘ QUICK'S WINDOW IS HALF SIMPLE'S each way (rhoquinn8217, 2026-09-09: a
+     third as tall first, then half again as tall). Text here is sized to the
+     window; these sizes were set for the third-height window and kept when
+     it grew, so Quick's text reads half again as large as Simple's. R3
+     still scales it with the window. */
   body.quick #compactBox { padding:3vh 3vw 2vh; }
   body.quick #compactBox .cmain { padding-top:0; gap:5vh; }
   body.quick #compactBox .cmain.centre { gap:3vh; }
   body.quick #compactBox .cname { font-size:24vh; line-height:1.1; }
   body.quick #compactBox .csel { gap:0; }
-  body.quick #compactBox .cselrow { gap:2vw; }
-  body.quick #compactBox select { font-size:13vh; padding:1.5vh 1.5vw; min-width:70vw; }
+  body.quick #compactBox .cselrow { gap:2vw; width:100%; justify-content:center; }
+  /* The selector may shrink below its longest name rather than push the
+     button off the edge; a long name is clipped inside it. */
+  body.quick #compactBox select { font-size:13vh; padding:1.5vh 1.5vw; min-width:0;
+    max-width:80vw; flex:0 1 auto; }
   body.quick #compactBox .cauto-btn { font-size:13vh; padding:1.2vh 1.6vw; }
   body.quick #compactBox .cbar { padding-top:3vh; gap:3vw; }
   body.quick #compactBox .cbar > button { font-size:8vh; padding:1.5vh 2vw; }
@@ -1012,7 +1020,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.64.18</span>
+  <span class="muted" style="font-size:12px">v2.64.19</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -1277,9 +1285,12 @@ function call(method, path, body, quiet) {
 // these numbers change, open_ui.inl's --window-size changes with them.
 // ⓘ This is the LARGE of the three sizes R3 cycles in the listener; Fit window
 // therefore means "large, centred". The listener keeps the other two.
+// ⓘ Advanced's MEDIUM (rhoquinn8217, 2026-09-09: two sizes per layout, and
+// Advanced keeps small and medium). Duplicated in the listener's spawn size;
+// the two move together.
 function wantSize() {
-  return { w: Math.round(screen.availWidth * 0.8),
-           h: Math.round(screen.availHeight * 0.8) };
+  return { w: Math.round(screen.availWidth * 0.68),
+           h: Math.round(screen.availHeight * 0.73) };
 }
 function fitWindow() {
   var w = wantSize().w;
@@ -5169,23 +5180,22 @@ function setMode(m) {
   }
 }
 
-// ⓘ A third of the screen each way, centred -- the SMALL of the listener's
-// compact sizes, so R3 cycles from where the window actually is
-// (rhoquinn8217, 2026-09-09: smallest first). Small on purpose: a window
-// that does one thing feels considered, a shrunken full page feels truncated.
+// ⓘ Simple opens at the smaller of its two sizes, 0.45 each way, centred --
+// the listener's table agrees, so R3 cycles from where the window actually
+// is (rhoquinn8217, 2026-09-09: two sizes per layout).
 function compactSize() {
-  var w = Math.round(screen.availWidth * 0.34);
-  var h = Math.round(screen.availHeight * 0.34);
+  var w = Math.round(screen.availWidth * 0.45);
+  var h = Math.round(screen.availHeight * 0.45);
   window.resizeTo(w, h);
   window.moveTo(Math.round((screen.availWidth - w) / 2),
                 Math.round((screen.availHeight - h) / 2));
 }
 
-// ⓘ Quick's window: half Simple's width, a third of its height -- the SMALL
-// of the listener's quick sizes (rhoquinn8217, 2026-09-09).
+// ⓘ Quick's window: half Simple's each way, the smaller of its two sizes
+// (rhoquinn8217, 2026-09-09: a third as tall first, then half again as tall).
 function quickSize() {
-  var w = Math.round(screen.availWidth * 0.17);
-  var h = Math.round(screen.availHeight * 0.113);
+  var w = Math.round(screen.availWidth * 0.225);
+  var h = Math.round(screen.availHeight * 0.225);
   window.resizeTo(w, h);
   window.moveTo(Math.round((screen.availWidth - w) / 2),
                 Math.round((screen.availHeight - h) / 2));

@@ -47,49 +47,46 @@ namespace config_move {
 // ⭐ One mover PER PAD (T-162): see window_move::Movers for why.
 inline window_move::Movers g_movers;
 
-// ⭐ THREE SIZES ON R3, as the keyboard has (rhoquinn8217, 2026-09-08), as a
-// share of the work area rather than pixels so 250% scaling and an unscaled 4K
-// screen get the same proportion.
+// ⭐ TWO SIZES ON R3 per layout (rhoquinn8217, 2026-09-09: three had been
+// one too many), as a share of the work area rather than pixels so 250%
+// scaling and an unscaled 4K screen get the same proportion.
 //
 //   small   0.55 x 0.66   the page's first size, before it grew
-//   medium  0.68 x 0.73   halfway
-//   large   0.80 x 0.80   four fifths both ways -- the size it opens at, and
-//                         the size the page's own Fit window restores
+//   medium  0.68 x 0.73   the size Advanced opens at
 //
-// ⓘ The index lives here for the life of the listener, like the keyboard's
-// g_size. The page does not know it: Fit window means "large, centred" and
-// says so. ⛔ Starts at LARGE, unlike the keyboard's medium, because large is
-// what was on screen when the sizes were asked for.
+// ⓘ Advanced keeps its small and medium; the four-fifths large of 2026-09-08
+// is gone. The index lives here for the life of the listener, like the
+// keyboard's g_size; the page does not know it, it only opens at medium.
 struct SizeShare { double w; double h; };
-inline const SizeShare kSizes[3] = { { 0.55, 0.66 }, { 0.68, 0.73 }, { 0.80, 0.80 } };
-inline std::atomic_int g_size{2};
+inline const SizeShare kSizes[2] = { { 0.55, 0.66 }, { 0.68, 0.73 } };
+inline std::atomic_int g_size{1};
 
 // ⭐ COMPACT HAS SIZES OF ITS OWN (rhoquinn8217, 2026-09-09): at 250% scaling on
 // a large screen the compact view still needs to be sized to the room, so R3
 // cycles a second table while the page is compact, with a position of its own.
 //
-//   small   0.34 x 0.34   what the page opens compact at, so the two agree
-//   medium  0.45 x 0.45
+//   medium  0.45 x 0.45   what the page opens Simple at, so the two agree
 //   large   0.56 x 0.56
-// ⓘ A tenth narrower than the first cut (rhoquinn8217, 2026-09-09).
+// ⓘ Simple keeps its medium and large (rhoquinn8217, 2026-09-09); the
+// 0.34 small is gone.
 //
 // ⓘ The page says which view it is in (ui/view); the listener cannot tell by
 // looking. Each switch resets that view's position to its entry size -- small
 // for compact (rhoquinn8217, 2026-09-09: smallest first), large for full --
 // which is exactly the size the page resizes to on the switch, so R3 always
 // cycles from where the window actually is.
-inline const SizeShare kCompactSizes[3] = { { 0.34, 0.34 }, { 0.45, 0.45 }, { 0.56, 0.56 } };
+inline const SizeShare kCompactSizes[2] = { { 0.45, 0.45 }, { 0.56, 0.56 } };
 inline std::atomic_int  g_sizeCompact{0};
 inline std::atomic_bool g_compact{false};
 
-// ⭐ QUICK HAS SIZES OF ITS OWN (rhoquinn8217, 2026-09-09): half Simple's width
-// and a third of its height at each step, so the window hugs the little it
-// shows -- a name, a selector, a footer.
+// ⭐ QUICK HAS SIZES OF ITS OWN (rhoquinn8217, 2026-09-09): half Simple's
+// each way, so the window hugs the little it shows -- a name, a selector, a
+// footer. ⓘ It was a third of Simple's height first, then half again as
+// tall the same evening.
 //
-//   small   0.170 x 0.113   what the page opens quick at
-//   medium  0.225 x 0.150
-//   large   0.280 x 0.187
-inline const SizeShare kQuickSizes[3] = { { 0.170, 0.113 }, { 0.225, 0.150 }, { 0.280, 0.187 } };
+//   medium  0.225 x 0.225   what the page opens Quick at
+//   large   0.280 x 0.280
+inline const SizeShare kQuickSizes[2] = { { 0.225, 0.225 }, { 0.280, 0.280 } };
 inline std::atomic_int  g_sizeQuick{0};
 inline std::atomic_bool g_quick{false};
 
@@ -99,7 +96,7 @@ inline void set_view(bool compact, bool quick)
 {
     g_compact.store(compact);
     g_quick.store(compact && quick);
-    if (!compact) g_size.store(2);
+    if (!compact) g_size.store(1);
     else if (quick) g_sizeQuick.store(0);
     else g_sizeCompact.store(0);
 }
@@ -198,7 +195,7 @@ inline void resize_next(HWND hwnd)
     const bool quick = g_quick.load();
     std::atomic_int &slot = !compact ? g_size : (quick ? g_sizeQuick : g_sizeCompact);
     const SizeShare *table = !compact ? kSizes : (quick ? kQuickSizes : kCompactSizes);
-    const int idx = (slot.load() + 1) % 3;
+    const int idx = (slot.load() + 1) % 2;
     slot.store(idx);
     const RECT wa = work_area();
     const int w = (int)((wa.right - wa.left) * table[idx].w);

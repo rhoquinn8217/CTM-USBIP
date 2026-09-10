@@ -390,8 +390,8 @@ inline void open_new(uint16_t restPort, bool withToken = true)
     RECT wa = { 0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN) };
     SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0);
     const int waW = wa.right - wa.left, waH = wa.bottom - wa.top;
-    const int winW = (int)(waW * 0.8);
-    const int winH = (int)(waH * 0.8);
+    const int winW = (int)(waW * 0.68);   // Advanced's medium, its opening size
+    const int winH = (int)(waH * 0.73);
     const std::wstring args = L"--app=" + url +
                               L" --user-data-dir=\"" + dataDir + L"\"" +
                               L" --no-first-run --no-default-browser-check" +
