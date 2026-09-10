@@ -49,6 +49,9 @@ carry it; upstream's own history is unchanged.
 | 2026-09-08 | Options moves the settings window and R3 sizes it, the same gesture the on-screen keyboard uses. A tap places it, a hold steers it with the stick or the mouse | `764e06c`, `b8ffac7`, `01f247d`, `239000b`, `79c03b4` |
 | 2026-09-09 | Three layouts for the settings window: SIMPLE, one controller and its config; QUICK, the same cut to a name and a selector for reaching mid-game; ADVANCED, the full page. Create goes straight to Quick, and the listener remembers the layout, size, place and controller across a close | `339ef21`, `6f83ccf`, `fc6982a`, `9097921`, `faa5760`, `36dae19`, `241e69a` |
 | 2026-09-09 | One Options mover per controller: two bridged pads shared one, so a hold on either snapped the window on every report of the other. The stick that steers a window no longer also drives the mouse, and travel is speed times elapsed time, so it does not change with the report rate | `1526c97`, `1256eea`, `5f9e4db` |
+| 2026-09-10 | The touchpad preset scrolls naturally, and its description says so | `f8ad9ac` |
+| 2026-09-10 | Adaptive trigger effects: a resistance break, a wall, or a climb that lets go, placed anywhere in the pull | `bbfcd5f`, `9f9b847`, `6cbe348`, `eaf2e55`, `33ff84d` |
+| 2026-09-10 | R2 as a mouse click: the cursor freezes for the whole gesture, so a double click lands twice on one pixel, and a held click becomes a drag | `890fab0`, `1db8342` |
 
 ## Files changed
 
@@ -57,94 +60,97 @@ Generated from `git diff origin/main origin/rhqn-main --stat`, excluding
 upstream's release FFmpeg binaries replacing the repo's debug ones).
 
 ```
- .gitattributes                                     |   48 +
- .gitignore                                         |   26 +-
- CHANGES.md                                         |  137 +
- LINK                                               |    0
- README.md                                          |   18 +
- app/ctm-usbip-tests.vcxproj                        |   95 +
- app/ctm-usbip.vcxproj                              |    4 +-
- attic/flydigi_apex4_identity.map                   |   58 +
- attic/flydigi_apex4_usb.profile                    |   24 +
- build-tests.ps1                                    |   86 +
- build.ps1                                          |   87 +-
- device-config.md                                   |  195 +
- docs/rest_api.md                                   |  139 +
- include/ctm/map/runtime.h                          |    5 +
- maps/ds5_usb_over_ds5_usb.map                      |   61 +
- maps/virtual_keyboard.map                          |   46 +
- maps/virtual_mouse.map                             |   54 +
- profiles/descriptors/ds5e_composite.profile        |   30 +
- profiles/descriptors/virtual_keyboard.profile      |   74 +
- profiles/descriptors/virtual_mouse.profile         |   59 +
- release.ps1                                        |  145 +
- src/app/agent.inl                                  |  419 +-
- src/app/agent_session_sweep.inl                    |  313 +
- src/app/cli.inl                                    |   22 +-
- src/app/common.inl                                 |    8 +
- src/app/config_move.inl                            |  534 ++
- src/app/nickname.inl                               |   90 +
- src/app/open_ui.inl                                |  457 ++
- src/app/overlay_window.inl                         | 1895 ++++++
- src/app/rest.inl                                   |  755 +++
- src/app/rest_config.inl                            | 1043 ++++
- src/app/rest_config_sessions.inl                   |  100 +
- src/app/rest_sessions.inl                          |   33 +
- src/app/service.inl                                |   25 +-
- src/app/tray_icon.inl                              |  197 +
- src/app/ui_page.inl                                |   73 +
- src/app/window_move.inl                            |  234 +
- src/audio/audio_gain.inl                           |  178 +
- src/audio/ds5_apply_settings.inl                   |  169 +
- src/audio/ds5_output_overrides.inl                 |  550 ++
- src/audio/iso_in_pacing.inl                        |  221 +
- src/audio/iso_in_test_tone.inl                     |   95 +
- src/audio/mic_ring.inl                             |  202 +
- src/audio/pcm_amplitude_log.inl                    |  162 +
- src/backend/backend.inl                            |   29 +
- src/backend/bridge.inl                             |  241 +-
- src/backend/bridge_enet.inl                        |   35 +-
- src/backend/bt.inl                                 |   16 +-
- src/config/config_presets.inl                      |  235 +
- src/config/config_store.inl                        |  746 +++
- src/config/config_watcher.inl                      |  170 +
- src/config/device_config.inl                       |  218 +
- src/input/gyro_calibration.inl                     |  131 +
- src/input/gyro_calibration_fetch.inl               |   95 +
- src/input/gyro_mouse.inl                           |  683 ++
- src/input/keyboard_device.inl                      |  277 +
- src/input/mouse_device.inl                         |  206 +
- src/input/mouse_exclusive.inl                      |  130 +
- src/input/osk.inl                                  |  200 +
- src/input/rebind.inl                               | 1141 ++++
- src/input/stick_mouse.inl                          |  410 ++
- src/input/touch_mouse.inl                          |  382 ++
- src/log/device_log.inl                             |  229 +
- src/main.cpp                                       |  377 +-
- src/map/runtime.cpp                                |    4 +
- src/usbip/device.inl                               |  434 +-
- src/usbip/server.inl                               |   55 +-
- tests/config_store_test.cpp                        |  630 ++
- tests/device_config_test.cpp                       |  463 ++
- tests/gyro_mouse_test.cpp                          |  247 +
- tests/harness.h                                    |   55 +
- tests/host_audio_settings_test.cpp                 |  125 +
- tests/iso_in_pacing_test.cpp                       |  118 +
- tests/map_defaults_test.cpp                        |  100 +
- tests/nickname_test.cpp                            |   98 +
- tests/osk_test.cpp                                 |   81 +
- tests/rest_parser_test.cpp                         |  195 +
- tests/stick_mouse_test.cpp                         |  532 ++
- tests/tests_main.cpp                               |   89 +
- tests/touch_mouse_test.cpp                         |  519 ++
- tests/units.h                                      |   54 +
- .../ffmpeg/x64/release/bin/swresample-6.dll        |  Bin 722944 -> 835584 bytes
- tools/controller-config-test-client.html           | 6524 ++++++++++++++++++++
- tools/device-config-panel-edge.bat                 |    9 +
- tools/device-config-panel-edge.ps1                 |  327 +
- tools/device-config-panel.bat                      |    4 +
- tools/device-config-panel.ps1                      |  303 +
- tools/osk-mockups.py                               |  103 +
- tools/start-ctm-usbip.bat                          |   67 +
- 97 files changed, 27472 insertions(+), 114 deletions(-)
+ .gitattributes                                |   48 +
+ .gitignore                                    |   26 +-
+ CHANGES.md                                    |  150 +
+ LINK                                          |    0
+ README.md                                     |   18 +
+ app/ctm-usbip-tests.vcxproj                   |   97 +
+ app/ctm-usbip.vcxproj                         |    4 +-
+ attic/flydigi_apex4_identity.map              |   58 +
+ attic/flydigi_apex4_usb.profile               |   24 +
+ build-tests.ps1                               |   86 +
+ build.ps1                                     |   87 +-
+ device-config.md                              |  195 +
+ docs/rest_api.md                              |  139 +
+ include/ctm/map/runtime.h                     |    5 +
+ maps/ds5_usb_over_ds5_usb.map                 |   61 +
+ maps/virtual_keyboard.map                     |   46 +
+ maps/virtual_mouse.map                        |   54 +
+ profiles/descriptors/ds5e_composite.profile   |   30 +
+ profiles/descriptors/virtual_keyboard.profile |   74 +
+ profiles/descriptors/virtual_mouse.profile    |   59 +
+ release.ps1                                   |  145 +
+ src/app/agent.inl                             |  419 +-
+ src/app/agent_session_sweep.inl               |  313 ++
+ src/app/cli.inl                               |   22 +-
+ src/app/common.inl                            |    8 +
+ src/app/config_move.inl                       |  534 ++
+ src/app/nickname.inl                          |   90 +
+ src/app/open_ui.inl                           |  457 ++
+ src/app/overlay_window.inl                    | 1895 +++++++
+ src/app/rest.inl                              |  755 +++
+ src/app/rest_config.inl                       | 1055 ++++
+ src/app/rest_config_sessions.inl              |  100 +
+ src/app/rest_sessions.inl                     |   33 +
+ src/app/service.inl                           |   25 +-
+ src/app/tray_icon.inl                         |  197 +
+ src/app/ui_page.inl                           |   73 +
+ src/app/window_move.inl                       |  234 +
+ src/audio/audio_gain.inl                      |  178 +
+ src/audio/ds5_apply_settings.inl              |  268 +
+ src/audio/ds5_output_overrides.inl            |  610 +++
+ src/audio/iso_in_pacing.inl                   |  221 +
+ src/audio/iso_in_test_tone.inl                |   95 +
+ src/audio/mic_ring.inl                        |  202 +
+ src/audio/pcm_amplitude_log.inl               |  162 +
+ src/backend/backend.inl                       |   29 +
+ src/backend/bridge.inl                        |  241 +-
+ src/backend/bridge_enet.inl                   |   35 +-
+ src/backend/bt.inl                            |   16 +-
+ src/config/config_presets.inl                 |  243 +
+ src/config/config_store.inl                   |  746 +++
+ src/config/config_watcher.inl                 |  170 +
+ src/config/device_config.inl                  |  218 +
+ src/input/gyro_calibration.inl                |  131 +
+ src/input/gyro_calibration_fetch.inl          |   95 +
+ src/input/gyro_mouse.inl                      |  737 +++
+ src/input/keyboard_device.inl                 |  277 ++
+ src/input/mouse_device.inl                    |  218 +
+ src/input/mouse_exclusive.inl                 |  130 +
+ src/input/osk.inl                             |  200 +
+ src/input/rebind.inl                          | 1141 +++++
+ src/input/stick_mouse.inl                     |  410 ++
+ src/input/touch_mouse.inl                     |  382 ++
+ src/input/trigger_click.inl                   |  212 +
+ src/input/trigger_effect.inl                  |  280 ++
+ src/log/device_log.inl                        |  229 +
+ src/main.cpp                                  |  386 +-
+ src/map/runtime.cpp                           |    4 +
+ src/usbip/device.inl                          |  441 +-
+ src/usbip/server.inl                          |   55 +-
+ tests/config_store_test.cpp                   |  630 +++
+ tests/device_config_test.cpp                  |  463 ++
+ tests/gyro_mouse_test.cpp                     |  247 +
+ tests/harness.h                               |   55 +
+ tests/host_audio_settings_test.cpp            |  125 +
+ tests/iso_in_pacing_test.cpp                  |  118 +
+ tests/map_defaults_test.cpp                   |  100 +
+ tests/nickname_test.cpp                       |   98 +
+ tests/osk_test.cpp                            |   81 +
+ tests/rest_parser_test.cpp                    |  195 +
+ tests/stick_mouse_test.cpp                    |  532 ++
+ tests/tests_main.cpp                          |   93 +
+ tests/touch_mouse_test.cpp                    |  519 ++
+ tests/trigger_click_test.cpp                  |  259 +
+ tests/trigger_effect_test.cpp                 |  260 +
+ tests/units.h                                 |   54 +
+ tools/controller-config-test-client.html      | 6553 +++++++++++++++++++++++++
+ tools/device-config-panel-edge.bat            |    9 +
+ tools/device-config-panel-edge.ps1            |  327 ++
+ tools/device-config-panel.bat                 |    4 +
+ tools/device-config-panel.ps1                 |  303 ++
+ tools/osk-mockups.py                          |  103 +
+ tools/start-ctm-usbip.bat                     |   67 +
+ 92 files changed, 27459 insertions(+), 114 deletions(-)
 ```
