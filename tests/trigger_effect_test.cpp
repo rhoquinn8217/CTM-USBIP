@@ -242,13 +242,15 @@ int run_trigger_effect_tests()
         std::vector<uint8_t> report = blank_report();
         CTM_CHECK(wants_anything("ds5"));
         const uint8_t claim = apply_to_report("ds5", report.data(), report.size());
-        CTM_CHECK_EQ((int)claim, (int)kClaimR2);            // L2 left alone
+        // Both are claimed: a config that sets one trigger owns both, so L2
+        // is put into a known state rather than inheriting one.
+        CTM_CHECK_EQ((int)claim, (int)(kClaimR2 | kClaimL2));
         // Break at zone 5, so resistance runs 4 to 5.
         CTM_CHECK_EQ((int)report[kR2Offset], 0x25);
         CTM_CHECK_EQ((int)(report[kR2Offset + 1] | (report[kR2Offset + 2] << 8)),
                      (1 << 4) | (1 << 5));
         CTM_CHECK_EQ((int)report[kR2Offset + 3], 6);
-        CTM_CHECK_EQ((int)report[kL2Offset], 0);            // the other block is untouched
+        CTM_CHECK_EQ((int)report[kL2Offset], 0x05);         // and the other is turned off
     }
 
     section("trigger effect: off clears only what we set");
@@ -289,6 +291,40 @@ int run_trigger_effect_tests()
         std::vector<uint8_t> shortReport(kL2Offset + 2, 0);
         CTM_CHECK_EQ((int)apply_to_report("ds5", shortReport.data(), shortReport.size()), 0);
         CTM_CHECK_EQ((int)shortReport[kR2Offset], 0);
+    }
+
+    section("trigger effect: a config that sets one trigger owns both");
+    // A wall left on L2 by one config was still there after switching to a
+    // config that says nothing about L2 (2026-09-10). An effect lives on the
+    // controller until something changes it, so "absent means leave alone" let
+    // one config's setting follow the pad into the next one.
+    reset_config();
+    g_strings["ds5.trigger_r2_effect"] = "click";
+    {
+        std::vector<uint8_t> report = blank_report();
+        const uint8_t claim = apply_to_report("ds5", report.data(), report.size());
+        CTM_CHECK_EQ((int)claim, (int)(kClaimR2 | kClaimL2));   // both claimed
+        CTM_CHECK_EQ((int)report[kR2Offset], 0x25);             // R2 as asked
+        CTM_CHECK_EQ((int)report[kL2Offset], 0x05);             // L2 put to off
+    }
+    // The same the other way round.
+    reset_config();
+    g_strings["ds5.trigger_l2_effect"] = "wall";
+    {
+        std::vector<uint8_t> report = blank_report();
+        const uint8_t claim = apply_to_report("ds5", report.data(), report.size());
+        CTM_CHECK_EQ((int)claim, (int)(kClaimR2 | kClaimL2));
+        CTM_CHECK_EQ((int)report[kR2Offset], 0x05);
+        CTM_CHECK_EQ((int)report[kL2Offset], 0x21);
+    }
+    // A config that asks for NOTHING still touches nothing, so an install that
+    // never uses this keeps a game's own trigger effects.
+    reset_config();
+    {
+        std::vector<uint8_t> report = blank_report();
+        CTM_CHECK_EQ((int)apply_to_report("ds5", report.data(), report.size()), 0);
+        CTM_CHECK_EQ((int)report[kR2Offset], 0);
+        CTM_CHECK_EQ((int)report[kL2Offset], 0);
     }
 
     section("trigger effect: sections do not leak into each other");

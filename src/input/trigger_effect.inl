@@ -365,14 +365,55 @@ inline uint8_t apply_one(const std::string &section, const char *sideKey,
     return claimBit;
 }
 
+// Is this side asking for an effect of its own?
+inline bool side_wants_effect(const std::string &section, const char *sideKey)
+{
+    const std::string key = std::string("trigger_") + sideKey + "_effect";
+    const Shape shape = shape_from(device_config_str(section.c_str(), key.c_str()));
+    return shape == Shape::Click || shape == Shape::Wall ||
+           shape == Shape::Notch || shape == Shape::Snap;
+}
+
 // Adds whatever the section asks for to an output report already being built.
 // Returns the claim bits to OR into ValidFlag0, or 0 to touch nothing.
+//
+// ⭐⭐ A CONFIG THAT SETS ANY TRIGGER EFFECT OWNS BOTH TRIGGERS.
+//
+// ⛔ WHY, and it was a real fault (rhoquinn8217, 2026-09-10): *"I'm feeling a
+// wall on the L2 trigger. Are you setting anything for L2 by mistake?"* We were
+// not -- a DIFFERENT config had, an hour earlier. An effect lives on the
+// controller until something changes it, and an absent key means "leave it
+// alone", so a wall set by one config followed the pad into the next one and
+// looked like a ghost.
+//
+// ➡️ "Leave it alone" is the right rule for a field somebody ELSE owns. It is
+// the wrong rule for one we set ourselves. So a section that configures either
+// trigger now puts the other into a known state instead of inheriting one.
+//
+// ⓘ Deliberately stateless. Tracking what we had set was the first shape and it
+// was keyed on the config, which is exactly the thing that changes -- so the
+// old config's note was never visited again to be undone.
 inline uint8_t apply_to_report(const std::string &section, uint8_t *report, size_t len)
 {
     if (report == nullptr || len < kL2Offset + kBlockLen) return 0;
+
+    const bool ownsTriggers =
+        side_wants_effect(section, "r2") || side_wants_effect(section, "l2");
+
     uint8_t claim = 0;
     claim = static_cast<uint8_t>(claim | apply_one(section, "r2", report, kR2Offset, kClaimR2));
     claim = static_cast<uint8_t>(claim | apply_one(section, "l2", report, kL2Offset, kClaimL2));
+
+    if (ownsTriggers) {
+        if ((claim & kClaimR2) == 0) {
+            build_off(report + kR2Offset);
+            claim = static_cast<uint8_t>(claim | kClaimR2);
+        }
+        if ((claim & kClaimL2) == 0) {
+            build_off(report + kL2Offset);
+            claim = static_cast<uint8_t>(claim | kClaimL2);
+        }
+    }
     return claim;
 }
 
