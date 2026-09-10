@@ -136,7 +136,27 @@ inline bool step_side(const Side &side, State &st, const uint8_t *data,
     const int pos = data[side.position];
     const bool past = clickRaw > 0 && pos >= clickRaw;
 
-    st.engaged = pos >= engageRaw;
+    // ⭐⭐ TWO THRESHOLDS, NOT ONE, AND THE INTERMITTENCY IS WHY (2026-09-10).
+    //
+    // ⛔ A single threshold sat one unit above where the trigger comes to rest.
+    // A capture showed rest values of 0, 3, 4, 5, 8, 9, 10 and 11 against an
+    // engage point of 12. When it rested high the release was never seen, so a
+    // drag from the previous pull was still set and the NEXT pull began with the
+    // cursor already handed back. rhoquinn8217: *"some instances gyro will stay
+    // off and some will turn off before the break."* Sometimes is what one unit
+    // of margin produces.
+    //
+    // ➡️ So engaging takes the full threshold and DISENGAGING takes a clearly
+    // lower one. The gap is what a resting trigger can wander through without
+    // being mistaken for a finger.
+    //
+    // ⚠️ AND AN EFFECT RAISES WHERE THE TRIGGER RESTS. With a notch set, the
+    // wall holds it slightly off its stop and the same capture showed rest
+    // climbing from 11 to 18. So the margin has to clear the resting value of a
+    // trigger UNDER LOAD, not the value of a bare one -- which is why the
+    // default sits further up than "the smallest the pad allows".
+    const int releaseRaw = (engageRaw * 2) / 3;
+    st.engaged = st.engaged ? (pos >= releaseRaw) : (pos >= engageRaw);
 
     if (!st.engaged) {
         // Home. Everything lets go, including a drag: this is the ONLY thing
@@ -212,7 +232,7 @@ inline void on_ds5_input(const void *deviceKey,
     // ⚠️ ONE number for both triggers. "Starting to pull" is a property of the
     // hand, not of which trigger it is, and two of them could disagree.
     const int engageRaw = raw_from_percent(
-        device_config_int(section.c_str(), "trigger_engage_at", 5));
+        device_config_int(section.c_str(), "trigger_engage_at", 15));
     // ⛔ 600, AND 200 WAS MEASURED WRONG (2026-09-10). The window came from the
     // touchpad, where a click is a tap. A trigger is not: rhoquinn8217's
     // QUICKEST deliberate press in the capture held for 538 ms, and every one of
@@ -293,7 +313,8 @@ inline void on_ds5_input(const void *deviceKey,
         if (changed) {
             device_log::input_s()
                 << "[trigger-click] r2=" << (int)data[kR2Position]
-                << " engage>=" << engageRaw << " click>=" << clickR2
+                << " engage>=" << engageRaw << " release<" << ((engageRaw * 2) / 3)
+                << " click>=" << clickR2
                 << " engaged=" << ((combined & 8) ? 1 : 0)
                 << " down=" << ((combined & 16) ? 1 : 0)
                 << " drag=" << ((combined & 32) ? 1 : 0)

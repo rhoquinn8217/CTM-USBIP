@@ -339,6 +339,12 @@ static std::string rest_keys_json()
 {"key":"touchpad_click_drag","type":"bool","default":false,"help":"Click the touchpad in with a finger on it to grab, move to drag, then LIFT THE FINGER to drop -- the click itself can be released straight away. Trackpads call this drag lock; three-finger drag is not possible here because the pad reports only two touches."},
 {"key":"touchpad_tap_click","type":"bool","default":false,"help":"A quick tap clicks: one finger is left click, two fingers is right click. Double-click is just tapping twice. Turn off if taps misfire in your grip."},
 {"key":"gyro_no_passthrough","type":"bool","default":false,"help":"Turn this on together with the gyro-to-mouse setting below, so tilting the pad moves only the cursor and nothing else can read the gyro. Leave it off and, in a game that responds to gyro, you get both at once -- the game reacting to the tilt AND the cursor moving."},
+)CTMKEYS";
+    // ⛔ SPLIT ON PURPOSE. MSVC refuses a single string literal over 16380
+    // bytes (C2026) and this one grew past it as the trigger settings were
+    // documented. Two literals joined at the end cost nothing and the break
+    // can move wherever is convenient -- it is not a section boundary.
+    const std::string pointers2 = R"CTMKEYS(
 {"key":"trigger_r2_effect","type":"choice","choices":["","off","click","wall","notch","snap"],"default":"","help":"A resistance effect on R2. \"click\" puts a break at the point below, so the finger can feel where a trigger click fires. \"wall\" is steady resistance from that point down. \"notch\" is both at once: a light wall the whole way down with one firm detent in it, at the point. The wall is flat, so moving the point changes WHERE the detent is rather than how hard the pull is. \"snap\" is a break like \"click\" that also tries to push the trigger back to rest, and is on trial. Blank leaves the trigger alone; \"off\" clears an effect this listener set. Wired controllers only."},
 {"key":"trigger_r2_effect_at","type":"int","min":0,"max":100,"default":50,"help":"Where in the pull the R2 effect sits, as a percent of the travel. Leave it blank to follow the R2 click point, which is what you want unless you are deliberately marking somewhere else. A \"click\" break can only land between 30 and 90 percent, and is moved to the nearest of those if you ask for more. A \"wall\" can start anywhere."},
 {"key":"trigger_r2_effect_strength","type":"int","min":1,"max":7,"default":5,"help":"How hard the R2 effect pushes back, 1 lightest and 7 firmest. Every value here is a real force; there is no setting that quietly means none."},
@@ -352,7 +358,7 @@ static std::string rest_keys_json()
 {"key":"trigger_r2_click_at","type":"int","min":10,"max":100,"default":90,"help":"How far R2 must travel before it clicks, as a percent of the pull. Deeper is steadier, because the finger has settled by the time it fires."},
 {"key":"trigger_l2_click","type":"string","name":"L2 press sends","default":"","help":"What L2 sends, otherwise the same as the R2 setting above."},
 {"key":"trigger_l2_click_at","type":"int","min":10,"max":100,"default":90,"help":"How far L2 must travel before it clicks, as a percent of the pull."},
-{"key":"trigger_engage_at","type":"int","min":1,"max":50,"default":5,"help":"How far a trigger must move before the cursor freezes, as a percent of the pull. Wants to be as small as the controller allows, so the cursor is already still well before the click. One number for both triggers, since it describes the hand rather than the trigger."},
+{"key":"trigger_engage_at","type":"int","min":4,"max":50,"default":15,"help":"How far a trigger must move before the cursor freezes, as a percent of the pull. It wants to be small so the cursor is still well before the click, but NOT close to where the trigger rests: a resting trigger was measured wandering up to 7 percent with an effect set, since the effect holds it off its stop, and a threshold near that is read as a finger. The release point sits two thirds of the way down from here, and the gap between them is the margin. One number for both triggers, since it describes the hand rather than the trigger."},
 {"key":"trigger_click_hold_ms","type":"int","min":0,"max":2000,"default":600,"help":"How long a trigger press is held before it becomes a drag, in milliseconds. This is also the double-click window: hold for less and a second press is a double click with the cursor still frozen, hold for longer and the cursor comes back with the button still down. A deliberate press measured 538ms, so anything near 200 turns ordinary presses into drags. 0 turns dragging off."},
 {"key":"gyro_mouse_px_per_360","type":"int","min":1000,"max":200000,"default":1920,"help":"Pixels the cursor travels for one full turn. 1920 means one turn crosses a 1080p screen, which is the calibrated figure -- if you need far more than that, the sensitivity settings are usually what is actually wrong."},
 {"key":"gyro_mouse_min_sens","type":"int","min":0,"max":60,"default":8,"help":"Sensitivity for slow, precise movement. ⭐ 8 is the recommended starting point and 4-10 is the useful band; below about 4 slow movement becomes almost dead, which people then compensate for by raising everything else."},
@@ -398,7 +404,7 @@ static std::string rest_keys_json()
 "MouseLeft","MouseRight","MouseMiddle","MouseWheelUp","MouseWheelDown",
 "KeyboardDS5_USBIP","KeyboardSteam","KeyboardWindows"
 ]})CTMKEYS";
-    return settings + pointers + names;
+    return settings + pointers + pointers2 + names;
 }
 
 // Resolves a body that may name either a device or a raw value.

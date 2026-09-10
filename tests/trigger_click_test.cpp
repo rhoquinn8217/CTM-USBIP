@@ -287,6 +287,61 @@ int run_trigger_click_tests()
         CTM_CHECK(out.down);
     }
 
+    section("trigger click: a resting trigger cannot look like a finger");
+    // ⛔ THE INTERMITTENCY THIS FIXES. One threshold sat a single unit above
+    // where the trigger comes to rest, so a pull that ended high was never seen
+    // as released -- and the NEXT pull began with a drag still set and the
+    // cursor already handed back. Engaging takes the full threshold; letting go
+    // takes a clearly lower one, and the gap is the margin.
+    {
+        State st;
+        const int engage = raw_from_percent(12);       // 30
+        const int release = (engage * 2) / 3;          // 20
+        static const Side side{ "r2", kR2Position };
+        bool freeze = false;
+
+        // A trigger wandering below the engage point never engages at all.
+        for (int rest : { 0, 11, 20, 29 }) {
+            freeze = false;
+            const std::vector<uint8_t> d = report_with(0, rest);
+            step_side(side, st, d.data(), 0, engage, raw_from_percent(80), 600, true, &freeze);
+            CTM_CHECK(!freeze);
+        }
+        // Past the engage point it engages, and a drag follows a held press.
+        freeze = false;
+        {
+            const std::vector<uint8_t> d = report_with(0, 240);
+            step_side(side, st, d.data(), 0, engage, raw_from_percent(80), 600, true, &freeze);
+            step_side(side, st, d.data(), 700, engage, raw_from_percent(80), 600, true, &freeze);
+        }
+        CTM_CHECK(st.dragging);
+        // ⭐ Now let it come to rest HIGH, at the old threshold. It must still
+        // read as released, or the drag survives into the next pull.
+        freeze = false;
+        {
+            const std::vector<uint8_t> d = report_with(0, 12);
+            step_side(side, st, d.data(), 800, engage, raw_from_percent(80), 600, true, &freeze);
+        }
+        CTM_CHECK(!st.engaged);
+        CTM_CHECK(!st.dragging);
+        CTM_CHECK(!st.down);
+        CTM_CHECK(!freeze);
+        // ⓘ And between the two thresholds the state HOLDS rather than flapping,
+        // which is the point of having two.
+        st = State();
+        freeze = false;
+        {
+            const std::vector<uint8_t> up = report_with(0, 40);
+            step_side(side, st, up.data(), 0, engage, raw_from_percent(80), 600, true, &freeze);
+            CTM_CHECK(st.engaged);
+            const std::vector<uint8_t> between = report_with(0, 25);
+            freeze = false;
+            step_side(side, st, between.data(), 10, engage, raw_from_percent(80), 600, true, &freeze);
+            CTM_CHECK(st.engaged);                     // above the release point
+            CTM_CHECK(freeze);
+        }
+    }
+
     section("trigger click: a mouse binding, end to end");
     reset_all();
     g_strings["ds5.trigger_r2_click"] = "MouseLeft";
