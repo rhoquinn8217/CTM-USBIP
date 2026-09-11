@@ -162,10 +162,15 @@ inline const Setting kTouchpadMouseMode[] = {
 // to come all the way home rather than thawing in the gap.
 //
 // ⭐⭐ AND THE EFFECT IS WHY IT IS USABLE. A trigger press fires somewhere a
-// finger cannot see. The notch puts a light wall under the pull with one firm
-// detent at the point, so there is somewhere to rest while frozen and something
-// to feel when it fires. Without it the frozen region is crossed in about a
-// thirtieth of a second and the press is a guess (measured 2026-09-10).
+// finger cannot see, so the break is the landmark: it arrives exactly where the
+// button does, and pushing through it IS the press.
+//
+// ⛔ A NOTCH WAS TRIED HERE AND REJECTED (rhoquinn8217, 2026-09-10). It adds a
+// light wall under the whole pull, which gives the frozen region somewhere to
+// rest -- but resting there is not something anyone does. You pull to press.
+// What the wall does cost is real: every press is heavier, and repeated
+// pressing becomes work. ⓘ The argument for it came from a test step that
+// asked for a hover, which was an artefact of the testing rather than a use.
 //
 // ⛔ THIS REPLACED A TOUCHPAD VERSION, and the reason is worth keeping. That
 // one froze on a touch, and a touch is binary: any graze froze the cursor with
@@ -188,9 +193,9 @@ inline const Setting kSteadyGyroMouseMode[] = {
     { "trigger_left_click_at", "80" },
     /* ⓘ The effect point is left unset so it FOLLOWS the press point. Two
        numbers for one place drifted apart three times in one evening. */
-    { "trigger_right_effect", "notch" },
+    { "trigger_right_effect", "click" },
     { "trigger_right_effect_strength", "7" },
-    { "trigger_left_effect", "notch" },
+    { "trigger_left_effect", "click" },
     { "trigger_left_effect_strength", "7" },
     /* ⚠️ Not the smallest the pad allows. A trigger under an effect rests
        further off its stop, and a threshold near that reads as a finger. */
