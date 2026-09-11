@@ -3,6 +3,8 @@ out/
 *.user
 *.suo
 *.log
+# Compressed device logs kept for reference; they are evidence, not source.
+logs-archive/
 
 # Build output
 /build/
