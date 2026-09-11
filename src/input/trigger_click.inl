@@ -293,10 +293,17 @@ inline bool has_effect(const std::string &section, const char *sideName)
     const std::string key = std::string("trigger_") + sideName + "_effect";
     const trigger_effect::Shape shape =
         trigger_effect::shape_from(device_config_str(section.c_str(), key.c_str()));
+    // ⛔ NOTCH IS EXCLUDED, measured 2026-09-10. Its wall covers the whole pull
+    // by design, so the controller reports the effect entered at the very top:
+    // the press fired at 15% of the travel, the instant the trigger left rest.
+    // ⓘ There is no moment the hardware can name that matches the detent,
+    // because the detent is a force CHANGE inside an effect already entered.
+    // So a notch keeps a travel threshold for the press and offers its feel
+    // only. ➡️ A wall does not have this problem: it starts where you put it,
+    // and entering it IS the point.
     return shape == trigger_effect::Shape::Click ||
            shape == trigger_effect::Shape::Snap ||
-           shape == trigger_effect::Shape::Wall ||
-           shape == trigger_effect::Shape::Notch;
+           shape == trigger_effect::Shape::Wall;
 }
 
 // ⭐ A PROBE FOR THE TRIGGER STATUS BYTE, off unless `trigger_probe` is set.
