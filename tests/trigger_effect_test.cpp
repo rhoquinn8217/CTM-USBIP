@@ -263,19 +263,37 @@ int run_trigger_effect_tests()
         CTM_CHECK_EQ((int)report[kL2Offset], 0x05);         // and the other is turned off
     }
 
-    section("trigger effect: off clears only what we set");
-    // Still holding the R2 effect from the section above.
+    section("trigger effect: off clears the trigger every time it is asked for");
     reset_config();
     g_strings["ds5.right_trigger_effect"] = "off";
     {
         std::vector<uint8_t> report = blank_report();
         const uint8_t claim = apply_to_report("ds5", report.data(), report.size());
-        CTM_CHECK_EQ((int)claim, (int)kClaimR2);
+        // Off owns BOTH, the same as any other shape: a section with an opinion
+        // about one trigger puts the other into a known state rather than
+        // leaving it holding whatever came before.
+        CTM_CHECK_EQ((int)claim, (int)(kClaimR2 | kClaimL2));
         CTM_CHECK_EQ((int)report[kR2Offset], 0x05);
+        CTM_CHECK_EQ((int)report[kL2Offset], 0x05);
     }
-    // ⭐ And a second off does nothing at all: there is no longer an effect of
-    // ours to undo, so the triggers are not claimed. This is what keeps an
-    // install that never uses the feature from stamping on a game.
+    // ⛔ AND AGAIN, IDENTICALLY. This asserted the opposite until 2026-09-11 --
+    // that a second off did nothing, because a record of what this process had
+    // set said there was nothing left to undo. That record was keyed on the
+    // CONFIG NAME, so linking a fresh config whose effect is off found no
+    // record under its name and sent nothing: the trigger kept the effect the
+    // previous config had given it. rhoquinn8217 caught it switching from a
+    // notch to an off: *"doesn't appear to turn off the adaptive trigger
+    // feeling."*
+    {
+        std::vector<uint8_t> report = blank_report();
+        CTM_CHECK_EQ((int)apply_to_report("ds5", report.data(), report.size()),
+                     (int)(kClaimR2 | kClaimL2));
+        CTM_CHECK(wants_anything("ds5"));
+    }
+    // ⭐ What still touches nothing is a section that never mentions a trigger.
+    // That is the protection against stamping on a game, and it does not need a
+    // record to work: silence by default does it.
+    reset_config();
     {
         std::vector<uint8_t> report = blank_report();
         CTM_CHECK_EQ((int)apply_to_report("ds5", report.data(), report.size()), 0);
@@ -344,10 +362,25 @@ int run_trigger_effect_tests()
     {
         std::vector<uint8_t> report = blank_report();
         apply_to_report("ds5", report.data(), report.size());
-        // The Edge never had an effect set, so its off is a no-op even though
-        // the DualSense section is holding one.
+        CTM_CHECK_EQ((int)report[kR2Offset], 0x25);        // the DS5 got its click
+        // ⭐ And the Edge gets what the EDGE asked for -- an off -- rather than
+        // the click sitting in the other section. Each section is read on its
+        // own; neither reaches into the other.
+        std::vector<uint8_t> other = blank_report();
+        CTM_CHECK_EQ((int)apply_to_report("edge", other.data(), other.size()),
+                     (int)(kClaimR2 | kClaimL2));
+        CTM_CHECK_EQ((int)other[kR2Offset], 0x05);
+    }
+
+    section("trigger effect: a section with no trigger keys is left alone");
+    reset_config();
+    g_strings["ds5.right_trigger_effect"] = "click";
+    {
+        // The Edge says nothing about triggers, so nothing is sent for it even
+        // while another section is holding an effect.
         std::vector<uint8_t> other = blank_report();
         CTM_CHECK_EQ((int)apply_to_report("edge", other.data(), other.size()), 0);
+        CTM_CHECK(!wants_anything("edge"));
     }
 
     reset_config();

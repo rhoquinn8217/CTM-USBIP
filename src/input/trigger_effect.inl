@@ -405,25 +405,24 @@ inline Shape shape_from(const std::string &value)
 // ⭐ WHAT WE HAVE SET, so that turning it off can clear it WITHOUT claiming the
 // triggers on installs that never asked for any of this.
 //
-// ⛔ Clearing unconditionally was the obvious first shape and it is wrong: it
-// would make every settings push claim the trigger fields, stamping "off" over
-// a game's own effect for everyone, including the people not using this. So we
-// clear only what this process actually set.
-inline std::mutex g_setMutex;
-inline std::map<std::string, bool> g_setEffect;
-
-inline bool has_set_effect(const std::string &marker)
-{
-    std::lock_guard<std::mutex> lock(g_setMutex);
-    return g_setEffect.find(marker) != g_setEffect.end();
-}
-
-inline void note_set_effect(const std::string &marker, bool on)
-{
-    std::lock_guard<std::mutex> lock(g_setMutex);
-    if (on) g_setEffect[marker] = true;
-    else g_setEffect.erase(marker);
-}
+// ⛔⛔ THERE WAS A RECORD HERE OF WHAT THIS PROCESS HAD SET, and "off" only
+// cleared a trigger that record knew about -- so a settings push could never
+// stamp off over a game's own effect for someone not using this.
+//
+// ⚠️ IT WAS KEYED ON THE CONFIG NAME, which is the thing that changes. Link a
+// config whose effect is "off" and there is no record under ITS name, so both
+// wants_anything() and apply_one() concluded there was nothing to do and sent
+// nothing at all. The trigger kept whatever the previous config gave it.
+// rhoquinn8217, 2026-09-11, switching from a notch to an off: *"doesn't appear
+// to turn off the adaptive trigger feeling."*
+//
+// ⓘ The comment on apply_to_report already said this shape had been abandoned
+// for exactly that reason; it was still load-bearing in two places.
+//
+// ➡️ "off" is now an instruction like any other, honoured when it is asked for.
+// ⭐ What it does NOT do is fire unasked: a section with no effect key at all
+// is Absent, owns nothing, and still touches no trigger field. The protection
+// that mattered comes from being silent by default, not from a record.
 
 // Writes one trigger's block and says which claim bit to raise. Returns 0 when
 // the trigger is to be left alone, which is the common case.
@@ -433,15 +432,12 @@ inline uint8_t apply_one(const std::string &section, const char *sideKey,
     const std::string effectKey   = effect_key(sideKey);
     const std::string atKey       = effectKey + "_at";
     const std::string strengthKey = effectKey + "_strength";
-    const std::string marker      = section + "/" + sideKey;
 
     const Shape shape = shape_from(device_config_str(section.c_str(), effectKey.c_str()));
     if (shape == Shape::Absent) return 0;
 
     if (shape == Shape::Off) {
-        if (!has_set_effect(marker)) return 0;      // nothing of ours to undo
         build_off(report + offset);
-        note_set_effect(marker, false);
         return claimBit;
     }
 
@@ -492,7 +488,6 @@ inline uint8_t apply_one(const std::string &section, const char *sideKey,
     } else {
         build_feedback(report + offset, zone, strength);
     }
-    note_set_effect(marker, true);
     return claimBit;
 }
 
@@ -501,8 +496,11 @@ inline bool side_wants_effect(const std::string &section, const char *sideKey)
 {
     const std::string key = effect_key(sideKey);
     const Shape shape = shape_from(device_config_str(section.c_str(), key.c_str()));
+    // ⭐ OFF COUNTS. Asking for it is asking for the trigger to be cleared,
+    // which needs a report sent and the pair claimed just as any shape does.
     return shape == Shape::Click || shape == Shape::Wall ||
-           shape == Shape::Notch || shape == Shape::Snap;
+           shape == Shape::Notch || shape == Shape::Snap ||
+           shape == Shape::Off;
 }
 
 // Adds whatever the section asks for to an output report already being built.
@@ -557,8 +555,8 @@ inline bool wants_anything(const std::string &section)
         const std::string key = effect_key(side);
         const Shape shape = shape_from(device_config_str(section.c_str(), key.c_str()));
         if (shape == Shape::Click || shape == Shape::Wall ||
-            shape == Shape::Notch || shape == Shape::Snap) return true;
-        if (shape == Shape::Off && has_set_effect(section + "/" + side)) return true;
+            shape == Shape::Notch || shape == Shape::Snap ||
+            shape == Shape::Off) return true;
     }
     return false;
 }
