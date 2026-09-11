@@ -464,9 +464,25 @@ inline uint8_t apply_one(const std::string &section, const char *sideKey,
     const int zone     = zone_from_percent(percent);
 
     if (shape == Shape::Click) {
-        // ⭐ The break lands at the END zone, so the requested point IS the end
-        // and the resistance starts one zone earlier.
-        build_weapon(report + offset, zone - 1, zone, strength);
+        // ⭐⭐ THE REQUESTED PERCENT IS WHERE IT GIVES WAY, so the end zone is
+        // one BELOW the zone that percent falls in, and the start is one below
+        // that.
+        //
+        // ⛔ MEASURED, 2026-09-11. It used to pass the zone itself as the end,
+        // on the reasoning that the break is at the end of the effect. But a
+        // zone is a ten-percent BAND, not a point, and the pad does not report
+        // the crossing until the trigger is into the NEXT band. With 80
+        // requested the end zone was 8, and a pull to raw 231 -- 90.6% of the
+        // travel -- still read status 1. Only 255 read 2. So the break sat on
+        // top of the hard stop, where there is nothing left to feel it against.
+        //
+        // ⚠️ THIS IS WHY ONE TRIGGER SEEMED BROKEN AND THE OTHER DID NOT.
+        // rhoquinn8217, 2026-09-11: *"R2 mouse click happens on the break. L2
+        // mouse click happens without hitting the break."* Both were doing the
+        // same thing. An index finger drives R2 through the last sliver of
+        // travel by habit; a middle finger on L2 stops short. Proven by putting
+        // the same click at 40% on both, where the give-way was felt on each.
+        build_weapon(report + offset, zone - 2, zone - 1, strength);
     } else if (shape == Shape::Notch) {
         build_detent_wall(report + offset, zone, strength);
     } else if (shape == Shape::Snap) {

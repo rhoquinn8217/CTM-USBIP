@@ -250,10 +250,15 @@ int run_trigger_effect_tests()
         // Both are claimed: a config that sets one trigger owns both, so L2
         // is put into a known state rather than inheriting one.
         CTM_CHECK_EQ((int)claim, (int)(kClaimR2 | kClaimL2));
-        // Break at zone 5, so resistance runs 4 to 5.
+        // ⭐ 50 percent is where it GIVES WAY, so the end zone is 4 and the
+        // resistance runs from 3. ⛔ This asserted zones 4 and 5 until
+        // 2026-09-11, when a zone was being read as a point: the pad does not
+        // report the crossing until the trigger is into the zone AFTER the end
+        // one, so naming zone 5 as the end put the break at 60 and a break
+        // asked for at 80 landed on the hard stop. Measured on hardware.
         CTM_CHECK_EQ((int)report[kR2Offset], 0x25);
         CTM_CHECK_EQ((int)(report[kR2Offset + 1] | (report[kR2Offset + 2] << 8)),
-                     (1 << 4) | (1 << 5));
+                     (1 << 3) | (1 << 4));
         CTM_CHECK_EQ((int)report[kR2Offset + 3], 6);
         CTM_CHECK_EQ((int)report[kL2Offset], 0x05);         // and the other is turned off
     }
