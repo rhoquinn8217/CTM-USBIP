@@ -474,7 +474,16 @@ inline void apply(const void *deviceKey,
     // Three clean repetitions showed both fingers held steady for the whole
     // press with no flicker, landing 8-16ms apart. So an instant check is enough
     // and no memory window is needed.
-    if (len > 40) {
+    // The offsets below are DUALSENSE offsets, so the pad has to be one.
+    //
+    // Without this an Xbox GIP report -- 48 bytes, so it passes `len > 40` --
+    // was read here every report. Bytes 18..47 of that report are always zero,
+    // and "finger down" is bit 0x80 CLEAR, so BOTH fingers read as permanently
+    // resting; and [9] is the right trigger's high byte, so RT alone supplied
+    // the Options edge. The chord could therefore fire on a pad with no
+    // touchpad. A DS4 has a touchpad but not at these offsets, so it is
+    // excluded too.
+    if (device_has_ds5_input_layout(descriptor) && len > 40) {
         const bool f1 = (data[33] & 0x80) == 0;
         const bool f2 = (data[37] & 0x80) == 0;
         const bool options = (data[9] & 0x20) != 0;
@@ -1208,16 +1217,32 @@ void ctm_rebind_apply(const void *deviceKey,
     // ⛔ When it consumes the input, the game must see NOTHING -- so the report
     // is blanked rather than merely left alone. A keyboard on screen that lets
     // stray presses through to what is behind it is worse than no keyboard.
-    if (ctm_overlay::handle_report(deviceKey, data, len)) {
-        ctm_overlay::blank_report(data, len);
-        return;
-    }
+    // ⛔ BOTH OF THESE READ, AND WRITE, DUALSENSE BYTE POSITIONS -- and neither
+    // is even handed the descriptor, so neither can check for itself. The guard
+    // belongs here, at the one place that has both the descriptor and the calls.
+    //
+    // What it was doing without one: overlay_window.inl carries its own copy of
+    // the DualSense bit table and reads the d-pad as `data[8] & 0x0f`, while
+    // blank_report WRITES data[1..6], [8], [9] and [10]. On an Xbox GIP report
+    // those land on the header, the sequence counter, the length byte, both
+    // button bytes and the trigger field -- so a pad that merely had the overlay
+    // open could have its report corrupted on the way to the game.
+    //
+    // ⓘ This makes the overlay keyboard and the Options-moves-the-window gesture
+    // DualSense-only, which is what they have always actually been. They
+    // appeared to work elsewhere only in the sense that they read something.
+    if (device_has_ds5_input_layout(descriptor)) {
+        if (ctm_overlay::handle_report(deviceKey, data, len)) {
+            ctm_overlay::blank_report(data, len);
+            return;
+        }
     // ⭐ Options moves the settings page while it is up and in front, the way
     // it moves the keyboard (2026-09-08). ⓘ After the keyboard on purpose: if
     // both are showing, the keyboard has the pad, as it always has.
-    if (config_move::handle_report(deviceKey, data, len)) {
-        ctm_overlay::blank_report(data, len);
-        return;
+        if (config_move::handle_report(deviceKey, data, len)) {
+            ctm_overlay::blank_report(data, len);
+            return;
+        }
     }
     ctm_rebind::apply(deviceKey, descriptor, linkedConfig, data, len);
 }

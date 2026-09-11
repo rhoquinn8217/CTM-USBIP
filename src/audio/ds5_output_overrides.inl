@@ -123,6 +123,26 @@ static bool device_has_ds5_motion(const std::vector<unsigned char> &descriptor)
     return device_has_ds5_audio(descriptor);
 }
 
+// Does this device's INPUT report use DualSense byte positions?
+//
+// A third question, and the one nothing was asking. device_section_for() answers
+// "which config section", and it says yes to a DS4 -- whose input report is a
+// DIFFERENT shape, three bytes shorter in the button region. So code that reads
+// DualSense offsets cannot use it as a guard, and code that reads them on a
+// non-Sony pad has no guard at all.
+//
+// Measured 2026-09-11: a DS4 puts its buttons at bytes 5/6/7 where a DualSense
+// puts them at 8/9/10, and an Xbox GIP report puts them at 4/5 behind a 4-byte
+// header. So three layouts, one of which this answers for.
+//
+// Same two devices as the audio and motion questions today. Kept separate for
+// the same reason those two are: when a DS4 input path is written, this is the
+// one that changes and the other two do not.
+static bool device_has_ds5_input_layout(const std::vector<unsigned char> &descriptor)
+{
+    return device_has_ds5_audio(descriptor);
+}
+
 // DualSense USB output report layout. Positions and claim bits are ours, from
 // on-wire capture, independently cross-checked against daidr/dualsense-tester
 // (MIT) -- every one agreed. NO CODE WAS COPIED.
