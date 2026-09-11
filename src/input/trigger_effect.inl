@@ -253,6 +253,15 @@ inline void build_feedback(uint8_t *block, int startZone, int strength)
 // ⓘ One knob. The detent takes the configured strength and the wall is a third
 // of it, floored at a real force. A ratio rather than a difference, because the
 // first failure above was a difference that turned out to be too small.
+//
+// ⚠️⚠️ AND IT HAS A FLOOR BELOW WHICH IT DOES NOTHING, measured 2026-09-10.
+// At strength 3 the detent is 3 against a wall of 1 and rhoquinn8217 could not
+// tell it from a plain wall. At 7 it is 7 against 2 and the bump is plainly
+// there. ➡️ So a notch wants 5 or more. Below that the two forces are too close
+// to separate, and the shape reads as the thing it was trying not to be.
+// ⛔ Do not "fix" a flat notch by changing the ratio. It was changed twice
+// already for exactly that reason, and the answer both times was that the step
+// was too small in absolute terms rather than proportionally.
 inline void build_detent_wall(uint8_t *block, int detentZone, int strength)
 {
     // ⓘ Zone 0 is left free so the trigger is not heavy at rest, which also
