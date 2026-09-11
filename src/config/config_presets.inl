@@ -98,20 +98,19 @@ inline const Setting kGyroMouseMode[] = {
     { "gyro_no_passthrough", "true" },
     CTM_PRESET_SHARED_BINDINGS,
     { "gyro_to_mouse_gate", "always" },
-    /* ⭐ THE TOUCHPAD IS BORROWED, NOT REPURPOSED (rhoquinn8217, 2026-09-03).
-       Gyro has no scroll of its own, so it borrows one -- ONE FINGER, reachable
-       with a pointer finger while both thumbs stay on the sticks.
-       ⛔ And touchpad_no_passthrough is deliberately NOT set: a borrowed source
-       keeps its day job, so a game's own touchpad gestures still work. The
-       person decides if they would rather it did not. */
-    { "touchpad_scroll", "1" },
-    /* ⛔ NEITHER STICK IS SPENT HERE (rhoquinn8217, 2026-09-03). This preset
-       used to borrow the left stick to scroll, which was nearly free while the
-       game still saw the stick -- and became a real cost once hiding a source
-       meant losing it. Movement is what a gamer cannot give up.
-       ⓘ The d-pad is already bound to the arrow keys, which scroll most things,
-       and the convention elsewhere puts scroll on the spare POINTING surface --
-       the Steam Controller's left trackpad -- rather than on a stick. */
+    /* ⭐⭐ SCROLL IS THE LEFT STICK, AND THAT IS A REVERSAL (rhoquinn8217,
+       2026-09-10). It was the touchpad from 2026-09-03, chosen so that neither
+       stick was spent, on the grounds that movement is what a gamer cannot give
+       up. ⓘ That reasoning still holds for a pad being PLAYED with.
+       ➡️ What changed is who this preset is for. A gyro belongs to plenty of
+       controllers that have no touchpad at all, and a preset that needs one
+       cannot serve them. This is a DESKTOP config -- it already binds Cross to
+       Enter and the d-pad to the arrows, so there is no game to protect a stick
+       for. The DS5-only shapes now say so in their names instead.
+       ⛔ So do not "restore" the touchpad here. The pad-specific version of this
+       idea is DS5-gyro-to-mouse, which uses the touchpad because it can. */
+    { "left_stick_mode", "scroll" },
+    { "left_stick_no_passthrough", "true" },
     // ⓘ Recentring belongs HERE and only here: it points the gyro back at the
     // middle of the screen. On a stick or touchpad cursor there is nothing to
     // recentre, so binding it there would be a button that appears to do
@@ -205,7 +204,9 @@ inline const Setting kSteadyGyroMouseMode[] = {
     { "trigger_click_hold_ms", "600" },
 
     { "touchpad_no_passthrough", "true" },
-    { "touchpad_scroll", "2" },
+    /* ⓘ ONE finger. Both thumbs are free here -- the triggers do the pressing
+       and the gyro does the pointing -- so nothing is competing for the pad. */
+    { "touchpad_scroll", "1" },
     { "touchpad_scroll_natural", "true" },
 };
 
@@ -271,7 +272,7 @@ inline const Preset kPresets[] = {
       "touchpad, reachable without either thumb leaving a stick. Square "
       "opens the on-screen keyboard.",
       true, true, kGyroMouseMode, CTM_PRESET_COUNT_OF(kGyroMouseMode) },
-    { "touchpad-mouse",
+    { "DS5-touchpad-to-mouse",
       "The touchpad behaves like a laptop trackpad: one finger moves the "
       "cursor, two fingers scroll the page with them, and a tap clicks. The "
       "most familiar of the three, and the easiest to pick up, but your hand "
@@ -282,7 +283,7 @@ inline const Preset kPresets[] = {
       "they already are. The least precise of the three for fine work, and "
       "the one that needs no new habits. Square opens the on-screen keyboard.",
       true, true, kStickMouseMode, CTM_PRESET_COUNT_OF(kStickMouseMode) },
-    { "steady-gyro-mouse",
+    { "DS5-gyro-to-mouse",
       "The gyro moves the cursor and the triggers hold it still. Start to pull "
       "and the cursor stops, push past the notch you can feel and it clicks "
       "where your finger expects, and it only moves again once you let the "
