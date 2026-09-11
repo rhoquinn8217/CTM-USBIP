@@ -55,6 +55,11 @@ constexpr size_t kL2Position = 5;
 constexpr size_t kR2Position = 6;
 constexpr int    kFullPull   = 255;
 
+// ⭐ Far enough down that only a deliberate shove gets there THROUGH a
+// resistance. Full travel reads exactly 255 in every capture; the margin is for
+// a pad that does not quite reach it.
+constexpr int kBottomedRaw = 250;
+
 // Where each trigger reports its adaptive effect status. See crossed_effect().
 constexpr size_t kRightStatusByte = 42;
 constexpr size_t kLeftStatusByte  = 43;
@@ -149,6 +154,9 @@ struct State {
     bool down     = false;   // the binding is held
     bool dragging = false;   // held long enough that the cursor came back
     long long downAtMs = 0;
+    // ⭐ When a press last ENDED as a click rather than a drag. The cursor is
+    // held for the rest of the double-click window afterwards; see step_side.
+    long long clickEndedAtMs = 0;
 };
 
 struct Pad {
@@ -181,6 +189,7 @@ inline int raw_from_percent(int percent)
 // without a config and time can be supplied rather than observed.
 inline bool step_side(const Side &side, State &st, const uint8_t *data, size_t len,
                       long long nowMs, int engageRaw, int clickRaw, int holdMs,
+                      int doubleMs,
                       bool bound, bool useEffect, bool shapeBreaks, bool *freeze)
 {
     if (!bound) {
@@ -235,8 +244,44 @@ inline bool step_side(const Side &side, State &st, const uint8_t *data, size_t l
     if (!st.engaged) {
         // Home. Everything lets go, including a drag: this is the ONLY thing
         // that ends one, which is what makes the gesture predictable.
+        if (st.down && !st.dragging) st.clickEndedAtMs = nowMs;
         st.down = false;
         st.dragging = false;
+        // ⭐⭐ THE CURSOR STAYS PUT BETWEEN THE HALVES OF A DOUBLE CLICK
+        // (rhoquinn8217, 2026-09-11). A click just happened, so another may be
+        // coming, and the cursor has no business moving in between.
+        //
+        // ⛔ WHY IT IS NOT ENOUGH TO STAY ENGAGED. Measured on a wall: two
+        // double clicks seconds apart, one worked and one did not, and the only
+        // difference was whether the lift stopped at raw 92 or carried on to 8.
+        //     11:36:52.479  r2=92  down=0  freeze=1   second click landed
+        //     11:36:52.294  r2=8   down=0  freeze=0   second click went wide
+        // Nobody can feel that difference, least of all with a wall pushing the
+        // finger back out as it releases.
+        //
+        // ⓘ A WALL IS A LANDMARK, NOT SOMETHING YOU PUSH THROUGH -- which is
+        // what makes this the common case rather than an edge one:
+        // *"I don't push through the resistance for the click to fire. The
+        // click fires right when the resistance starts... the wall is used to
+        // shorten the finger travel distance to trigger the click."* So the
+        // gesture is tap the landmark, lift, tap again, and the lift goes all
+        // the way home every time.
+        //
+        // ⚠️ A DRAG IS EXCLUDED on purpose. Letting go of a drag means you are
+        // done, and holding the cursor after it would feel stuck.
+        // ⛔⛔ ITS OWN NUMBER, NOT THE DRAG WINDOW (rhoquinn8217, 2026-09-11).
+        // This used holdMs, and one number was answering two questions. "How
+        // long must I hold before this is a drag" is about deliberate intent
+        // and wants 600. "How long do I wait to see whether a second click is
+        // coming" is about how fast a double click is and wants a fraction of
+        // that. Waiting 600ms for a second press that never comes reads as the
+        // cursor lagging after every click:
+        // *"gyro stays off longer than fully releasing the trigger, making it
+        // feel like a click causes mouse lag."*
+        if (st.clickEndedAtMs != 0 && doubleMs > 0 &&
+            nowMs - st.clickEndedAtMs < doubleMs) {
+            *freeze = true;
+        }
         return false;
     }
 
@@ -244,11 +289,32 @@ inline bool step_side(const Side &side, State &st, const uint8_t *data, size_t l
         st.down = true;
         st.dragging = false;
         st.downAtMs = nowMs;
+        st.clickEndedAtMs = 0;        // a new press: the window is not running
     } else if (!past && st.down && !st.dragging) {
         // Lifted back over the point without going home. The binding releases,
         // the cursor does NOT: the finger is still on the trigger, and the next
         // press is very likely the second half of a double click.
+        // ⓘ Noted here too, so a lift that CARRIES ON home a moment later is
+        // still inside the window when it gets there.
+        st.clickEndedAtMs = nowMs;
         st.down = false;
+    } else if (st.down && !st.dragging && useEffect && !shapeBreaks &&
+               pos >= kBottomedRaw) {
+        // ⭐⭐ SHOVED THROUGH THE RESISTANCE TO THE STOP: that is a drag, now,
+        // without waiting out the window (rhoquinn8217, 2026-09-11).
+        //
+        // ⓘ A wall's press fires the moment you MEET it, which is a light act.
+        // Carrying on through it to the bottom is not -- the effect is pushing
+        // back the whole way, so arriving there is a decision:
+        // *"it signals the commitment to hold down/drag something. This gives a
+        // faster response for a drag that feels right."*
+        //
+        // ⛔ ONLY SHAPES THAT RESIST WITHOUT BREAKING -- wall and notch. On a
+        // click or a snap the break itself throws the trigger to the stop, so
+        // bottoming out there is the mechanism rather than a choice, and this
+        // would turn ordinary clicks into drags. With no effect there is
+        // nothing to push against and the same applies.
+        st.dragging = true;
     } else if (st.down && !st.dragging && holdMs > 0 && nowMs - st.downAtMs >= holdMs) {
         // ⭐ Held past the window, so this was never a click. Hand the cursor
         // back and keep the binding down: that is a drag.
@@ -439,6 +505,10 @@ inline void on_ds5_input(const void *deviceKey,
     // ⭐ A drag has to be something you MEAN, so the window must sit clear of an
     // ordinary press rather than just above a tap.
     const int holdMs = device_config_int(section.c_str(), "trigger_drag_after_ms", 600);
+    // How long the cursor stays put after a click, waiting for a second one.
+    // ⓘ 0 hands it back the moment the trigger goes home.
+    const int doubleMs =
+        device_config_int(section.c_str(), "trigger_double_click_ms", 200);
     const int clickR2 = raw_from_percent(
         device_config_int(section.c_str(), "right_trigger_press_at", 90));
     const int clickL2 = raw_from_percent(
@@ -463,9 +533,9 @@ inline void on_ds5_input(const void *deviceKey,
         Pad &pad = g_pads[deviceKey];
 
         const bool downR2 = step_side(kR2, pad.r2, data, len, nowMs, engageRaw,
-                                      clickR2, holdMs, boundR2.set(), effectR2, breaksR2, &freeze);
+                                      clickR2, holdMs, doubleMs, boundR2.set(), effectR2, breaksR2, &freeze);
         const bool downL2 = step_side(kL2, pad.l2, data, len, nowMs, engageRaw,
-                                      clickL2, holdMs, boundL2.set(), effectL2, breaksL2, &freeze);
+                                      clickL2, holdMs, doubleMs, boundL2.set(), effectL2, breaksL2, &freeze);
 
         const struct { bool down; const Bound *b; } held[2] = {
             { downR2, &boundR2 }, { downL2, &boundL2 }
