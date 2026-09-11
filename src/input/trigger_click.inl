@@ -45,6 +45,7 @@
 #pragma once
 
 #include <cstdio>   // snprintf, for the probe below
+#include <sstream>  // composing the two-sided state line
 
 namespace trigger_click {
 
@@ -500,14 +501,20 @@ inline void on_ds5_input(const void *deviceKey,
         static std::map<const void *, int> lastSaid;
         const int now = (freeze ? 1 : 0) | (buttons != 0 ? 2 : 0) |
                         (keyCount > 0 ? 4 : 0);
-        int r2State = 0;
+        // ⛔ BOTH SIDES. This reported R2 only until 2026-09-11, so a left
+        // trigger under test produced lines describing the right one -- and a
+        // change in L2 alone did not even reach the change check unless it
+        // happened to move the shared button bit.
+        int r2State = 0, l2State = 0;
         {
             std::lock_guard<std::mutex> lock(g_mutex);
             const Pad &pad = g_pads[deviceKey];
-            r2State = (pad.r2.engaged ? 8 : 0) | (pad.r2.down ? 16 : 0) |
-                      (pad.r2.dragging ? 32 : 0);
+            r2State = (pad.r2.engaged ? 1 : 0) | (pad.r2.down ? 2 : 0) |
+                      (pad.r2.dragging ? 4 : 0);
+            l2State = (pad.l2.engaged ? 1 : 0) | (pad.l2.down ? 2 : 0) |
+                      (pad.l2.dragging ? 4 : 0);
         }
-        const int combined = now | r2State;
+        const int combined = now | (r2State << 3) | (l2State << 6);
         bool changed = false;
         {
             std::lock_guard<std::mutex> lock(sayMutex);
@@ -518,17 +525,32 @@ inline void on_ds5_input(const void *deviceKey,
             }
         }
         if (changed) {
+            // ⓘ One line for the pair. Two lines would interleave with the
+            // other pad's and with the raw probe, and the question being asked
+            // is almost always about one side RELATIVE to the other.
+            auto side = [&](const char *label, size_t pos, size_t statusByte,
+                            bool useEffect, bool breaks, int clickRaw, int st) {
+                std::ostringstream o;
+                o << label << "=" << (int)data[pos]
+                  << (useEffect ? (breaks ? " fires=on-break status="
+                                          : " fires=on-entry status=")
+                                : " fires=on-travel click>=")
+                  << (useEffect ? (int)(len > statusByte ? (data[statusByte] >> 4) : 0)
+                                : clickRaw)
+                  << " engaged=" << ((st & 1) ? 1 : 0)
+                  << " down=" << ((st & 2) ? 1 : 0)
+                  << " drag=" << ((st & 4) ? 1 : 0);
+                return o.str();
+            };
             device_log::input_s()
-                << "[trigger-click] r2=" << (int)data[kR2Position]
-                << " engage>=" << engageRaw << " release<" << ((engageRaw * 2) / 3)
-                << (effectR2 ? (breaksR2 ? " fires=on-break status="
-                                         : " fires=on-entry status=")
-                             : " fires=on-travel click>=")
-                << (effectR2 ? (int)(len > kRightStatusByte ? (data[kRightStatusByte] >> 4) : 0)
-                            : clickR2)
-                << " engaged=" << ((combined & 8) ? 1 : 0)
-                << " down=" << ((combined & 16) ? 1 : 0)
-                << " drag=" << ((combined & 32) ? 1 : 0)
+                << "[trigger-click] "
+                << side("r2", kR2Position, kRightStatusByte, effectR2, breaksR2,
+                        clickR2, r2State)
+                << " | "
+                << side("l2", kL2Position, kLeftStatusByte, effectL2, breaksL2,
+                        clickL2, l2State)
+                << " | engage>=" << engageRaw
+                << " release<" << ((engageRaw * 2) / 3)
                 << " freeze=" << ((combined & 1) ? 1 : 0)
                 << std::endl;
         }
