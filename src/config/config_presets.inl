@@ -187,6 +187,16 @@ inline const Setting kSteadyGyroMouseMode[] = {
     { "gyro_to_mouse_gate", "trigger" },
 
     /* ⭐ Bound like any other button, then told to steady the cursor. */
+    /* ⛔⛔ 80 IS CHOSEN, NOT INHERITED. Do not "fix" it to 50.
+       Tried on hardware 2026-09-11, all three:
+         50  a crisp break, but easy to trip by accident
+         80  a LIGHTER touch, and worth the extra travel to reach  <- kept
+         90  no resistance at all; it gives way as the trigger bottoms out
+       ⓘ A deep break is felt LESS, because the trigger's own return spring
+       stiffens as you pull and swamps a fixed extra force. That is why 90 is
+       useless and why this number cannot simply be raised for a firmer feel.
+       ⚠️ Before the zone fix on the same day, 80 behaved the way 90 does now --
+       so a note anywhere calling 80 unfeelable predates that and is stale. */
     { "rebind_7", "MouseLeft" },
     { "right_trigger_freezes_cursor", "true" },
     { "right_trigger_press_at", "80" },
