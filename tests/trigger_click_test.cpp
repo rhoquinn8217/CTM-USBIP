@@ -193,7 +193,7 @@ Out pull(State &st, int r2, long long nowMs, int holdMs = 200, int clickAt = 90)
     const std::vector<uint8_t> d = report_with(0, r2);
     Out out{ false, false };
     out.down = step_side(side, st, d.data(), d.size(), nowMs, raw_from_percent(5),
-                         raw_from_percent(clickAt), holdMs, true, false, &out.freeze);
+                         raw_from_percent(clickAt), holdMs, true, false, false, &out.freeze);
     return out;
 }
 
@@ -222,7 +222,7 @@ int run_trigger_click_tests()
         const std::vector<uint8_t> d = report_with(0, 255);
         bool freeze = false;
         const bool down = step_side(side, st, d.data(), d.size(), 0, raw_from_percent(5),
-                                    raw_from_percent(90), 200, false, false, &freeze);
+                                    raw_from_percent(90), 200, false, false, false, &freeze);
         CTM_CHECK(!down);
         CTM_CHECK(!freeze);       // fully pulled, and still inert
     }
@@ -329,15 +329,15 @@ int run_trigger_click_tests()
         for (int rest : { 0, 11, 20, 29 }) {
             freeze = false;
             const std::vector<uint8_t> d = report_with(0, rest);
-            step_side(side, st, d.data(), d.size(), 0, engage, raw_from_percent(80), 600, true, false, &freeze);
+            step_side(side, st, d.data(), d.size(), 0, engage, raw_from_percent(80), 600, true, false, false, &freeze);
             CTM_CHECK(!freeze);
         }
         // Past the engage point it engages, and a drag follows a held press.
         freeze = false;
         {
             const std::vector<uint8_t> d = report_with(0, 240);
-            step_side(side, st, d.data(), d.size(), 0, engage, raw_from_percent(80), 600, true, false, &freeze);
-            step_side(side, st, d.data(), d.size(), 700, engage, raw_from_percent(80), 600, true, false, &freeze);
+            step_side(side, st, d.data(), d.size(), 0, engage, raw_from_percent(80), 600, true, false, false, &freeze);
+            step_side(side, st, d.data(), d.size(), 700, engage, raw_from_percent(80), 600, true, false, false, &freeze);
         }
         CTM_CHECK(st.dragging);
         // ⭐ Now let it come to rest HIGH, at the old threshold. It must still
@@ -345,7 +345,7 @@ int run_trigger_click_tests()
         freeze = false;
         {
             const std::vector<uint8_t> d = report_with(0, 12);
-            step_side(side, st, d.data(), d.size(), 800, engage, raw_from_percent(80), 600, true, false, &freeze);
+            step_side(side, st, d.data(), d.size(), 800, engage, raw_from_percent(80), 600, true, false, false, &freeze);
         }
         CTM_CHECK(!st.engaged);
         CTM_CHECK(!st.dragging);
@@ -357,11 +357,11 @@ int run_trigger_click_tests()
         freeze = false;
         {
             const std::vector<uint8_t> up = report_with(0, 40);
-            step_side(side, st, up.data(), up.size(), 0, engage, raw_from_percent(80), 600, true, false, &freeze);
+            step_side(side, st, up.data(), up.size(), 0, engage, raw_from_percent(80), 600, true, false, false, &freeze);
             CTM_CHECK(st.engaged);
             const std::vector<uint8_t> between = report_with(0, 25);
             freeze = false;
-            step_side(side, st, between.data(), between.size(), 10, engage, raw_from_percent(80), 600, true, false, &freeze);
+            step_side(side, st, between.data(), between.size(), 10, engage, raw_from_percent(80), 600, true, false, false, &freeze);
             CTM_CHECK(st.engaged);                     // above the release point
             CTM_CHECK(freeze);
         }
@@ -381,7 +381,7 @@ int run_trigger_click_tests()
         const std::vector<uint8_t> deepButShort = report_with_status(250, 0);
         bool down = step_side(side, st, deepButShort.data(), deepButShort.size(),
                               0, raw_from_percent(15), raw_from_percent(80),
-                              600, true, true, &freeze);
+                              600, true, true, false, &freeze);
         CTM_CHECK(!down);        // travel would have fired; the effect did not
         CTM_CHECK(freeze);       // and the cursor is held either way
 
@@ -390,7 +390,7 @@ int run_trigger_click_tests()
         freeze = false;
         down = step_side(side, st, shallowButIn.data(), shallowButIn.size(),
                          10, raw_from_percent(15), raw_from_percent(80),
-                         600, true, true, &freeze);
+                         600, true, true, false, &freeze);
         CTM_CHECK(down);         // ⭐ the controller's word wins outright
 
         // ⛔ Status 2 is the bottom of the travel and still counts as crossed:
@@ -400,7 +400,7 @@ int run_trigger_click_tests()
         const std::vector<uint8_t> bottomed = report_with_status(255, 2);
         down = step_side(side, st, bottomed.data(), bottomed.size(),
                          20, raw_from_percent(15), raw_from_percent(80),
-                         600, true, true, &freeze);
+                         600, true, true, false, &freeze);
         CTM_CHECK(down);
 
         // ⓘ And with useEffect off, the very same report goes back to travel.
@@ -408,7 +408,7 @@ int run_trigger_click_tests()
         freeze = false;
         down = step_side(side, st, shallowButIn.data(), shallowButIn.size(),
                          30, raw_from_percent(15), raw_from_percent(80),
-                         600, true, false, &freeze);
+                         600, true, false, false, &freeze);
         CTM_CHECK(!down);        // 120 is short of 204
     }
     // ⛔ A report too short to hold the status byte must not read past its end.
@@ -419,8 +419,37 @@ int run_trigger_click_tests()
         bool freeze = false;
         const bool down = step_side(side, st, shortReport.data(), shortReport.size(),
                                     0, raw_from_percent(15), raw_from_percent(80),
-                                    600, true, true, &freeze);
+                                    600, true, true, false, &freeze);
         CTM_CHECK(!down);
+    }
+
+    section("trigger click: a break fires on 2, a wall on 1");
+    // ⛔ Firing on anything non-zero read ENTERING the resistance as breaking
+    // through it. Five pulls that never broke still clicked (2026-09-10), and
+    // the status never reached 2 on any of them.
+    {
+        static const Side side{ "right", kR2Position, kRightStatusByte };
+        const std::vector<uint8_t> inside = report_with_status(230, 1);
+        const std::vector<uint8_t> past   = report_with_status(250, 2);
+
+        // A shape that gives way: inside is not enough, past is.
+        State br;
+        bool freeze = false;
+        CTM_CHECK(!step_side(side, br, inside.data(), inside.size(), 0,
+                             raw_from_percent(15), raw_from_percent(80),
+                             600, true, true, true, &freeze));
+        CTM_CHECK(freeze);      // held either way
+        CTM_CHECK(step_side(side, br, past.data(), past.size(), 10,
+                            raw_from_percent(15), raw_from_percent(80),
+                            600, true, true, true, &freeze));
+
+        // A shape that only resists: entering it IS the moment, because there
+        // is nothing to come through.
+        State wall;
+        freeze = false;
+        CTM_CHECK(step_side(side, wall, inside.data(), inside.size(), 0,
+                            raw_from_percent(15), raw_from_percent(80),
+                            600, true, true, false, &freeze));
     }
 
     section("trigger click: a mouse binding, end to end");

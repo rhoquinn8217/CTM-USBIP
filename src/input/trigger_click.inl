@@ -78,12 +78,29 @@ struct Side {
 // the finger was still pushing toward a break it had not reached.
 // ⓘ Two numbers for one moment cannot be kept in step by hand. Asking the
 // controller makes them the same moment.
-constexpr uint8_t kStatusShort = 0;    // short of the effect
+// ⭐⭐ THREE VALUES, AND WHICH ONE FIRES DEPENDS ON THE SHAPE.
+//     0  short of the effect
+//     1  INSIDE it -- being resisted, but not through
+//     2  past it -- the break has given way
+//
+// ⛔ Firing on "anything but 0" was wrong, and rhoquinn8217 caught it: five
+// pulls that never broke still clicked, because entering the resistance was
+// being read as breaking through it. The status never reached 2 on any of
+// those pulls, which is precisely what makes 2 the break.
+//
+// ➡️ So a shape that GIVES WAY fires on 2, and a shape that merely resists
+// fires on 1. A wall never breaks -- there is nothing to come through -- so
+// entering it is the only moment it has.
+constexpr uint8_t kStatusShort  = 0;
+constexpr uint8_t kStatusInside = 1;
+constexpr uint8_t kStatusPast   = 2;
 
-inline bool crossed_effect(const Side &side, const uint8_t *data, size_t len)
+inline bool crossed_effect(const Side &side, const uint8_t *data, size_t len,
+                           bool shapeBreaks)
 {
     if (len <= side.statusByte) return false;
-    return (data[side.statusByte] >> 4) != kStatusShort;
+    const uint8_t status = static_cast<uint8_t>(data[side.statusByte] >> 4);
+    return shapeBreaks ? (status >= kStatusPast) : (status >= kStatusInside);
 }
 
 // What a trigger's press should hold down. Resolved per report, so a config
@@ -155,7 +172,7 @@ inline int raw_from_percent(int percent)
 // without a config and time can be supplied rather than observed.
 inline bool step_side(const Side &side, State &st, const uint8_t *data, size_t len,
                       long long nowMs, int engageRaw, int clickRaw, int holdMs,
-                      bool bound, bool useEffect, bool *freeze)
+                      bool bound, bool useEffect, bool shapeBreaks, bool *freeze)
 {
     if (!bound) {
         st = State();
@@ -166,7 +183,7 @@ inline bool step_side(const Side &side, State &st, const uint8_t *data, size_t l
     // ⭐ The controller's word whenever an effect is set, a travel threshold
     // only when one is not. The status says the finger has entered the effect,
     // which for a click is the break giving way and for a wall is its start.
-    const bool past = useEffect ? crossed_effect(side, data, len)
+    const bool past = useEffect ? crossed_effect(side, data, len, shapeBreaks)
                                : (clickRaw > 0 && pos >= clickRaw);
 
     // ⭐⭐ TWO THRESHOLDS, NOT ONE, AND THE INTERMITTENCY IS WHY (2026-09-10).
@@ -221,6 +238,18 @@ inline bool step_side(const Side &side, State &st, const uint8_t *data, size_t l
 inline std::string bind_key_for(const char *sideName)
 {
     return std::string("trigger_") + sideName + "_click";
+}
+
+// Does this trigger's effect GIVE WAY, or does it only resist? A click and a
+// snap break; a wall and a notch do not. The answer picks which status value
+// counts as pressed.
+inline bool shape_breaks(const std::string &section, const char *sideName)
+{
+    const std::string key = std::string("trigger_") + sideName + "_effect";
+    const trigger_effect::Shape shape =
+        trigger_effect::shape_from(device_config_str(section.c_str(), key.c_str()));
+    return shape == trigger_effect::Shape::Click ||
+           shape == trigger_effect::Shape::Snap;
 }
 
 // Does this trigger have an effect at all to fire on?
@@ -362,6 +391,8 @@ inline void on_ds5_input(const void *deviceKey,
     // give way, so those keep a travel threshold.
     const bool effectR2 = has_effect(section, kR2.name);
     const bool effectL2 = has_effect(section, kL2.name);
+    const bool breaksR2 = shape_breaks(section, kR2.name);
+    const bool breaksL2 = shape_breaks(section, kL2.name);
     const long long nowMs = now_ms();
 
     uint8_t buttons = 0;
@@ -376,9 +407,9 @@ inline void on_ds5_input(const void *deviceKey,
         Pad &pad = g_pads[deviceKey];
 
         const bool downR2 = step_side(kR2, pad.r2, data, len, nowMs, engageRaw,
-                                      clickR2, holdMs, boundR2.set(), effectR2, &freeze);
+                                      clickR2, holdMs, boundR2.set(), effectR2, breaksR2, &freeze);
         const bool downL2 = step_side(kL2, pad.l2, data, len, nowMs, engageRaw,
-                                      clickL2, holdMs, boundL2.set(), effectL2, &freeze);
+                                      clickL2, holdMs, boundL2.set(), effectL2, breaksL2, &freeze);
 
         const struct { bool down; const Bound *b; } held[2] = {
             { downR2, &boundR2 }, { downL2, &boundL2 }
@@ -431,8 +462,9 @@ inline void on_ds5_input(const void *deviceKey,
             device_log::input_s()
                 << "[trigger-click] r2=" << (int)data[kR2Position]
                 << " engage>=" << engageRaw << " release<" << ((engageRaw * 2) / 3)
-                << (effectR2 ? " fires=on-effect status="
-                            : " fires=on-travel click>=")
+                << (effectR2 ? (breaksR2 ? " fires=on-break status="
+                                         : " fires=on-entry status=")
+                             : " fires=on-travel click>=")
                 << (effectR2 ? (int)(len > kRightStatusByte ? (data[kRightStatusByte] >> 4) : 0)
                             : clickR2)
                 << " engaged=" << ((combined & 8) ? 1 : 0)
