@@ -800,6 +800,7 @@ inline void apply(const void *deviceKey,
         // fights: pressing a gate button still drives the page.
         uint8_t gateMouseButtons = 0;
         bool gateAnyMouse = false;
+        bool gateGaveUpATrigger = false;
 
         for (int i = 0; i < kButtonCount; ++i) {
             bool claimed = false;
@@ -807,6 +808,30 @@ inline void apply(const void *deviceKey,
                 if (g.standardIndex == i) { claimed = true; break; }
             }
             if (claimed) continue;
+
+            // ⛔⛔ A TRIGGER HANDED TO THE GESTURE IS NOT FIRED HERE EITHER.
+            //
+            // The note below says the triggers were never claimed by the gate,
+            // which was true while a blanket return stopped all user rebinds.
+            // It stopped being true when this loop learned mouse buttons, and
+            // the suppression added for the same problem sits in the MAIN loop,
+            // below the branch that returns before reaching it.
+            //
+            // ⚠️ So with the settings page in front, both clickers were live:
+            // the gesture waiting for the break, and this firing on the pad's
+            // digital bit within the first few percent of the travel. The
+            // digital bit always won. rhoquinn8217, 2026-09-11: *"I'm barely
+            // tapping the L2 and it's still registering a click"* -- and then
+            // the observation that cracked it, *"the clicks are only
+            // registering on the config window and nothing else"*, which is
+            // exactly the scope of this branch.
+            if ((i == kBtnL2 || i == kBtnR2) &&
+                device_config_bool(gateSection.c_str(),
+                                   trigger_effect::freeze_key(i == kBtnR2 ? "right" : "left").c_str(),
+                                   false)) {
+                gateGaveUpATrigger = true;
+                continue;
+            }
 
 
             char kn[32];
@@ -863,8 +888,13 @@ inline void apply(const void *deviceKey,
         // main path does the same; copied rather than reasoned about afresh.
         //
         // ⓘ The virtual mouse has to be started, or the clicks go nowhere.
-        if (gateAnyMouse) {
+        // ⭐ Publish when we have an opinion, giving a trigger up included --
+        // the same rule as the main path, and for the same reason: going
+        // silent leaves whatever was last published held forever.
+        if (gateAnyMouse || gateGaveUpATrigger) {
             ctm_mouse_device::set_buttons(gateMouseButtons);
+        }
+        if (gateAnyMouse) {
             ctm_gyro_mouse_ensure_mouse_started();
         }
         return;                       // ⭐ other user rebinds do not run here
