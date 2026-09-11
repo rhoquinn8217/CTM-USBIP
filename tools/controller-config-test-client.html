@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.64.44 -- see the changelog at the bottom of this comment.
+  VERSION 2.64.48 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,13 @@
   tidy message about it.
 
   CHANGELOG
+    2.64.48 In compact and quick the config selector no longer opens a list at
+            all. It shows the one config it is on, Cross steps it, Cross again
+            confirms, Circle puts the old one back. 2.64.45 through 2.64.47
+            each tried to make a list fit the window -- smaller option text, a
+            three-row listbox, then a measured height -- and none did. The list
+            was the wrong idea, and the mechanism for stepping in place was
+            already in gpActivate.
     2.64.44 A preset's settings list leaves out the passthrough switches too.
             They are the same in every preset that touches the control, so
             they separate nothing.
@@ -669,6 +676,7 @@
      button off the edge; a long name is clipped inside it. */
   body.quick #compactBox select { font-size:12.6vh; padding:1.8vh 1.5vw; min-width:0;
     max-width:80vw; flex:0 1 auto; }
+  #compactBox .cselrow { position:relative; }
   body.quick #compactBox .cauto-btn { font-size:12.6vh; padding:1.5vh 1.6vw; }
   body.quick #compactBox .cbar { padding-top:3.75vh; gap:3vw; }
   body.quick #compactBox .cbar > button { font-size:6.9vh; padding:1.5vh 2vw; }
@@ -4219,7 +4227,21 @@ function gpActivate() {
     GP_SELECTING = el;
     GP_SELECT_WAS = el.selectedIndex;
     el.classList.add('gp-selecting');
-    el.size = Math.min(el.options.length, 8);   // show the list
+    // ⛔⛔ COMPACT SHOWS ONE, AND STEPS IN PLACE (rhoquinn8217, 2026-09-11).
+    //
+    // Expanding to eight rows is right on the full page and wrong in a window
+    // the size of a postcard, where eight rows of quick-view type is taller
+    // than the window. ⚠️ Three was tried first and was still too tall, which
+    // is the tell that no row count is the answer here.
+    //
+    // ➡️ So the box keeps showing the ONE config it is on, and Cross steps it:
+    // *"instead of a drop down, it will show only 1 config. When you press x on
+    // the box it will still show 1 config and you can press down or up to
+    // change it and x to confirm."*
+    // ⓘ Nothing else is needed -- gpKeyMove already walks selectedIndex while
+    // GP_SELECTING is set, gpKeySelect already commits, and gpKeyBack already
+    // puts the old value back. The gold outline says which mode you are in.
+    el.size = COMPACT ? 1 : Math.min(el.options.length, 8);
     // ⛔ Nothing in the sticky block needs scrolling to: it is pinned on screen by
   // definition. Calling scrollIntoView on it moved the SETTINGS list beneath,
   // so navigating the header appeared to scroll the page for no reason.
@@ -5640,6 +5662,22 @@ function compactAutoUnlink() {
   stopAutoLink(d.linked_config, mySerial, nameFor(d.ordinal));
 }
 
+// ⭐ A CLICK ENTERS THE SAME MODE THE PAD USES, in compact only. Otherwise a
+// mouse gets the native popup -- the very thing that does not fit -- while the
+// pad gets a one-row stepper, and the two disagree about what the control is.
+// ⓘ The full page keeps its native dropdown: there is room for it there, and it
+// is faster with a mouse.
+function pickerActivate(ev, sel) {
+  if (!COMPACT) return;
+  ev.preventDefault();
+  if (GP_SELECTING === sel) { gpSelectEnd(true); return; }
+  GP_SELECTING = sel;
+  GP_SELECT_WAS = sel.selectedIndex;
+  sel.classList.add('gp-selecting');
+  sel.size = 1;
+  sel.focus();
+}
+
 function compactPick() {
   var sel = document.getElementById('cpick');
   if (!sel || !COMPACT) return;
@@ -5776,6 +5814,7 @@ function paintCompact() {
       html += '<div class="csel' + slide + '">' +
               (QUICK ? '' : '<div class="ctitle">Controller Config</div>') +
               '<div class="cselrow"><select id="cpick" data-ordinal="' + esc(d.ordinal) + '"' +
+              ' onmousedown="pickerActivate(event,this)"' +
               ' onchange="compactPick()">' +
               opts + '</select>' + autoBtn + '</div></div>' + (QUICK ? '' : foot(true, d.ordinal));
     }
