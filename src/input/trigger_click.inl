@@ -54,7 +54,7 @@ constexpr size_t kL2Position = 5;
 constexpr size_t kR2Position = 6;
 constexpr int    kFullPull   = 255;
 
-// Where each trigger reports its adaptive effect status. See crossed_break().
+// Where each trigger reports its adaptive effect status. See crossed_effect().
 constexpr size_t kRightStatusByte = 42;
 constexpr size_t kLeftStatusByte  = 43;
 
@@ -466,13 +466,17 @@ inline void on_ds5_input(const void *deviceKey,
         pad.heldKeys = keyCount > 0;
     }
 
-    // ⭐ WHAT THE GESTURE ACTUALLY DID, logged only when it CHANGES. The state
+    // ⭐ WHAT THE GESTURE ACTUALLY DID, logged only when it CHANGES, and only
+    // when asked for. ⓘ It earned its place twice -- it found a press firing
+    // eleven units early, and it found an engage threshold sitting one unit
+    // above where the trigger rests -- but a shipped feature should not write
+    // several lines per pull into the log forever. Same switch as the probe. The state
     // machine reads correct and the gate reads correct, so a report of the
     // cursor coming back early can only be settled by watching the transitions
     // rather than by reading either again (2026-09-10).
     // ⓘ Four states and a position. A pull that never crosses the click point
     // should show engaged going true and nothing else moving.
-    {
+    if (device_config_bool(section.c_str(), "trigger_probe", false)) {
         static std::mutex sayMutex;
         static std::map<const void *, int> lastSaid;
         const int now = (freeze ? 1 : 0) | (buttons != 0 ? 2 : 0) |
