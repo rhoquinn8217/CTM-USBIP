@@ -270,8 +270,9 @@ inline bool shape_breaks(const std::string &section, const char *sideName)
     const std::string key = std::string("trigger_") + sideName + "_effect";
     const trigger_effect::Shape shape =
         trigger_effect::shape_from(device_config_str(section.c_str(), key.c_str()));
-    return shape == trigger_effect::Shape::Click ||
-           shape == trigger_effect::Shape::Snap;
+    // ⓘ Only the click. Snap would qualify by shape, but it reports nothing to
+    // fire on, so it never reaches here -- see has_effect above.
+    return shape == trigger_effect::Shape::Click;
 }
 
 // Does this trigger have an effect at all to fire on?
@@ -301,8 +302,14 @@ inline bool has_effect(const std::string &section, const char *sideName)
     // So a notch keeps a travel threshold for the press and offers its feel
     // only. ➡️ A wall does not have this problem: it starts where you put it,
     // and entering it IS the point.
+    // ⛔ AND SNAP IS EXCLUDED TOO, measured 2026-09-10. The bow mode reports NO
+    // status: every pull across two runs read 0 from top to bottom, so a press
+    // waiting on it never fired at all. ⓘ And with no press there is no drag,
+    // so the cursor stayed frozen until the trigger came fully home -- which is
+    // the rule working, but it reads as the gyro never coming back.
+    // ⚠️ Bow is the one mode listed as unofficial, and this is the second thing
+    // about it we cannot confirm: its return force was never felt either.
     return shape == trigger_effect::Shape::Click ||
-           shape == trigger_effect::Shape::Snap ||
            shape == trigger_effect::Shape::Wall;
 }
 
