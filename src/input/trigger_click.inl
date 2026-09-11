@@ -54,10 +54,37 @@ constexpr size_t kL2Position = 5;
 constexpr size_t kR2Position = 6;
 constexpr int    kFullPull   = 255;
 
+// Where each trigger reports its adaptive effect status. See crossed_break().
+constexpr size_t kRightStatusByte = 42;
+constexpr size_t kLeftStatusByte  = 43;
+
 struct Side {
     const char *name;      // "right" or "left": also the config key stem
     size_t position;       // where its pull sits in the report
+    size_t statusByte;     // where the controller reports its effect status
 };
+
+// ⭐⭐⭐ THE CONTROLLER SAYS WHEN THE TRIGGER CROSSES A BREAK, and that is a
+// better answer than any number we could pick. Confirmed on hardware
+// 2026-09-10, both triggers, each by its own run: the HIGH NYBBLE of byte 42
+// for the right and byte 43 for the left reads 0 short of the effect, 1 once
+// it is crossed, and 2 at the bottom of the travel.
+//
+// ⛔ WHY IT MATTERS RATHER THAN BEING A REFINEMENT. With a break at 80% the
+// hardware reported the crossing at raw 215, while a travel threshold of 80%
+// sits at 204. So the press fired ELEVEN UNITS BEFORE the finger felt anything
+// give way -- rhoquinn8217: *"gyro is turning on before the break."* The press
+// was already down, the hold ran out, and the drag handed the cursor back while
+// the finger was still pushing toward a break it had not reached.
+// ⓘ Two numbers for one moment cannot be kept in step by hand. Asking the
+// controller makes them the same moment.
+constexpr uint8_t kStatusShort = 0;    // short of the effect
+
+inline bool crossed_effect(const Side &side, const uint8_t *data, size_t len)
+{
+    if (len <= side.statusByte) return false;
+    return (data[side.statusByte] >> 4) != kStatusShort;
+}
 
 // What a trigger's press should hold down. Resolved per report, so a config
 // change lands without a re-bridge like every other setting here.
@@ -126,9 +153,9 @@ inline int raw_from_percent(int percent)
 //
 // ⓘ Takes its thresholds rather than reading them, so the rule can be tested
 // without a config and time can be supplied rather than observed.
-inline bool step_side(const Side &side, State &st, const uint8_t *data,
+inline bool step_side(const Side &side, State &st, const uint8_t *data, size_t len,
                       long long nowMs, int engageRaw, int clickRaw, int holdMs,
-                      bool bound, bool *freeze)
+                      bool bound, bool useEffect, bool *freeze)
 {
     if (!bound) {
         st = State();
@@ -136,7 +163,11 @@ inline bool step_side(const Side &side, State &st, const uint8_t *data,
     }
 
     const int pos = data[side.position];
-    const bool past = clickRaw > 0 && pos >= clickRaw;
+    // ⭐ The controller's word whenever an effect is set, a travel threshold
+    // only when one is not. The status says the finger has entered the effect,
+    // which for a click is the break giving way and for a wall is its start.
+    const bool past = useEffect ? crossed_effect(side, data, len)
+                               : (clickRaw > 0 && pos >= clickRaw);
 
     // ⭐⭐ TWO THRESHOLDS, NOT ONE, AND THE INTERMITTENCY IS WHY (2026-09-10).
     //
@@ -190,6 +221,31 @@ inline bool step_side(const Side &side, State &st, const uint8_t *data,
 inline std::string bind_key_for(const char *sideName)
 {
     return std::string("trigger_") + sideName + "_click";
+}
+
+// Does this trigger have an effect at all to fire on?
+//
+// ⭐ ALL FOUR SHAPES, at rhoquinn8217's word (2026-09-10). A break is the
+// obvious case, but a wall reports its status too -- the controller says when
+// the finger has entered the effect, not only when something gave way. So the
+// press can land where the effect starts for a wall exactly as it lands where
+// a click gives way.
+//
+// ⚠️ NOTCH IS THE ONE TO WATCH, and the log will say. Its wall deliberately
+// covers the whole pull so the finger has somewhere to rest, which means the
+// controller may report it entered at the very top rather than at the detent.
+// If it fires early, the shape is what needs changing, not this. ⓘ Measured
+// rather than reasoned about, because reasoning about this hardware has been
+// wrong repeatedly today.
+inline bool has_effect(const std::string &section, const char *sideName)
+{
+    const std::string key = std::string("trigger_") + sideName + "_effect";
+    const trigger_effect::Shape shape =
+        trigger_effect::shape_from(device_config_str(section.c_str(), key.c_str()));
+    return shape == trigger_effect::Shape::Click ||
+           shape == trigger_effect::Shape::Snap ||
+           shape == trigger_effect::Shape::Wall ||
+           shape == trigger_effect::Shape::Notch;
 }
 
 // ⭐ A PROBE FOR THE TRIGGER STATUS BYTE, off unless `trigger_probe` is set.
@@ -258,8 +314,8 @@ inline void on_ds5_input(const void *deviceKey,
 
     probe_report(deviceKey, section, data, len);
 
-    static const Side kR2{ "right", kR2Position };
-    static const Side kL2{ "left", kL2Position };
+    static const Side kR2{ "right", kR2Position, kRightStatusByte };
+    static const Side kL2{ "left", kL2Position, kLeftStatusByte };
 
     const Bound boundR2 =
         bound_for(device_config_str(section.c_str(), bind_key_for(kR2.name).c_str()));
@@ -302,6 +358,10 @@ inline void on_ds5_input(const void *deviceKey,
         device_config_int(section.c_str(), "trigger_right_click_at", 90));
     const int clickL2 = raw_from_percent(
         device_config_int(section.c_str(), "trigger_left_click_at", 90));
+    // ⓘ Which triggers have a break to fire on. A wall or a notch does not
+    // give way, so those keep a travel threshold.
+    const bool effectR2 = has_effect(section, kR2.name);
+    const bool effectL2 = has_effect(section, kL2.name);
     const long long nowMs = now_ms();
 
     uint8_t buttons = 0;
@@ -315,10 +375,10 @@ inline void on_ds5_input(const void *deviceKey,
         std::lock_guard<std::mutex> lock(g_mutex);
         Pad &pad = g_pads[deviceKey];
 
-        const bool downR2 = step_side(kR2, pad.r2, data, nowMs, engageRaw,
-                                      clickR2, holdMs, boundR2.set(), &freeze);
-        const bool downL2 = step_side(kL2, pad.l2, data, nowMs, engageRaw,
-                                      clickL2, holdMs, boundL2.set(), &freeze);
+        const bool downR2 = step_side(kR2, pad.r2, data, len, nowMs, engageRaw,
+                                      clickR2, holdMs, boundR2.set(), effectR2, &freeze);
+        const bool downL2 = step_side(kL2, pad.l2, data, len, nowMs, engageRaw,
+                                      clickL2, holdMs, boundL2.set(), effectL2, &freeze);
 
         const struct { bool down; const Bound *b; } held[2] = {
             { downR2, &boundR2 }, { downL2, &boundL2 }
@@ -371,7 +431,10 @@ inline void on_ds5_input(const void *deviceKey,
             device_log::input_s()
                 << "[trigger-click] r2=" << (int)data[kR2Position]
                 << " engage>=" << engageRaw << " release<" << ((engageRaw * 2) / 3)
-                << " click>=" << clickR2
+                << (effectR2 ? " fires=on-effect status="
+                            : " fires=on-travel click>=")
+                << (effectR2 ? (int)(len > kRightStatusByte ? (data[kRightStatusByte] >> 4) : 0)
+                            : clickR2)
                 << " engaged=" << ((combined & 8) ? 1 : 0)
                 << " down=" << ((combined & 16) ? 1 : 0)
                 << " drag=" << ((combined & 32) ? 1 : 0)
