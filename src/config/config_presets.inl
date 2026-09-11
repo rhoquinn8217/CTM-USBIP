@@ -58,7 +58,7 @@ struct Preset {
 //
 // ⓘ Button indices come from the table in rebind.inl: 0 cross, 1 circle,
 // 2 square, 3 triangle, 6 L2, 7 R2, 12-15 d-pad up/down/left/right.
-#define CTM_PRESET_SHARED_BINDINGS                                             \
+#define CTM_PRESET_COMMON_BINDINGS                                             \
     { "rebind_0",  "Enter" },        /* cross  -- Deck: A = Enter          */  \
     { "rebind_1",  "Escape" },       /* circle -- Deck: B = Escape         */  \
     /* \u2b50 Square opens OUR OWN on-screen keyboard, built 2026-09-02. It was
@@ -71,9 +71,22 @@ struct Preset {
     { "rebind_12", "ArrowUp" },                                                \
     { "rebind_13", "ArrowDown" },                                              \
     { "rebind_14", "ArrowLeft" },                                              \
-    { "rebind_15", "ArrowRight" },                                             \
+    { "rebind_15", "ArrowRight" }
+
+// ⭐ THE TRIGGER REBINDS ARE THEIR OWN HALF. Every preset that points with
+// something other than the triggers puts the mouse buttons on them, because
+// that leaves the face buttons free. `steady-gyro-mouse` must NOT: it drives
+// the triggers itself, at a depth it chooses, and a rebind here would fire a
+// second time on the pad's own digital bit -- early, and untunable.
+// ⛔ Split rather than copied. A preset that opts out by writing the common
+// bindings again is a preset that drifts the first time one of them changes.
+#define CTM_PRESET_TRIGGER_CLICKS                                              \
     { "rebind_7",  "MouseLeft" },    /* R2 -- triggers rather than face    */  \
     { "rebind_6",  "MouseRight" }    /* L2 -- buttons, which stay free     */
+
+#define CTM_PRESET_SHARED_BINDINGS                                             \
+    CTM_PRESET_COMMON_BINDINGS,                                                \
+    CTM_PRESET_TRIGGER_CLICKS
 
 // ---- gyro_mouse_mode -------------------------------------------------------
 //
@@ -129,6 +142,66 @@ inline const Setting kTouchpadMouseMode[] = {
     // ⭐ Click the pad in to grab, move, lift the finger to drop. The pad's
     // click is free here because there is no gyro to recentre.
     { "touchpad_click_drag", "true" },
+};
+
+// ---- steady_gyro_mouse_mode ------------------------------------------------
+//
+// ⭐⭐ THE DUALSENSE ONE. The gyro points and the TRIGGERS steady it: the
+// cursor stops the moment a trigger leaves rest, so the press lands on
+// something already still.
+//
+//   start to pull        the cursor FREEZES
+//   past the break       the button goes down, where your finger felt it
+//   let up, not home     the button releases, the cursor stays still
+//   let it come home     the cursor moves again
+//   keep holding         the cursor returns with the button down: a DRAG
+//
+// ⭐ ONE RULE MAKES ALL OF THAT: the cursor is frozen for as long as the finger
+// is committed, and only a FULL release hands it back. Which is why a double
+// press lands both clicks on the same pixel -- the gyro waits for the trigger
+// to come all the way home rather than thawing in the gap.
+//
+// ⭐⭐ AND THE EFFECT IS WHY IT IS USABLE. A trigger press fires somewhere a
+// finger cannot see. The notch puts a light wall under the pull with one firm
+// detent at the point, so there is somewhere to rest while frozen and something
+// to feel when it fires. Without it the frozen region is crossed in about a
+// thirtieth of a second and the press is a guess (measured 2026-09-10).
+//
+// ⛔ THIS REPLACED A TOUCHPAD VERSION, and the reason is worth keeping. That
+// one froze on a touch, and a touch is binary: any graze froze the cursor with
+// nothing on screen to explain it. rhoquinn8217: *"even the tiniest register on
+// the touch pad will cause the mouse to freeze which make the feature seem
+// broken."* A trigger has travel, so it can demand a deliberate millimetre.
+//
+// ⓘ The touchpad keeps the job it is good at: two fingers scroll, naturally.
+inline const Setting kSteadyGyroMouseMode[] = {
+    { "gyro_no_passthrough", "true" },
+    /* ⛔ COMMON only. The trigger rebinds are declined on purpose -- see the
+       macro split above. */
+    CTM_PRESET_COMMON_BINDINGS,
+    /* The gyro moves the cursor EXCEPT while a trigger is being worked. */
+    { "gyro_to_mouse_gate", "trigger" },
+
+    { "trigger_right_click", "MouseLeft" },
+    { "trigger_right_click_at", "80" },
+    { "trigger_left_click", "MouseRight" },
+    { "trigger_left_click_at", "80" },
+    /* ⓘ The effect point is left unset so it FOLLOWS the press point. Two
+       numbers for one place drifted apart three times in one evening. */
+    { "trigger_right_effect", "notch" },
+    { "trigger_right_effect_strength", "7" },
+    { "trigger_left_effect", "notch" },
+    { "trigger_left_effect_strength", "7" },
+    /* ⚠️ Not the smallest the pad allows. A trigger under an effect rests
+       further off its stop, and a threshold near that reads as a finger. */
+    { "trigger_engage_at", "15" },
+    /* ⓘ One number for the drag delay AND the double-press window. A
+       deliberate press was measured at 538 ms, so this sits clear of one. */
+    { "trigger_click_hold_ms", "600" },
+
+    { "touchpad_no_passthrough", "true" },
+    { "touchpad_scroll", "2" },
+    { "touchpad_scroll_natural", "true" },
 };
 
 // ---- stick_mouse_mode ------------------------------------------------------
@@ -204,6 +277,14 @@ inline const Preset kPresets[] = {
       "they already are. The least precise of the three for fine work, and "
       "the one that needs no new habits. Square opens the on-screen keyboard.",
       true, true, kStickMouseMode, CTM_PRESET_COUNT_OF(kStickMouseMode) },
+    { "steady-gyro-mouse",
+      "The gyro moves the cursor and the triggers hold it still. Start to pull "
+      "and the cursor stops, push past the notch you can feel and it clicks "
+      "where your finger expects, and it only moves again once you let the "
+      "trigger all the way back. Hold instead of releasing and you are "
+      "dragging. R2 is left click, L2 is right click, two fingers scroll, and "
+      "Square opens the on-screen keyboard.",
+      true, true, kSteadyGyroMouseMode, CTM_PRESET_COUNT_OF(kSteadyGyroMouseMode) },
     { "L2-gyro-mouse-aiming",
       "For playing, not for the desktop. Gyro aims only while L2 is held, so "
       "the camera is steady while you move and precise when you aim. Nothing "
