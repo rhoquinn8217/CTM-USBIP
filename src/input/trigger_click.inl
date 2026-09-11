@@ -83,6 +83,13 @@ struct Side {
 //     1  INSIDE it -- being resisted, but not through
 //     2  past it -- the break has given way
 //
+// ⚠️ AND A BREAK MEANS THE BOTTOM, MEASURED. With a click set at 80%, status 2
+// was only ever seen at raw 255 -- both in the probe and in the run that
+// confirmed this. ➡️ So firing on a break means firing when the trigger
+// bottoms out, and the effect's POSITION setting no longer moves the press.
+// That is unambiguous and it is what rhoquinn8217 confirmed by feel, but it is
+// not what the setting's name suggests, so it is written down here.
+//
 // ⛔ Firing on "anything but 0" was wrong, and rhoquinn8217 caught it: five
 // pulls that never broke still clicked, because entering the resistance was
 // being read as breaking through it. The status never reached 2 on any of
@@ -186,6 +193,21 @@ inline bool step_side(const Side &side, State &st, const uint8_t *data, size_t l
     const bool past = useEffect ? crossed_effect(side, data, len, shapeBreaks)
                                : (clickRaw > 0 && pos >= clickRaw);
 
+    // ⛔⛔ THE FREEZE STAYS ON TRAVEL, AND THAT IS DELIBERATE.
+    //
+    // The press asks the controller (see crossed_effect), so the obvious next
+    // step is to freeze on the controller too: status 1 means the finger has
+    // entered the effect. ➡️ DO NOT. rhoquinn8217 talked it through and
+    // rejected it 2026-09-10: *"pulling the trigger is what causes the most
+    // gyro movement. We need it off right when the pull begins, otherwise it
+    // will affect the gyro and end up clicking away from what you wanted."*
+    //
+    // ⭐ An effect cannot begin at the very top of the pull -- there is travel
+    // before it by construction -- so status 1 always arrives AFTER the finger
+    // has started moving the pad. The freeze has to be in place before that,
+    // which only a travel threshold can do. The whole design rests on the
+    // cursor already being still when the jolt arrives.
+    //
     // ⭐⭐ TWO THRESHOLDS, NOT ONE, AND THE INTERMITTENCY IS WHY (2026-09-10).
     //
     // ⛔ A single threshold sat one unit above where the trigger comes to rest.
