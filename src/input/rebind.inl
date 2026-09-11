@@ -882,6 +882,9 @@ inline void apply(const void *deviceKey,
     bool anyBound = false;
     uint8_t mouseButtons = 0;
     bool anyMouse = false;
+    // ⛔ A trigger handed to the gesture still counts as something we have an
+    // opinion about. See where this is used, at the publish below.
+    bool gaveUpATrigger = false;
 
     for (int i = 0; i < kButtonCount; ++i) {
         // ⛔⛔ A TRIGGER BOUND THROUGH THE GESTURE IS NOT ALSO BOUND HERE.
@@ -901,6 +904,17 @@ inline void apply(const void *deviceKey,
             device_config_bool(section.c_str(),
                                trigger_effect::freeze_key(i == kBtnR2 ? "right" : "left").c_str(),
                                false)) {
+            // ⛔⛔ AND THE MASK STILL HAS TO BE PUBLISHED. Skipping the button
+            // here also skips the publish below, which is what LATCHES it: if
+            // this trigger was the only mouse binding, anyMouse stays false,
+            // set_buttons is never called again, and whatever g_buttons last
+            // held is held forever. rhoquinn8217, 2026-09-11: *"click with R2
+            // is still sticking and won't unstick."*
+            // ⓘ The comment on the gate path above had already worked out that
+            // publishing only while something is HELD latches the release. This
+            // is one step further out: publishing only while something is BOUND
+            // latches it too, once a binding can be taken away mid-press.
+            gaveUpATrigger = true;
             continue;
         }
 
@@ -1019,8 +1033,26 @@ inline void apply(const void *deviceKey,
     }
     // ⓘ Only when something is bound to a mouse button, so a controller with no
     // mouse bindings never touches the shared state.
-    if (anyMouse) {
+    // ⭐ PUBLISH WHENEVER WE HAVE AN OPINION, which includes "this trigger is
+    // not mine any more" -- that is precisely when the bit needs clearing.
+    // ⓘ Starting the mouse is a separate question: a suppressed trigger may be
+    // bound to a key, and trigger_click starts the mouse itself when it needs
+    // one.
+    if (anyMouse || gaveUpATrigger) {
         ctm_mouse_device::set_buttons(mouseButtons);
+        if (device_config_bool(section.c_str(), "trigger_probe", false)) {
+            static uint8_t lastPublished = 0xff;
+            if (mouseButtons != lastPublished) {
+                lastPublished = mouseButtons;
+                device_log::input(device_log::msg()
+                    << "[rebind-mouse] published=0x" << std::hex
+                    << static_cast<int>(mouseButtons) << std::dec
+                    << " anyMouse=" << (anyMouse ? 1 : 0)
+                    << " gaveUpATrigger=" << (gaveUpATrigger ? 1 : 0));
+            }
+        }
+    }
+    if (anyMouse) {
         ctm_gyro_mouse_ensure_mouse_started();
     }
 }
