@@ -189,7 +189,7 @@ struct Out { bool down; bool freeze; };
 // One step of the R2 side with time and thresholds supplied.
 Out pull(State &st, int r2, long long nowMs, int holdMs = 200, int clickAt = 90)
 {
-    static const Side side{ "right", kR2Position, kRightStatusByte };
+    static const Side side{ "right", kR2Position, kRightStatusByte, 7 };
     const std::vector<uint8_t> d = report_with(0, r2);
     Out out{ false, false };
     out.down = step_side(side, st, d.data(), d.size(), nowMs, raw_from_percent(5),
@@ -218,7 +218,7 @@ int run_trigger_click_tests()
     reset_all();
     {
         State st;
-        static const Side side{ "right", kR2Position, kRightStatusByte };
+        static const Side side{ "right", kR2Position, kRightStatusByte, 7 };
         const std::vector<uint8_t> d = report_with(0, 255);
         bool freeze = false;
         const bool down = step_side(side, st, d.data(), d.size(), 0, raw_from_percent(5),
@@ -322,7 +322,7 @@ int run_trigger_click_tests()
         State st;
         const int engage = raw_from_percent(12);       // 30
         const int release = (engage * 2) / 3;          // 20
-        static const Side side{ "right", kR2Position, kRightStatusByte };
+        static const Side side{ "right", kR2Position, kRightStatusByte, 7 };
         bool freeze = false;
 
         // A trigger wandering below the engage point never engages at all.
@@ -374,7 +374,7 @@ int run_trigger_click_tests()
     // the press fired eleven units before anything gave way (2026-09-10).
     {
         State st;
-        static const Side side{ "right", kR2Position, kRightStatusByte };
+        static const Side side{ "right", kR2Position, kRightStatusByte, 7 };
         bool freeze = false;
 
         // Deep enough to pass any travel threshold, but the effect says no.
@@ -414,7 +414,7 @@ int run_trigger_click_tests()
     // ⛔ A report too short to hold the status byte must not read past its end.
     {
         State st;
-        static const Side side{ "right", kR2Position, kRightStatusByte };
+        static const Side side{ "right", kR2Position, kRightStatusByte, 7 };
         const std::vector<uint8_t> shortReport = report_with(0, 255);
         bool freeze = false;
         const bool down = step_side(side, st, shortReport.data(), shortReport.size(),
@@ -428,7 +428,7 @@ int run_trigger_click_tests()
     // through it. Five pulls that never broke still clicked (2026-09-10), and
     // the status never reached 2 on any of them.
     {
-        static const Side side{ "right", kR2Position, kRightStatusByte };
+        static const Side side{ "right", kR2Position, kRightStatusByte, 7 };
         const std::vector<uint8_t> inside = report_with_status(230, 1);
         const std::vector<uint8_t> past   = report_with_status(250, 2);
 
@@ -454,7 +454,8 @@ int run_trigger_click_tests()
 
     section("trigger click: a mouse binding, end to end");
     reset_all();
-    g_strings["ds5.right_trigger_bind"] = "MouseLeft";
+    g_bools["ds5.right_trigger_freezes_cursor"] = true;
+    g_strings["ds5.rebind_7"] = "MouseLeft";
     {
         const std::vector<unsigned char> descriptor(12, 0);
         int pad = 0;
@@ -466,14 +467,16 @@ int run_trigger_click_tests()
 
     section("trigger click: a keyboard binding, end to end");
     reset_all();
-    g_strings["ds5.right_trigger_bind"] = "Enter";
+    g_bools["ds5.right_trigger_freezes_cursor"] = true;
+    g_strings["ds5.rebind_7"] = "Enter";
     {
         const std::vector<unsigned char> descriptor(12, 0);
         int pad = 0;
         on_ds5_input(&pad, descriptor, "", report_with(0, 240).data(), 16);
         CTM_CHECK_EQ((int)g_buttons, 0);           // no mouse button held
         CTM_CHECK(g_keys.find(&pad) != g_keys.end());
-        CTM_CHECK_EQ((int)g_keys[&pad][0], 0x28);
+        CTM_CHECK(g_keys[&pad].size() == 1);
+        if (g_keys[&pad].size() == 1) CTM_CHECK_EQ((int)g_keys[&pad][0], 0x28);
         // Releasing home lets the key go.
         on_ds5_input(&pad, descriptor, "", report_with(0, 0).data(), 16);
         CTM_CHECK(g_keys.find(&pad) == g_keys.end());
@@ -482,8 +485,10 @@ int run_trigger_click_tests()
 
     section("trigger click: both triggers, bound differently");
     reset_all();
-    g_strings["ds5.right_trigger_bind"] = "MouseLeft";
-    g_strings["ds5.left_trigger_bind"] = "MouseRight";
+    g_bools["ds5.right_trigger_freezes_cursor"] = true;
+    g_strings["ds5.rebind_7"] = "MouseLeft";
+    g_bools["ds5.left_trigger_freezes_cursor"] = true;
+    g_strings["ds5.rebind_6"] = "MouseRight";
     {
         const std::vector<unsigned char> descriptor(12, 0);
         int pad = 0;
@@ -493,7 +498,8 @@ int run_trigger_click_tests()
 
     section("trigger click: two pads do not freeze each other");
     reset_all();
-    g_strings["ds5.right_trigger_bind"] = "MouseLeft";
+    g_bools["ds5.right_trigger_freezes_cursor"] = true;
+    g_strings["ds5.rebind_7"] = "MouseLeft";
     {
         const std::vector<unsigned char> descriptor(12, 0);
         int padA = 0, padB = 0;

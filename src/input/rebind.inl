@@ -898,9 +898,9 @@ inline void apply(const void *deviceKey,
         // ⚠️ The key name comes from trigger_effect.inl, which both files can
         // see, so a rename cannot leave the two disagreeing.
         if ((i == kBtnL2 || i == kBtnR2) &&
-            !device_config_str(section.c_str(),
-                               trigger_effect::bind_key(i == kBtnR2 ? "right" : "left").c_str())
-                 .empty()) {
+            device_config_bool(section.c_str(),
+                               trigger_effect::freeze_key(i == kBtnR2 ? "right" : "left").c_str(),
+                               false)) {
             continue;
         }
 

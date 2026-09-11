@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.64.42 -- see the changelog at the bottom of this comment.
+  VERSION 2.64.43 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,11 @@
   tidy message about it.
 
   CHANGELOG
+    2.64.43 A preset's settings list is two columns again, and it leaves out
+            the tuning numbers. A preview should say what a preset does, not
+            how it is calibrated. The trigger binding is also gone: a trigger
+            is bound by its ordinary remap, and a separate switch says whether
+            pulling it steadies the cursor.
     2.64.42 A preset's settings list is three columns, so the DS5 gyro preset
             fits the compact view. And the config picker marks the auto-linked
             config with 🗘, which the open list and the compact views already
@@ -2316,6 +2321,19 @@ function presetRowValue(key, value) {
 // values are that page's own.
 var PRESET_BUTTON_ORDER = ['Shoulder/stick buttons', 'Face buttons', 'System buttons'];
 
+// ⛔ TUNING NUMBERS ARE NOT PART OF THE DESCRIPTION (rhoquinn8217, 2026-09-10).
+// A preset preview answers "what will this do", and a press depth or a drag
+// delay answers "how is it calibrated" -- which nobody can judge from a list,
+// and which anyone who cares will read in the settings anyway.
+// ⓘ An explicit list rather than a pattern. Hiding everything ending in _at or
+// _ms would take real answers with it.
+var PRESET_HIDE = [
+  'right_trigger_press_at', 'left_trigger_press_at',
+  'right_trigger_effect_strength', 'left_trigger_effect_strength',
+  'right_trigger_snap_force', 'left_trigger_snap_force',
+  'trigger_freeze_at', 'trigger_drag_after_ms'
+];
+
 function presetInfoRows(settings) {
   var groups = {};
   var arrows = [];
@@ -2329,6 +2347,7 @@ function presetInfoRows(settings) {
       arrows.push(s);
       return;
     }
+    if (PRESET_HIDE.indexOf(s.key) >= 0) return;
     var sect = sectionOf(s.key);
     var sub = '';
     if (BUTTON_SECTIONS.indexOf(sect) >= 0) { sub = sect; sect = 'Buttons'; }
@@ -2364,16 +2383,13 @@ function presetTable(title, rows) {
     return t + '</table>';
   };
   var html = '<h4>' + esc(title) + '</h4>';
-  // ⭐ THREE COLUMNS (rhoquinn8217, 2026-09-10), two before that. The DS5 gyro
-  // preset ran off the bottom of the compact view, and a third column costs
-  // nothing: these rows are a label and a short value.
-  // ⓘ Earlier columns take the remainder, so three rows give one each and four
-  // give two-one-one rather than leaving a column empty.
+  // ⭐ Two columns; the first takes the odd one, and a single row stays a
+  // single row. ⛔ Three was tried on 2026-09-10 and looked worse -- the answer
+  // to a preset that runs off the bottom is fewer rows, not narrower ones.
   if (rows.length >= 2) {
-    var per = Math.ceil(rows.length / 3);
-    var out = '<div class="ptwo">';
-    for (var i = 0; i < rows.length; i += per) out += table(rows.slice(i, i + per));
-    return html + out + '</div>';
+    var half = Math.ceil(rows.length / 2);
+    return html + '<div class="ptwo">' + table(rows.slice(0, half)) +
+           table(rows.slice(half)) + '</div>';
   }
   return html + table(rows);
 }
@@ -2971,14 +2987,10 @@ function renderConfigEditor(hostId, configName, prefix, ordinal) {
         // jumps 10 and L1/R1 jumps 100, so any key is a couple of presses away.
         // ⚠️ A NUMBERED rebind only. 'rebind_debug' also starts with 'rebind_'
         // and is a bool -- the prefix test alone turned it into a key picker.
-        //
-        // ⭐ AND THE TRIGGER BINDINGS, which are the same thing under another
-        // name (rhoquinn8217, 2026-09-10). They were typed as plain strings and
-        // rendered as text boxes, which made them look broken beside every other
-        // binding on the page -- and made it look as though they only took mouse
-        // buttons, when they take the whole vocabulary the picker lists.
-        if (meta.key && (/^rebind_\d+$/.test(meta.key) ||
-                         /_trigger_bind$/.test(meta.key)) && KEY_NAMES.length) {
+        // ⓘ A trigger needs no special case here: it is bound by its ordinary
+        // remap like every other button, and only a separate switch decides
+        // whether pulling it steadies the cursor.
+        if (meta.key && /^rebind_\d+$/.test(meta.key) && KEY_NAMES.length) {
           control = '<select id="' + id + '"' + onchange + dis + '>' +
             '<option value=""' + (String(shown) === '' ? ' selected' : '') +
             '>(not bound)</option>' +

@@ -180,16 +180,19 @@ inline const Setting kTouchpadMouseMode[] = {
 // ⓘ The touchpad keeps the job it is good at: two fingers scroll, naturally.
 inline const Setting kSteadyGyroMouseMode[] = {
     { "gyro_no_passthrough", "true" },
-    /* ⛔ COMMON only. The trigger rebinds are declined on purpose -- see the
-       macro split above. */
+    /* ⛔ COMMON only. The shared trigger clicks are declined because this
+       preset binds the triggers ITSELF, below, and then steadies them. */
     CTM_PRESET_COMMON_BINDINGS,
     /* The gyro moves the cursor EXCEPT while a trigger is being worked. */
     { "gyro_to_mouse_gate", "trigger" },
 
-    { "right_trigger_bind", "MouseLeft" },
-    { "right_trigger_bind_at", "80" },
-    { "left_trigger_bind", "MouseRight" },
-    { "left_trigger_bind_at", "80" },
+    /* ⭐ Bound like any other button, then told to steady the cursor. */
+    { "rebind_7", "MouseLeft" },
+    { "right_trigger_freezes_cursor", "true" },
+    { "right_trigger_press_at", "80" },
+    { "rebind_6", "MouseRight" },
+    { "left_trigger_freezes_cursor", "true" },
+    { "left_trigger_press_at", "80" },
     /* ⓘ The effect point is left unset so it FOLLOWS the press point. Two
        numbers for one place drifted apart three times in one evening. */
     { "right_trigger_effect", "click" },

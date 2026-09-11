@@ -62,6 +62,7 @@ struct Side {
     const char *name;      // "right" or "left": also the config key stem
     size_t position;       // where its pull sits in the report
     size_t statusByte;     // where the controller reports its effect status
+    int rebindIndex;       // which rebind_N says what this trigger sends
 };
 
 // ⭐⭐⭐ THE CONTROLLER SAYS WHEN THE TRIGGER CROSSES A BREAK, and that is a
@@ -257,11 +258,21 @@ inline bool step_side(const Side &side, State &st, const uint8_t *data, size_t l
     return st.down;
 }
 
-inline std::string bind_key_for(const char *sideName)
+// ⭐ WHAT THE TRIGGER SENDS COMES FROM THE ORDINARY REMAP. There is no second
+// binding: rebind_6 and rebind_7 are the triggers, the same way rebind_0 is
+// Cross, and this file only changes HOW a press behaves.
+inline std::string rebind_key_for(const Side &side)
 {
-    // ⓘ From trigger_effect.inl, so the rebinder and this file cannot
-    // disagree about what the key is called.
-    return trigger_effect::bind_key(sideName);
+    char buf[24];
+    snprintf(buf, sizeof(buf), "rebind_%d", side.rebindIndex);
+    return std::string(buf);
+}
+
+// Is the cursor gesture switched on for this trigger?
+inline bool freezes_cursor(const std::string &section, const char *sideName)
+{
+    return device_config_bool(section.c_str(),
+                              trigger_effect::freeze_key(sideName).c_str(), false);
 }
 
 // Does this trigger's effect GIVE WAY, or does it only resist? A click and a
@@ -381,13 +392,19 @@ inline void on_ds5_input(const void *deviceKey,
 
     probe_report(deviceKey, section, data, len);
 
-    static const Side kR2{ "right", kR2Position, kRightStatusByte };
-    static const Side kL2{ "left", kL2Position, kLeftStatusByte };
+    static const Side kR2{ "right", kR2Position, kRightStatusByte, 7 };
+    static const Side kL2{ "left", kL2Position, kLeftStatusByte, 6 };
 
-    const Bound boundR2 =
-        bound_for(device_config_str(section.c_str(), bind_key_for(kR2.name).c_str()));
-    const Bound boundL2 =
-        bound_for(device_config_str(section.c_str(), bind_key_for(kL2.name).c_str()));
+    // ⛔ BOTH HALVES OR NEITHER. The gesture needs something to send and a
+    // reason to take the trigger over. A switch with no remap behind it would
+    // freeze the cursor and press nothing; a remap with the switch off is an
+    // ordinary button and belongs to the rebinder.
+    const Bound boundR2 = freezes_cursor(section, kR2.name)
+        ? bound_for(device_config_str(section.c_str(), rebind_key_for(kR2).c_str()))
+        : Bound();
+    const Bound boundL2 = freezes_cursor(section, kL2.name)
+        ? bound_for(device_config_str(section.c_str(), rebind_key_for(kL2).c_str()))
+        : Bound();
 
     // ⓘ The common case costs two config lookups and touches nothing else, so
     // an install that never binds a trigger behaves exactly as it did before.
@@ -422,9 +439,9 @@ inline void on_ds5_input(const void *deviceKey,
     // ordinary press rather than just above a tap.
     const int holdMs = device_config_int(section.c_str(), "trigger_drag_after_ms", 600);
     const int clickR2 = raw_from_percent(
-        device_config_int(section.c_str(), "right_trigger_bind_at", 90));
+        device_config_int(section.c_str(), "right_trigger_press_at", 90));
     const int clickL2 = raw_from_percent(
-        device_config_int(section.c_str(), "left_trigger_bind_at", 90));
+        device_config_int(section.c_str(), "left_trigger_press_at", 90));
     // ⓘ Which triggers have a break to fire on. A wall or a notch does not
     // give way, so those keep a travel threshold.
     const bool effectR2 = has_effect(section, kR2.name);

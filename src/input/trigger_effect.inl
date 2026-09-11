@@ -358,9 +358,21 @@ inline void build_snap(uint8_t *block, int startZone, int endZone,
 // ⭐ "right" and "left" come FIRST. They are the right trigger and the left
 // trigger, the way everyone says it and the way right_stick_ and left_stick_
 // already read in this project.
-inline std::string bind_key(const char *sideName)
+// ⭐⭐ THE TRIGGER IS BOUND LIKE EVERY OTHER BUTTON, and this is only the
+// SWITCH that changes how it behaves while you work it (rhoquinn8217,
+// 2026-09-10). There used to be a second binding of its own, which meant two
+// boxes that looked alike sitting next to each other with only one of them
+// winning. ➡️ Now rebind_6 and rebind_7 say what a trigger sends, and this says
+// whether pulling it holds the cursor still.
+inline std::string freeze_key(const char *sideName)
 {
-    return std::string(sideName) + "_trigger_bind";
+    return std::string(sideName) + "_trigger_freezes_cursor";
+}
+
+// How deep the press fires, when the effect does not name the point itself.
+inline std::string press_at_key(const char *sideName)
+{
+    return std::string(sideName) + "_trigger_press_at";
 }
 
 inline std::string effect_key(const char *sideName)
@@ -444,7 +456,7 @@ inline uint8_t apply_one(const std::string &section, const char *sideKey,
     // landmark a finger gets. Putting it anywhere but the click point is
     // possible -- for marking where the cursor freezes, say -- but it should be
     // something you ask for rather than something you inherit.
-    const std::string clickAtKey = bind_key(sideKey) + "_at";
+    const std::string clickAtKey = press_at_key(sideKey);
     const int percent = device_config_int(
         section.c_str(), atKey.c_str(),
         device_config_int(section.c_str(), clickAtKey.c_str(), 50));
