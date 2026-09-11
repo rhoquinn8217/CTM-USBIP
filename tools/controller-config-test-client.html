@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.64.43 -- see the changelog at the bottom of this comment.
+  VERSION 2.64.44 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,9 @@
   tidy message about it.
 
   CHANGELOG
+    2.64.44 A preset's settings list leaves out the passthrough switches too.
+            They are the same in every preset that touches the control, so
+            they separate nothing.
     2.64.43 A preset's settings list is two columns again, and it leaves out
             the tuning numbers. A preview should say what a preset does, not
             how it is calibrated. The trigger binding is also gone: a trigger
@@ -2331,7 +2334,14 @@ var PRESET_HIDE = [
   'right_trigger_press_at', 'left_trigger_press_at',
   'right_trigger_effect_strength', 'left_trigger_effect_strength',
   'right_trigger_snap_force', 'left_trigger_snap_force',
-  'trigger_freeze_at', 'trigger_drag_after_ms'
+  'trigger_freeze_at', 'trigger_drag_after_ms',
+  // AND THE PASSTHROUGHS. "gyro_no_passthrough true" is not something a
+  // preset DOES, it is the housekeeping behind what it does: if the gyro is
+  // moving the cursor then of course the game is not also getting it. Every
+  // preset that remaps a control sets these, so they say nothing about which
+  // preset you are looking at.
+  'gyro_no_passthrough', 'touchpad_no_passthrough',
+  'left_stick_no_passthrough', 'right_stick_no_passthrough'
 ];
 
 function presetInfoRows(settings) {
