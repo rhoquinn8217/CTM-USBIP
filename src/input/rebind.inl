@@ -884,6 +884,26 @@ inline void apply(const void *deviceKey,
     bool anyMouse = false;
 
     for (int i = 0; i < kButtonCount; ++i) {
+        // ⛔⛔ A TRIGGER BOUND THROUGH THE GESTURE IS NOT ALSO BOUND HERE.
+        //
+        // Two settings could bind one trigger and BOTH fired: this one on the
+        // pad's own digital bit, early and untunable, and the gesture at a
+        // depth it chooses with the cursor held still. Two presses per pull
+        // (rhoquinn8217, 2026-09-10).
+        //
+        // ➡️ The gesture WINS, because it is a superset: it can do everything
+        // this can, plus a depth and a drag. ⓘ Pointing them at one another as
+        // two views of one value was considered and refused -- they are not
+        // equivalent, and hiding that would be worse than choosing.
+        // ⚠️ The key name comes from trigger_effect.inl, which both files can
+        // see, so a rename cannot leave the two disagreeing.
+        if ((i == kBtnL2 || i == kBtnR2) &&
+            !device_config_str(section.c_str(),
+                               trigger_effect::bind_key(i == kBtnR2 ? "right" : "left").c_str())
+                 .empty()) {
+            continue;
+        }
+
         char keyName[32];
         snprintf(keyName, sizeof(keyName), "rebind_%d", i);
         const std::string code = device_config_str(section.c_str(), keyName);

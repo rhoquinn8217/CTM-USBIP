@@ -347,6 +347,27 @@ inline void build_snap(uint8_t *block, int startZone, int endZone,
     block[4] = static_cast<uint8_t>(snapForce);
 }
 
+// ⭐ THE KEY NAMES LIVE HERE, and they are built rather than written out.
+//
+// ⓘ This is the earliest trigger file in the include order, so the rebinder and
+// the gesture can both reach it. ⛔ That matters: the rebinder has to know
+// whether a trigger is bound through the gesture, and a second copy of the
+// string in rebind.inl would drift the first time one of them was renamed --
+// which has now happened twice in one day.
+//
+// ⭐ "right" and "left" come FIRST. They are the right trigger and the left
+// trigger, the way everyone says it and the way right_stick_ and left_stick_
+// already read in this project.
+inline std::string bind_key(const char *sideName)
+{
+    return std::string(sideName) + "_trigger_bind";
+}
+
+inline std::string effect_key(const char *sideName)
+{
+    return std::string(sideName) + "_trigger_effect";
+}
+
 // ---- what a config asks for -------------------------------------------------
 
 enum class Shape {
@@ -397,7 +418,7 @@ inline void note_set_effect(const std::string &marker, bool on)
 inline uint8_t apply_one(const std::string &section, const char *sideKey,
                          uint8_t *report, size_t offset, uint8_t claimBit)
 {
-    const std::string effectKey   = std::string("trigger_") + sideKey + "_effect";
+    const std::string effectKey   = effect_key(sideKey);
     const std::string atKey       = effectKey + "_at";
     const std::string strengthKey = effectKey + "_strength";
     const std::string marker      = section + "/" + sideKey;
@@ -423,7 +444,7 @@ inline uint8_t apply_one(const std::string &section, const char *sideKey,
     // landmark a finger gets. Putting it anywhere but the click point is
     // possible -- for marking where the cursor freezes, say -- but it should be
     // something you ask for rather than something you inherit.
-    const std::string clickAtKey = std::string("trigger_") + sideKey + "_click_at";
+    const std::string clickAtKey = bind_key(sideKey) + "_at";
     const int percent = device_config_int(
         section.c_str(), atKey.c_str(),
         device_config_int(section.c_str(), clickAtKey.c_str(), 50));
@@ -437,8 +458,7 @@ inline uint8_t apply_one(const std::string &section, const char *sideKey,
     } else if (shape == Shape::Notch) {
         build_detent_wall(report + offset, zone, strength);
     } else if (shape == Shape::Snap) {
-        const std::string snapKey =
-            std::string("trigger_") + sideKey + "_snap_force";
+        const std::string snapKey = std::string(sideKey) + "_trigger_snap_force";
         build_snap(report + offset, zone - 1, zone, strength,
                    device_config_int(section.c_str(), snapKey.c_str(), 3));
     } else {
@@ -451,7 +471,7 @@ inline uint8_t apply_one(const std::string &section, const char *sideKey,
 // Is this side asking for an effect of its own?
 inline bool side_wants_effect(const std::string &section, const char *sideKey)
 {
-    const std::string key = std::string("trigger_") + sideKey + "_effect";
+    const std::string key = effect_key(sideKey);
     const Shape shape = shape_from(device_config_str(section.c_str(), key.c_str()));
     return shape == Shape::Click || shape == Shape::Wall ||
            shape == Shape::Notch || shape == Shape::Snap;
@@ -506,7 +526,7 @@ inline bool wants_anything(const std::string &section)
 {
     const char *sides[] = { "right", "left" };
     for (const char *side : sides) {
-        const std::string key = std::string("trigger_") + side + "_effect";
+        const std::string key = effect_key(side);
         const Shape shape = shape_from(device_config_str(section.c_str(), key.c_str()));
         if (shape == Shape::Click || shape == Shape::Wall ||
             shape == Shape::Notch || shape == Shape::Snap) return true;

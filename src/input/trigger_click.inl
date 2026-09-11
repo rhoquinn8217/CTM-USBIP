@@ -259,7 +259,9 @@ inline bool step_side(const Side &side, State &st, const uint8_t *data, size_t l
 
 inline std::string bind_key_for(const char *sideName)
 {
-    return std::string("trigger_") + sideName + "_click";
+    // ⓘ From trigger_effect.inl, so the rebinder and this file cannot
+    // disagree about what the key is called.
+    return trigger_effect::bind_key(sideName);
 }
 
 // Does this trigger's effect GIVE WAY, or does it only resist? A click and a
@@ -267,7 +269,7 @@ inline std::string bind_key_for(const char *sideName)
 // counts as pressed.
 inline bool shape_breaks(const std::string &section, const char *sideName)
 {
-    const std::string key = std::string("trigger_") + sideName + "_effect";
+    const std::string key = trigger_effect::effect_key(sideName);
     const trigger_effect::Shape shape =
         trigger_effect::shape_from(device_config_str(section.c_str(), key.c_str()));
     // ⓘ Only the click. Snap would qualify by shape, but it reports nothing to
@@ -291,7 +293,7 @@ inline bool shape_breaks(const std::string &section, const char *sideName)
 // wrong repeatedly today.
 inline bool has_effect(const std::string &section, const char *sideName)
 {
-    const std::string key = std::string("trigger_") + sideName + "_effect";
+    const std::string key = trigger_effect::effect_key(sideName);
     const trigger_effect::Shape shape =
         trigger_effect::shape_from(device_config_str(section.c_str(), key.c_str()));
     // ⛔ NOTCH IS EXCLUDED, measured 2026-09-10. Its wall covers the whole pull
@@ -410,7 +412,7 @@ inline void on_ds5_input(const void *deviceKey,
     // ⚠️ ONE number for both triggers. "Starting to pull" is a property of the
     // hand, not of which trigger it is, and two of them could disagree.
     const int engageRaw = raw_from_percent(
-        device_config_int(section.c_str(), "trigger_engage_at", 15));
+        device_config_int(section.c_str(), "trigger_freeze_at", 15));
     // ⛔ 600, AND 200 WAS MEASURED WRONG (2026-09-10). The window came from the
     // touchpad, where a click is a tap. A trigger is not: rhoquinn8217's
     // QUICKEST deliberate press in the capture held for 538 ms, and every one of
@@ -418,11 +420,11 @@ inline void on_ds5_input(const void *deviceKey,
     // coming back mid-press was read as the freeze failing.
     // ⭐ A drag has to be something you MEAN, so the window must sit clear of an
     // ordinary press rather than just above a tap.
-    const int holdMs = device_config_int(section.c_str(), "trigger_click_hold_ms", 600);
+    const int holdMs = device_config_int(section.c_str(), "trigger_drag_after_ms", 600);
     const int clickR2 = raw_from_percent(
-        device_config_int(section.c_str(), "trigger_right_click_at", 90));
+        device_config_int(section.c_str(), "right_trigger_bind_at", 90));
     const int clickL2 = raw_from_percent(
-        device_config_int(section.c_str(), "trigger_left_click_at", 90));
+        device_config_int(section.c_str(), "left_trigger_bind_at", 90));
     // ⓘ Which triggers have a break to fire on. A wall or a notch does not
     // give way, so those keep a travel threshold.
     const bool effectR2 = has_effect(section, kR2.name);

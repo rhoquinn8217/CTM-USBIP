@@ -454,7 +454,7 @@ int run_trigger_click_tests()
 
     section("trigger click: a mouse binding, end to end");
     reset_all();
-    g_strings["ds5.trigger_right_click"] = "MouseLeft";
+    g_strings["ds5.right_trigger_bind"] = "MouseLeft";
     {
         const std::vector<unsigned char> descriptor(12, 0);
         int pad = 0;
@@ -466,7 +466,7 @@ int run_trigger_click_tests()
 
     section("trigger click: a keyboard binding, end to end");
     reset_all();
-    g_strings["ds5.trigger_right_click"] = "Enter";
+    g_strings["ds5.right_trigger_bind"] = "Enter";
     {
         const std::vector<unsigned char> descriptor(12, 0);
         int pad = 0;
@@ -482,8 +482,8 @@ int run_trigger_click_tests()
 
     section("trigger click: both triggers, bound differently");
     reset_all();
-    g_strings["ds5.trigger_right_click"] = "MouseLeft";
-    g_strings["ds5.trigger_left_click"] = "MouseRight";
+    g_strings["ds5.right_trigger_bind"] = "MouseLeft";
+    g_strings["ds5.left_trigger_bind"] = "MouseRight";
     {
         const std::vector<unsigned char> descriptor(12, 0);
         int pad = 0;
@@ -493,7 +493,7 @@ int run_trigger_click_tests()
 
     section("trigger click: two pads do not freeze each other");
     reset_all();
-    g_strings["ds5.trigger_right_click"] = "MouseLeft";
+    g_strings["ds5.right_trigger_bind"] = "MouseLeft";
     {
         const std::vector<unsigned char> descriptor(12, 0);
         int padA = 0, padB = 0;

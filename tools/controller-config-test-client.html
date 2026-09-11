@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.64.39 -- see the changelog at the bottom of this comment.
+  VERSION 2.64.40 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,10 @@
   tidy message about it.
 
   CHANGELOG
+    2.64.40 The trigger bindings are pickers, not text boxes. They take the
+            same names a button remap takes, so typing one by hand invited the
+            same typo, and a text box made them look as though they only
+            accepted mouse buttons.
     2.64.39 The section you are on keeps a dim underline when the strip does
             not have focus, instead of losing its mark entirely. And Set auto
             link carries the 🗘 the compact views have used since 2.64.11, so
@@ -2945,7 +2949,14 @@ function renderConfigEditor(hostId, configName, prefix, ordinal) {
         // jumps 10 and L1/R1 jumps 100, so any key is a couple of presses away.
         // ⚠️ A NUMBERED rebind only. 'rebind_debug' also starts with 'rebind_'
         // and is a bool -- the prefix test alone turned it into a key picker.
-        if (meta.key && /^rebind_\d+$/.test(meta.key) && KEY_NAMES.length) {
+        //
+        // ⭐ AND THE TRIGGER BINDINGS, which are the same thing under another
+        // name (rhoquinn8217, 2026-09-10). They were typed as plain strings and
+        // rendered as text boxes, which made them look broken beside every other
+        // binding on the page -- and made it look as though they only took mouse
+        // buttons, when they take the whole vocabulary the picker lists.
+        if (meta.key && (/^rebind_\d+$/.test(meta.key) ||
+                         /_trigger_bind$/.test(meta.key)) && KEY_NAMES.length) {
           control = '<select id="' + id + '"' + onchange + dis + '>' +
             '<option value=""' + (String(shown) === '' ? ' selected' : '') +
             '>(not bound)</option>' +

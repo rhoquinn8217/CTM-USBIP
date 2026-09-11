@@ -186,22 +186,22 @@ inline const Setting kSteadyGyroMouseMode[] = {
     /* The gyro moves the cursor EXCEPT while a trigger is being worked. */
     { "gyro_to_mouse_gate", "trigger" },
 
-    { "trigger_right_click", "MouseLeft" },
-    { "trigger_right_click_at", "80" },
-    { "trigger_left_click", "MouseRight" },
-    { "trigger_left_click_at", "80" },
+    { "right_trigger_bind", "MouseLeft" },
+    { "right_trigger_bind_at", "80" },
+    { "left_trigger_bind", "MouseRight" },
+    { "left_trigger_bind_at", "80" },
     /* ⓘ The effect point is left unset so it FOLLOWS the press point. Two
        numbers for one place drifted apart three times in one evening. */
-    { "trigger_right_effect", "click" },
-    { "trigger_right_effect_strength", "7" },
-    { "trigger_left_effect", "click" },
-    { "trigger_left_effect_strength", "7" },
+    { "right_trigger_effect", "click" },
+    { "right_trigger_effect_strength", "7" },
+    { "left_trigger_effect", "click" },
+    { "left_trigger_effect_strength", "7" },
     /* ⚠️ Not the smallest the pad allows. A trigger under an effect rests
        further off its stop, and a threshold near that reads as a finger. */
-    { "trigger_engage_at", "15" },
+    { "trigger_freeze_at", "15" },
     /* ⓘ One number for the drag delay AND the double-press window. A
        deliberate press was measured at 538 ms, so this sits clear of one. */
-    { "trigger_click_hold_ms", "600" },
+    { "trigger_drag_after_ms", "600" },
 
     { "touchpad_no_passthrough", "true" },
     /* ⓘ ONE finger. Both thumbs are free here -- the triggers do the pressing
