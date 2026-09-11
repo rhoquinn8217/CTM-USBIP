@@ -48,6 +48,28 @@
 // this project wants: a break somewhere (weapon), and any shape at all made out
 // of ten per-zone forces (feedback). The oscillating modes are for guns.
 //
+// ⭐⭐ WHAT EACH MODE IS ACTUALLY FOR, looked up 2026-09-10 after measuring
+// them. Every finding below was measured FIRST and the reading agreed, which is
+// why it is worth trusting in both directions:
+//
+//   weapon (0x25)  a GUN TRIGGER BREAK. Easy until a point, then it gives way.
+//                  ⭐ The only mode modelling a discrete firing moment, and the
+//                  only one that reports 0 / 1 / 2 -- before, during, past.
+//                  ➡️ So it is the only shape a PRESS can be hung on.
+//   feedback(0x21) RESISTANCE, not an event: drawing something heavy, grinding
+//                  through mud, a stiff mechanism. Reports 0 before and 1 while
+//                  engaged, and never 2, because there is nothing to come
+//                  through. ⓘ Our wall and notch are both this mode.
+//   bow    (0x22)  DRAWING A BOWSTRING, not firing: resistance plus a snap-back
+//                  that returns the trigger. ⛔ Unofficial, and documented as
+//                  probably not setting the status at all -- which is exactly
+//                  what we measured, 0 from top to bottom on every pull.
+//                  ⚠️ Also documented as liable to be REMOVED by a future
+//                  controller firmware. Do not build anything on it.
+//
+// ⓘ That is why a click is the only shape whose press lands where the finger
+// feels it. It is the only one Sony built to have a moment.
+//
 // ⚠️ WHERE WE KNOWINGLY DIVERGE FROM THE PUBLISHED FACTORIES:
 //   1. **Strength.** They take 1-8 and send one less, so their 1 stores 0. We
 //      take 1-7 and send it verbatim. Same maximum, and no value in the range
