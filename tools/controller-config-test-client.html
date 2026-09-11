@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.64.40 -- see the changelog at the bottom of this comment.
+  VERSION 2.64.41 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,9 @@
   tidy message about it.
 
   CHANGELOG
+    2.64.41 The per-side trigger settings group under Triggers again. They read
+            right_trigger_ and left_trigger_ now, and the grouping test was a
+            prefix, so every one of them landed in Other.
     2.64.40 The trigger bindings are pickers, not text boxes. They take the
             same names a button remap takes, so typing one by hand invited the
             same typo, and a text box made them look as though they only
@@ -2786,9 +2789,14 @@ function sectionOf(key) {
   if (key.indexOf('left_stick') === 0) return 'Left stick';
   if (key.indexOf('touchpad') === 0) return 'Touchpad';
   if (key.indexOf('gyro') === 0) return 'Gyro';
-  // The trigger effect keys. Without this they land in "Other", which is where
-  // a setting goes to not be found.
-  if (key.indexOf('trigger') === 0) return 'Triggers';
+  // ⛔ THE TRIGGER KEYS, AND THE TEST IS NOT A PREFIX. Two kinds reach here:
+  // the shared ones start with trigger_, and the per-side ones read
+  // right_trigger_ and left_trigger_ because that is how a trigger is named.
+  // A prefix test caught only the first kind and dropped every per-side setting
+  // into "Other" the moment they were renamed (2026-09-10).
+  // ⓘ Grouping here is by prefix everywhere else, which is why the rename broke
+  // it silently -- nothing errors, the settings simply appear somewhere else.
+  if (/(^|_)trigger_/.test(key)) return 'Triggers';
   if (key.indexOf('rumble') === 0 || key.indexOf('master_rumble') === 0) return 'Rumble';
   if (key.indexOf('audio') === 0 || key.indexOf('speaker') === 0 ||
       key.indexOf('headset') === 0 || key.indexOf('force_echo') === 0) return 'Audio';
