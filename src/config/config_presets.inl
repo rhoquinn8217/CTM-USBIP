@@ -209,11 +209,20 @@ inline const Setting kSteadyGyroMouseMode[] = {
     { "right_trigger_effect_strength", "7" },
     { "left_trigger_effect", "click" },
     { "left_trigger_effect_strength", "7" },
-    /* ⚠️ Not the smallest the pad allows. A trigger under an effect rests
-       further off its stop, and a threshold near that reads as a finger. */
-    { "trigger_freeze_at", "15" },
-    /* ⓘ One number for the drag delay AND the double-press window. A
-       deliberate press was measured at 538 ms, so this sits clear of one. */
+    /* ⭐ 6 AFTER MEASURING WHERE THE TRIGGER ACTUALLY RESTS (2026-09-11).
+       ⛔ It was 15, defending against a note that a trigger under an effect
+       rests off its stop at 11 to 18. A histogram of a full day's reports says
+       otherwise: 783,755 frames at EXACTLY 0, and 40 to 250 frames at each of
+       1 through 45, which is travel rather than rest.
+       ⚠️ 15 percent of the pull before the cursor stopped was enough to feel --
+       rhoquinn8217: *"I can depress the trigger slightly but gyro doesn't turn
+       off as I would expect."* ⓘ Still not the floor: engaging at 6 releases at
+       4, which clears the 11 that note worried about if it ever comes back. */
+    { "trigger_freeze_at", "6" },
+    /* ⓘ How long a press is HELD before it becomes a drag. ⛔ It was also the
+       double-press window until 2026-09-11, and one number answering two
+       questions made every click feel laggy; that is trigger_double_click_ms
+       now. A deliberate press was measured at 538 ms, so this sits clear. */
     { "trigger_drag_after_ms", "600" },
 
     { "touchpad_no_passthrough", "true" },

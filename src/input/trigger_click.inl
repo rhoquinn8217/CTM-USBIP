@@ -496,7 +496,7 @@ inline void on_ds5_input(const void *deviceKey,
     // ⚠️ ONE number for both triggers. "Starting to pull" is a property of the
     // hand, not of which trigger it is, and two of them could disagree.
     const int engageRaw = raw_from_percent(
-        device_config_int(section.c_str(), "trigger_freeze_at", 15));
+        device_config_int(section.c_str(), "trigger_freeze_at", 6));
     // ⛔ 600, AND 200 WAS MEASURED WRONG (2026-09-10). The window came from the
     // touchpad, where a click is a tap. A trigger is not: rhoquinn8217's
     // QUICKEST deliberate press in the capture held for 538 ms, and every one of
