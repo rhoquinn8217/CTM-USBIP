@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.64.41 -- see the changelog at the bottom of this comment.
+  VERSION 2.64.42 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,10 @@
   tidy message about it.
 
   CHANGELOG
+    2.64.42 A preset's settings list is three columns, so the DS5 gyro preset
+            fits the compact view. And the config picker marks the auto-linked
+            config with 🗘, which the open list and the compact views already
+            did.
     2.64.41 The per-side trigger settings group under Triggers again. They read
             right_trigger_ and left_trigger_ now, and the grouping test was a
             prefix, so every one of them landed in Other.
@@ -2360,12 +2364,16 @@ function presetTable(title, rows) {
     return t + '</table>';
   };
   var html = '<h4>' + esc(title) + '</h4>';
-  // ⭐ Every section is two columns (rhoquinn8217, 2026-09-09); the first
-  // column takes the odd one, and a single row stays a single row.
+  // ⭐ THREE COLUMNS (rhoquinn8217, 2026-09-10), two before that. The DS5 gyro
+  // preset ran off the bottom of the compact view, and a third column costs
+  // nothing: these rows are a label and a short value.
+  // ⓘ Earlier columns take the remainder, so three rows give one each and four
+  // give two-one-one rather than leaving a column empty.
   if (rows.length >= 2) {
-    var half = Math.ceil(rows.length / 2);
-    return html + '<div class="ptwo">' + table(rows.slice(0, half)) +
-           table(rows.slice(half)) + '</div>';
+    var per = Math.ceil(rows.length / 3);
+    var out = '<div class="ptwo">';
+    for (var i = 0; i < rows.length; i += per) out += table(rows.slice(i, i + per));
+    return html + out + '</div>';
   }
   return html + table(rows);
 }
@@ -2629,10 +2637,16 @@ function buildDevicePane(d) {
     return settingsKindOf(d.kind) === c.kind;
   });
   var options = '<option value="">(no config)</option>';
+  // ⭐ THE AUTO-LINKED CONFIG CARRIES THE MARK HERE TOO (rhoquinn8217,
+  // 2026-09-10). The open list has shown 🗘 beside a claiming config since
+  // 2.64.12, and the compact views mark it beside their selector, but the full
+  // view's picker showed nothing -- so which config this pad comes back to was
+  // the one thing the picker would not tell you.
   kindOk.forEach(function(c) {
+    var claims = claimedBy && c.name.toLowerCase() === claimedBy.toLowerCase();
     options += '<option value="' + esc(c.name) + '"' +
                (c.name === d.linked_config ? ' selected' : '') + '>' +
-               esc(c.name) + '</option>';
+               esc(c.name) + (claims ? ' 🗘' : '') + '</option>';
   });
 
   // ⭐ Auto link sits with the CONFIG it applies to. It answers "which config

@@ -282,10 +282,6 @@ static std::string rest_keys_json()
 {"key":"turbo_4","type":"int","min":0,"max":1000,"name":"(L1) | (LB)","default":0,"help":"Set milliseconds between rapid fire presses, 0 means held down"},
 {"key":"rebind_5","type":"string","name":"(R1) | (RB)","default":"","help":"Remap button to keyboard key or mouse action"},
 {"key":"turbo_5","type":"int","min":0,"max":1000,"name":"(R1) | (RB)","default":0,"help":"Set milliseconds between rapid fire presses, 0 means held down"},
-{"key":"rebind_6","type":"string","name":"(L2) | (LT)","default":"","help":"Remap button to keyboard key or mouse action"},
-{"key":"turbo_6","type":"int","min":0,"max":1000,"name":"(L2) | (LT)","default":0,"help":"Set milliseconds between rapid fire presses, 0 means held down"},
-{"key":"rebind_7","type":"string","name":"(R2) | (RT)","default":"","help":"Remap button to keyboard key or mouse action"},
-{"key":"turbo_7","type":"int","min":0,"max":1000,"name":"(R2) | (RT)","default":0,"help":"Set milliseconds between rapid fire presses, 0 means held down"},
 {"key":"rebind_8","type":"string","name":"(Create) | (Select)","default":"","help":"Remap button to keyboard key or mouse action"},
 {"key":"turbo_8","type":"int","min":0,"max":1000,"name":"(Create) | (Select)","default":0,"help":"Set milliseconds between rapid fire presses, 0 means held down"},
 {"key":"rebind_9","type":"string","name":"(Options) | (Start)","default":"","help":"Remap button to keyboard key or mouse action"},
@@ -345,12 +341,16 @@ static std::string rest_keys_json()
     // documented. Two literals joined at the end cost nothing and the break
     // can move wherever is convenient -- it is not a section boundary.
     const std::string pointers2 = R"CTMKEYS(
+{"key":"rebind_7","type":"string","name":"(R2) | (RT)","default":"","help":"Remap button to keyboard key or mouse action"},
+{"key":"turbo_7","type":"int","min":0,"max":1000,"name":"(R2) | (RT)","default":0,"help":"Set milliseconds between rapid fire presses, 0 means held down"},
 {"key":"right_trigger_bind","type":"string","name":"(R2) | (RT) — RIGHT trigger","default":"","help":"What the right trigger sends. Blank is off. Setting it also freezes the cursor while the trigger is worked, and it replaces the (R2) remap, which is ignored while this is set."},
 {"key":"right_trigger_bind_at","type":"int","min":10,"max":100,"default":80,"name":"RIGHT trigger fires at","help":"How far the right trigger travels before it sends, as a percent. Ignored when its effect is \"click\" or \"wall\", which report their own point."},
 {"key":"right_trigger_effect","type":"choice","choices":["","off","click","wall","notch","snap"],"default":"","name":"RIGHT trigger feel","help":"Resistance on the right trigger. \"click\" is a break at the point. \"wall\" is steady resistance from it down. \"notch\" is a wall with a bump in it. \"snap\" is a break that also pushes back. Blank leaves the trigger alone, \"off\" clears it. Wired only."},
 {"key":"right_trigger_effect_at","type":"int","min":0,"max":100,"default":50,"name":"RIGHT trigger feel sits at","help":"Where the right effect sits, as a percent. Blank follows the point the trigger sends at. A \"click\" break can only land between 30 and 90."},
 {"key":"right_trigger_effect_strength","type":"int","min":1,"max":7,"default":5,"name":"RIGHT trigger feel strength","help":"How hard the right effect pushes back, 1 to 7. A \"notch\" needs 5 or more before its bump can be felt."},
 {"key":"right_trigger_snap_force","type":"int","min":1,"max":7,"default":3,"name":"RIGHT trigger snap force","help":"How hard \"snap\" pushes the right trigger back to rest. Nothing else uses it."},
+{"key":"rebind_6","type":"string","name":"(L2) | (LT)","default":"","help":"Remap button to keyboard key or mouse action"},
+{"key":"turbo_6","type":"int","min":0,"max":1000,"name":"(L2) | (LT)","default":0,"help":"Set milliseconds between rapid fire presses, 0 means held down"},
 {"key":"left_trigger_bind","type":"string","name":"(L2) | (LT) — LEFT trigger","default":"","help":"What the left trigger sends. The same as the right trigger above, and it replaces the (L2) remap."},
 {"key":"left_trigger_bind_at","type":"int","min":10,"max":100,"default":80,"name":"LEFT trigger fires at","help":"How far the left trigger travels before it sends, as a percent."},
 {"key":"left_trigger_effect","type":"choice","choices":["","off","click","wall","notch","snap"],"default":"","name":"LEFT trigger feel","help":"Resistance on the left trigger. The same shapes as the right trigger above."},

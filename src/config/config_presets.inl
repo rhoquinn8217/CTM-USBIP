@@ -264,6 +264,9 @@ inline const Setting kL2GyroAiming[] = {
 
 #define CTM_PRESET_COUNT_OF(a) (sizeof(a) / sizeof((a)[0]))
 
+// ⭐ THE ORDER IS THE ORDER PEOPLE READ, and the ones that need a DualSense
+// sit at the BOTTOM (rhoquinn8217, 2026-09-10). A list that opens with a preset
+// half its readers cannot use asks them to skip past it every time.
 inline const Preset kPresets[] = {
     { "gyro-to-mouse",
       "Tilt the controller to move the cursor, always on -- no trigger to "
@@ -272,30 +275,27 @@ inline const Preset kPresets[] = {
       "touchpad, reachable without either thumb leaving a stick. Square "
       "opens the on-screen keyboard.",
       true, true, kGyroMouseMode, CTM_PRESET_COUNT_OF(kGyroMouseMode) },
+    { "stick-to-mouse",
+      "Right stick moves the cursor, left stick scrolls -- both thumbs where "
+      "they already are. The least precise of the three for fine work, and "
+      "the one that needs no new habits. Square opens the on-screen keyboard.",
+      true, true, kStickMouseMode, CTM_PRESET_COUNT_OF(kStickMouseMode) },
+    { "L2-gyro-mouse-aiming",
+      "For playing, not for the desktop. Gyro aims only while L2 is held, so "
+      "the camera is steady while you move and precise when you aim. Nothing "
+      "else is bound: every button stays with the game.",
+      true, true, kL2GyroAiming, CTM_PRESET_COUNT_OF(kL2GyroAiming) },
     { "DS5-touchpad-to-mouse",
       "The touchpad behaves like a laptop trackpad: one finger moves the "
       "cursor, two fingers scroll the page with them, and a tap clicks. The "
       "most familiar of the three, and the easiest to pick up, but your hand "
       "leaves the sticks to use it. Square opens the on-screen keyboard.",
       true, true, kTouchpadMouseMode, CTM_PRESET_COUNT_OF(kTouchpadMouseMode) },
-    { "stick-to-mouse",
-      "Right stick moves the cursor, left stick scrolls -- both thumbs where "
-      "they already are. The least precise of the three for fine work, and "
-      "the one that needs no new habits. Square opens the on-screen keyboard.",
-      true, true, kStickMouseMode, CTM_PRESET_COUNT_OF(kStickMouseMode) },
     { "DS5-gyro-to-mouse",
-      "The gyro moves the cursor and the triggers hold it still. Start to pull "
-      "and the cursor stops, push past the notch you can feel and it clicks "
-      "where your finger expects, and it only moves again once you let the "
-      "trigger all the way back. Hold instead of releasing and you are "
-      "dragging. R2 is left click, L2 is right click, two fingers scroll, and "
-      "Square opens the on-screen keyboard.",
+      "The gyro moves the cursor and a trigger holds it still. Start to pull "
+      "and the cursor stops; push past the break and it clicks. Keep holding "
+      "to drag. R2 is left click, L2 is right click, one finger scrolls.",
       true, true, kSteadyGyroMouseMode, CTM_PRESET_COUNT_OF(kSteadyGyroMouseMode) },
-    { "L2-gyro-mouse-aiming",
-      "For playing, not for the desktop. Gyro aims only while L2 is held, so "
-      "the camera is steady while you move and precise when you aim. Nothing "
-      "else is bound: every button stays with the game.",
-      true, true, kL2GyroAiming, CTM_PRESET_COUNT_OF(kL2GyroAiming) },
 };
 
 inline size_t preset_count()
