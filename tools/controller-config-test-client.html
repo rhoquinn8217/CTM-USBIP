@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.64.38 -- see the changelog at the bottom of this comment.
+  VERSION 2.64.39 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,10 @@
   tidy message about it.
 
   CHANGELOG
+    2.64.39 The section you are on keeps a dim underline when the strip does
+            not have focus, instead of losing its mark entirely. And Set auto
+            link carries the 🗘 the compact views have used since 2.64.11, so
+            one idea stops looking like two.
     2.64.38 The trigger settings read RIGHT and LEFT rather than r2 and l2,
             right first then left, and the L2/R2 remaps moved in beside them.
             One letter was too little to tell them apart, and a remap two
@@ -964,10 +968,15 @@
                     white-space:nowrap; }
   .sectbar button:hover { color:#c9cbd3; }
   /* ⭐ THE EMPHASIS BELONGS TO THE STRIP WHILE YOU ARE ON IT (rhoquinn8217,
-     2026-09-01). Away from it the underline and the bold come off and only the
-     brighter text remains, so the row stops competing with whatever you are
-     actually working on. */
-  .sectbar button.on { color:#e8e8ea; outline:none; }
+     2026-09-01). Away from it the bold comes off and the underline dims, so the
+     row stops competing with whatever you are actually working on.
+     ⭐⭐ BUT IT NO LONGER DISAPPEARS (rhoquinn8217, 2026-09-10): while you are
+     on a setting, the section that setting belongs to should still be marked.
+     It used to vanish entirely, which left nothing on screen saying where in
+     the page you were. ⓘ Dimmed rather than restored at full strength, so the
+     original intent survives -- present, and not shouting. */
+  .sectbar button.on { color:#e8e8ea; outline:none;
+                       border-bottom-color:#3d4a7a; }
   #sectBar.here button.on { border-bottom-color:#6c8cff; font-weight:600; }
   /* ⭐ ONE COLUMN FOR BUBBLES (rhoquinn8217, 2026-09-01). Both notices were
      pinned to the same corner at the same offset, so a second one landed on
@@ -2641,16 +2650,20 @@ function buildDevicePane(d) {
   // DualSense reports no serial, so there is nothing to remember it by. A
   // button that is simply absent reads as a bug; one that is greyed with a
   // reason answers the question.
+  // ⭐ THE MARK TRAVELS WITH THE BUTTON (rhoquinn8217, 2026-09-10). The compact
+  // and quick views have shown 🗘 beside the selector since 2.64.11, and the
+  // list marks a claiming config with the same glyph. The full view spelled the
+  // action out and showed no mark at all, so the same idea looked like two.
   var claimBtn;
   if (!mySerial) {
     claimBtn = '<button disabled title="this controller reports no serial, so ' +
-               'there is nothing to remember it by">Set auto link</button>';
+               'there is nothing to remember it by">Set auto link 🗘</button>';
   } else if (!d.linked_config) {
     claimBtn = '<button disabled title="pick a config first — there is nothing ' +
-               'to claim while it reads the shared settings">Set auto link</button>';
+               'to claim while it reads the shared settings">Set auto link 🗘</button>';
   } else if (alreadyMine) {
     claimBtn = '<button disabled title="already claimed by this config">' +
-               'Set auto link</button>';
+               'Set auto link 🗘</button>';
   } else {
     // ⭐ Live even when another config holds the claim -- REPLACING one is the
     // common case, and a disabled button meant removing the old claim first
@@ -2659,7 +2672,7 @@ function buildDevicePane(d) {
                esc(d.linked_config) + '\',\'' + esc(mySerial) + '\',\'' +
                esc(claimedBy) + '\')" ' +
                'title="give this controller this config whenever it bridges">' +
-               'Set auto link</button>';
+               'Set auto link 🗘</button>';
   }
 
   head += '<div class="f"><span>currently linked config</span>' +
