@@ -188,14 +188,14 @@ struct Out { bool down; bool freeze; };
 
 // One step of the R2 side with time and thresholds supplied.
 Out pull(State &st, int r2, long long nowMs, int holdMs = 200, int clickAt = 90,
-         int doubleMs = 200)
+         int doubleMs = 200, Steady steady = Steady::Immediate)
 {
     static const Side side{ "right", kR2Position, kRightStatusByte, 7 };
     const std::vector<uint8_t> d = report_with(0, r2);
     Out out{ false, false };
     out.down = step_side(side, st, d.data(), d.size(), nowMs, raw_from_percent(5),
-                         raw_from_percent(clickAt), holdMs, doubleMs, true, false,
-                         false, &out.freeze);
+                         raw_from_percent(clickAt), holdMs, doubleMs, true, steady,
+                         false, false, &out.freeze);
     return out;
 }
 
@@ -224,9 +224,67 @@ int run_trigger_click_tests()
         const std::vector<uint8_t> d = report_with(0, 255);
         bool freeze = false;
         const bool down = step_side(side, st, d.data(), d.size(), 0, raw_from_percent(5),
-                                    raw_from_percent(90), 200, 200, false, false, false, &freeze);
+                                    raw_from_percent(90), 200, 200, false, Steady::Immediate, false, false, &freeze);
         CTM_CHECK(!down);
         CTM_CHECK(!freeze);       // fully pulled, and still inert
+    }
+
+    section("trigger click: where the steady engages, per mode");
+    reset_all();
+    {
+        // Off and immediate both take the shared number; only before_press
+        // derives its own, and it follows the press point rather than being a
+        // second depth that can drift away from it.
+        g_strings["ds5.right_trigger_steady_cursor_pull"] = "immediate";
+        CTM_CHECK_EQ(engage_percent("ds5", "right", 6, 80), 6);
+        g_strings["ds5.right_trigger_steady_cursor_pull"] = "before_press";
+        CTM_CHECK_EQ(engage_percent("ds5", "right", 6, 80), 70);
+        CTM_CHECK_EQ(engage_percent("ds5", "right", 6, 50), 40);
+        // ⓘ Floored, so a shallow press cannot put the lock at or below rest.
+        CTM_CHECK_EQ(engage_percent("ds5", "right", 6, 10), 4);
+        // ⛔ And the OTHER side is unaffected: these are per-side on purpose.
+        CTM_CHECK_EQ(engage_percent("ds5", "left", 6, 80), 6);
+        g_strings["ds5.right_trigger_steady_cursor_pull"] = "off";
+        CTM_CHECK(!steadies_cursor("ds5", "right"));
+        g_strings["ds5.right_trigger_steady_cursor_pull"] = "immediate";
+        CTM_CHECK(steadies_cursor("ds5", "right"));
+    }
+    reset_all();
+
+    section("trigger click: after_press leaves the pull alone and holds on the click");
+    {
+        // ⭐ For a trigger that is ALSO the gyro's gate. The cursor must stay
+        // live all the way down so you can aim with it, and only stop once the
+        // click has landed -- long enough that a second click lands in the same
+        // place. rhoquinn8217, 2026-09-11: *"on the L2 click, it should stop
+        // gyro for a duration that you would give to double click."*
+        State st;
+        // Engaged but short of the press: NOT held, unlike immediate.
+        Out out = pull(st, 60, 0, 200, 90, 200, Steady::AfterPress);
+        CTM_CHECK(!out.down);
+        CTM_CHECK(!out.freeze);
+        // The press lands, and the hold starts with it.
+        out = pull(st, 240, 10, 200, 90, 200, Steady::AfterPress);
+        CTM_CHECK(out.down);
+        CTM_CHECK(out.freeze);
+        // ⛔ And it runs from the PRESS, not the release -- a gate trigger may
+        // never be released, so a window keyed on release would never start.
+        out = pull(st, 240, 150, 200, 90, 200, Steady::AfterPress);
+        CTM_CHECK(out.freeze);
+        out = pull(st, 240, 260, 200, 90, 200, Steady::AfterPress);
+        CTM_CHECK(!out.freeze);              // window spent, cursor live again
+    }
+
+    section("trigger click: off never touches the cursor");
+    {
+        State st;
+        Out out = pull(st, 60, 0, 200, 90, 200, Steady::Off);
+        CTM_CHECK(!out.freeze);
+        out = pull(st, 240, 10, 200, 90, 200, Steady::Off);
+        CTM_CHECK(out.down);                 // it still presses
+        CTM_CHECK(!out.freeze);              // and still leaves the cursor alone
+        out = pull(st, 0, 20, 200, 90, 200, Steady::Off);
+        CTM_CHECK(!out.freeze);
     }
 
     section("trigger click: the freeze arrives before the press");
@@ -333,14 +391,14 @@ int run_trigger_click_tests()
         const std::vector<uint8_t> met = report_with_status(120, 1);
         CTM_CHECK(step_side(side, st, met.data(), met.size(), 0,
                             raw_from_percent(5), raw_from_percent(80),
-                            600, 200, true, true, false, &freeze));
+                            600, 200, true, Steady::Immediate, true, false, &freeze));
         CTM_CHECK(freeze);
         // Bottomed out, one millisecond later. Far short of the 600ms window.
         freeze = false;
         const std::vector<uint8_t> floored = report_with_status(255, 1);
         CTM_CHECK(step_side(side, st, floored.data(), floored.size(), 1,
                             raw_from_percent(5), raw_from_percent(80),
-                            600, 200, true, true, false, &freeze));
+                            600, 200, true, Steady::Immediate, true, false, &freeze));
         CTM_CHECK(!freeze);                // dragging already
     }
 
@@ -354,12 +412,12 @@ int run_trigger_click_tests()
         const std::vector<uint8_t> past = report_with_status(255, 2);
         CTM_CHECK(step_side(side, st, past.data(), past.size(), 0,
                             raw_from_percent(5), raw_from_percent(80),
-                            600, 200, true, true, true, &freeze));
+                            600, 200, true, Steady::Immediate, true, true, &freeze));
         CTM_CHECK(freeze);                 // pressed, still a click
         freeze = false;
         CTM_CHECK(step_side(side, st, past.data(), past.size(), 1,
                             raw_from_percent(5), raw_from_percent(80),
-                            600, 200, true, true, true, &freeze));
+                            600, 200, true, Steady::Immediate, true, true, &freeze));
         CTM_CHECK(freeze);                 // and it stays a click
     }
 
@@ -423,15 +481,15 @@ int run_trigger_click_tests()
         for (int rest : { 0, 11, 20, 29 }) {
             freeze = false;
             const std::vector<uint8_t> d = report_with(0, rest);
-            step_side(side, st, d.data(), d.size(), 0, engage, raw_from_percent(80), 600, 200, true, false, false, &freeze);
+            step_side(side, st, d.data(), d.size(), 0, engage, raw_from_percent(80), 600, 200, true, Steady::Immediate, false, false, &freeze);
             CTM_CHECK(!freeze);
         }
         // Past the engage point it engages, and a drag follows a held press.
         freeze = false;
         {
             const std::vector<uint8_t> d = report_with(0, 240);
-            step_side(side, st, d.data(), d.size(), 0, engage, raw_from_percent(80), 600, 200, true, false, false, &freeze);
-            step_side(side, st, d.data(), d.size(), 700, engage, raw_from_percent(80), 600, 200, true, false, false, &freeze);
+            step_side(side, st, d.data(), d.size(), 0, engage, raw_from_percent(80), 600, 200, true, Steady::Immediate, false, false, &freeze);
+            step_side(side, st, d.data(), d.size(), 700, engage, raw_from_percent(80), 600, 200, true, Steady::Immediate, false, false, &freeze);
         }
         CTM_CHECK(st.dragging);
         // ⭐ Now let it come to rest HIGH, at the old threshold. It must still
@@ -439,7 +497,7 @@ int run_trigger_click_tests()
         freeze = false;
         {
             const std::vector<uint8_t> d = report_with(0, 12);
-            step_side(side, st, d.data(), d.size(), 800, engage, raw_from_percent(80), 600, 200, true, false, false, &freeze);
+            step_side(side, st, d.data(), d.size(), 800, engage, raw_from_percent(80), 600, 200, true, Steady::Immediate, false, false, &freeze);
         }
         CTM_CHECK(!st.engaged);
         CTM_CHECK(!st.dragging);
@@ -451,11 +509,11 @@ int run_trigger_click_tests()
         freeze = false;
         {
             const std::vector<uint8_t> up = report_with(0, 40);
-            step_side(side, st, up.data(), up.size(), 0, engage, raw_from_percent(80), 600, 200, true, false, false, &freeze);
+            step_side(side, st, up.data(), up.size(), 0, engage, raw_from_percent(80), 600, 200, true, Steady::Immediate, false, false, &freeze);
             CTM_CHECK(st.engaged);
             const std::vector<uint8_t> between = report_with(0, 25);
             freeze = false;
-            step_side(side, st, between.data(), between.size(), 10, engage, raw_from_percent(80), 600, 200, true, false, false, &freeze);
+            step_side(side, st, between.data(), between.size(), 10, engage, raw_from_percent(80), 600, 200, true, Steady::Immediate, false, false, &freeze);
             CTM_CHECK(st.engaged);                     // above the release point
             CTM_CHECK(freeze);
         }
@@ -475,7 +533,7 @@ int run_trigger_click_tests()
         const std::vector<uint8_t> deepButShort = report_with_status(250, 0);
         bool down = step_side(side, st, deepButShort.data(), deepButShort.size(),
                               0, raw_from_percent(15), raw_from_percent(80),
-                              600, 200, true, true, false, &freeze);
+                              600, 200, true, Steady::Immediate, true, false, &freeze);
         CTM_CHECK(!down);        // travel would have fired; the effect did not
         CTM_CHECK(freeze);       // and the cursor is held either way
 
@@ -484,7 +542,7 @@ int run_trigger_click_tests()
         freeze = false;
         down = step_side(side, st, shallowButIn.data(), shallowButIn.size(),
                          10, raw_from_percent(15), raw_from_percent(80),
-                         600, 200, true, true, false, &freeze);
+                         600, 200, true, Steady::Immediate, true, false, &freeze);
         CTM_CHECK(down);         // ⭐ the controller's word wins outright
 
         // ⛔ Status 2 is the bottom of the travel and still counts as crossed:
@@ -494,7 +552,7 @@ int run_trigger_click_tests()
         const std::vector<uint8_t> bottomed = report_with_status(255, 2);
         down = step_side(side, st, bottomed.data(), bottomed.size(),
                          20, raw_from_percent(15), raw_from_percent(80),
-                         600, 200, true, true, false, &freeze);
+                         600, 200, true, Steady::Immediate, true, false, &freeze);
         CTM_CHECK(down);
 
         // ⓘ And with useEffect off, the very same report goes back to travel.
@@ -502,7 +560,7 @@ int run_trigger_click_tests()
         freeze = false;
         down = step_side(side, st, shallowButIn.data(), shallowButIn.size(),
                          30, raw_from_percent(15), raw_from_percent(80),
-                         600, 200, true, false, false, &freeze);
+                         600, 200, true, Steady::Immediate, false, false, &freeze);
         CTM_CHECK(!down);        // 120 is short of 204
     }
     // ⛔ A report too short to hold the status byte must not read past its end.
@@ -513,7 +571,7 @@ int run_trigger_click_tests()
         bool freeze = false;
         const bool down = step_side(side, st, shortReport.data(), shortReport.size(),
                                     0, raw_from_percent(15), raw_from_percent(80),
-                                    600, 200, true, true, false, &freeze);
+                                    600, 200, true, Steady::Immediate, true, false, &freeze);
         CTM_CHECK(!down);
     }
 
@@ -531,11 +589,11 @@ int run_trigger_click_tests()
         bool freeze = false;
         CTM_CHECK(!step_side(side, br, inside.data(), inside.size(), 0,
                              raw_from_percent(15), raw_from_percent(80),
-                             600, 200, true, true, true, &freeze));
+                             600, 200, true, Steady::Immediate, true, true, &freeze));
         CTM_CHECK(freeze);      // held either way
         CTM_CHECK(step_side(side, br, past.data(), past.size(), 10,
                             raw_from_percent(15), raw_from_percent(80),
-                            600, 200, true, true, true, &freeze));
+                            600, 200, true, Steady::Immediate, true, true, &freeze));
 
         // A shape that only resists: entering it IS the moment, because there
         // is nothing to come through.
@@ -543,12 +601,12 @@ int run_trigger_click_tests()
         freeze = false;
         CTM_CHECK(step_side(side, wall, inside.data(), inside.size(), 0,
                             raw_from_percent(15), raw_from_percent(80),
-                            600, 200, true, true, false, &freeze));
+                            600, 200, true, Steady::Immediate, true, false, &freeze));
     }
 
     section("trigger click: a mouse binding, end to end");
     reset_all();
-    g_bools["ds5.right_trigger_freezes_cursor"] = true;
+    g_strings["ds5.right_trigger_steady_cursor_pull"] = "immediate";
     g_strings["ds5.rebind_7"] = "MouseLeft";
     {
         const std::vector<unsigned char> descriptor(12, 0);
@@ -561,7 +619,7 @@ int run_trigger_click_tests()
 
     section("trigger click: a keyboard binding, end to end");
     reset_all();
-    g_bools["ds5.right_trigger_freezes_cursor"] = true;
+    g_strings["ds5.right_trigger_steady_cursor_pull"] = "immediate";
     g_strings["ds5.rebind_7"] = "Enter";
     {
         const std::vector<unsigned char> descriptor(12, 0);
@@ -583,9 +641,9 @@ int run_trigger_click_tests()
 
     section("trigger click: both triggers, bound differently");
     reset_all();
-    g_bools["ds5.right_trigger_freezes_cursor"] = true;
+    g_strings["ds5.right_trigger_steady_cursor_pull"] = "immediate";
     g_strings["ds5.rebind_7"] = "MouseLeft";
-    g_bools["ds5.left_trigger_freezes_cursor"] = true;
+    g_strings["ds5.left_trigger_steady_cursor_pull"] = "immediate";
     g_strings["ds5.rebind_6"] = "MouseRight";
     {
         const std::vector<unsigned char> descriptor(12, 0);
@@ -596,7 +654,7 @@ int run_trigger_click_tests()
 
     section("trigger click: two pads do not freeze each other");
     reset_all();
-    g_bools["ds5.right_trigger_freezes_cursor"] = true;
+    g_strings["ds5.right_trigger_steady_cursor_pull"] = "immediate";
     g_strings["ds5.rebind_7"] = "MouseLeft";
     {
         const std::vector<unsigned char> descriptor(12, 0);

@@ -183,8 +183,13 @@ inline const Setting kSteadyGyroMouseMode[] = {
     /* ⛔ COMMON only. The shared trigger clicks are declined because this
        preset binds the triggers ITSELF, below, and then steadies them. */
     CTM_PRESET_COMMON_BINDINGS,
-    /* The gyro moves the cursor EXCEPT while a trigger is being worked. */
-    { "gyro_to_mouse_gate", "trigger" },
+    /* ⭐ ALWAYS, and the triggers steady it on top (rhoquinn8217, 2026-09-11).
+       ⛔ This said "trigger", which was never a gate: every other value names a
+       button you HOLD to enable the gyro, and that one meant "always, minus the
+       steady". It also made the two mutually exclusive -- choosing L2 as the
+       gate gave up the steady. The steady is a suppression now, so this says
+       what it has always meant. */
+    { "gyro_to_mouse_gate", "always" },
 
     /* ⭐ Bound like any other button, then told to steady the cursor. */
     /* ⛔⛔ 80 IS CHOSEN, NOT INHERITED. Do not "fix" it to 50.
@@ -198,10 +203,10 @@ inline const Setting kSteadyGyroMouseMode[] = {
        ⚠️ Before the zone fix on the same day, 80 behaved the way 90 does now --
        so a note anywhere calling 80 unfeelable predates that and is stale. */
     { "rebind_7", "MouseLeft" },
-    { "right_trigger_freezes_cursor", "true" },
+    { "right_trigger_steady_cursor_pull", "immediate" },
     { "right_trigger_press_at", "80" },
     { "rebind_6", "MouseRight" },
-    { "left_trigger_freezes_cursor", "true" },
+    { "left_trigger_steady_cursor_pull", "immediate" },
     { "left_trigger_press_at", "80" },
     /* ⓘ The effect point is left unset so it FOLLOWS the press point. Two
        numbers for one place drifted apart three times in one evening. */
@@ -223,7 +228,8 @@ inline const Setting kSteadyGyroMouseMode[] = {
        double-press window until 2026-09-11, and one number answering two
        questions made every click feel laggy; that is trigger_double_click_ms
        now. A deliberate press was measured at 538 ms, so this sits clear. */
-    { "trigger_drag_after_ms", "600" },
+    { "right_trigger_drag_after_ms", "600" },
+    { "left_trigger_drag_after_ms", "600" },
 
     { "touchpad_no_passthrough", "true" },
     /* ⓘ ONE finger. Both thumbs are free here -- the triggers do the pressing

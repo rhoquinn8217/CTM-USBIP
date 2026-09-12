@@ -364,9 +364,9 @@ inline void build_snap(uint8_t *block, int startZone, int endZone,
 // boxes that looked alike sitting next to each other with only one of them
 // winning. ➡️ Now rebind_6 and rebind_7 say what a trigger sends, and this says
 // whether pulling it holds the cursor still.
-inline std::string freeze_key(const char *sideName)
+inline std::string steady_key(const char *sideName)
 {
-    return std::string(sideName) + "_trigger_freezes_cursor";
+    return std::string(sideName) + "_trigger_steady_cursor_pull";
 }
 
 // How deep the press fires, when the effect does not name the point itself.

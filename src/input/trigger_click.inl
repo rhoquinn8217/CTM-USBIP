@@ -149,6 +149,10 @@ inline Bound bound_for(const std::string &code)
     return out;
 }
 
+// ⭐ WHEN a trigger steadies the cursor. Declared up here because step_side
+// takes one; the reasoning behind the values is at steady_mode() below.
+enum class Steady { Off, Immediate, BeforePress, AfterPress };
+
 struct State {
     bool engaged  = false;   // off its rest stop: the cursor should be frozen
     bool down     = false;   // the binding is held
@@ -190,7 +194,8 @@ inline int raw_from_percent(int percent)
 inline bool step_side(const Side &side, State &st, const uint8_t *data, size_t len,
                       long long nowMs, int engageRaw, int clickRaw, int holdMs,
                       int doubleMs,
-                      bool bound, bool useEffect, bool shapeBreaks, bool *freeze)
+                      bool bound, Steady steady, bool useEffect, bool shapeBreaks,
+                      bool *freeze)
 {
     if (!bound) {
         st = State();
@@ -278,7 +283,7 @@ inline bool step_side(const Side &side, State &st, const uint8_t *data, size_t l
         // cursor lagging after every click:
         // *"gyro stays off longer than fully releasing the trigger, making it
         // feel like a click causes mouse lag."*
-        if (st.clickEndedAtMs != 0 && doubleMs > 0 &&
+        if (steady != Steady::Off && st.clickEndedAtMs != 0 && doubleMs > 0 &&
             nowMs - st.clickEndedAtMs < doubleMs) {
             *freeze = true;
         }
@@ -321,7 +326,28 @@ inline bool step_side(const Side &side, State &st, const uint8_t *data, size_t l
         st.dragging = true;
     }
 
-    if (!st.dragging) *freeze = true;
+    // ⭐⭐ WHEN THE CURSOR IS ACTUALLY HELD, which is the whole of the mode.
+    //
+    // ⓘ Immediate and BeforePress hold it for as long as the trigger is
+    // engaged -- they differ only in where engaged BEGINS, which engage_percent
+    // decides. Off never holds it.
+    //
+    // ⭐ AfterPress holds it only once the press has fired, and only for the
+    // double-click window (rhoquinn8217, 2026-09-11): *"on the L2 click, it
+    // should stop gyro for a duration that you would give to double click."*
+    // ⛔ The point is NOT to protect the click that just fired -- that has
+    // already landed -- it is to hold the cursor still so a SECOND click lands
+    // in the same place. ⚠️ Which is why it runs from the press rather than
+    // from the release: a trigger held as a gyro gate may not be released at
+    // all, and the window would never start.
+    if (!st.dragging) {
+        if (steady == Steady::Immediate || steady == Steady::BeforePress) {
+            *freeze = true;
+        } else if (steady == Steady::AfterPress && st.down && doubleMs > 0 &&
+                   nowMs - st.downAtMs < doubleMs) {
+            *freeze = true;
+        }
+    }
     return st.down;
 }
 
@@ -336,10 +362,47 @@ inline std::string rebind_key_for(const Side &side)
 }
 
 // Is the cursor gesture switched on for this trigger?
-inline bool freezes_cursor(const std::string &section, const char *sideName)
+// ⭐⭐ WHEN the cursor is steadied, not just whether (rhoquinn8217, 2026-09-11).
+//
+// ⛔ A boolean could not express the case that motivated it: a trigger which is
+// ALSO the gyro's gate. Holding it lightly must open the gate and leave the
+// cursor free to aim; only the deep part of the pull, just before the click,
+// should lock it. With one shared trigger_freeze_at at 6% the steady engaged
+// before Gate::L2 even opened at 12%, so the gyro came on and the cursor could
+// not move -- two settings, both correct, cancelling.
+//
+// ⛔ AND NOT A PERCENT. A steady depth set beside a press depth is two numbers
+// naming one place, which this file has been bitten by three times. BeforePress
+// follows press_at instead, so moving the click moves the lock with it.
+
+inline Steady steady_mode(const std::string &section, const char *sideName)
 {
-    return device_config_bool(section.c_str(),
-                              trigger_effect::freeze_key(sideName).c_str(), false);
+    const std::string v =
+        device_config_str(section.c_str(), trigger_effect::steady_key(sideName).c_str());
+    if (v.empty()) return Steady::Off;
+    if (v == "immediate" || v == "true"  || v == "1") return Steady::Immediate;
+    if (v == "before_press") return Steady::BeforePress;
+    if (v == "after_press") return Steady::AfterPress;
+    return Steady::Off;                       // "off", "false", anything else
+}
+
+inline bool steadies_cursor(const std::string &section, const char *sideName)
+{
+    return steady_mode(section, sideName) != Steady::Off;
+}
+
+// ⓘ How far down BeforePress locks: one zone short of the press, which is the
+// smallest gap the pad can distinguish and leaves the rest of the pull to aim in.
+constexpr int kBeforePressGap = 10;
+
+inline int engage_percent(const std::string &section, const char *sideName,
+                          int sharedFreezeAt, int pressAtPercent)
+{
+    if (steady_mode(section, sideName) != Steady::BeforePress) return sharedFreezeAt;
+    // ⓘ Only BeforePress derives its own depth. Off and AfterPress never lock
+    // during the pull, and Immediate locks from the shared point.
+    const int at = pressAtPercent - kBeforePressGap;
+    return at < 4 ? 4 : at;
 }
 
 // Does this trigger's effect GIVE WAY, or does it only resist? A click and a
@@ -466,10 +529,10 @@ inline void on_ds5_input(const void *deviceKey,
     // reason to take the trigger over. A switch with no remap behind it would
     // freeze the cursor and press nothing; a remap with the switch off is an
     // ordinary button and belongs to the rebinder.
-    const Bound boundR2 = freezes_cursor(section, kR2.name)
+    const Bound boundR2 = steadies_cursor(section, kR2.name)
         ? bound_for(device_config_str(section.c_str(), rebind_key_for(kR2).c_str()))
         : Bound();
-    const Bound boundL2 = freezes_cursor(section, kL2.name)
+    const Bound boundL2 = steadies_cursor(section, kL2.name)
         ? bound_for(device_config_str(section.c_str(), rebind_key_for(kL2).c_str()))
         : Bound();
 
@@ -493,10 +556,11 @@ inline void on_ds5_input(const void *deviceKey,
         return;
     }
 
-    // ⚠️ ONE number for both triggers. "Starting to pull" is a property of the
-    // hand, not of which trigger it is, and two of them could disagree.
-    const int engageRaw = raw_from_percent(
-        device_config_int(section.c_str(), "trigger_freeze_at", 6));
+    // ⓘ One SHARED number, because "starting to pull" is a property of the
+    // hand rather than of which trigger it is. ⭐ A side set to BeforePress
+    // overrides it with a depth derived from its own press point; see
+    // engage_percent.
+    const int sharedFreezeAt = device_config_int(section.c_str(), "trigger_freeze_at", 6);
     // ⛔ 600, AND 200 WAS MEASURED WRONG (2026-09-10). The window came from the
     // touchpad, where a click is a tap. A trigger is not: rhoquinn8217's
     // QUICKEST deliberate press in the capture held for 538 ms, and every one of
@@ -504,15 +568,34 @@ inline void on_ds5_input(const void *deviceKey,
     // coming back mid-press was read as the freeze failing.
     // ⭐ A drag has to be something you MEAN, so the window must sit clear of an
     // ordinary press rather than just above a tap.
-    const int holdMs = device_config_int(section.c_str(), "trigger_drag_after_ms", 600);
-    // How long the cursor stays put after a click, waiting for a second one.
-    // ⓘ 0 hands it back the moment the trigger goes home.
-    const int doubleMs =
-        device_config_int(section.c_str(), "trigger_double_click_ms", 200);
-    const int clickR2 = raw_from_percent(
-        device_config_int(section.c_str(), "right_trigger_press_at", 90));
-    const int clickL2 = raw_from_percent(
-        device_config_int(section.c_str(), "left_trigger_press_at", 90));
+    // ⭐⭐ PER SIDE, because a trigger that is also the gyro's GATE is held
+    // indefinitely -- holding it is its resting state -- so a timer measuring
+    // "how long have you held this" measures nothing there (rhoquinn8217,
+    // 2026-09-11). Every right click on such a trigger turned into a drag 600ms
+    // later, which handed the cursor back mid-aim and looked like the
+    // double-click window failing.
+    // ⓘ 0 turns dragging off for that side, which is what a gate trigger wants.
+    const int holdR2 = device_config_int(section.c_str(), "right_trigger_drag_after_ms", 600);
+    const int holdL2 = device_config_int(section.c_str(), "left_trigger_drag_after_ms", 600);
+    // ⭐ PER SIDE, because which trigger wants it follows what it is BOUND to,
+    // not which side it is on (rhoquinn8217, 2026-09-11): *"someone might want
+    // to use L2 as the left click."* A double click matters wherever the left
+    // button lives, and costs a held cursor wherever it does not.
+    // ⓘ 0 hands the cursor back the moment the trigger goes home.
+    const int doubleR2 =
+        device_config_int(section.c_str(), "right_trigger_double_click_ms", 200);
+    const int doubleL2 =
+        device_config_int(section.c_str(), "left_trigger_double_click_ms", 200);
+    const int pressAtR2 = device_config_int(section.c_str(), "right_trigger_press_at", 90);
+    const int pressAtL2 = device_config_int(section.c_str(), "left_trigger_press_at", 90);
+    const int clickR2 = raw_from_percent(pressAtR2);
+    const int clickL2 = raw_from_percent(pressAtL2);
+    const Steady steadyR2 = steady_mode(section, kR2.name);
+    const Steady steadyL2 = steady_mode(section, kL2.name);
+    const int engageR2 = raw_from_percent(
+        engage_percent(section, kR2.name, sharedFreezeAt, pressAtR2));
+    const int engageL2 = raw_from_percent(
+        engage_percent(section, kL2.name, sharedFreezeAt, pressAtL2));
     // ⓘ Which triggers have a break to fire on. A wall or a notch does not
     // give way, so those keep a travel threshold.
     const bool effectR2 = has_effect(section, kR2.name);
@@ -532,10 +615,12 @@ inline void on_ds5_input(const void *deviceKey,
         std::lock_guard<std::mutex> lock(g_mutex);
         Pad &pad = g_pads[deviceKey];
 
-        const bool downR2 = step_side(kR2, pad.r2, data, len, nowMs, engageRaw,
-                                      clickR2, holdMs, doubleMs, boundR2.set(), effectR2, breaksR2, &freeze);
-        const bool downL2 = step_side(kL2, pad.l2, data, len, nowMs, engageRaw,
-                                      clickL2, holdMs, doubleMs, boundL2.set(), effectL2, breaksL2, &freeze);
+        const bool downR2 = step_side(kR2, pad.r2, data, len, nowMs, engageR2,
+                                      clickR2, holdR2, doubleR2, boundR2.set(),
+                                      steadyR2, effectR2, breaksR2, &freeze);
+        const bool downL2 = step_side(kL2, pad.l2, data, len, nowMs, engageL2,
+                                      clickL2, holdL2, doubleL2, boundL2.set(),
+                                      steadyL2, effectL2, breaksL2, &freeze);
 
         const struct { bool down; const Bound *b; } held[2] = {
             { downR2, &boundR2 }, { downL2, &boundL2 }
@@ -598,8 +683,12 @@ inline void on_ds5_input(const void *deviceKey,
             // ⓘ One line for the pair. Two lines would interleave with the
             // other pad's and with the raw probe, and the question being asked
             // is almost always about one side RELATIVE to the other.
+            // ⓘ The engage depth is PER SIDE now -- a side set to before_press
+            // derives its own from its press point -- so each half carries its
+            // own rather than one shared number at the end that fits neither.
             auto side = [&](const char *label, size_t pos, size_t statusByte,
-                            bool useEffect, bool breaks, int clickRaw, int st) {
+                            bool useEffect, bool breaks, int clickRaw, int st,
+                            int engage) {
                 std::ostringstream o;
                 o << label << "=" << (int)data[pos]
                   << (useEffect ? (breaks ? " fires=on-break status="
@@ -607,6 +696,8 @@ inline void on_ds5_input(const void *deviceKey,
                                 : " fires=on-travel click>=")
                   << (useEffect ? (int)(len > statusByte ? (data[statusByte] >> 4) : 0)
                                 : clickRaw)
+                  << " engage>=" << engage
+                  << " release<" << ((engage * 2) / 3)
                   << " engaged=" << ((st & 1) ? 1 : 0)
                   << " down=" << ((st & 2) ? 1 : 0)
                   << " drag=" << ((st & 4) ? 1 : 0);
@@ -615,13 +706,11 @@ inline void on_ds5_input(const void *deviceKey,
             device_log::input_s()
                 << "[trigger-click] "
                 << side("r2", kR2Position, kRightStatusByte, effectR2, breaksR2,
-                        clickR2, r2State)
+                        clickR2, r2State, engageR2)
                 << " | "
                 << side("l2", kL2Position, kLeftStatusByte, effectL2, breaksL2,
-                        clickL2, l2State)
-                << " | engage>=" << engageRaw
-                << " release<" << ((engageRaw * 2) / 3)
-                << " freeze=" << ((combined & 1) ? 1 : 0)
+                        clickL2, l2State, engageL2)
+                << " | freeze=" << ((combined & 1) ? 1 : 0)
                 << std::endl;
         }
     }

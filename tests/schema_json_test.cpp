@@ -141,7 +141,7 @@ int run_schema_json_tests()
     // thing we think it is.
     CTM_CHECK(json.find("\"keys\":[") != std::string::npos);
     CTM_CHECK(json.find("\"key_names\":[") != std::string::npos);
-    CTM_CHECK(json.find("\"key\":\"right_trigger_freezes_cursor\"") != std::string::npos);
+    CTM_CHECK(json.find("\"key\":\"right_trigger_steady_cursor_pull\"") != std::string::npos);
 
     return 0;
 }

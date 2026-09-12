@@ -826,9 +826,9 @@ inline void apply(const void *deviceKey,
             // registering on the config window and nothing else"*, which is
             // exactly the scope of this branch.
             if ((i == kBtnL2 || i == kBtnR2) &&
-                device_config_bool(gateSection.c_str(),
-                                   trigger_effect::freeze_key(i == kBtnR2 ? "right" : "left").c_str(),
-                                   false)) {
+                !device_config_str(gateSection.c_str(),
+                                   trigger_effect::steady_key(i == kBtnR2 ? "right" : "left").c_str())
+                     .empty()) {
                 gateGaveUpATrigger = true;
                 continue;
             }
@@ -931,9 +931,9 @@ inline void apply(const void *deviceKey,
         // ⚠️ The key name comes from trigger_effect.inl, which both files can
         // see, so a rename cannot leave the two disagreeing.
         if ((i == kBtnL2 || i == kBtnR2) &&
-            device_config_bool(section.c_str(),
-                               trigger_effect::freeze_key(i == kBtnR2 ? "right" : "left").c_str(),
-                               false)) {
+            !device_config_str(section.c_str(),
+                               trigger_effect::steady_key(i == kBtnR2 ? "right" : "left").c_str())
+                 .empty()) {
             // ⛔⛔ AND THE MASK STILL HAS TO BE PUBLISHED. Skipping the button
             // here also skips the publish below, which is what LATCHES it: if
             // this trigger was the only mouse binding, anyMouse stays false,
