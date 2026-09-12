@@ -86,6 +86,18 @@ inline void pump_loop()
     // profile's [usb.endpoints] hid_in.
     constexpr uint8_t kMouseInEndpoint = 0x81;
 
+    // ⛔⛔ PER-RUN STATE, NOT STATICS (rhoquinn8217, 2026-09-11). These three
+    // were function-local statics, which meant a pump that stopped and started
+    // again -- an unbridge and re-bridge, which is exactly what someone does to
+    // clear a stuck button -- began life believing it had already sent whatever
+    // the last run had. A button held at stop time was then never released,
+    // because the new pump compared against a stale value and saw no change.
+    uint8_t clickDown = 0;
+    long long clickDownAtMs = 0;
+    // ⭐ What the HOST actually received, which is NOT the same as what we last
+    // computed. See where it is committed, below.
+    uint8_t lastSent = 0;
+
     while (g_running.load() && !g_stop.load()) {
         int8_t dx = 0, dy = 0;
         const bool moved = ctm_gyro_mouse::shared_mailbox().drain(&dx, &dy);
@@ -101,8 +113,6 @@ inline void pump_loop()
         // is in flight, hold it ~30ms, then release. Sequential taps become
         // sequential clicks, which is what makes a double-tap a double-click
         // with no special case.
-        static uint8_t clickDown = 0;
-        static long long clickDownAtMs = 0;
         const long long nowMs =
             std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now().time_since_epoch()).count();
@@ -116,10 +126,9 @@ inline void pump_loop()
                                        g_dragMask.load(std::memory_order_relaxed) |
                                        g_triggerMask.load(std::memory_order_relaxed));
 
-        static uint8_t lastButtons = 0;
-        const bool buttonsChanged = buttons != lastButtons;
-        lastButtons = buttons;
+        const bool buttonsChanged = buttons != lastSent;
 
+        bool sent = false;
         if (moved || buttonsChanged || wheel != 0) {
             std::shared_ptr<CtmUsbipDevice> dev;
             {
@@ -135,12 +144,45 @@ inline void pump_loop()
                 report.data[2] = static_cast<uint8_t>(dy);   // relative Y
                 report.data[3] = static_cast<uint8_t>(wheel);
                 dev->inject_synthetic_input(report);
+                sent = true;
             }
+        }
+
+        // ⛔⛔ COMMIT ONLY WHAT WENT OUT. The old code recorded the new mask
+        // before the report was built, so a transition that arrived while
+        // g_device was momentarily null -- a re-attach, a session cycling --
+        // was recorded as sent and never retried. The next pass compared equal,
+        // found no change, and the button stayed down at the host until a real
+        // mouse or a re-bridge moved it. rhoquinn8217, 2026-09-11: *"The left
+        // click is getting stuck and won't release until I use a real mouse to
+        // click with or I bridge cycle."*
+        // ⭐ Leaving lastSent alone is the whole retry: the mask still differs
+        // next pass, so the release goes out as soon as there is a device.
+        if (sent) {
+            lastSent = buttons;
         } else {
-            // Nothing pending: sleep a mouse poll interval rather than spin.
-            // ~4ms keeps latency well under the 10ms endpoint bInterval while
-            // costing almost nothing when idle.
+            // Nothing went out, either because nothing was pending or because
+            // there was no device to send it to. Sleep a mouse poll interval
+            // rather than spin. ~4ms keeps latency well under the 10ms endpoint
+            // bInterval while costing almost nothing when idle.
             std::this_thread::sleep_for(std::chrono::milliseconds(4));
+        }
+    }
+
+    // ⛔ NOTHING LEAVES A BUTTON DOWN. The pump is stopped while a press is
+    // held whenever a pad unbridges mid-click, and the host has no idea the
+    // device that owed it a release has gone.
+    if (lastSent != 0) {
+        std::shared_ptr<CtmUsbipDevice> dev;
+        {
+            std::lock_guard<std::mutex> lock(g_mutex);
+            dev = g_device;
+        }
+        if (dev) {
+            CTM_INPUT_REPORT report = {};
+            report.endpoint_address = kMouseInEndpoint;
+            report.length = 4;
+            dev->inject_synthetic_input(report);
         }
     }
 }

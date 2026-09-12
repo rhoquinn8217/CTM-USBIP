@@ -146,21 +146,73 @@ int run_trigger_effect_tests()
     build_feedback(block, 5, 0);
     CTM_CHECK(block[3] != 0 || block[4] != 0 || block[5] != 0 || block[6] != 0);
 
-    section("trigger effect: the notch climbs, then lets go");
-    // \u26d4 A shaped WALL was tried first and felt identical to a plain wall on
-    // hardware: a tenth of the pull is too short for a force step to register,
-    // and a click is a release rather than a firmer patch. So the notch is a
-    // wide weapon, and the point is where it breaks.
-    build_ramp_break(block, 4, 7);
-    CTM_CHECK_EQ(hex_of(block, 4), std::string("25 14 00 07"));   // zones 2 and 4
-    // It reaches further than a click does: the climb starts at the shallowest
-    // zone weapon mode allows, rather than one zone before the break.
-    build_ramp_break(block, 8, 7);
-    CTM_CHECK_EQ(hex_of(block, 4), std::string("25 04 01 07"));   // the capture's shotgun
-    // A point too shallow to break at still yields the shortest real climb
-    // rather than nothing.
-    build_ramp_break(block, 0, 5);
-    CTM_CHECK_EQ(hex_of(block, 3), std::string("25 0c 00"));
+    section("trigger effect: the notch is a flat wall with a detent in it");
+    // Two shapes failed on hardware before this one. A lip three steps firmer
+    // felt identical to a plain wall, and a climb to the point made a deeper
+    // point mean a HARDER pull rather than a further one. The wall is flat so
+    // that only the detent's POSITION changes with the setting.
+    build_detent_wall(block, 5, 7);
+    CTM_CHECK_EQ((int)block[0], 0x21);
+    CTM_CHECK_EQ((int)(block[1] | (block[2] << 8)), 0x03fe);   // zones 1-9
+    CTM_CHECK_EQ(hex_of(block + 3, 4), std::string("90 a4 4b 12"));
+    {
+        const uint32_t forces = (uint32_t)block[3] | ((uint32_t)block[4] << 8) |
+                                ((uint32_t)block[5] << 16) | ((uint32_t)block[6] << 24);
+        CTM_CHECK_EQ((int)((forces >> 15) & 0x7), 7);   // the detent, at zone 5
+        CTM_CHECK_EQ((int)((forces >> 12) & 0x7), 2);   // the wall before it
+        CTM_CHECK_EQ((int)((forces >> 18) & 0x7), 2);   // and after it
+    }
+    // Moving the point moves ONLY the detent: every other zone is unchanged, so
+    // the pull takes the same effort wherever it sits.
+    {
+        uint8_t deep[kBlockLen];
+        build_detent_wall(deep, 8, 7);
+        CTM_CHECK_EQ((int)(deep[1] | (deep[2] << 8)), 0x03fe);   // the same wall
+        const uint32_t forces = (uint32_t)deep[3] | ((uint32_t)deep[4] << 8) |
+                                ((uint32_t)deep[5] << 16) | ((uint32_t)deep[6] << 24);
+        CTM_CHECK_EQ((int)((forces >> 24) & 0x7), 7);   // the detent moved to 8
+        CTM_CHECK_EQ((int)((forces >> 15) & 0x7), 2);   // and zone 5 is wall again
+    }
+    // The contrast is the feature, so the wall must never reach the detent's
+    // own force, and must never fall to silence either.
+    {
+        uint8_t light[kBlockLen];
+        build_detent_wall(light, 5, 3);
+        const uint32_t forces = (uint32_t)light[3] | ((uint32_t)light[4] << 8) |
+                                ((uint32_t)light[5] << 16) | ((uint32_t)light[6] << 24);
+        CTM_CHECK_EQ((int)((forces >> 15) & 0x7), 3);
+        CTM_CHECK_EQ((int)((forces >> 12) & 0x7), 1);
+    }
+    // Zone 0 stays free, so the trigger is not heavy at rest.
+    CTM_CHECK_EQ((int)(block[1] & 0x01), 0);
+
+    section("trigger effect: the snap, with its force in its own byte");
+    // ⛔ SECOND ATTEMPT. The first packed both forces into byte 3, three bits
+    // each. On hardware the trigger never returned and the break got HARDER as
+    // the snap force rose, which is what a byte read as ONE number would do.
+    // So the snap force now has byte 4 to itself.
+    build_snap(block, 2, 8, 7, 3);
+    CTM_CHECK_EQ((int)block[0], 0x22);
+    CTM_CHECK_EQ((int)(block[1] | (block[2] << 8)), (1 << 2) | (1 << 8));
+    CTM_CHECK_EQ((int)block[3], 7);   // resistance, on its own
+    CTM_CHECK_EQ((int)block[4], 3);   // the snap back, on its own
+    // ⭐ The point of the retry: the resistance byte must not move when only the
+    // snap force changes.
+    {
+        uint8_t soft[kBlockLen], hard[kBlockLen];
+        build_snap(soft, 2, 8, 7, 1);
+        build_snap(hard, 2, 8, 7, 7);
+        CTM_CHECK_EQ((int)soft[3], (int)hard[3]);
+        CTM_CHECK(soft[4] != hard[4]);
+    }
+    // The bow keeps the documented zone limits, so 9 is refused where a click
+    // would take it. One unknown at a time.
+    build_snap(block, 8, 9, 7, 3);
+    CTM_CHECK_EQ((int)(block[1] | (block[2] << 8)), (1 << 7) | (1 << 8));
+    // Neither force clamps to zero, which is the hardware\'s "none".
+    build_snap(block, 2, 4, 0, 0);
+    CTM_CHECK_EQ((int)block[3], 1);
+    CTM_CHECK_EQ((int)block[4], 1);
 
     section("trigger effect: reading the config");
     CTM_CHECK(shape_from("") == Shape::Absent);
@@ -174,6 +226,8 @@ int run_trigger_effect_tests()
     // ⛔ A typo must leave the trigger alone. Treating it as an effect would
     // put resistance on a trigger nobody asked to change.
     CTM_CHECK(shape_from("clik") == Shape::Absent);
+    CTM_CHECK(shape_from("snap") == Shape::Snap);
+    CTM_CHECK(shape_from("bow") == Shape::Snap);
 
     section("trigger effect: an unconfigured trigger is never claimed");
     reset_config();
@@ -186,35 +240,60 @@ int run_trigger_effect_tests()
 
     section("trigger effect: a click on R2 only");
     reset_config();
-    g_strings["ds5.trigger_r2_effect"] = "click";
-    g_ints["ds5.trigger_r2_effect_at"] = 50;
-    g_ints["ds5.trigger_r2_effect_strength"] = 6;
+    g_strings["ds5.right_trigger_effect"] = "click";
+    g_ints["ds5.right_trigger_effect_at"] = 50;
+    g_ints["ds5.right_trigger_effect_strength"] = 6;
     {
         std::vector<uint8_t> report = blank_report();
         CTM_CHECK(wants_anything("ds5"));
         const uint8_t claim = apply_to_report("ds5", report.data(), report.size());
-        CTM_CHECK_EQ((int)claim, (int)kClaimR2);            // L2 left alone
-        // Break at zone 5, so resistance runs 4 to 5.
+        // Both are claimed: a config that sets one trigger owns both, so L2
+        // is put into a known state rather than inheriting one.
+        CTM_CHECK_EQ((int)claim, (int)(kClaimR2 | kClaimL2));
+        // ⭐ 50 percent is where it GIVES WAY, so the end zone is 4 and the
+        // resistance runs from 3. ⛔ This asserted zones 4 and 5 until
+        // 2026-09-11, when a zone was being read as a point: the pad does not
+        // report the crossing until the trigger is into the zone AFTER the end
+        // one, so naming zone 5 as the end put the break at 60 and a break
+        // asked for at 80 landed on the hard stop. Measured on hardware.
         CTM_CHECK_EQ((int)report[kR2Offset], 0x25);
         CTM_CHECK_EQ((int)(report[kR2Offset + 1] | (report[kR2Offset + 2] << 8)),
-                     (1 << 4) | (1 << 5));
+                     (1 << 3) | (1 << 4));
         CTM_CHECK_EQ((int)report[kR2Offset + 3], 6);
-        CTM_CHECK_EQ((int)report[kL2Offset], 0);            // the other block is untouched
+        CTM_CHECK_EQ((int)report[kL2Offset], 0x05);         // and the other is turned off
     }
 
-    section("trigger effect: off clears only what we set");
-    // Still holding the R2 effect from the section above.
+    section("trigger effect: off clears the trigger every time it is asked for");
     reset_config();
-    g_strings["ds5.trigger_r2_effect"] = "off";
+    g_strings["ds5.right_trigger_effect"] = "off";
     {
         std::vector<uint8_t> report = blank_report();
         const uint8_t claim = apply_to_report("ds5", report.data(), report.size());
-        CTM_CHECK_EQ((int)claim, (int)kClaimR2);
+        // Off owns BOTH, the same as any other shape: a section with an opinion
+        // about one trigger puts the other into a known state rather than
+        // leaving it holding whatever came before.
+        CTM_CHECK_EQ((int)claim, (int)(kClaimR2 | kClaimL2));
         CTM_CHECK_EQ((int)report[kR2Offset], 0x05);
+        CTM_CHECK_EQ((int)report[kL2Offset], 0x05);
     }
-    // ⭐ And a second off does nothing at all: there is no longer an effect of
-    // ours to undo, so the triggers are not claimed. This is what keeps an
-    // install that never uses the feature from stamping on a game.
+    // ⛔ AND AGAIN, IDENTICALLY. This asserted the opposite until 2026-09-11 --
+    // that a second off did nothing, because a record of what this process had
+    // set said there was nothing left to undo. That record was keyed on the
+    // CONFIG NAME, so linking a fresh config whose effect is off found no
+    // record under its name and sent nothing: the trigger kept the effect the
+    // previous config had given it. rhoquinn8217 caught it switching from a
+    // notch to an off: *"doesn't appear to turn off the adaptive trigger
+    // feeling."*
+    {
+        std::vector<uint8_t> report = blank_report();
+        CTM_CHECK_EQ((int)apply_to_report("ds5", report.data(), report.size()),
+                     (int)(kClaimR2 | kClaimL2));
+        CTM_CHECK(wants_anything("ds5"));
+    }
+    // ⭐ What still touches nothing is a section that never mentions a trigger.
+    // That is the protection against stamping on a game, and it does not need a
+    // record to work: silence by default does it.
+    reset_config();
     {
         std::vector<uint8_t> report = blank_report();
         CTM_CHECK_EQ((int)apply_to_report("ds5", report.data(), report.size()), 0);
@@ -223,9 +302,9 @@ int run_trigger_effect_tests()
 
     section("trigger effect: both triggers, and a short report");
     reset_config();
-    g_strings["ds5.trigger_r2_effect"] = "click";
-    g_strings["ds5.trigger_l2_effect"] = "wall";
-    g_ints["ds5.trigger_l2_effect_at"] = 30;
+    g_strings["ds5.right_trigger_effect"] = "click";
+    g_strings["ds5.left_trigger_effect"] = "wall";
+    g_ints["ds5.left_trigger_effect_at"] = 30;
     {
         std::vector<uint8_t> report = blank_report();
         const uint8_t claim = apply_to_report("ds5", report.data(), report.size());
@@ -242,17 +321,66 @@ int run_trigger_effect_tests()
         CTM_CHECK_EQ((int)shortReport[kR2Offset], 0);
     }
 
+    section("trigger effect: a config that sets one trigger owns both");
+    // A wall left on L2 by one config was still there after switching to a
+    // config that says nothing about L2 (2026-09-10). An effect lives on the
+    // controller until something changes it, so "absent means leave alone" let
+    // one config's setting follow the pad into the next one.
+    reset_config();
+    g_strings["ds5.right_trigger_effect"] = "click";
+    {
+        std::vector<uint8_t> report = blank_report();
+        const uint8_t claim = apply_to_report("ds5", report.data(), report.size());
+        CTM_CHECK_EQ((int)claim, (int)(kClaimR2 | kClaimL2));   // both claimed
+        CTM_CHECK_EQ((int)report[kR2Offset], 0x25);             // R2 as asked
+        CTM_CHECK_EQ((int)report[kL2Offset], 0x05);             // L2 put to off
+    }
+    // The same the other way round.
+    reset_config();
+    g_strings["ds5.left_trigger_effect"] = "wall";
+    {
+        std::vector<uint8_t> report = blank_report();
+        const uint8_t claim = apply_to_report("ds5", report.data(), report.size());
+        CTM_CHECK_EQ((int)claim, (int)(kClaimR2 | kClaimL2));
+        CTM_CHECK_EQ((int)report[kR2Offset], 0x05);
+        CTM_CHECK_EQ((int)report[kL2Offset], 0x21);
+    }
+    // A config that asks for NOTHING still touches nothing, so an install that
+    // never uses this keeps a game's own trigger effects.
+    reset_config();
+    {
+        std::vector<uint8_t> report = blank_report();
+        CTM_CHECK_EQ((int)apply_to_report("ds5", report.data(), report.size()), 0);
+        CTM_CHECK_EQ((int)report[kR2Offset], 0);
+        CTM_CHECK_EQ((int)report[kL2Offset], 0);
+    }
+
     section("trigger effect: sections do not leak into each other");
     reset_config();
-    g_strings["ds5.trigger_r2_effect"] = "click";
-    g_strings["edge.trigger_r2_effect"] = "off";
+    g_strings["ds5.right_trigger_effect"] = "click";
+    g_strings["edge.right_trigger_effect"] = "off";
     {
         std::vector<uint8_t> report = blank_report();
         apply_to_report("ds5", report.data(), report.size());
-        // The Edge never had an effect set, so its off is a no-op even though
-        // the DualSense section is holding one.
+        CTM_CHECK_EQ((int)report[kR2Offset], 0x25);        // the DS5 got its click
+        // ⭐ And the Edge gets what the EDGE asked for -- an off -- rather than
+        // the click sitting in the other section. Each section is read on its
+        // own; neither reaches into the other.
+        std::vector<uint8_t> other = blank_report();
+        CTM_CHECK_EQ((int)apply_to_report("edge", other.data(), other.size()),
+                     (int)(kClaimR2 | kClaimL2));
+        CTM_CHECK_EQ((int)other[kR2Offset], 0x05);
+    }
+
+    section("trigger effect: a section with no trigger keys is left alone");
+    reset_config();
+    g_strings["ds5.right_trigger_effect"] = "click";
+    {
+        // The Edge says nothing about triggers, so nothing is sent for it even
+        // while another section is holding an effect.
         std::vector<uint8_t> other = blank_report();
         CTM_CHECK_EQ((int)apply_to_report("edge", other.data(), other.size()), 0);
+        CTM_CHECK(!wants_anything("edge"));
     }
 
     reset_config();

@@ -355,7 +355,13 @@ int run_config_store_tests()
         CTM_CHECK(ctm_presets::find("gyro-to-mouse") != nullptr);
         CTM_CHECK(ctm_presets::find("GYRO-TO-MOUSE") != nullptr);
         CTM_CHECK(ctm_presets::find("stick-to-mouse") != nullptr);
-        CTM_CHECK(ctm_presets::find("touchpad-mouse") != nullptr);
+        CTM_CHECK(ctm_presets::find("DS5-touchpad-to-mouse") != nullptr);
+        CTM_CHECK(ctm_presets::find("DS5-gyro-to-mouse") != nullptr);
+        // ⛔ The old names are gone, not aliased. A preset that needs a
+        // DualSense now says so in its name, and a stale name must fail
+        // loudly rather than resolve to something similar.
+        CTM_CHECK(ctm_presets::find("touchpad-mouse") == nullptr);
+        CTM_CHECK(ctm_presets::find("steady-gyro-mouse") == nullptr);
         CTM_CHECK(ctm_presets::find("nonsense") == nullptr);
 
         const ctm_presets::Preset *gyro = ctm_presets::find("gyro-to-mouse");
@@ -368,7 +374,7 @@ int run_config_store_tests()
 
     section("presets: every mouse mode shares the desktop bindings");
     {
-        const char *const names[] = { "gyro-to-mouse", "touchpad-mouse",
+        const char *const names[] = { "gyro-to-mouse", "DS5-touchpad-to-mouse",
                                       "stick-to-mouse" };
         for (const char *name : names) {
             const ctm_presets::Preset *p = ctm_presets::find(name);
@@ -416,33 +422,37 @@ int run_config_store_tests()
         };
 
         CTM_CHECK(has("gyro-to-mouse", "gyro_to_mouse_gate", "always"));
-        // ⛔ AND NOTHING ELSE DRIVES THE CURSOR HERE (rhoquinn8217, 2026-09-03).
-        // This preset used to borrow the LEFT STICK to scroll. That was nearly
-        // free while a borrowed source still reached the game -- but hiding a
-        // source now means losing it, so aiming with the gyro would have cost a
-        // stick as well. The d-pad's arrow keys already scroll.
-        CTM_CHECK(!mentions("gyro-to-mouse", "left_stick_mode"));
-        CTM_CHECK(!mentions("gyro-to-mouse", "right_stick_mode"));
-        // ⭐ THE TOUCHPAD DOES SCROLL HERE, with ONE finger (rhoquinn8217,
-        // 2026-09-03). The old reasoning was that reaching the pad meant
-        // regripping -- but a POINTER finger reaches a DualSense touchpad with
-        // both thumbs still on the sticks, which is why controller makers use
-        // one finger and laptops use two.
+        // ⭐⭐ SCROLL IS THE LEFT STICK, AND THIS ASSERTION IS REVERSED
+        // (rhoquinn8217, 2026-09-10). It used to check the opposite, guarding a
+        // decision from 2026-09-03 that scroll belonged on the touchpad so that
+        // neither stick was spent. ⓘ That check did its job: it failed the
+        // moment the preset changed, which is how a reversal should be noticed.
         //
-        // ⛔ And the left stick is not spent on it: movement is what a gamer
-        // cannot give up, and the touchpad is the cheap thing to borrow.
-        CTM_CHECK(has("gyro-to-mouse", "touchpad_scroll", "1"));
+        // ➡️ What changed is who the preset is for. A gyro belongs to plenty of
+        // controllers with no touchpad, and a preset that needs one cannot serve
+        // them. The DualSense-only shapes now say so in their names, and this
+        // one is deliberately not among them.
+        CTM_CHECK(has("gyro-to-mouse", "left_stick_mode", "scroll"));
+        CTM_CHECK(has("gyro-to-mouse", "left_stick_no_passthrough", "true"));
+        CTM_CHECK(!mentions("gyro-to-mouse", "right_stick_mode"));
+        // ⛔ And it must not reach for a touchpad at all, which is the whole
+        // point of the change.
+        CTM_CHECK(!mentions("gyro-to-mouse", "touchpad_scroll"));
 
         // ⭐ EACH PRESET HIDES ITS OWN SOURCE AND NOBODY ELSE'S. A single
         // setting could not say "hide the gyro but leave my sticks alone",
         // which is why there are three (rhoquinn8217, 2026-09-03).
         CTM_CHECK(has("gyro-to-mouse", "gyro_no_passthrough", "true"));
         CTM_CHECK(!mentions("gyro-to-mouse", "right_stick_no_passthrough"));
-        CTM_CHECK(!mentions("gyro-to-mouse", "left_stick_no_passthrough"));
         CTM_CHECK(!mentions("gyro-to-mouse", "touchpad_no_passthrough"));
 
-        CTM_CHECK(has("touchpad-mouse", "touchpad_no_passthrough", "true"));
-        CTM_CHECK(!mentions("touchpad-mouse", "gyro_no_passthrough"));
+        CTM_CHECK(has("DS5-touchpad-to-mouse", "touchpad_no_passthrough", "true"));
+        CTM_CHECK(!mentions("DS5-touchpad-to-mouse", "gyro_no_passthrough"));
+
+        // ⓘ The DualSense one scrolls with ONE finger now. Both thumbs are free
+        // in it -- the triggers press and the gyro points -- so nothing is
+        // competing for the pad and two fingers buy nothing.
+        CTM_CHECK(has("DS5-gyro-to-mouse", "touchpad_scroll", "1"));
 
         CTM_CHECK(has("stick-to-mouse", "right_stick_no_passthrough", "true"));
         CTM_CHECK(has("stick-to-mouse", "left_stick_no_passthrough", "true"));
@@ -450,19 +460,19 @@ int run_config_store_tests()
 
         // ⛔ And the superseded single key is gone from every preset.
         CTM_CHECK(!mentions("gyro-to-mouse", "mouse_exclusive"));
-        CTM_CHECK(!mentions("touchpad-mouse", "mouse_exclusive"));
+        CTM_CHECK(!mentions("DS5-touchpad-to-mouse", "mouse_exclusive"));
         CTM_CHECK(!mentions("stick-to-mouse", "mouse_exclusive"));
 
-        CTM_CHECK(has("touchpad-mouse", "touchpad_to_mouse", "true"));
+        CTM_CHECK(has("DS5-touchpad-to-mouse", "touchpad_to_mouse", "true"));
         // ⓘ Two fingers here -- one finger cannot scroll while one finger is
         // already pointing. The gyro preset's ONE is checked above.
-        CTM_CHECK(has("touchpad-mouse", "touchpad_scroll", "2"));
+        CTM_CHECK(has("DS5-touchpad-to-mouse", "touchpad_scroll", "2"));
         // ⓘ The borrow rule -- gyro does not suppress the touchpad -- is
         // asserted with the other suppression checks above.
-        CTM_CHECK(has("touchpad-mouse", "touchpad_tap_click", "true"));
+        CTM_CHECK(has("DS5-touchpad-to-mouse", "touchpad_tap_click", "true"));
         // The hand is on the pad here, so the sticks are left alone.
-        CTM_CHECK(!mentions("touchpad-mouse", "left_stick_mode"));
-        CTM_CHECK(!mentions("touchpad-mouse", "right_stick_mode"));
+        CTM_CHECK(!mentions("DS5-touchpad-to-mouse", "left_stick_mode"));
+        CTM_CHECK(!mentions("DS5-touchpad-to-mouse", "right_stick_mode"));
 
         // ⭐ Each stick says what IT does, rather than a job naming a stick.
         CTM_CHECK(has("stick-to-mouse", "right_stick_mode", "mouse"));

@@ -105,6 +105,8 @@ inline Gate parse_gate(const std::string &raw)
     }
     if (v.empty()) return Gate::Off;
     if (v == "always") return Gate::Always;
+    // ⓘ An old spelling of "always"; the steady is no longer a gate.
+    if (v == "trigger") return Gate::Always;
     if (v == "l2") return Gate::L2;
     if (v == "r2") return Gate::R2;
     if (v == "l1") return Gate::L1;
@@ -127,6 +129,21 @@ inline Gate parse_gate(const std::string &raw)
 // is the exception: whose trigger is being worked is a question about a pad.
 inline bool gate_open(Gate gate, const uint8_t *d, size_t len, const void *deviceKey = nullptr)
 {
+    // ⭐⭐ THE TRIGGER'S STEADY SUPPRESSES THE GYRO WHATEVER THE GATE IS
+    // (rhoquinn8217, 2026-09-11).
+    //
+    // ⛔ It used to be a gate VALUE, "trigger", which meant the two could not be
+    // combined: choosing L2 as the gate silently gave up the steady, and
+    // choosing the steady gave up the gate. ⚠️ And it read wrong -- every other
+    // value names a button you HOLD to enable the gyro, while "trigger" meant
+    // "always, minus the steady". rhoquinn8217: *"trigger doesn't gate the
+    // gyro-to-mouse. Actually it should be 'always' because it is."*
+    //
+    // ➡️ So the steady is a suppression ON TOP of whichever gate was chosen, and
+    // "trigger" is now just another spelling of "always".
+    // ⓘ A null key means no controller is in play -- the recenter check calls it
+    // that way -- and gyro_hold() answers false for one, so nothing changes there.
+    if (gyro_hold(deviceKey)) return false;
     switch (gate) {
         case Gate::Off:
             return false;
@@ -149,9 +166,9 @@ inline bool gate_open(Gate gate, const uint8_t *d, size_t len, const void *devic
         case Gate::PS:
             return len > 10 && (d[10] & 0x01);
         case Gate::TriggerHold:
-            // Open unless the trigger logic is holding the cursor still. A drag
-            // clears the hold, which is how the cursor comes back mid-press.
-            return !gyro_hold(deviceKey);
+            // ⓘ Kept so configs written before 2026-09-11 still parse. The hold
+            // is checked above for every gate now, so this IS Always.
+            return true;
     }
     return false;
 }

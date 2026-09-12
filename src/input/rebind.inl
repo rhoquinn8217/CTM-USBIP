@@ -800,6 +800,7 @@ inline void apply(const void *deviceKey,
         // fights: pressing a gate button still drives the page.
         uint8_t gateMouseButtons = 0;
         bool gateAnyMouse = false;
+        bool gateGaveUpATrigger = false;
 
         for (int i = 0; i < kButtonCount; ++i) {
             bool claimed = false;
@@ -807,6 +808,30 @@ inline void apply(const void *deviceKey,
                 if (g.standardIndex == i) { claimed = true; break; }
             }
             if (claimed) continue;
+
+            // ⛔⛔ A TRIGGER HANDED TO THE GESTURE IS NOT FIRED HERE EITHER.
+            //
+            // The note below says the triggers were never claimed by the gate,
+            // which was true while a blanket return stopped all user rebinds.
+            // It stopped being true when this loop learned mouse buttons, and
+            // the suppression added for the same problem sits in the MAIN loop,
+            // below the branch that returns before reaching it.
+            //
+            // ⚠️ So with the settings page in front, both clickers were live:
+            // the gesture waiting for the break, and this firing on the pad's
+            // digital bit within the first few percent of the travel. The
+            // digital bit always won. rhoquinn8217, 2026-09-11: *"I'm barely
+            // tapping the L2 and it's still registering a click"* -- and then
+            // the observation that cracked it, *"the clicks are only
+            // registering on the config window and nothing else"*, which is
+            // exactly the scope of this branch.
+            if ((i == kBtnL2 || i == kBtnR2) &&
+                !device_config_str(gateSection.c_str(),
+                                   trigger_effect::steady_key(i == kBtnR2 ? "right" : "left").c_str())
+                     .empty()) {
+                gateGaveUpATrigger = true;
+                continue;
+            }
 
 
             char kn[32];
@@ -863,8 +888,13 @@ inline void apply(const void *deviceKey,
         // main path does the same; copied rather than reasoned about afresh.
         //
         // ⓘ The virtual mouse has to be started, or the clicks go nowhere.
-        if (gateAnyMouse) {
+        // ⭐ Publish when we have an opinion, giving a trigger up included --
+        // the same rule as the main path, and for the same reason: going
+        // silent leaves whatever was last published held forever.
+        if (gateAnyMouse || gateGaveUpATrigger) {
             ctm_mouse_device::set_buttons(gateMouseButtons);
+        }
+        if (gateAnyMouse) {
             ctm_gyro_mouse_ensure_mouse_started();
         }
         return;                       // ⭐ other user rebinds do not run here
@@ -882,8 +912,42 @@ inline void apply(const void *deviceKey,
     bool anyBound = false;
     uint8_t mouseButtons = 0;
     bool anyMouse = false;
+    // ⛔ A trigger handed to the gesture still counts as something we have an
+    // opinion about. See where this is used, at the publish below.
+    bool gaveUpATrigger = false;
 
     for (int i = 0; i < kButtonCount; ++i) {
+        // ⛔⛔ A TRIGGER BOUND THROUGH THE GESTURE IS NOT ALSO BOUND HERE.
+        //
+        // Two settings could bind one trigger and BOTH fired: this one on the
+        // pad's own digital bit, early and untunable, and the gesture at a
+        // depth it chooses with the cursor held still. Two presses per pull
+        // (rhoquinn8217, 2026-09-10).
+        //
+        // ➡️ The gesture WINS, because it is a superset: it can do everything
+        // this can, plus a depth and a drag. ⓘ Pointing them at one another as
+        // two views of one value was considered and refused -- they are not
+        // equivalent, and hiding that would be worse than choosing.
+        // ⚠️ The key name comes from trigger_effect.inl, which both files can
+        // see, so a rename cannot leave the two disagreeing.
+        if ((i == kBtnL2 || i == kBtnR2) &&
+            !device_config_str(section.c_str(),
+                               trigger_effect::steady_key(i == kBtnR2 ? "right" : "left").c_str())
+                 .empty()) {
+            // ⛔⛔ AND THE MASK STILL HAS TO BE PUBLISHED. Skipping the button
+            // here also skips the publish below, which is what LATCHES it: if
+            // this trigger was the only mouse binding, anyMouse stays false,
+            // set_buttons is never called again, and whatever g_buttons last
+            // held is held forever. rhoquinn8217, 2026-09-11: *"click with R2
+            // is still sticking and won't unstick."*
+            // ⓘ The comment on the gate path above had already worked out that
+            // publishing only while something is HELD latches the release. This
+            // is one step further out: publishing only while something is BOUND
+            // latches it too, once a binding can be taken away mid-press.
+            gaveUpATrigger = true;
+            continue;
+        }
+
         char keyName[32];
         snprintf(keyName, sizeof(keyName), "rebind_%d", i);
         const std::string code = device_config_str(section.c_str(), keyName);
@@ -999,8 +1063,26 @@ inline void apply(const void *deviceKey,
     }
     // ⓘ Only when something is bound to a mouse button, so a controller with no
     // mouse bindings never touches the shared state.
-    if (anyMouse) {
+    // ⭐ PUBLISH WHENEVER WE HAVE AN OPINION, which includes "this trigger is
+    // not mine any more" -- that is precisely when the bit needs clearing.
+    // ⓘ Starting the mouse is a separate question: a suppressed trigger may be
+    // bound to a key, and trigger_click starts the mouse itself when it needs
+    // one.
+    if (anyMouse || gaveUpATrigger) {
         ctm_mouse_device::set_buttons(mouseButtons);
+        if (device_config_bool(section.c_str(), "trigger_probe", false)) {
+            static uint8_t lastPublished = 0xff;
+            if (mouseButtons != lastPublished) {
+                lastPublished = mouseButtons;
+                device_log::input(device_log::msg()
+                    << "[rebind-mouse] published=0x" << std::hex
+                    << static_cast<int>(mouseButtons) << std::dec
+                    << " anyMouse=" << (anyMouse ? 1 : 0)
+                    << " gaveUpATrigger=" << (gaveUpATrigger ? 1 : 0));
+            }
+        }
+    }
+    if (anyMouse) {
         ctm_gyro_mouse_ensure_mouse_started();
     }
 }

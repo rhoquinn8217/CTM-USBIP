@@ -176,6 +176,33 @@ int run_gyro_mouse_tests()
         CTM_CHECK(!gate_open(Gate::L2, r.data(), r.size()));
     }
 
+    section("gyro-mouse: the steady is no longer a gate value");
+    {
+        // ⛔ It used to be one, which made the two mutually exclusive: choosing
+        // L2 as the gate silently gave up the steady. It is a suppression on
+        // top of whichever gate was chosen now.
+        //
+        // ⚠️ THE SUPPRESSION ITSELF IS NOT ASSERTED HERE, deliberately.
+        // trigger_click_test.cpp defines its own ctm_gyro_mouse::set_gyro_hold
+        // stub, this file links the real one, and both are inline with the same
+        // signature -- so the linker picks one for the whole binary. Calling it
+        // from here made trigger_click's own assertions start failing, because
+        // its writes went to the real map while its reads came from the stub.
+        // ⓘ The behaviour is covered end to end over there, where held_for()
+        // reads whatever set_gyro_hold actually wrote.
+        auto r = make_report(0, 0, /*l2*/ 40);
+        // No hold in play, so every gate answers on its own terms.
+        CTM_CHECK(gate_open(Gate::L2, r.data(), r.size()));
+        CTM_CHECK(gate_open(Gate::Always, r.data(), r.size()));
+        // ⓘ And the old value is now exactly Always rather than a special case.
+        CTM_CHECK(gate_open(Gate::TriggerHold, r.data(), r.size()));
+    }
+
+    section("gyro-mouse: \"trigger\" still parses, as always");
+    // ⓘ Configs written before 2026-09-11 carry it; it was never a gate, and
+    // now it is spelled what it always meant.
+    CTM_CHECK(parse_gate("trigger") == Gate::Always);
+
     section("gyro-mouse: gate off is inert");
     {
         g_gate = "";

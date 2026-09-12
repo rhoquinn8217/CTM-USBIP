@@ -85,10 +85,30 @@ static bool rest_link_device(const std::string &ordinal, const std::string &conf
         if (session->device) {
             session->device->set_linked_config(configName);
         }
+        // ⭐⭐ AND ASK FOR THE SETTINGS REPORT TO BE RE-SENT.
+        //
+        // ⛔ WITHOUT THIS, LINKING A CONFIG ONLY HALF APPLIED IT. The two lines
+        // above change what the per-report overrides RESOLVE, which covers
+        // every setting that rides on a report the game is already sending.
+        // They do nothing for the settings we SET once -- audio routing,
+        // volume, the microphone, and the trigger effects. Those only reached
+        // the controller when the config FILE changed or the pad was
+        // re-bridged, so linking a config and feeling nothing happen was the
+        // documented behaviour rather than a fault (found 2026-09-10, when an
+        // L2 wall from another config outlived a link that had already moved).
+        //
+        // ⓘ Raised as a flag rather than sent from here on purpose. The sweep
+        // that acts on it runs on the AGENT loop, which is the only thread
+        // where a session cannot be torn down underneath a backend pointer --
+        // see the warning above apply_pending_config_to_sessions(). This
+        // borrows that guarantee instead of needing its own.
+        ctm_config_watcher::change_pending().store(true, std::memory_order_relaxed);
+
         device_log::config(device_log::msg()
             << ordinal << (configName.empty()
                 ? std::string(" back on the shared section")
-                : std::string(" now reads ") + configName));
+                : std::string(" now reads ") + configName)
+            << " -- settings queued for the next sweep");
         return true;
     }
     // ⭐ Ordinals are monotonic and never reused, so a stale reference from an

@@ -23,6 +23,7 @@ int run_nickname_tests();
 int run_host_audio_settings_tests();
 int run_trigger_effect_tests();
 int run_trigger_click_tests();
+int run_schema_json_tests();
 
 // ⛔⛔ THE TEST BINARY RUNS FROM THE SAME DIRECTORY AS THE AGENT.
 //
@@ -68,6 +69,9 @@ int main(int argc, char **argv)
     // ⚠️ Do not move this below enter_scratch() -- the map files are not in
     // the scratch directory and the suite would fail to find them.
     run_map_defaults_tests(argc, argv);
+    // ⛔ Here too, and for the same reason: it reads src/app/rest_config.inl
+    // from the repo, which the scratch directory below is not.
+    run_schema_json_tests();
 
     if (!enter_scratch()) {
         std::fprintf(stderr, "could not create the scratch directory -- "

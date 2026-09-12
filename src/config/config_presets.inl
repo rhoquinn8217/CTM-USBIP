@@ -58,7 +58,7 @@ struct Preset {
 //
 // ⓘ Button indices come from the table in rebind.inl: 0 cross, 1 circle,
 // 2 square, 3 triangle, 6 L2, 7 R2, 12-15 d-pad up/down/left/right.
-#define CTM_PRESET_SHARED_BINDINGS                                             \
+#define CTM_PRESET_COMMON_BINDINGS                                             \
     { "rebind_0",  "Enter" },        /* cross  -- Deck: A = Enter          */  \
     { "rebind_1",  "Escape" },       /* circle -- Deck: B = Escape         */  \
     /* \u2b50 Square opens OUR OWN on-screen keyboard, built 2026-09-02. It was
@@ -71,9 +71,22 @@ struct Preset {
     { "rebind_12", "ArrowUp" },                                                \
     { "rebind_13", "ArrowDown" },                                              \
     { "rebind_14", "ArrowLeft" },                                              \
-    { "rebind_15", "ArrowRight" },                                             \
+    { "rebind_15", "ArrowRight" }
+
+// ⭐ THE TRIGGER REBINDS ARE THEIR OWN HALF. Every preset that points with
+// something other than the triggers puts the mouse buttons on them, because
+// that leaves the face buttons free. `steady-gyro-mouse` must NOT: it drives
+// the triggers itself, at a depth it chooses, and a rebind here would fire a
+// second time on the pad's own digital bit -- early, and untunable.
+// ⛔ Split rather than copied. A preset that opts out by writing the common
+// bindings again is a preset that drifts the first time one of them changes.
+#define CTM_PRESET_TRIGGER_CLICKS                                              \
     { "rebind_7",  "MouseLeft" },    /* R2 -- triggers rather than face    */  \
     { "rebind_6",  "MouseRight" }    /* L2 -- buttons, which stay free     */
+
+#define CTM_PRESET_SHARED_BINDINGS                                             \
+    CTM_PRESET_COMMON_BINDINGS,                                                \
+    CTM_PRESET_TRIGGER_CLICKS
 
 // ---- gyro_mouse_mode -------------------------------------------------------
 //
@@ -85,20 +98,19 @@ inline const Setting kGyroMouseMode[] = {
     { "gyro_no_passthrough", "true" },
     CTM_PRESET_SHARED_BINDINGS,
     { "gyro_to_mouse_gate", "always" },
-    /* ⭐ THE TOUCHPAD IS BORROWED, NOT REPURPOSED (rhoquinn8217, 2026-09-03).
-       Gyro has no scroll of its own, so it borrows one -- ONE FINGER, reachable
-       with a pointer finger while both thumbs stay on the sticks.
-       ⛔ And touchpad_no_passthrough is deliberately NOT set: a borrowed source
-       keeps its day job, so a game's own touchpad gestures still work. The
-       person decides if they would rather it did not. */
-    { "touchpad_scroll", "1" },
-    /* ⛔ NEITHER STICK IS SPENT HERE (rhoquinn8217, 2026-09-03). This preset
-       used to borrow the left stick to scroll, which was nearly free while the
-       game still saw the stick -- and became a real cost once hiding a source
-       meant losing it. Movement is what a gamer cannot give up.
-       ⓘ The d-pad is already bound to the arrow keys, which scroll most things,
-       and the convention elsewhere puts scroll on the spare POINTING surface --
-       the Steam Controller's left trackpad -- rather than on a stick. */
+    /* ⭐⭐ SCROLL IS THE LEFT STICK, AND THAT IS A REVERSAL (rhoquinn8217,
+       2026-09-10). It was the touchpad from 2026-09-03, chosen so that neither
+       stick was spent, on the grounds that movement is what a gamer cannot give
+       up. ⓘ That reasoning still holds for a pad being PLAYED with.
+       ➡️ What changed is who this preset is for. A gyro belongs to plenty of
+       controllers that have no touchpad at all, and a preset that needs one
+       cannot serve them. This is a DESKTOP config -- it already binds Cross to
+       Enter and the d-pad to the arrows, so there is no game to protect a stick
+       for. The DS5-only shapes now say so in their names instead.
+       ⛔ So do not "restore" the touchpad here. The pad-specific version of this
+       idea is DS5-gyro-to-mouse, which uses the touchpad because it can. */
+    { "left_stick_mode", "scroll" },
+    { "left_stick_no_passthrough", "true" },
     // ⓘ Recentring belongs HERE and only here: it points the gyro back at the
     // middle of the screen. On a stick or touchpad cursor there is nothing to
     // recentre, so binding it there would be a button that appears to do
@@ -129,6 +141,101 @@ inline const Setting kTouchpadMouseMode[] = {
     // ⭐ Click the pad in to grab, move, lift the finger to drop. The pad's
     // click is free here because there is no gyro to recentre.
     { "touchpad_click_drag", "true" },
+};
+
+// ---- steady_gyro_mouse_mode ------------------------------------------------
+//
+// ⭐⭐ THE DUALSENSE ONE. The gyro points and the TRIGGERS steady it: the
+// cursor stops the moment a trigger leaves rest, so the press lands on
+// something already still.
+//
+//   start to pull        the cursor FREEZES
+//   past the break       the button goes down, where your finger felt it
+//   let up, not home     the button releases, the cursor stays still
+//   let it come home     the cursor moves again
+//   keep holding         the cursor returns with the button down: a DRAG
+//
+// ⭐ ONE RULE MAKES ALL OF THAT: the cursor is frozen for as long as the finger
+// is committed, and only a FULL release hands it back. Which is why a double
+// press lands both clicks on the same pixel -- the gyro waits for the trigger
+// to come all the way home rather than thawing in the gap.
+//
+// ⭐⭐ AND THE EFFECT IS WHY IT IS USABLE. A trigger press fires somewhere a
+// finger cannot see, so the break is the landmark: it arrives exactly where the
+// button does, and pushing through it IS the press.
+//
+// ⛔ A NOTCH WAS TRIED HERE AND REJECTED (rhoquinn8217, 2026-09-10). It adds a
+// light wall under the whole pull, which gives the frozen region somewhere to
+// rest -- but resting there is not something anyone does. You pull to press.
+// What the wall does cost is real: every press is heavier, and repeated
+// pressing becomes work. ⓘ The argument for it came from a test step that
+// asked for a hover, which was an artefact of the testing rather than a use.
+//
+// ⛔ THIS REPLACED A TOUCHPAD VERSION, and the reason is worth keeping. That
+// one froze on a touch, and a touch is binary: any graze froze the cursor with
+// nothing on screen to explain it. rhoquinn8217: *"even the tiniest register on
+// the touch pad will cause the mouse to freeze which make the feature seem
+// broken."* A trigger has travel, so it can demand a deliberate millimetre.
+//
+// ⓘ The touchpad keeps the job it is good at: two fingers scroll, naturally.
+inline const Setting kSteadyGyroMouseMode[] = {
+    { "gyro_no_passthrough", "true" },
+    /* ⛔ COMMON only. The shared trigger clicks are declined because this
+       preset binds the triggers ITSELF, below, and then steadies them. */
+    CTM_PRESET_COMMON_BINDINGS,
+    /* ⭐ ALWAYS, and the triggers steady it on top (rhoquinn8217, 2026-09-11).
+       ⛔ This said "trigger", which was never a gate: every other value names a
+       button you HOLD to enable the gyro, and that one meant "always, minus the
+       steady". It also made the two mutually exclusive -- choosing L2 as the
+       gate gave up the steady. The steady is a suppression now, so this says
+       what it has always meant. */
+    { "gyro_to_mouse_gate", "always" },
+
+    /* ⭐ Bound like any other button, then told to steady the cursor. */
+    /* ⛔⛔ 80 IS CHOSEN, NOT INHERITED. Do not "fix" it to 50.
+       Tried on hardware 2026-09-11, all three:
+         50  a crisp break, but easy to trip by accident
+         80  a LIGHTER touch, and worth the extra travel to reach  <- kept
+         90  no resistance at all; it gives way as the trigger bottoms out
+       ⓘ A deep break is felt LESS, because the trigger's own return spring
+       stiffens as you pull and swamps a fixed extra force. That is why 90 is
+       useless and why this number cannot simply be raised for a firmer feel.
+       ⚠️ Before the zone fix on the same day, 80 behaved the way 90 does now --
+       so a note anywhere calling 80 unfeelable predates that and is stale. */
+    { "rebind_7", "MouseLeft" },
+    { "right_trigger_steady_cursor_pull", "immediate" },
+    { "right_trigger_press_at", "80" },
+    { "rebind_6", "MouseRight" },
+    { "left_trigger_steady_cursor_pull", "immediate" },
+    { "left_trigger_press_at", "80" },
+    /* ⓘ The effect point is left unset so it FOLLOWS the press point. Two
+       numbers for one place drifted apart three times in one evening. */
+    { "right_trigger_effect", "click" },
+    { "right_trigger_effect_strength", "7" },
+    { "left_trigger_effect", "click" },
+    { "left_trigger_effect_strength", "7" },
+    /* ⭐ 6 AFTER MEASURING WHERE THE TRIGGER ACTUALLY RESTS (2026-09-11).
+       ⛔ It was 15, defending against a note that a trigger under an effect
+       rests off its stop at 11 to 18. A histogram of a full day's reports says
+       otherwise: 783,755 frames at EXACTLY 0, and 40 to 250 frames at each of
+       1 through 45, which is travel rather than rest.
+       ⚠️ 15 percent of the pull before the cursor stopped was enough to feel --
+       rhoquinn8217: *"I can depress the trigger slightly but gyro doesn't turn
+       off as I would expect."* ⓘ Still not the floor: engaging at 6 releases at
+       4, which clears the 11 that note worried about if it ever comes back. */
+    { "trigger_freeze_at", "6" },
+    /* ⓘ How long a press is HELD before it becomes a drag. ⛔ It was also the
+       double-press window until 2026-09-11, and one number answering two
+       questions made every click feel laggy; that is trigger_double_click_ms
+       now. A deliberate press was measured at 538 ms, so this sits clear. */
+    { "right_trigger_drag_after_ms", "600" },
+    { "left_trigger_drag_after_ms", "600" },
+
+    { "touchpad_no_passthrough", "true" },
+    /* ⓘ ONE finger. Both thumbs are free here -- the triggers do the pressing
+       and the gyro does the pointing -- so nothing is competing for the pad. */
+    { "touchpad_scroll", "1" },
+    { "touchpad_scroll_natural", "true" },
 };
 
 // ---- stick_mouse_mode ------------------------------------------------------
@@ -185,6 +292,9 @@ inline const Setting kL2GyroAiming[] = {
 
 #define CTM_PRESET_COUNT_OF(a) (sizeof(a) / sizeof((a)[0]))
 
+// ⭐ THE ORDER IS THE ORDER PEOPLE READ, and the ones that need a DualSense
+// sit at the BOTTOM (rhoquinn8217, 2026-09-10). A list that opens with a preset
+// half its readers cannot use asks them to skip past it every time.
 inline const Preset kPresets[] = {
     { "gyro-to-mouse",
       "Tilt the controller to move the cursor, always on -- no trigger to "
@@ -193,12 +303,6 @@ inline const Preset kPresets[] = {
       "touchpad, reachable without either thumb leaving a stick. Square "
       "opens the on-screen keyboard.",
       true, true, kGyroMouseMode, CTM_PRESET_COUNT_OF(kGyroMouseMode) },
-    { "touchpad-mouse",
-      "The touchpad behaves like a laptop trackpad: one finger moves the "
-      "cursor, two fingers scroll the page with them, and a tap clicks. The "
-      "most familiar of the three, and the easiest to pick up, but your hand "
-      "leaves the sticks to use it. Square opens the on-screen keyboard.",
-      true, true, kTouchpadMouseMode, CTM_PRESET_COUNT_OF(kTouchpadMouseMode) },
     { "stick-to-mouse",
       "Right stick moves the cursor, left stick scrolls -- both thumbs where "
       "they already are. The least precise of the three for fine work, and "
@@ -209,6 +313,17 @@ inline const Preset kPresets[] = {
       "the camera is steady while you move and precise when you aim. Nothing "
       "else is bound: every button stays with the game.",
       true, true, kL2GyroAiming, CTM_PRESET_COUNT_OF(kL2GyroAiming) },
+    { "DS5-touchpad-to-mouse",
+      "The touchpad behaves like a laptop trackpad: one finger moves the "
+      "cursor, two fingers scroll the page with them, and a tap clicks. The "
+      "most familiar of the three, and the easiest to pick up, but your hand "
+      "leaves the sticks to use it. Square opens the on-screen keyboard.",
+      true, true, kTouchpadMouseMode, CTM_PRESET_COUNT_OF(kTouchpadMouseMode) },
+    { "DS5-gyro-to-mouse",
+      "The gyro moves the cursor and a trigger holds it still. Start to pull "
+      "and the cursor stops; push past the break and it clicks. Keep holding "
+      "to drag. R2 is left click, L2 is right click, one finger scrolls.",
+      true, true, kSteadyGyroMouseMode, CTM_PRESET_COUNT_OF(kSteadyGyroMouseMode) },
 };
 
 inline size_t preset_count()

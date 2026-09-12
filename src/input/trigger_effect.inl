@@ -26,6 +26,102 @@
 // ⛔ FEEDBACK MODE IS NOT CROSS-CHECKED. Only weapon mode appears in a capture
 // we took. The feedback encoder is written from the published layout alone, so
 // it is the one to distrust if something feels wrong.
+//
+// ---- THE WHOLE MODE SET, read up 2026-09-10 so the next person need not -----
+//
+// Eleven bytes per trigger, always. Byte 0 is the mode, the rest are its
+// parameters, and the pull is addressed as ten ZONES rather than as the 0-255
+// the input report gives back.
+//
+//   0x05  off          all zeros after the mode
+//   0x21  feedback     zones bitmap (2 bytes) + 3 bits of force per zone (4)
+//   0x25  weapon       start and stop as one bitmap (2) + one strength byte
+//   0x26  vibration    like feedback, plus a frequency byte at index 9
+//   0x22  bow          weapon plus a snap-back force meant to reset the
+//                     trigger. ⚠️ ON TRIAL -- read the note at the bottom of
+//                     this comment before drawing any conclusion from it.
+//   0x23  galloping    two feet and a frequency, an oscillation
+//   0x27  machine      two amplitudes, a frequency and a period
+//   0x01/0x02/0x06     the simple forms of feedback, weapon and vibration
+//
+// ⭐ ONLY 0x21 AND 0x25 ARE USED HERE, and between them they cover everything
+// this project wants: a break somewhere (weapon), and any shape at all made out
+// of ten per-zone forces (feedback). The oscillating modes are for guns.
+//
+// ⭐⭐ WHAT EACH MODE IS ACTUALLY FOR, looked up 2026-09-10 after measuring
+// them. Every finding below was measured FIRST and the reading agreed, which is
+// why it is worth trusting in both directions:
+//
+//   weapon (0x25)  a GUN TRIGGER BREAK. Easy until a point, then it gives way.
+//                  ⭐ The only mode modelling a discrete firing moment, and the
+//                  only one that reports 0 / 1 / 2 -- before, during, past.
+//                  ➡️ So it is the only shape a PRESS can be hung on.
+//   feedback(0x21) RESISTANCE, not an event: drawing something heavy, grinding
+//                  through mud, a stiff mechanism. Reports 0 before and 1 while
+//                  engaged, and never 2, because there is nothing to come
+//                  through. ⓘ Our wall and notch are both this mode.
+//   bow    (0x22)  DRAWING A BOWSTRING, not firing: resistance plus a snap-back
+//                  that returns the trigger. ⛔ Unofficial, and documented as
+//                  probably not setting the status at all -- which is exactly
+//                  what we measured, 0 from top to bottom on every pull.
+//                  ⚠️ Also documented as liable to be REMOVED by a future
+//                  controller firmware. Do not build anything on it.
+//
+// ⓘ That is why a click is the only shape whose press lands where the finger
+// feels it. It is the only one Sony built to have a moment.
+//
+// ⚠️ WHERE WE KNOWINGLY DIVERGE FROM THE PUBLISHED FACTORIES:
+//   1. **Strength.** They take 1-8 and send one less, so their 1 stores 0. We
+//      take 1-7 and send it verbatim. Same maximum, and no value in the range
+//      stores a zero -- which on this hardware is an effect that can neither be
+//      felt nor used to clear the last one. That cost a morning; see below.
+//   2. **Weapon's deep end.** They cap the start at zone 7 and the stop at 8.
+//      We allow 8 and 9, because rhoquinn8217 asked for a deeper click and it
+//      was then confirmed on hardware at both 30% and 90% (2026-09-10).
+//
+// ⛔⛔ THE BOW, AND WHY IT PROBABLY FAILED ON OUR SIDE (2026-09-10).
+// It was really sent -- `22 80 01 1f` and `22 80 01 3f` are in the log, zones 7
+// and 8, from a config that was genuinely linked. On the pad it gave resistance
+// but never returned the trigger, and rhoquinn8217 reported the break getting
+// HARDER as the snap force went up.
+// ⭐ That last part is the clue, and it points at OUR ENCODING rather than at
+// the mode. We packed two three-bit forces into byte 3, resistance low and snap
+// high, on the strength of one written description. If the pad instead reads
+// that byte as ONE number, then 0x1f is 31 and 0x3f is 63 where the other modes
+// take 0 to 7 -- so raising the snap force would raise the resistance, which is
+// exactly what was felt.
+// ➡️ **The cheap retry is to put the snap force in byte 4 instead** and leave
+// byte 3 as a plain strength. If the break then stops getting harder, the
+// packing was the fault and the mode is fine. Do that before concluding the
+// mode does nothing.
+//
+// ⭐⭐⭐ THE CONTROLLER REPORTS WHEN THE TRIGGER CROSSES A BREAK, and the byte
+// is CONFIRMED on our own hardware (2026-09-10, ten pulls, a probe over the
+// whole input report):
+//
+//     byte 42, HIGH NYBBLE  ->  the RIGHT trigger's adaptive status
+//     byte 43, HIGH NYBBLE  ->  the LEFT trigger's, same encoding
+//        0   short of the effect
+//        1   crossed it
+//        2   at the bottom of the travel
+//
+// ⓘ Measured with a weapon break at 80%: it went 08 -> 18 as the break gave
+// way, 18 -> 28 at full travel, and straight back to 0 on the way out. On five
+// pulls that stopped SHORT of the break it never left 0, which is what makes it
+// the break rather than the travel -- travel we already have in byte 6.
+// ⛔ THE LOW NYBBLE IS A COUNTER, not the stop zone. It increments on its own
+// with the trigger at rest. Mask it off; do not read it.
+// ⭐ BOTH ARE CONFIRMED, each by its own run. With an effect on the LEFT
+// trigger only, byte 43 walked 08 -> 18 -> 29 and back while byte 42 never
+// moved at all -- which is what makes them a pair rather than an assumption.
+// ⓘ Byte 9's L2 bit moved in that run too, exactly as it should, which is the
+// cross-check that the capture was of the trigger being pulled and not of
+// something else happening at the same time.
+//
+// ➡️ WHAT IT IS FOR. A press can fire where the finger FEELS the break, rather
+// than at a percent someone keeps in step with it by hand. Those two numbers
+// drifted apart three times in one evening and each time it cost a round of
+// testing. Asking the controller makes them the same event. See T-168.
 
 #pragma once
 
@@ -50,6 +146,8 @@ constexpr uint8_t kClaimL2 = 0x08;
 constexpr uint8_t kModeOff      = 0x05;
 constexpr uint8_t kModeFeedback = 0x21;
 constexpr uint8_t kModeWeapon   = 0x25;
+// ⚠️ Listed as unofficial, and on trial. See the bow note in the header.
+constexpr uint8_t kModeBow      = 0x22;
 
 // ---- the travel, in zones ---------------------------------------------------
 //
@@ -82,6 +180,12 @@ constexpr int kWeaponEndMax   = 9;
 // what actually went out was an effect asking for nothing, twice.
 // ⭐ So the setting IS the hardware value, 1 to 7, sent verbatim. Off is a
 // MODE, never a strength of zero.
+// ⛔ THE BOW KEEPS THE DOCUMENTED LIMITS where weapon does not, so that a
+// failure can only be the mode or the packing, never the zone.
+constexpr int kBowStartMin = 0;
+constexpr int kBowStartMax = 7;
+constexpr int kBowEndMax   = 8;
+
 constexpr int kStrengthMin = 1;
 constexpr int kStrengthMax = 7;
 
@@ -150,23 +254,130 @@ inline void build_feedback(uint8_t *block, int startZone, int strength)
     block[6] = static_cast<uint8_t>((forces >> 24) & 0xff);
 }
 
-// Resistance that CLIMBS across the pull and then lets go at the point: a wall
-// and a click in the same effect.
+// A light wall the whole way down, with ONE firm zone in it: the finger meets
+// steady resistance, hits a distinct detent where the point is, and pushes on
+// through the same steady resistance.
 //
-// \u26d4 THE FIRST ATTEMPT WAS A SHAPED WALL and it failed on hardware
-// (2026-09-10). Feedback mode carries a force per zone, so a notch was written
-// as one zone at full force with the rest three lower. rhoquinn8217: *"wall and
-// notch feel exactly the same."* A tenth of the pull is too short for a step
-// from 7 to 4 to register, and nothing LETS GO afterwards -- and a click is a
-// release, not a firmer patch.
+// ⛔ TWO SHAPES WERE TRIED AND FELT WRONG FIRST, both on hardware 2026-09-10.
+//   1. A wall with a lip three steps firmer. rhoquinn8217: *"wall and notch
+//      feel exactly the same."* Seven against four across a tenth of the pull
+//      is not a step a finger notices.
+//   2. A weapon effect climbing from an early zone to the point. That DOES
+//      move its break, but the climb means a deeper point is a longer fight:
+//      *"trigger_r2_effect_at changes how hard you need to press the button
+//      for it to bump."* ⭐ The setting is called _at, so it has to change
+//      WHERE, and only where.
 //
-// \u2b50 Weapon mode is the one built for this, and the 2026-08-24 capture proves
-// it: the shotgun was zones 2 to 8, resistance across most of the travel ending
-// in a break. So the notch is a wide weapon rather than a shaped feedback, and
-// the configured point is where it breaks.
-inline void build_ramp_break(uint8_t *block, int endZone, int strength)
+// ⭐ SO THE WALL IS FLAT AND ONLY THE DETENT MOVES. The effort is the same
+// wherever the point sits, which is what leaves its position as the thing the
+// finger actually reads.
+//
+// ⓘ One knob. The detent takes the configured strength and the wall is a third
+// of it, floored at a real force. A ratio rather than a difference, because the
+// first failure above was a difference that turned out to be too small.
+//
+// ⚠️⚠️ AND IT HAS A FLOOR BELOW WHICH IT DOES NOTHING, measured 2026-09-10.
+// At strength 3 the detent is 3 against a wall of 1 and rhoquinn8217 could not
+// tell it from a plain wall. At 7 it is 7 against 2 and the bump is plainly
+// there. ➡️ So a notch wants 5 or more. Below that the two forces are too close
+// to separate, and the shape reads as the thing it was trying not to be.
+// ⛔ Do not "fix" a flat notch by changing the ratio. It was changed twice
+// already for exactly that reason, and the answer both times was that the step
+// was too small in absolute terms rather than proportionally.
+inline void build_detent_wall(uint8_t *block, int detentZone, int strength)
 {
-    build_weapon(block, kWeaponStartMin, endZone, strength);
+    // ⓘ Zone 0 is left free so the trigger is not heavy at rest, which also
+    // means the detent cannot sit at the very top of the pull.
+    constexpr int kWallStart = 1;
+    detentZone = clamp_to(detentZone, kWallStart, kZoneCount - 1);
+    strength   = clamp_to(strength, kStrengthMin, kStrengthMax);
+    const int wall = clamp_to(strength / 3, kStrengthMin, kStrengthMax);
+
+    uint16_t active = 0;
+    uint32_t forces = 0;
+    for (int zone = kWallStart; zone < kZoneCount; ++zone) {
+        active |= static_cast<uint16_t>(1u << zone);
+        const int force = (zone == detentZone) ? strength : wall;
+        forces |= static_cast<uint32_t>(force) << (3 * zone);
+    }
+
+    memset(block, 0, kBlockLen);
+    block[0] = kModeFeedback;
+    block[1] = static_cast<uint8_t>(active & 0xff);
+    block[2] = static_cast<uint8_t>((active >> 8) & 0xff);
+    block[3] = static_cast<uint8_t>(forces & 0xff);
+    block[4] = static_cast<uint8_t>((forces >> 8) & 0xff);
+    block[5] = static_cast<uint8_t>((forces >> 16) & 0xff);
+    block[6] = static_cast<uint8_t>((forces >> 24) & 0xff);
+}
+
+// A break at the point, plus a push meant to carry the trigger back to rest.
+//
+// ⭐ WHY IT IS WORTH HAVING (rhoquinn8217, 2026-09-10). The R2 gesture only
+// hands the cursor back when the trigger goes ALL THE WAY home. A finger that
+// relaxes but rests part way leaves the cursor frozen with nothing on screen
+// explaining why, which is the exact complaint that made the touchpad version
+// feel broken. A trigger that returns itself removes that state.
+//
+// ⛔⛔ SECOND ATTEMPT, AND THE PACKING IS THE VARIABLE. The first put both
+// forces in byte 3, three bits each, from a written description. On hardware
+// the trigger never returned AND the break got harder as the snap force rose --
+// which is what you would feel if the pad reads byte 3 as ONE number, since our
+// snap of 7 made that byte 63 where every other mode there takes 0 to 7.
+// ➡️ So the snap force now sits in byte 4 and byte 3 is a plain strength, like
+// weapon's. **Two observables decide it:** the break should stop getting harder
+// as the snap force rises, and the trigger should return.
+// ⚠️ If the break still hardens with the snap force, byte 4 is not the field
+// either and the mode should be dropped rather than guessed at a third time.
+inline void build_snap(uint8_t *block, int startZone, int endZone,
+                       int strength, int snapForce)
+{
+    startZone = clamp_to(startZone, kBowStartMin, kBowStartMax);
+    endZone   = clamp_to(endZone, startZone + 1, kBowEndMax);
+    strength  = clamp_to(strength, kStrengthMin, kStrengthMax);
+    snapForce = clamp_to(snapForce, kStrengthMin, kStrengthMax);
+
+    const uint16_t zones = static_cast<uint16_t>((1u << startZone) | (1u << endZone));
+
+    memset(block, 0, kBlockLen);
+    block[0] = kModeBow;
+    block[1] = static_cast<uint8_t>(zones & 0xff);
+    block[2] = static_cast<uint8_t>((zones >> 8) & 0xff);
+    block[3] = static_cast<uint8_t>(strength);
+    block[4] = static_cast<uint8_t>(snapForce);
+}
+
+// ⭐ THE KEY NAMES LIVE HERE, and they are built rather than written out.
+//
+// ⓘ This is the earliest trigger file in the include order, so the rebinder and
+// the gesture can both reach it. ⛔ That matters: the rebinder has to know
+// whether a trigger is bound through the gesture, and a second copy of the
+// string in rebind.inl would drift the first time one of them was renamed --
+// which has now happened twice in one day.
+//
+// ⭐ "right" and "left" come FIRST. They are the right trigger and the left
+// trigger, the way everyone says it and the way right_stick_ and left_stick_
+// already read in this project.
+// ⭐⭐ THE TRIGGER IS BOUND LIKE EVERY OTHER BUTTON, and this is only the
+// SWITCH that changes how it behaves while you work it (rhoquinn8217,
+// 2026-09-10). There used to be a second binding of its own, which meant two
+// boxes that looked alike sitting next to each other with only one of them
+// winning. ➡️ Now rebind_6 and rebind_7 say what a trigger sends, and this says
+// whether pulling it holds the cursor still.
+inline std::string steady_key(const char *sideName)
+{
+    return std::string(sideName) + "_trigger_steady_cursor_pull";
+}
+
+// How deep the press fires, when the effect does not name the point itself.
+inline std::string press_at_key(const char *sideName)
+{
+    return std::string(sideName) + "_trigger_press_at";
+}
+
+inline std::string effect_key(const char *sideName)
+{
+    return std::string(sideName) + "_trigger_effect";
 }
 
 // ---- what a config asks for -------------------------------------------------
@@ -176,7 +387,8 @@ enum class Shape {
     Off,      // asked for nothing: clear an effect WE set, and only that
     Click,    // a break at the point, so the finger can find it
     Wall,     // resistance from the point down
-    Notch,    // a long climb that lets go at the point: a wall AND a click
+    Notch,    // a flat wall with one firm zone in it, at the point
+    Snap,     // a break at the point, and a push meant to return the trigger
 };
 
 inline Shape shape_from(const std::string &value)
@@ -186,79 +398,151 @@ inline Shape shape_from(const std::string &value)
     if (value == "click" || value == "weapon") return Shape::Click;
     if (value == "wall" || value == "feedback") return Shape::Wall;
     if (value == "notch" || value == "both") return Shape::Notch;
+    if (value == "snap" || value == "bow") return Shape::Snap;
     return Shape::Absent;     // a typo leaves the trigger alone, never breaks it
 }
 
 // ⭐ WHAT WE HAVE SET, so that turning it off can clear it WITHOUT claiming the
 // triggers on installs that never asked for any of this.
 //
-// ⛔ Clearing unconditionally was the obvious first shape and it is wrong: it
-// would make every settings push claim the trigger fields, stamping "off" over
-// a game's own effect for everyone, including the people not using this. So we
-// clear only what this process actually set.
-inline std::mutex g_setMutex;
-inline std::map<std::string, bool> g_setEffect;
-
-inline bool has_set_effect(const std::string &marker)
-{
-    std::lock_guard<std::mutex> lock(g_setMutex);
-    return g_setEffect.find(marker) != g_setEffect.end();
-}
-
-inline void note_set_effect(const std::string &marker, bool on)
-{
-    std::lock_guard<std::mutex> lock(g_setMutex);
-    if (on) g_setEffect[marker] = true;
-    else g_setEffect.erase(marker);
-}
+// ⛔⛔ THERE WAS A RECORD HERE OF WHAT THIS PROCESS HAD SET, and "off" only
+// cleared a trigger that record knew about -- so a settings push could never
+// stamp off over a game's own effect for someone not using this.
+//
+// ⚠️ IT WAS KEYED ON THE CONFIG NAME, which is the thing that changes. Link a
+// config whose effect is "off" and there is no record under ITS name, so both
+// wants_anything() and apply_one() concluded there was nothing to do and sent
+// nothing at all. The trigger kept whatever the previous config gave it.
+// rhoquinn8217, 2026-09-11, switching from a notch to an off: *"doesn't appear
+// to turn off the adaptive trigger feeling."*
+//
+// ⓘ The comment on apply_to_report already said this shape had been abandoned
+// for exactly that reason; it was still load-bearing in two places.
+//
+// ➡️ "off" is now an instruction like any other, honoured when it is asked for.
+// ⭐ What it does NOT do is fire unasked: a section with no effect key at all
+// is Absent, owns nothing, and still touches no trigger field. The protection
+// that mattered comes from being silent by default, not from a record.
 
 // Writes one trigger's block and says which claim bit to raise. Returns 0 when
 // the trigger is to be left alone, which is the common case.
 inline uint8_t apply_one(const std::string &section, const char *sideKey,
                          uint8_t *report, size_t offset, uint8_t claimBit)
 {
-    const std::string effectKey   = std::string("trigger_") + sideKey + "_effect";
+    const std::string effectKey   = effect_key(sideKey);
     const std::string atKey       = effectKey + "_at";
     const std::string strengthKey = effectKey + "_strength";
-    const std::string marker      = section + "/" + sideKey;
 
     const Shape shape = shape_from(device_config_str(section.c_str(), effectKey.c_str()));
     if (shape == Shape::Absent) return 0;
 
     if (shape == Shape::Off) {
-        if (!has_set_effect(marker)) return 0;      // nothing of ours to undo
         build_off(report + offset);
-        note_set_effect(marker, false);
         return claimBit;
     }
 
-    const int percent  = device_config_int(section.c_str(), atKey.c_str(), 50);
+    // ⭐⭐ THE LANDMARK FOLLOWS THE CLICK unless it is told otherwise.
+    //
+    // ⛔ Two numbers for one place drifted apart three times in one evening: a
+    // break at 10 with a click at 90, then a break at 80 with a click at 90.
+    // Each time the report "I stopped just before the break" meant a different
+    // depth from "I stopped just before it clicked", and each time it cost a
+    // round of testing to notice.
+    // ⓘ A trigger holds ONE effect, so whatever it is set to is the only
+    // landmark a finger gets. Putting it anywhere but the click point is
+    // possible -- for marking where the cursor freezes, say -- but it should be
+    // something you ask for rather than something you inherit.
+    const std::string clickAtKey = press_at_key(sideKey);
+    const int percent = device_config_int(
+        section.c_str(), atKey.c_str(),
+        device_config_int(section.c_str(), clickAtKey.c_str(), 50));
     const int strength = device_config_int(section.c_str(), strengthKey.c_str(), 5);
     const int zone     = zone_from_percent(percent);
 
     if (shape == Shape::Click) {
-        // ⭐ The break lands at the END zone, so the requested point IS the end
-        // and the resistance starts one zone earlier.
-        build_weapon(report + offset, zone - 1, zone, strength);
+        // ⭐⭐ THE REQUESTED PERCENT IS WHERE IT GIVES WAY, so the end zone is
+        // one BELOW the zone that percent falls in, and the start is one below
+        // that.
+        //
+        // ⛔ MEASURED, 2026-09-11. It used to pass the zone itself as the end,
+        // on the reasoning that the break is at the end of the effect. But a
+        // zone is a ten-percent BAND, not a point, and the pad does not report
+        // the crossing until the trigger is into the NEXT band. With 80
+        // requested the end zone was 8, and a pull to raw 231 -- 90.6% of the
+        // travel -- still read status 1. Only 255 read 2. So the break sat on
+        // top of the hard stop, where there is nothing left to feel it against.
+        //
+        // ⚠️ THIS IS WHY ONE TRIGGER SEEMED BROKEN AND THE OTHER DID NOT.
+        // rhoquinn8217, 2026-09-11: *"R2 mouse click happens on the break. L2
+        // mouse click happens without hitting the break."* Both were doing the
+        // same thing. An index finger drives R2 through the last sliver of
+        // travel by habit; a middle finger on L2 stops short. Proven by putting
+        // the same click at 40% on both, where the give-way was felt on each.
+        build_weapon(report + offset, zone - 2, zone - 1, strength);
     } else if (shape == Shape::Notch) {
-        // \u2b50 The break is at the point, the climb starts as early as weapon
-        // mode allows, so the pull feels like a wall that finally gives.
-        build_ramp_break(report + offset, zone, strength);
+        build_detent_wall(report + offset, zone, strength);
+    } else if (shape == Shape::Snap) {
+        const std::string snapKey = std::string(sideKey) + "_trigger_snap_force";
+        build_snap(report + offset, zone - 1, zone, strength,
+                   device_config_int(section.c_str(), snapKey.c_str(), 3));
     } else {
         build_feedback(report + offset, zone, strength);
     }
-    note_set_effect(marker, true);
     return claimBit;
+}
+
+// Is this side asking for an effect of its own?
+inline bool side_wants_effect(const std::string &section, const char *sideKey)
+{
+    const std::string key = effect_key(sideKey);
+    const Shape shape = shape_from(device_config_str(section.c_str(), key.c_str()));
+    // ⭐ OFF COUNTS. Asking for it is asking for the trigger to be cleared,
+    // which needs a report sent and the pair claimed just as any shape does.
+    return shape == Shape::Click || shape == Shape::Wall ||
+           shape == Shape::Notch || shape == Shape::Snap ||
+           shape == Shape::Off;
 }
 
 // Adds whatever the section asks for to an output report already being built.
 // Returns the claim bits to OR into ValidFlag0, or 0 to touch nothing.
+//
+// ⭐⭐ A CONFIG THAT SETS ANY TRIGGER EFFECT OWNS BOTH TRIGGERS.
+//
+// ⛔ WHY, and it was a real fault (rhoquinn8217, 2026-09-10): *"I'm feeling a
+// wall on the L2 trigger. Are you setting anything for L2 by mistake?"* We were
+// not -- a DIFFERENT config had, an hour earlier. An effect lives on the
+// controller until something changes it, and an absent key means "leave it
+// alone", so a wall set by one config followed the pad into the next one and
+// looked like a ghost.
+//
+// ➡️ "Leave it alone" is the right rule for a field somebody ELSE owns. It is
+// the wrong rule for one we set ourselves. So a section that configures either
+// trigger now puts the other into a known state instead of inheriting one.
+//
+// ⓘ Deliberately stateless. Tracking what we had set was the first shape and it
+// was keyed on the config, which is exactly the thing that changes -- so the
+// old config's note was never visited again to be undone.
 inline uint8_t apply_to_report(const std::string &section, uint8_t *report, size_t len)
 {
     if (report == nullptr || len < kL2Offset + kBlockLen) return 0;
+
+    const bool ownsTriggers =
+        side_wants_effect(section, "right") || side_wants_effect(section, "left");
+
     uint8_t claim = 0;
-    claim = static_cast<uint8_t>(claim | apply_one(section, "r2", report, kR2Offset, kClaimR2));
-    claim = static_cast<uint8_t>(claim | apply_one(section, "l2", report, kL2Offset, kClaimL2));
+    claim = static_cast<uint8_t>(claim | apply_one(section, "right", report, kR2Offset, kClaimR2));
+    claim = static_cast<uint8_t>(claim | apply_one(section, "left", report, kL2Offset, kClaimL2));
+
+    if (ownsTriggers) {
+        if ((claim & kClaimR2) == 0) {
+            build_off(report + kR2Offset);
+            claim = static_cast<uint8_t>(claim | kClaimR2);
+        }
+        if ((claim & kClaimL2) == 0) {
+            build_off(report + kL2Offset);
+            claim = static_cast<uint8_t>(claim | kClaimL2);
+        }
+    }
     return claim;
 }
 
@@ -266,13 +550,13 @@ inline uint8_t apply_to_report(const std::string &section, uint8_t *report, size
 // has nothing to send, so a trigger effect alone is enough to send one.
 inline bool wants_anything(const std::string &section)
 {
-    const char *sides[] = { "r2", "l2" };
+    const char *sides[] = { "right", "left" };
     for (const char *side : sides) {
-        const std::string key = std::string("trigger_") + side + "_effect";
+        const std::string key = effect_key(side);
         const Shape shape = shape_from(device_config_str(section.c_str(), key.c_str()));
         if (shape == Shape::Click || shape == Shape::Wall ||
-            shape == Shape::Notch) return true;
-        if (shape == Shape::Off && has_set_effect(section + "/" + side)) return true;
+            shape == Shape::Notch || shape == Shape::Snap ||
+            shape == Shape::Off) return true;
     }
     return false;
 }

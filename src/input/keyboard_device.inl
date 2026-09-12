@@ -63,6 +63,14 @@ inline std::wstring keyboard_map_path()
 // everything currently held across all of them.
 inline std::map<const void *, std::pair<uint8_t, std::vector<uint8_t>>> g_perDevice;
 
+// ⭐ A SECOND LEVEL, for a key held by something that is not the rebinder.
+//
+// ⛔ It cannot share the map above. The rebinder writes its slot IN FULL on
+// every report and runs last on the input path, so a key held by anything
+// earlier would be erased microseconds after it was set. Same reasoning as the
+// mouse device's separate drag and trigger levels.
+inline std::map<const void *, std::pair<uint8_t, std::vector<uint8_t>>> g_triggerHeld;
+
 inline void set_state_locked_from_devices();
 
 // ⓘ The device-aware entry point. Anything with a controller in hand uses this;
@@ -86,7 +94,21 @@ inline void forget_device(const void *deviceKey)
 {
     std::lock_guard<std::mutex> lock(g_stateMutex);
     g_perDevice.erase(deviceKey);
+    g_triggerHeld.erase(deviceKey);
     set_state_locked_from_devices();
+}
+
+// The trigger click's own level. Same shape as set_state_for, different slot.
+inline void set_trigger_keys_for(const void *deviceKey, uint8_t modifiers,
+                                 const uint8_t *keys, size_t count)
+{
+    {
+        std::lock_guard<std::mutex> lock(g_stateMutex);
+        auto &slot = g_triggerHeld[deviceKey];
+        slot.first = modifiers;
+        slot.second.assign(keys, keys + (keys ? count : 0));
+        set_state_locked_from_devices();
+    }
 }
 
 inline void set_state(uint8_t modifiers, const uint8_t *keys, size_t count)
@@ -129,13 +151,15 @@ inline void set_state_locked_from_devices()
     uint8_t mods = 0;
     uint8_t merged[6] = {0, 0, 0, 0, 0, 0};
     size_t n = 0;
-    for (const auto &entry : g_perDevice) {
-        mods = static_cast<uint8_t>(mods | entry.second.first);
-        for (uint8_t k : entry.second.second) {
-            if (k == 0 || n >= 6) continue;
-            bool already = false;
-            for (size_t i = 0; i < n; ++i) if (merged[i] == k) already = true;
-            if (!already) merged[n++] = k;
+    for (const auto *table : { &g_perDevice, &g_triggerHeld }) {
+        for (const auto &entry : *table) {
+            mods = static_cast<uint8_t>(mods | entry.second.first);
+            for (uint8_t k : entry.second.second) {
+                if (k == 0 || n >= 6) continue;
+                bool already = false;
+                for (size_t i = 0; i < n; ++i) if (merged[i] == k) already = true;
+                if (!already) merged[n++] = k;
+            }
         }
     }
     bool changed = (g_modifiers != mods);
