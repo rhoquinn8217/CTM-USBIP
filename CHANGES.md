@@ -52,6 +52,12 @@ carry it; upstream's own history is unchanged.
 | 2026-09-10 | The touchpad preset scrolls naturally, and its description says so | `f8ad9ac` |
 | 2026-09-10 | Adaptive trigger effects: a resistance break, a wall, or a climb that lets go, placed anywhere in the pull | `bbfcd5f`, `9f9b847`, `6cbe348`, `eaf2e55`, `33ff84d` |
 | 2026-09-10 | R2 as a mouse click: the cursor freezes for the whole gesture, so a double click lands twice on one pixel, and a held click becomes a drag | `890fab0`, `1db8342` |
+| 2026-09-11 | A trigger is bound in one place. `rebind_6` and `rebind_7` say what it sends, as for any other button, and a per-side mode says what pulling it does to the cursor. Setting both no longer sends two presses per pull | `c948bad`, `7abdd1e`, `6e873e6`, `962e7fc`, `b285c83`, `9262f50`, `f0d70f6` |
+| 2026-09-11 | The press lands on the break the finger feels. The controller is asked rather than a travel number guessed: byte 42 for the right trigger, byte 43 for the left, both confirmed on hardware. Two thresholds so a resting trigger cannot chatter | `aa00e2a`, `4950379`, `573d079`, `f8ab6eb`, `e935859`, `dac514b`, `8a9cd41`, `fd15276` |
+| 2026-09-11 | Four trigger feels, each measured rather than assumed: a break, a wall, a wall with a detent, and a break that returns itself. A notch and a snap press on travel, because the hardware cannot name their moment. An effect of "off" now clears the trigger whenever it is asked for | `64efd09`, `86317a5`, `265418c`, `8f1a672`, `856e615`, `5325e54`, `458f4f6`, `7e7001e`, `ca47551`, `033758f` |
+| 2026-09-11 | The gyro gate and the trigger's steady are separate settings, so one trigger can open the gate on a light hold and click at its break. The drag and double-click windows are per side, because which trigger wants them follows what it is bound to | `258c07b`, `fdbc0ca`, `ccfa2d0` |
+| 2026-09-11 | Two ways a mouse button could be left held down, both closed: the rebinder went silent once it gave a trigger up, and the pump recorded a release as sent before checking there was a device to send it to | `012fef6` |
+| 2026-09-11 | Settings page 2.64.48: trigger settings grouped and ordered, the compact config picker steps in place instead of opening a list taller than its window, preset previews drop tuning numbers and passthroughs, and the trigger log reports both sides | `dad60d1`, `f763fe1`, `e0b521d`, `91b2c38`, `b06d011`, `683b091`, `3daa7a3`, `3c33c4f`, `9d74ebd`, `012d986`, `9006b65` |
 
 ## Files changed
 
@@ -61,11 +67,11 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
 
 ```
  .gitattributes                                |   48 +
- .gitignore                                    |   26 +-
- CHANGES.md                                    |  150 +
+ .gitignore                                    |   28 +-
+ CHANGES.md                                    |  156 +
  LINK                                          |    0
  README.md                                     |   18 +
- app/ctm-usbip-tests.vcxproj                   |   97 +
+ app/ctm-usbip-tests.vcxproj                   |   98 +
  app/ctm-usbip.vcxproj                         |    4 +-
  attic/flydigi_apex4_identity.map              |   58 +
  attic/flydigi_apex4_usb.profile               |   24 +
@@ -90,8 +96,8 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  src/app/open_ui.inl                           |  457 ++
  src/app/overlay_window.inl                    | 1895 +++++++
  src/app/rest.inl                              |  755 +++
- src/app/rest_config.inl                       | 1055 ++++
- src/app/rest_config_sessions.inl              |  100 +
+ src/app/rest_config.inl                       | 1067 ++++
+ src/app/rest_config_sessions.inl              |  120 +
  src/app/rest_sessions.inl                     |   33 +
  src/app/service.inl                           |   25 +-
  src/app/tray_icon.inl                         |  197 +
@@ -108,30 +114,30 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  src/backend/bridge.inl                        |  241 +-
  src/backend/bridge_enet.inl                   |   35 +-
  src/backend/bt.inl                            |   16 +-
- src/config/config_presets.inl                 |  243 +
+ src/config/config_presets.inl                 |  358 ++
  src/config/config_store.inl                   |  746 +++
  src/config/config_watcher.inl                 |  170 +
  src/config/device_config.inl                  |  218 +
  src/input/gyro_calibration.inl                |  131 +
  src/input/gyro_calibration_fetch.inl          |   95 +
- src/input/gyro_mouse.inl                      |  737 +++
- src/input/keyboard_device.inl                 |  277 ++
- src/input/mouse_device.inl                    |  218 +
+ src/input/gyro_mouse.inl                      |  754 +++
+ src/input/keyboard_device.inl                 |  301 ++
+ src/input/mouse_device.inl                    |  260 +
  src/input/mouse_exclusive.inl                 |  130 +
  src/input/osk.inl                             |  200 +
- src/input/rebind.inl                          | 1141 +++++
+ src/input/rebind.inl                          | 1223 +++++
  src/input/stick_mouse.inl                     |  410 ++
  src/input/touch_mouse.inl                     |  382 ++
- src/input/trigger_click.inl                   |  212 +
- src/input/trigger_effect.inl                  |  280 ++
+ src/input/trigger_click.inl                   |  763 +++
+ src/input/trigger_effect.inl                  |  564 +++
  src/log/device_log.inl                        |  229 +
  src/main.cpp                                  |  386 +-
  src/map/runtime.cpp                           |    4 +
  src/usbip/device.inl                          |  441 +-
  src/usbip/server.inl                          |   55 +-
- tests/config_store_test.cpp                   |  630 +++
+ tests/config_store_test.cpp                   |  640 +++
  tests/device_config_test.cpp                  |  463 ++
- tests/gyro_mouse_test.cpp                     |  247 +
+ tests/gyro_mouse_test.cpp                     |  274 +
  tests/harness.h                               |   55 +
  tests/host_audio_settings_test.cpp            |  125 +
  tests/iso_in_pacing_test.cpp                  |  118 +
@@ -139,18 +145,19 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  tests/nickname_test.cpp                       |   98 +
  tests/osk_test.cpp                            |   81 +
  tests/rest_parser_test.cpp                    |  195 +
+ tests/schema_json_test.cpp                    |  147 +
  tests/stick_mouse_test.cpp                    |  532 ++
- tests/tests_main.cpp                          |   93 +
+ tests/tests_main.cpp                          |   97 +
  tests/touch_mouse_test.cpp                    |  519 ++
- tests/trigger_click_test.cpp                  |  259 +
- tests/trigger_effect_test.cpp                 |  260 +
+ tests/trigger_click_test.cpp                  |  675 +++
+ tests/trigger_effect_test.cpp                 |  388 ++
  tests/units.h                                 |   54 +
- tools/controller-config-test-client.html      | 6553 +++++++++++++++++++++++++
+ tools/controller-config-test-client.html      | 6669 +++++++++++++++++++++++++
  tools/device-config-panel-edge.bat            |    9 +
  tools/device-config-panel-edge.ps1            |  327 ++
  tools/device-config-panel.bat                 |    4 +
  tools/device-config-panel.ps1                 |  303 ++
  tools/osk-mockups.py                          |  103 +
  tools/start-ctm-usbip.bat                     |   67 +
- 92 files changed, 27459 insertions(+), 114 deletions(-)
+ 93 files changed, 29463 insertions(+), 114 deletions(-)
 ```
