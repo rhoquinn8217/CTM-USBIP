@@ -10,120 +10,11 @@
 
 #pragma once
 
+// ⓘ Outside the namespace: this file opens ctm_rebind itself, and including it
+// inside would nest a second one.
+#include "button_layout.inl"
+
 namespace ctm_rebind {
-
-// ⭐ W3C STANDARD GAMEPAD indices. Positions survive across controllers; names
-// do not. Index 0 is the bottom face button -- Cross on a DualSense, A on an
-// Xbox pad. Same button, same index, different label.
-//
-// ⓘ The W3C reached this the same way: "The Standard Gamepad buttons are
-// defined by their layout on the gamepad rather than their intended
-// functionality."
-enum : int {
-    kBtnFaceDown = 0, kBtnFaceRight = 1, kBtnFaceLeft = 2, kBtnFaceUp = 3,
-    kBtnL1 = 4, kBtnR1 = 5, kBtnL2 = 6, kBtnR2 = 7,
-    kBtnSelect = 8, kBtnStart = 9, kBtnL3 = 10, kBtnR3 = 11,
-    kBtnDpadUp = 12, kBtnDpadDown = 13, kBtnDpadLeft = 14, kBtnDpadRight = 15,
-    kBtnHome = 16,
-    kButtonCount = 17
-};
-
-// Where each standard index lives in a DUALSENSE report.
-//
-// ⚠️ OFFSETS ARE OURS -- report id at index 0, matching gyro_mouse.inl's note.
-// A reference that omits the report id has every offset one lower.
-//
-//   [8]  low nibble: d-pad as an 8-way HAT, not four bits
-//        high nibble: square 0x10, cross 0x20, circle 0x40, triangle 0x80
-//   [9]  L1 0x01, R1 0x02, L2 0x04, R2 0x08,
-//        create 0x10, options 0x20, L3 0x40, R3 0x80
-//   [10] PS 0x01, touchpad-click 0x02, mute 0x04
-//
-// ⛔ THE D-PAD IS A HAT. Values 0-7 are the eight directions and 8 is centred,
-// so "up" is not one bit -- it is three of the eight values. Treating it as a
-// bitmask would bind diagonals to nothing and up-left to up.
-struct BitSpot {
-    int byteIndex;
-    uint8_t mask;
-};
-
-// ⓘ A mask of 0 means "not a simple bit" -- the d-pad, handled separately.
-inline const BitSpot kDs5Spots[kButtonCount] = {
-    { 8, 0x20 },   // 0  cross
-    { 8, 0x40 },   // 1  circle
-    { 8, 0x10 },   // 2  square
-    { 8, 0x80 },   // 3  triangle
-    { 9, 0x01 },   // 4  L1
-    { 9, 0x02 },   // 5  R1
-    { 9, 0x04 },   // 6  L2 (digital bit; the analog value is at [6])
-    { 9, 0x08 },   // 7  R2
-    { 9, 0x10 },   // 8  create / select
-    { 9, 0x20 },   // 9  options / start
-    { 9, 0x40 },   // 10 L3
-    { 9, 0x80 },   // 11 R3
-    { 8, 0x00 },   // 12 d-pad up     -- hat, see below
-    { 8, 0x00 },   // 13 d-pad down
-    { 8, 0x00 },   // 14 d-pad left
-    { 8, 0x00 },   // 15 d-pad right
-    { 10, 0x01 },  // 16 PS / home
-};
-
-// Hat value -> which of the four d-pad directions are down.
-// 0=N 1=NE 2=E 3=SE 4=S 5=SW 6=W 7=NW 8=centred
-inline bool hat_has(uint8_t hat, int standardIndex)
-{
-    if (hat > 7) return false;
-    switch (standardIndex) {
-        case kBtnDpadUp:    return hat == 7 || hat == 0 || hat == 1;
-        case kBtnDpadRight: return hat == 1 || hat == 2 || hat == 3;
-        case kBtnDpadDown:  return hat == 3 || hat == 4 || hat == 5;
-        case kBtnDpadLeft:  return hat == 5 || hat == 6 || hat == 7;
-        default:            return false;
-    }
-}
-
-inline void hat_clear(uint8_t *data, int standardIndex)
-{
-    const uint8_t hat = static_cast<uint8_t>(data[8] & 0x0f);
-    if (!hat_has(hat, standardIndex)) return;
-    // ⚠️ A hat cannot express "up is released but right is still held" as a
-    // bitmask would. Clearing one direction of a diagonal means moving to the
-    // remaining single direction; clearing the only direction centres it.
-    static const uint8_t kCentre = 8;
-    uint8_t next = kCentre;
-    switch (hat) {
-        case 1: next = (standardIndex == kBtnDpadUp)    ? 2 : 0; break;  // NE
-        case 3: next = (standardIndex == kBtnDpadDown)  ? 2 : 4; break;  // SE
-        case 5: next = (standardIndex == kBtnDpadDown)  ? 6 : 4; break;  // SW
-        case 7: next = (standardIndex == kBtnDpadUp)    ? 6 : 0; break;  // NW
-        default: next = kCentre; break;
-    }
-    data[8] = static_cast<uint8_t>((data[8] & 0xf0) | next);
-}
-
-inline bool is_pressed(const uint8_t *data, size_t len, int standardIndex)
-{
-    if (standardIndex >= kBtnDpadUp && standardIndex <= kBtnDpadRight) {
-        return len > 8 && hat_has(static_cast<uint8_t>(data[8] & 0x0f), standardIndex);
-    }
-    const BitSpot &spot = kDs5Spots[standardIndex];
-    if (spot.mask == 0) return false;
-    return len > static_cast<size_t>(spot.byteIndex) &&
-           (data[spot.byteIndex] & spot.mask) != 0;
-}
-
-inline void clear_button(uint8_t *data, size_t len, int standardIndex)
-{
-    if (standardIndex >= kBtnDpadUp && standardIndex <= kBtnDpadRight) {
-        if (len > 8) hat_clear(data, standardIndex);
-        return;
-    }
-    const BitSpot &spot = kDs5Spots[standardIndex];
-    if (spot.mask == 0) return;
-    if (len > static_cast<size_t>(spot.byteIndex)) {
-        data[spot.byteIndex] = static_cast<uint8_t>(data[spot.byteIndex] & ~spot.mask);
-    }
-}
 
 // ---- Key names --------------------------------------------------------------
 //
@@ -550,8 +441,19 @@ inline void apply(const void *deviceKey,
         }
     }
 
-    const char *kind = device_section_for(descriptor);
+    // ⭐ WHICH SECTION, AND WHICH LAYOUT -- two questions, asked separately.
+    //
+    // ⛔ device_section_for() used to answer both here, and it answers neither
+    // well: it says "ds4" for a pad whose bytes are not where it implies, and
+    // nullptr for every Xbox pad, which is what kept them out of the rebinder.
+    const char *kind = device_button_section_for(descriptor);
     if (kind == nullptr) return;
+    const Layout *layout = layout_for(kind);
+    if (layout == nullptr) return;
+    // ⓘ Each layout knows the shortest report its own spots can be read from,
+    // so a truncated report is refused per pad rather than against a DualSense
+    // constant that means nothing to the others.
+    if (len < layout->minLength) return;
 
     // ⭐ CONFIG MODE WINS over anything the user bound.
     //
@@ -658,8 +560,8 @@ inline void apply(const void *deviceKey,
         for (int i = 0; i < kButtonCount; ++i) {
             const uint32_t bit = 1u << i;
             if ((g_swallowUntilReleased & bit) == 0) continue;
-            if (is_pressed(data, len, i)) {
-                clear_button(data, len, i);
+            if (is_pressed(*layout, data, len, i)) {
+                clear_button(*layout, data, len, i);
             } else {
                 g_swallowUntilReleased &= ~bit;
             }
@@ -697,12 +599,12 @@ inline void apply(const void *deviceKey,
         // Square while it is up. One button, both directions.
         static std::map<std::pair<const void *, int>, bool> gateSquareHeld;
         {
-            const bool sq = is_pressed(data, len, kBtnFaceLeft);
+            const bool sq = is_pressed(*layout, data, len, kBtnFaceLeft);
             const bool fresh = sq && !gateSquareHeld[{deviceKey, kBtnFaceLeft}];
             gateSquareHeld[{deviceKey, kBtnFaceLeft}] = sq;
 
             if (ctm_rebind_editing_field()) {
-                clear_button(data, len, kBtnFaceLeft);
+                clear_button(*layout, data, len, kBtnFaceLeft);
                 if (fresh) ctm_osk_toggle(gateSection, kBtnFaceLeft, 2);   // 2 = ours
             } else if (fresh) {
                 // ⭐⭐ SAY WHY THE KEYBOARD DID NOT OPEN (rhoquinn8217,
@@ -738,10 +640,10 @@ inline void apply(const void *deviceKey,
             // ⛔ Square belongs to the keyboard while a text box has focus;
             // sending the toggle as well would do both.
             if (g.standardIndex == kBtnFaceLeft && ctm_rebind_editing_field()) continue;
-            const bool held = is_pressed(data, len, g.standardIndex);
+            const bool held = is_pressed(*layout, data, len, g.standardIndex);
             // ⛔ Cleared whether or not it is held, so a button released this
             // frame cannot leave a stale bit behind.
-            clear_button(data, len, g.standardIndex);
+            clear_button(*layout, data, len, g.standardIndex);
             if (!held) continue;
             const KeyName *k = key_for(g.code);
             if (k != nullptr && k->usage != 0 && gateCount < 6) {
@@ -777,7 +679,7 @@ inline void apply(const void *deviceKey,
         // ⓘ A snapshot rather than moving the exception: the blanking must
         // still happen, and it must happen before anything can forget to.
         bool gatePressed[kButtonCount] = {};
-        for (int i = 0; i < kButtonCount; ++i) gatePressed[i] = is_pressed(data, len, i);
+        for (int i = 0; i < kButtonCount; ++i) gatePressed[i] = is_pressed(*layout, data, len, i);
 
         data[1] = data[2] = data[3] = data[4] = 0x80;   // LX LY RX RY
         data[5] = data[6] = 0x00;                       // L2 R2 analog
@@ -857,7 +759,7 @@ inline void apply(const void *deviceKey,
                 static std::map<std::pair<const void *, int>, bool> gateOskHeld;
                 if (now && !gateOskHeld[{deviceKey, i}]) ctm_osk_toggle(gateSection, i, which);
                 gateOskHeld[{deviceKey, i}] = now;
-                clear_button(data, len, i);
+                clear_button(*layout, data, len, i);
                 continue;
             }
 
@@ -885,7 +787,7 @@ inline void apply(const void *deviceKey,
                         gateMouseButtons | (gma == kMouseLeft ? 0x01 :
                                             gma == kMouseRight ? 0x02 : 0x04));
                 }
-                clear_button(data, len, i);
+                clear_button(*layout, data, len, i);
             }
         }
 
@@ -982,14 +884,14 @@ inline void apply(const void *deviceKey,
                 lastBytes[0] = data[8]; lastBytes[1] = data[9]; lastBytes[2] = data[10];
                 device_log::input(device_log::msg()
                     << "rebind " << i << " -> '" << code << "' turbo=" << turboMs
-                    << " pressed=" << (is_pressed(data, len, i) ? "yes" : "no")
+                    << " pressed=" << (is_pressed(*layout, data, len, i) ? "yes" : "no")
                     << "  bytes[8]=0x" << std::hex << static_cast<int>(data[8])
                     << " [9]=0x" << static_cast<int>(data[9])
                     << " [10]=0x" << static_cast<int>(data[10]) << std::dec);
             }
         }
 
-        const bool held = is_pressed(data, len, i);
+        const bool held = is_pressed(*layout, data, len, i);
 
         // ⭐ Turbo alternates the button's own state when nothing is rebound,
         // and the KEY's state when something is. Independent settings, because
@@ -1009,14 +911,14 @@ inline void apply(const void *deviceKey,
 
         if (code.empty()) {
             // Turbo with no rebind: the button repeats itself.
-            if (held && !active) clear_button(data, len, i);
+            if (held && !active) clear_button(*layout, data, len, i);
             continue;
         }
 
         // ⛔ REPLACE. The button is cleared whether or not it is currently in
         // its turbo "down" phase -- the game must never see it at all, or a
         // rebind would double up with the original.
-        clear_button(data, len, i);
+        clear_button(*layout, data, len, i);
 
         // ⭐ The on-screen keyboard, before the mouse and key paths: it is
         // neither, and like a wheel click it fires ONCE per press -- a toggle

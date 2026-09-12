@@ -143,6 +143,40 @@ static bool device_has_ds5_input_layout(const std::vector<unsigned char> &descri
     return device_has_ds5_audio(descriptor);
 }
 
+// Which settings section does this pad's BUTTONS read from?
+//
+// ⛔ NOT device_section_for(). That one answers "does this speak the DS5 output
+// report", and its null return is what kept every non-Sony pad out of the
+// rebinder entirely -- an Xbox pad could be given a config and it would do
+// nothing, which is the silent-success failure this file warns about.
+//
+// ⓘ The vocabulary matches config_store::settings_kind_for() on purpose: a name
+// minted here that the config store does not know would create a section nothing
+// can ever link to.
+//
+// ⚠️ "puck" is deliberately absent. Composite devices are forwarded verbatim and
+// never reach a path a config acts on -- structural, not a gap to fill.
+static const char *device_button_section_for(const std::vector<unsigned char> &descriptor)
+{
+    if (descriptor.size() < 12) {
+        return nullptr;
+    }
+    const uint16_t vendor = static_cast<uint16_t>(
+        descriptor[8] | (static_cast<uint16_t>(descriptor[9]) << 8));
+    const uint16_t product = static_cast<uint16_t>(
+        descriptor[10] | (static_cast<uint16_t>(descriptor[11]) << 8));
+
+    if (vendor == kVendorSony) {
+        if (product == 0x0ce6) return "ds5";
+        if (product == 0x0df2) return "ds5_edge";
+        if (product == 0x09cc || product == 0x05c4) return "ds4";
+        return nullptr;
+    }
+    // Microsoft, the captured GIP pad the xbox profile describes.
+    if (vendor == 0x045e && product == 0x0b12) return "xbox";
+    return nullptr;
+}
+
 // DualSense USB output report layout. Positions and claim bits are ours, from
 // on-wire capture, independently cross-checked against daidr/dualsense-tester
 // (MIT) -- every one agreed. NO CODE WAS COPIED.
