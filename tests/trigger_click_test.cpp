@@ -62,7 +62,7 @@ const char *device_section_for(const std::vector<unsigned char> &) { return "ds5
 
 std::string device_settings_section(const char *kind, const std::string &linked)
 {
-    return linked.empty() ? std::string(kind) : linked + "/" + kind;
+    return linked.empty() ? std::string(kind) : "cfg:" + linked;
 }
 
 // What the module drives, recorded rather than performed.

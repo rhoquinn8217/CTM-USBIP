@@ -42,13 +42,17 @@ static const uint16_t kVendorSony = 0x054c;
 //
 // ⭐ THIS IS WHERE A LINKED CONFIG TAKES EFFECT. Without a link the answer is
 // the shared section for the device type, exactly as before. With one, it is
-// that config file's namespaced section -- and because config files store
-// their settings under the DEVICE KIND, the two are the same shape and every
-// accessor works unchanged.
+// that config file's section -- the same shape, so every accessor works
+// unchanged.
+//
+// ⭐⭐ AND THE CONFIG'S SECTION CARRIES NO KIND (2026-09-12). An Xbox pad and a
+// DualSense linked to one config read the same section; each uses what it can.
+// ⚠️ The kind still has to be non-null: a device with no kind at all is one
+// that takes no config, and gets no settings either way.
 //
 // ⓘ Built inline rather than calling config_store::section_for, because this
 // file is included before config_store.inl. Keep the two in step: the format
-// is "cfg:<lowered name>/<kind>".
+// is "cfg:<lowered name>".
 static std::string device_settings_section(const char *kind, const std::string &linkedConfig)
 {
     if (kind == nullptr) return std::string();
@@ -57,7 +61,7 @@ static std::string device_settings_section(const char *kind, const std::string &
     for (char c : linkedConfig) {
         name.push_back((c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c);
     }
-    return "cfg:" + name + "/" + kind;
+    return "cfg:" + name;
 }
 
 static const char *device_section_for(const std::vector<unsigned char> &descriptor)

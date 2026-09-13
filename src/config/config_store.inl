@@ -10,25 +10,38 @@
 // section exactly as before, so a single-controller user never meets any of
 // this.
 //
-// ⭐ THE DECISION THAT KEPT THIS SMALL. A config file's settings live under the
-// DEVICE KIND -- a ds5 config holds a [ds5] block, the same shape as the shared
-// ctm-device-config.txt. Loading namespaces it:
+// ⭐ THE DECISION THAT KEPT THIS SMALL. Loading a config file puts its settings
+// in a section of their own, beside the shared ones:
 //
-//     configs/couch.txt   [ds5] speaker_volume = 65
-//         becomes         g_device_config["cfg:couch/ds5"]["speaker_volume"]
+//     configs/couch.txt   [settings] speaker_volume = 65
+//         becomes         g_device_config["cfg:couch"]["speaker_volume"]
 //
 // So "link a device to a config" is just "look up a different section name",
 // and device_config_str/int/bool are UNCHANGED and unaware any of this exists.
-// The alternative -- a settings block with its own section name -- would have
-// meant teaching every accessor about the indirection.
+//
+// ⭐⭐ A CONFIG IS NOT TIED TO A CONTROLLER TYPE (rhoquinn8217, 2026-09-12).
+// The section used to carry the kind -- "cfg:couch/ds5" -- so a DualSense
+// config could not go on an Xbox pad, and a pad with no kind of its own could
+// have no config at all. Nothing a config stores needed it: buttons are W3C
+// positions, trigger points are percents, times are milliseconds, and every
+// feature checks the pad before it acts. So every controller linked to "couch"
+// reads the one section, and uses whatever of it that controller can.
+//
+// ⓘ The shared ctm-device-config.txt keeps its [ds5] and [xbox] sections. Those
+// are hardware defaults for a controller with no config linked, and different
+// hardware genuinely wants different defaults.
 //
 // FILE FORMAT
 //     [config]
-//     kind      = ds5                  ; must match the device it links to
 //     auto_link = aabbccddeeff         ; serials linked automatically at bridge
 //
-//     [ds5]                            ; settings, named for the kind
+//     [settings]
 //     speaker_volume = 65
+//
+// ⓘ A file written before 2026-09-12 says `kind = ds5` and keeps its settings
+// in a [ds5] block. It still loads, into the same section: with no [settings]
+// block, the block named by its kind IS its settings. Loading never rewrites
+// it, and a write goes into the block it already has.
 //
 // !! ABSENT IS NOT DEFAULTED. A key a file does not mention is left alone,
 // !! exactly as with no config at all. That is the existing rule and nothing
@@ -41,9 +54,13 @@ namespace config_store {
 inline const char *kDir = "configs";
 inline const char *kArchiveDir = "configs\\archive";
 
+// The block a config's settings are read from and written to: "settings", or
+// the kind an older file declared. See FILE FORMAT above.
+inline const char *kSettingsBlock = "settings";
+
 struct ConfigFile {
     std::string name;                       // filename stem
-    std::string kind;                       // SETTINGS kind: "ds5" or "ds5_edge"
+    std::string settingsBlock;              // "settings", or an older file's kind
     std::vector<std::string> autoLink;      // normalised serials
     std::string path;
 };
@@ -144,15 +161,28 @@ inline bool kind_supports_config(const std::string &kind)
     // ⓘ Whether a DS4 or an Xbox pad reports a usable serial through this bridge
     // is UNMEASURED. If not, auto_link quietly will not work for them and the
     // page already says so -- it disables the button when there is no serial.
+    //
+    // ⭐ This decides WHETHER a device takes a config, never WHICH one. Since
+    // 2026-09-12 any config links to any device this says yes to. ⛔ And "hid"
+    // stays a no: a keyboard and a mouse arrive as "hid" too, and they keep
+    // their own software rather than taking a config.
     // Accepts either form, so callers need not know which they hold.
     return !settings_kind_for(kind).empty();
 }
 
-// ⭐ The namespaced section name -- the whole mechanism.
+// ⭐ The section a named config's settings load into -- the whole mechanism.
+// ⛔ NO KIND IN IT. Every controller linked to the config reads this one
+// section; see the note at the top of this file.
+inline std::string config_section(const std::string &configName)
+{
+    return "cfg:" + lower(configName);
+}
+
+// The section a device reads: its kind's shared section, or its config's.
 inline std::string section_for(const std::string &configName, const std::string &kind)
 {
     if (configName.empty()) return kind;                 // shared section
-    return "cfg:" + lower(configName) + "/" + lower(kind);
+    return config_section(configName);
 }
 
 inline std::string path_for(const std::string &name)
@@ -216,10 +246,13 @@ inline bool load_one_locked(const std::string &name, ConfigFile *out)
 
     out->name = name;
     out->path = path_for(name);
-    out->kind.clear();
+    out->settingsBlock.clear();
     out->autoLink.clear();
 
     std::string section, line;
+    std::string legacyKind;                      // `kind =` in an older file
+    bool sawConfig = false;
+    bool sawSettings = false;
     std::vector<std::pair<std::string, std::string>> pending;
 
     while (std::getline(file, line)) {
@@ -229,6 +262,8 @@ inline bool load_one_locked(const std::string &name, ConfigFile *out)
         if (line.empty()) continue;
         if (line.front() == '[' && line.back() == ']') {
             section = lower(trim(line.substr(1, line.size() - 2)));
+            if (section == "config") sawConfig = true;
+            if (section == kSettingsBlock) sawSettings = true;
             continue;
         }
         const size_t equals = line.find('=');
@@ -237,7 +272,7 @@ inline bool load_one_locked(const std::string &name, ConfigFile *out)
         const std::string value = trim(line.substr(equals + 1));
 
         if (section == "config") {
-            if (key == "kind") out->kind = lower(value);
+            if (key == "kind") legacyKind = lower(value);
             else if (key == "auto_link") {
                 std::string current;
                 for (char c : value + ",") {
@@ -253,15 +288,26 @@ inline bool load_one_locked(const std::string &name, ConfigFile *out)
         }
     }
 
-    if (out->kind.empty()) return false;         // no kind, not a config
+    // ⭐ The [config] section is what makes a file a config. It used to be the
+    // kind line, which every config had to carry; now no new config carries
+    // one, and every config -- old or new -- has a [config] section.
+    if (!sawConfig) return false;
 
-    // ⚠️ Only a block matching the declared kind is taken. A [ds5] block inside
-    // a ds5_edge config is a mistake, and honouring it silently would make the
-    // file behave differently from how it reads.
+    // ⭐ ONE block is the settings: [settings] when the file has one, otherwise
+    // the block an older file's kind names. A [ds5] config written before
+    // 2026-09-12 therefore loads unchanged, into the same section a new one does.
+    //
+    // ⚠️ Any other block is ignored, not honoured -- including a kind block
+    // sitting beside a [settings] block. Taking both would make the file
+    // behave differently from how it reads, and there is no right order to
+    // merge them in.
+    if (sawSettings || legacyKind.empty()) out->settingsBlock = kSettingsBlock;
+    else out->settingsBlock = legacyKind;
+
     for (const auto &entry : pending) {
-        if (entry.first != out->kind) continue;
+        if (entry.first != out->settingsBlock) continue;
         const size_t eq = entry.second.find('=');
-        g_device_config[section_for(name, out->kind)][entry.second.substr(0, eq)] =
+        g_device_config[config_section(name)][entry.second.substr(0, eq)] =
             entry.second.substr(eq + 1);
     }
     return true;
@@ -355,12 +401,12 @@ inline std::string auto_link_for(const std::string &serial, const std::string &k
 {
     const std::string s = normalise_serial(serial);
     if (s.empty()) return std::string();
-    // Callers pass a SESSION kind; configs are stored by settings kind.
-    const std::string wanted = settings_kind_for(kind);
-    if (wanted.empty()) return std::string();
+    // ⭐ The kind decides only whether this device takes a config at all. A
+    // claim is honoured on any device that does -- it names a physical
+    // controller, and a config is no longer tied to one type of them.
+    if (!kind_supports_config(kind)) return std::string();
     std::lock_guard<std::mutex> lock(g_mutex);
     for (const auto &entry : g_files) {
-        if (entry.second.kind != wanted) continue;
         for (const std::string &claim : entry.second.autoLink) {
             if (claim == s) return entry.second.name;
         }
@@ -381,11 +427,12 @@ inline std::string claimed_by(const std::string &serial, const std::string &exce
     return std::string();
 }
 
-inline bool create_config(const std::string &name, const std::string &kind, std::string *error)
+// ⭐ NO KIND. A config is not made FOR a type of controller, so creating one
+// needs only a name -- which is also what lets New work before anything is
+// bridged. Whether a particular device may take it is asked at link time.
+inline bool create_config(const std::string &name, std::string *error)
 {
     if (!valid_name(name)) { *error = "name must be letters, digits, _ or - (max 48)"; return false; }
-    const std::string settingsKind = settings_kind_for(kind);
-    if (settingsKind.empty()) { *error = "config unsupported for kind " + kind; return false; }
     {
         std::lock_guard<std::mutex> lock(g_mutex);
         if (g_files.count(lower(name))) { *error = name + " already exists"; return false; }
@@ -402,16 +449,16 @@ inline bool create_config(const std::string &name, const std::string &kind, std:
     // and would go stale the moment someone adds a key and forgets to register
     // it.
     file << "# " << name << "\r\n#\r\n"
-         << "# Settings for one or more " << settingsKind << " controllers.\r\n"
+         << "# Settings for any controller linked to this config. A setting a\r\n"
+         << "# controller cannot use is simply unused on that controller.\r\n"
          << "#\r\n"
          << "# A key that is ABSENT is left alone -- it is not defaulted. So an\r\n"
          << "# empty block below behaves exactly as no config at all, and every\r\n"
          << "# line added is a deliberate override.\r\n\r\n"
          << "[config]\r\n"
-         << "kind = " << settingsKind << "\r\n"
          << "# Serials linked to this config automatically at bridge time.\r\n"
          << "auto_link =\r\n\r\n"
-         << "[" << settingsKind << "]\r\n";
+         << "[" << kSettingsBlock << "]\r\n";
     file.close();
     {
         // ⛔ The ABSOLUTE path, logged at every create -- the other half of
@@ -630,6 +677,10 @@ inline bool set_setting(const std::string &name, const std::string &key,
         }
     }
 
+    // ⭐ Into the block the settings already live in. An older file keeps its
+    // [ds5] block rather than growing a [settings] one beside it, which the
+    // loader would then prefer -- and silently drop everything already there.
+    const std::string &block = cfg.settingsBlock;
     std::string current;
     int sectionStart = -1;
     int sectionEnd = static_cast<int>(lines.size());
@@ -637,11 +688,11 @@ inline bool set_setting(const std::string &name, const std::string &key,
         const std::string t = trim(lines[i]);
         if (t.size() >= 2 && t.front() == '[' && t.back() == ']') {
             current = lower(trim(t.substr(1, t.size() - 2)));
-            if (current == cfg.kind) sectionStart = i;
+            if (current == block) sectionStart = i;
             else if (sectionStart >= 0 && sectionEnd == static_cast<int>(lines.size())) sectionEnd = i;
             continue;
         }
-        if (current != cfg.kind) continue;
+        if (current != block) continue;
         std::string bare = t;
         if (!bare.empty() && (bare.front() == '#' || bare.front() == ';')) bare = trim(bare.substr(1));
         const size_t eq = bare.find('=');
@@ -661,7 +712,7 @@ inline bool set_setting(const std::string &name, const std::string &key,
 
     if (sectionStart < 0) {
         lines.push_back("");
-        lines.push_back("[" + cfg.kind + "]");
+        lines.push_back("[" + block + "]");
         lines.push_back(key + " = " + value);
     } else {
         int insert = sectionEnd;

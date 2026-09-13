@@ -6,8 +6,10 @@
 // touched the file. Most of what follows exists for that one property.
 //
 // The rest guard the rules that are easy to state and easy to break silently:
-// a config only claims settings under its own kind, a serial is normalised the
-// same way everywhere, and nothing reaches the file that could forge a line.
+// a config's settings load into ONE section every linked controller reads,
+// whatever kind of controller it is -- and an older file with a kind still
+// loads into that same section -- a serial is normalised the same way
+// everywhere, and nothing reaches the file that could forge a line.
 //
 // WHAT THEY CANNOT DO. They say nothing about whether a linked config actually
 // reaches a controller -- that is threading through the output path and needs
@@ -106,10 +108,30 @@ int run_config_store_tests()
 
     section("config store: the section a device reads");
     CTM_CHECK_EQ(cs::section_for("", "ds5"), std::string("ds5"));
-    CTM_CHECK_EQ(cs::section_for("Couch", "ds5"), std::string("cfg:couch/ds5"));
-    CTM_CHECK_EQ(cs::section_for("couch", "ds5_edge"), std::string("cfg:couch/ds5_edge"));
+    CTM_CHECK_EQ(cs::section_for("", "xbox"), std::string("xbox"));
+    CTM_CHECK_EQ(cs::section_for("Couch", "ds5"), std::string("cfg:couch"));
 
-    section("config store: only the DS5 family may carry a config");
+    section("config store: ⭐ every kind of controller reads a config's ONE section");
+    {
+        // ⭐⭐ The decision this guards (rhoquinn8217, 2026-09-12): a config is
+        // not tied to a controller type. These were "cfg:couch/ds5" and
+        // "cfg:couch/ds5_edge" -- two sections, so a DualSense config could not
+        // reach an Edge, let alone an Xbox pad.
+        CTM_CHECK_EQ(cs::section_for("couch", "ds5_edge"), std::string("cfg:couch"));
+        CTM_CHECK_EQ(cs::section_for("couch", "xbox"), std::string("cfg:couch"));
+        CTM_CHECK_EQ(cs::config_section("COUCH"), std::string("cfg:couch"));
+
+        // ⛔ And the resolver the report paths use agrees, byte for byte. It is
+        // a separate copy (it is included before config_store), so a drift
+        // between the two would be a link that reads nothing.
+        CTM_CHECK_EQ(units::device_settings_section("ds5", "Couch"), std::string("cfg:couch"));
+        CTM_CHECK_EQ(units::device_settings_section("xbox", "couch"), std::string("cfg:couch"));
+        CTM_CHECK_EQ(units::device_settings_section("ds4", ""), std::string("ds4"));
+        // A device with no kind takes no config, linked or not.
+        CTM_CHECK_EQ(units::device_settings_section(nullptr, "couch"), std::string(""));
+    }
+
+    section("config store: which devices can take a config");
     // ⚠️ These are the SESSION kinds the agent actually uses. An earlier version
     // listed "ds5_edge", which the agent has never used, so a real DualSense
     // arriving as "ds5_usb" was refused a config entirely.
@@ -125,6 +147,9 @@ int run_config_store_tests()
     // devices take an early return in handle_input and are forwarded verbatim,
     // so they never reach the paths a config would act on.
     CTM_CHECK(!cs::kind_supports_config("puck"));
+    // ⛔ A keyboard and a mouse arrive as "hid". They keep their own software
+    // and take no config -- device case 2.
+    CTM_CHECK(!cs::kind_supports_config("hid"));
     CTM_CHECK(!cs::kind_supports_config("nonsense"));
 
     section("config store: ⭐ a session kind maps to the settings section name");
@@ -141,47 +166,90 @@ int run_config_store_tests()
     // created that nothing can ever link to.
     CTM_CHECK_EQ(cs::settings_kind_for("puck"), std::string(""));
 
-    section("config store: a config created for a ds5_usb device stores ds5");
+    section("config store: a created config names no kind, and writes land in [settings]");
     {
         std::string error;
-        CTM_CHECK(cs::create_config("usbcfg", "ds5_usb", &error));
+        CTM_CHECK(cs::create_config("usbcfg", &error));
         cs::ConfigFile made;
         CTM_CHECK(cs::find_config("usbcfg", &made));
-        CTM_CHECK_EQ(made.kind, std::string("ds5"));      // not "ds5_usb"
-        // and its settings therefore land where a reader will look for them
+        CTM_CHECK_EQ(made.settingsBlock, std::string("settings"));
+        const std::string body = read_config("usbcfg");
+        CTM_CHECK(!contains(body, "kind"));
+        CTM_CHECK(contains(body, "[settings]"));
+        // and its settings land where every reader will look for them
         CTM_CHECK(cs::set_setting("usbcfg", "speaker_volume", "42", &error));
-        CTM_CHECK_EQ(units::device_config_int("cfg:usbcfg/ds5", "speaker_volume", -1), 42);
+        CTM_CHECK(contains(read_config("usbcfg"), "[settings]\r\nspeaker_volume = 42"));
+        CTM_CHECK_EQ(units::device_config_int("cfg:usbcfg", "speaker_volume", -1), 42);
     }
 
     wipe_configs();
 
-    section("config store: settings load into the namespaced section");
+    section("config store: settings load into the config's section");
     {
         write_config("couch",
-            "[config]\r\nkind = ds5\r\nauto_link =\r\n\r\n"
-            "[ds5]\r\nspeaker_volume = 65\r\n");
-        CTM_CHECK_EQ(units::device_config_int("cfg:couch/ds5", "speaker_volume", -1), 65);
+            "[config]\r\nauto_link =\r\n\r\n"
+            "[settings]\r\nspeaker_volume = 65\r\n");
+        CTM_CHECK_EQ(units::device_config_int("cfg:couch", "speaker_volume", -1), 65);
         // ...and does not leak into the shared section
         CTM_CHECK_EQ(units::device_config_int("ds5", "speaker_volume", -1), -1);
     }
 
-    section("config store: a block for another kind is ignored, not honoured");
+    section("config store: ⭐ a config written before 2026-09-12 still loads");
     {
-        // ⚠️ A [ds5] block inside a ds5_edge config is a mistake. Silently
+        // ⛔ Every config made until today says kind = ds5 and keeps its
+        // settings in [ds5]. Dropping the kind must not drop those settings --
+        // the block its kind names IS its settings, in the same one section.
+        write_config("legacy",
+            "[config]\r\nkind = ds5\r\nauto_link =\r\n\r\n"
+            "[ds5]\r\nspeaker_volume = 65\r\n");
+        CTM_CHECK_EQ(units::device_config_int("cfg:legacy", "speaker_volume", -1), 65);
+        cs::ConfigFile old;
+        CTM_CHECK(cs::find_config("legacy", &old));
+        CTM_CHECK_EQ(old.settingsBlock, std::string("ds5"));
+
+        // ⭐ A write goes into the block it already has. A [settings] block
+        // added beside it would win on the next load and silently drop every
+        // setting the [ds5] block held.
+        std::string error;
+        CTM_CHECK(cs::set_setting("legacy", "gyro_to_mouse_gate", "L2", &error));
+        const std::string body = read_config("legacy");
+        CTM_CHECK(!contains(body, "[settings]"));
+        CTM_CHECK(contains(body, "kind = ds5"));             // never rewritten away
+        CTM_CHECK_EQ(units::device_config_int("cfg:legacy", "speaker_volume", -1), 65);
+        CTM_CHECK_EQ(units::device_config_str("cfg:legacy", "gyro_to_mouse_gate"),
+                     std::string("l2"));
+    }
+
+    section("config store: one block is the settings, and any other is ignored");
+    {
+        // ⚠️ A [ds5] block inside a ds5_edge file is a mistake. Silently
         // applying it would make the file behave differently from how it reads.
         write_config("edgecfg",
             "[config]\r\nkind = ds5_edge\r\nauto_link =\r\n\r\n"
             "[ds5]\r\nspeaker_volume = 11\r\n"
             "[ds5_edge]\r\nspeaker_volume = 22\r\n");
-        CTM_CHECK_EQ(units::device_config_int("cfg:edgecfg/ds5_edge", "speaker_volume", -1), 22);
-        CTM_CHECK_EQ(units::device_config_int("cfg:edgecfg/ds5", "speaker_volume", -1), -1);
+        CTM_CHECK_EQ(units::device_config_int("cfg:edgecfg", "speaker_volume", -1), 22);
+
+        // ⭐ [settings] wins over a kind block beside it. There is no right
+        // order to merge two blocks in, so only one is taken.
+        write_config("both",
+            "[config]\r\nkind = ds5\r\nauto_link =\r\n\r\n"
+            "[ds5]\r\nspeaker_volume = 11\r\nheadset_volume = 12\r\n"
+            "[settings]\r\nspeaker_volume = 33\r\n");
+        CTM_CHECK_EQ(units::device_config_int("cfg:both", "speaker_volume", -1), 33);
+        CTM_CHECK_EQ(units::device_config_int("cfg:both", "headset_volume", -1), -1);
     }
 
-    section("config store: a file with no kind is not a config");
+    section("config store: the [config] section is what makes a file a config");
     {
-        write_config("nokind", "[ds5]\r\nspeaker_volume = 50\r\n");
+        // No [config] section: a stray file in configs/, not a config.
+        write_config("noconfig", "[ds5]\r\nspeaker_volume = 50\r\n");
         cs::ConfigFile found;
-        CTM_CHECK(!cs::find_config("nokind", &found));
+        CTM_CHECK(!cs::find_config("noconfig", &found));
+        // ⭐ A [config] section with no kind IS one -- no new config has a kind.
+        write_config("nokind", "[config]\r\nauto_link =\r\n\r\n[settings]\r\nspeaker_volume = 50\r\n");
+        CTM_CHECK(cs::find_config("nokind", &found));
+        CTM_CHECK_EQ(units::device_config_int("cfg:nokind", "speaker_volume", -1), 50);
     }
 
     section("config store: ⭐ a write preserves comments, layout and other keys");
@@ -238,31 +306,26 @@ int run_config_store_tests()
     section("config store: create writes an empty settings block");
     {
         std::string error;
-        CTM_CHECK(cs::create_config("fresh", "ds5", &error));
+        CTM_CHECK(cs::create_config("fresh", &error));
         const std::string body = read_config("fresh");
-        CTM_CHECK(contains(body, "kind = ds5"));
-        CTM_CHECK(contains(body, "[ds5]"));
+        CTM_CHECK(contains(body, "[config]"));
+        CTM_CHECK(contains(body, "auto_link ="));
+        CTM_CHECK(contains(body, "[settings]"));
+        // ⛔ No kind line: nothing a new config holds is tied to one.
+        CTM_CHECK(!contains(body, "kind ="));
         // ⭐ Deliberately empty: "all settings at defaults" and "nothing
         // overridden" are the same thing when an absent key is left alone.
         CTM_CHECK(!contains(body, "speaker_volume"));
         // and a second create with the same name is refused
-        CTM_CHECK(!cs::create_config("fresh", "ds5", &error));
-        // ⭐ A ds4 config IS creatable now, and lands in its own section.
-        CTM_CHECK(cs::create_config("pad4", "ds4", &error));
-        const std::string ds4body = read_config("pad4");
-        CTM_CHECK(contains(ds4body, "kind = ds4"));
-        CTM_CHECK(contains(ds4body, "[ds4]"));
-        // ⛔ And a kind that cannot carry one is still refused -- the puck,
-        // structurally, rather than ds4 which used to stand in for this.
-        CTM_CHECK(!cs::create_config("nope", "puck", &error));
-        CTM_CHECK(contains(error, "unsupported"));
+        CTM_CHECK(!cs::create_config("fresh", &error));
+        CTM_CHECK(contains(error, "already exists"));
     }
 
     section("config store: auto_link claims and refusals");
     {
         std::string error;
-        CTM_CHECK(cs::create_config("first", "ds5", &error));
-        CTM_CHECK(cs::create_config("second", "ds5", &error));
+        CTM_CHECK(cs::create_config("first", &error));
+        CTM_CHECK(cs::create_config("second", &error));
         CTM_CHECK(cs::add_auto_link("first", "AA:BB:CC:DD:EE:FF", &error));
         CTM_CHECK_EQ(cs::auto_link_for("aabbccddeeff", "ds5"), std::string("first"));
 
@@ -271,8 +334,14 @@ int run_config_store_tests()
         CTM_CHECK(!cs::add_auto_link("second", "aabbccddeeff", &error));
         CTM_CHECK(contains(error, "already claimed"));
 
-        // a kind that does not match does not match
-        CTM_CHECK_EQ(cs::auto_link_for("aabbccddeeff", "ds5e_usb"), std::string(""));
+        // ⭐ A claim is honoured on any controller that takes a config. This
+        // was "a kind that does not match does not match" until 2026-09-12;
+        // a config is not tied to a controller type any more.
+        CTM_CHECK_EQ(cs::auto_link_for("aabbccddeeff", "ds5e_usb"), std::string("first"));
+        CTM_CHECK_EQ(cs::auto_link_for("aabbccddeeff", "xbox"), std::string("first"));
+        // ⛔ ...but never on a device that takes no config at all.
+        CTM_CHECK_EQ(cs::auto_link_for("aabbccddeeff", "hid"), std::string(""));
+        CTM_CHECK_EQ(cs::auto_link_for("aabbccddeeff", "puck"), std::string(""));
         // an empty serial never auto-links
         CTM_CHECK_EQ(cs::auto_link_for("", "ds5"), std::string(""));
 
@@ -286,7 +355,7 @@ int run_config_store_tests()
         write_config("oldname",
             "# oldname\r\n[config]\r\nkind = ds5\r\nauto_link = aabbccddeeff\r\n\r\n"
             "[ds5]\r\nspeaker_volume = 55\r\n");
-        CTM_CHECK_EQ(units::device_config_int("cfg:oldname/ds5", "speaker_volume", -1), 55);
+        CTM_CHECK_EQ(units::device_config_int("cfg:oldname", "speaker_volume", -1), 55);
 
         CTM_CHECK(cs::rename_config("oldname", "newname", &error));
 
@@ -294,8 +363,8 @@ int run_config_store_tests()
         CTM_CHECK(!cs::find_config("oldname", &gone));
         CTM_CHECK(cs::find_config("newname", &moved));
         // ⭐ Settings follow, under the new namespaced section.
-        CTM_CHECK_EQ(units::device_config_int("cfg:newname/ds5", "speaker_volume", -1), 55);
-        CTM_CHECK_EQ(units::device_config_int("cfg:oldname/ds5", "speaker_volume", -1), -1);
+        CTM_CHECK_EQ(units::device_config_int("cfg:newname", "speaker_volume", -1), 55);
+        CTM_CHECK_EQ(units::device_config_int("cfg:oldname", "speaker_volume", -1), -1);
         // auto_link lives inside the file, so the claim moves with it.
         CTM_CHECK_EQ(cs::auto_link_for("aabbccddeeff", "ds5"), std::string("newname"));
         // and the header comment is corrected rather than left stale
@@ -519,9 +588,9 @@ int run_config_store_tests()
         CTM_CHECK(cs::find_config("duplicate", &dup));
 
         // Settings ride across, under the copy's own namespaced section.
-        CTM_CHECK_EQ(units::device_config_int("cfg:duplicate/ds5", "speaker_volume", -1), 55);
+        CTM_CHECK_EQ(units::device_config_int("cfg:duplicate", "speaker_volume", -1), 55);
         // ...and the original is untouched.
-        CTM_CHECK_EQ(units::device_config_int("cfg:original/ds5", "speaker_volume", -1), 55);
+        CTM_CHECK_EQ(units::device_config_int("cfg:original", "speaker_volume", -1), 55);
 
         // \u26d4 THE CLAIM DOES NOT COME ALONG. Two configs claiming one serial is
         // exactly the ambiguity add_auto_link refuses; a copy must not create it.
@@ -543,7 +612,7 @@ int run_config_store_tests()
     section("config store: rename refuses to overwrite or take a reserved name");
     {
         std::string error;
-        CTM_CHECK(cs::create_config("other", "ds5", &error));
+        CTM_CHECK(cs::create_config("other", &error));
         // ⛔ Renaming onto a name in use would silently destroy the other one.
         CTM_CHECK(!cs::rename_config("newname", "other", &error));
         CTM_CHECK(contains(error, "already exists"));
@@ -564,7 +633,7 @@ int run_config_store_tests()
         CTM_CHECK(!cs::find_config("fresh", &gone));       // out of the listing
 
         // ⭐ Recreate and archive again: the first archived copy must survive.
-        CTM_CHECK(cs::create_config("fresh", "ds5", &error));
+        CTM_CHECK(cs::create_config("fresh", &error));
         std::string secondMove;
         CTM_CHECK(cs::archive_config("fresh", &error, &secondMove));
         CTM_CHECK(secondMove != movedTo);
@@ -583,13 +652,13 @@ int run_config_store_tests()
     {
         write_config("temp",
             "[config]\r\nkind = ds5\r\nauto_link =\r\n\r\n[ds5]\r\nspeaker_volume = 77\r\n");
-        CTM_CHECK_EQ(units::device_config_int("cfg:temp/ds5", "speaker_volume", -1), 77);
+        CTM_CHECK_EQ(units::device_config_int("cfg:temp", "speaker_volume", -1), 77);
         std::error_code ignored;
         std::filesystem::remove("configs\\temp.txt", ignored);
         cs::reload_all();
         // ⚠️ Stale values surviving a delete would be worse than the delete
         // failing -- the file would say one thing and the controller do another.
-        CTM_CHECK_EQ(units::device_config_int("cfg:temp/ds5", "speaker_volume", -1), -1);
+        CTM_CHECK_EQ(units::device_config_int("cfg:temp", "speaker_volume", -1), -1);
     }
 
     section("config store: the shared section survives a config reload");
@@ -606,12 +675,12 @@ int run_config_store_tests()
 
         write_config("alive",
             "[config]\r\nkind = ds5\r\nauto_link =\r\n\r\n[ds5]\r\nspeaker_volume = 99\r\n");
-        CTM_CHECK_EQ(units::device_config_int("cfg:alive/ds5", "speaker_volume", -1), 99);
+        CTM_CHECK_EQ(units::device_config_int("cfg:alive", "speaker_volume", -1), 99);
         CTM_CHECK_EQ(units::device_config_int("ds5", "speaker_volume", -1), 33);
 
         // ...and the config section survives an invalidate of the shared file
         units::device_config_invalidate();
-        CTM_CHECK_EQ(units::device_config_int("cfg:alive/ds5", "speaker_volume", -1), 99);
+        CTM_CHECK_EQ(units::device_config_int("cfg:alive", "speaker_volume", -1), 99);
     }
 
     section("config store: ⭐ a deleted key really disappears on reload");
@@ -624,15 +693,15 @@ int run_config_store_tests()
         write_config("vanish",
             "[config]\r\nkind = ds5\r\nauto_link =\r\n\r\n"
             "[ds5]\r\nspeaker_volume = 55\r\nheadset_volume = 44\r\n");
-        CTM_CHECK_EQ(units::device_config_int("cfg:vanish/ds5", "speaker_volume", -1), 55);
-        CTM_CHECK_EQ(units::device_config_int("cfg:vanish/ds5", "headset_volume", -1), 44);
+        CTM_CHECK_EQ(units::device_config_int("cfg:vanish", "speaker_volume", -1), 55);
+        CTM_CHECK_EQ(units::device_config_int("cfg:vanish", "headset_volume", -1), 44);
 
         // rewrite with one key removed
         write_config("vanish",
             "[config]\r\nkind = ds5\r\nauto_link =\r\n\r\n"
             "[ds5]\r\nspeaker_volume = 55\r\n");
-        CTM_CHECK_EQ(units::device_config_int("cfg:vanish/ds5", "speaker_volume", -1), 55);
-        CTM_CHECK_EQ(units::device_config_int("cfg:vanish/ds5", "headset_volume", -1), -1);
+        CTM_CHECK_EQ(units::device_config_int("cfg:vanish", "speaker_volume", -1), 55);
+        CTM_CHECK_EQ(units::device_config_int("cfg:vanish", "headset_volume", -1), -1);
     }
 
     wipe_configs();

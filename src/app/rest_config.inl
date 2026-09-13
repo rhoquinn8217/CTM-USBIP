@@ -95,8 +95,9 @@ static std::string rest_devices_json()
 static std::string rest_config_json(const config_store::ConfigFile &cfg,
                                     const std::vector<RestDeviceView> &devices)
 {
+    // ⛔ No "kind" (2026-09-12). A config is not tied to a controller type, and
+    // a field saying which one it was for would invite a UI to filter on it.
     std::string out = "{\"name\":\"" + rest_json_escape(cfg.name) + "\"";
-    out += ",\"kind\":\"" + rest_json_escape(cfg.kind) + "\"";
     out += ",\"auto_link\":[";
     for (size_t i = 0; i < cfg.autoLink.size(); ++i) {
         if (i) out += ",";
@@ -217,7 +218,7 @@ static std::string rest_configs_json()
 // One config with its settings as currently loaded.
 static std::string rest_config_detail_json(const config_store::ConfigFile &cfg)
 {
-    const std::string section = config_store::section_for(cfg.name, cfg.kind);
+    const std::string section = config_store::config_section(cfg.name);
     std::string out = rest_config_json(cfg, rest_collect_devices());
     out.pop_back();                                   // drop the closing brace
     out += ",\"settings\":{";
@@ -411,26 +412,12 @@ static std::string rest_keys_json()
     return settings + pointers + pointers2 + names;
 }
 
-// Resolves a body that may name either a device or a raw value.
-static bool rest_kind_from_body(const RestJson &json, std::string *kind, std::string *error)
+// The refusal for a device that takes no config: a keyboard, a mouse, or
+// anything else that is not a controller kind. ⓘ One wording, used by every
+// route that links, so the page shows the same sentence wherever it lands.
+static std::string rest_no_config_error(const RestDeviceView &view)
 {
-    auto kindIt = json.strings.find("kind");
-    if (kindIt != json.strings.end() && !kindIt->second.empty()) {
-        *kind = kindIt->second;
-        return true;
-    }
-    auto deviceIt = json.strings.find("device");
-    if (deviceIt != json.strings.end()) {
-        RestDeviceView view;
-        if (!rest_find_device(deviceIt->second, &view)) {
-            *error = deviceIt->second + " is not connected";
-            return false;
-        }
-        *kind = view.kind;
-        return true;
-    }
-    *error = "kind or device is required";
-    return false;
+    return view.ordinal + " is a " + view.kind + ", which does not take a config";
 }
 
 // Returns true when this request was one of ours and `out` holds the response.
@@ -819,10 +806,28 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
                 *out = rest_error_response(400, "name is required");
                 return true;
             }
-            std::string kind, error;
-            if (!rest_kind_from_body(json, &kind, &error)) {
-                *out = rest_error_response(400, error);
-                return true;
+            std::string error;
+            // ⭐ NO KIND (2026-09-12). A config is not tied to a controller
+            // type, so a name is all it takes. A "kind" in the body, from an
+            // older page, is ignored rather than refused.
+            //
+            // ⓘ A DEVICE may still be named. The new config is linked to it,
+            // so it must be a device that takes a config, and a preset is
+            // checked against it -- refused here, before anything is written,
+            // rather than leaving a config behind that the link then refuses.
+            std::string deviceKind;          // settings kind of the named device
+            auto deviceIt = json.strings.find("device");
+            if (deviceIt != json.strings.end()) {
+                RestDeviceView view;
+                if (!rest_find_device(deviceIt->second, &view)) {
+                    *out = rest_error_response(400, deviceIt->second + " is not connected");
+                    return true;
+                }
+                if (!config_store::kind_supports_config(view.kind)) {
+                    *out = rest_error_response(400, rest_no_config_error(view));
+                    return true;
+                }
+                deviceKind = config_store::settings_kind_for(view.kind);
             }
             // ⭐ An optional preset to start from. Absent means blank, which
             // is what create has always done -- so the plain path is
@@ -835,18 +840,20 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
                     *out = rest_error_response(400, "no preset named " + presetIt->second);
                     return true;
                 }
-                const std::string settingsKind = config_store::settings_kind_for(kind);
-                if (!ctm_presets::suits(*preset, settingsKind)) {
+                // ⓘ Only against a named device. With none, the config is for
+                // whatever links to it later, and each controller then uses
+                // what of the preset it can.
+                if (!deviceKind.empty() && !ctm_presets::suits(*preset, deviceKind)) {
                     // ⛔ Named rather than ignored: a preset that cannot act on
                     // this controller would be a config that silently does
                     // nothing, which is the worst shape a setting can take.
                     *out = rest_error_response(400,
-                        std::string(preset->name) + " is not for " + settingsKind);
+                        std::string(preset->name) + " is not for " + deviceKind);
                     return true;
                 }
             }
 
-            if (!config_store::create_config(nameIt->second, kind, &error)) {
+            if (!config_store::create_config(nameIt->second, &error)) {
                 *out = rest_error_response(409, error);
                 return true;
             }
@@ -873,7 +880,6 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
             }
             // Link the device that asked for it, if one was named -- creating a
             // config for a controller and not attaching it would surprise.
-            auto deviceIt = json.strings.find("device");
             if (deviceIt != json.strings.end()) {
                 std::string ignored;
                 rest_link_device(deviceIt->second, nameIt->second, &ignored);
@@ -1041,9 +1047,11 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
                     *out = rest_error_response(400, deviceIt->second + " is not connected");
                     return true;
                 }
-                if (config_store::settings_kind_for(view.kind) != cfg.kind) {
-                    *out = rest_error_response(400,
-                        "kind mismatch: device is " + view.kind + ", config is " + cfg.kind);
+                // ⓘ Any config may claim any controller that takes one -- the
+                // kind no longer has to match (2026-09-12). A device that takes
+                // no config has nothing for a claim to act on.
+                if (!config_store::kind_supports_config(view.kind)) {
+                    *out = rest_error_response(400, rest_no_config_error(view));
                     return true;
                 }
                 serial = view.serial;

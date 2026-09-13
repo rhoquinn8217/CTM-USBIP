@@ -71,7 +71,7 @@ static std::string device_settings_section(const char *kind, const std::string &
 {
     if (kind == nullptr) return std::string();
     if (linkedConfig.empty()) return std::string(kind);
-    return "cfg:" + linkedConfig + "/" + kind;
+    return "cfg:" + linkedConfig;
 }
 static const char *device_section_for(const std::vector<unsigned char> &)
 {
