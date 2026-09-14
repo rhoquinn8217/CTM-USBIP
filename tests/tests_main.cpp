@@ -20,6 +20,7 @@ int run_touch_mouse_tests();
 int run_stick_mouse_tests();
 int run_osk_tests();
 int run_nickname_tests();
+int run_same_controller_tests();
 int run_host_audio_settings_tests();
 int run_trigger_effect_tests();
 int run_trigger_click_tests();
@@ -94,6 +95,7 @@ int main(int argc, char **argv)
     run_stick_mouse_tests();
     run_osk_tests();
     run_nickname_tests();
+    run_same_controller_tests();
     run_host_audio_settings_tests();
     return ctmtest::summary();
 }

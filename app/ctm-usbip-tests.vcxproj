@@ -88,6 +88,7 @@
     <ClCompile Include="..\tests\stick_mouse_test.cpp" />
     <ClCompile Include="..\tests\osk_test.cpp" />
     <ClCompile Include="..\tests\nickname_test.cpp" />
+    <ClCompile Include="..\tests\same_controller_test.cpp" />
     <ClCompile Include="..\tests\tests_main.cpp" />
   </ItemGroup>
   <ItemGroup>

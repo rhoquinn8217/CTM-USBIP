@@ -23,6 +23,10 @@ struct AgentBridgeSession {
     // ordinal above and gone with the session, never used as a handle.
     std::string nickname;
     std::string physicalSerial;
+    // The device's node on the TV (/dev/hidraw2, /dev/input/event13). With the
+    // serial, it tells a re-bridge of one device from another device that
+    // shares the serial -- see same_controller.inl.
+    std::string tvPath;
     std::string linkedConfig;
 };
 
@@ -318,9 +322,20 @@ static void bridge_session_worker(AgentBridgeSession *session)
     // serial, coexisting for five seconds. The SERIAL is what identifies the
     // physical device.
     //
+    // ⛔ WITH THE TV'S NODE, since 2026-09-14: one USB device can arrive as
+    // several bridges sharing its serial, and the pad of a GameSir retired its
+    // own keyboard interface. same_controller.inl has the rule and its tests.
+    //
     // ⛔ OUTSIDE the session->mutex block below, deliberately. Taking
     // g_agent_sessions_mutex while holding a session mutex inverts the lock
     // order the rest of this file uses, and stop_bridge_session takes both.
+    std::string myTvPath;
+    {
+        const BackendCaps capsNow = backendPtr->caps();
+        for (wchar_t c : capsNow.path) {
+            if (c < 128) myTvPath.push_back(static_cast<char>(c));
+        }
+    }
     {
         const std::string mySerial = session->device ? session->device->physical_serial()
                                                      : std::string();
@@ -334,7 +349,8 @@ static void bridge_session_worker(AgentBridgeSession *session)
                     // so it cannot be matched -- and does not need to be: it is
                     // not holding the pad's control endpoint either.
                     std::lock_guard<std::mutex> otherLock(other->mutex);
-                    if (other->physicalSerial == mySerial) {
+                    if (same_controller::matches(mySerial, myTvPath,
+                                                 other->physicalSerial, other->tvPath)) {
                         older.push_back(other->busId);
                     }
                 }
@@ -356,6 +372,7 @@ static void bridge_session_worker(AgentBridgeSession *session)
                                                    : std::string();
         std::lock_guard<std::mutex> lock(session->mutex);
         session->physicalSerial = serial;
+        session->tvPath = myTvPath;
         if (session->linkedConfig.empty()) {
             session->linkedConfig = config_store::auto_link_for(serial, session->kind);
             if (!session->linkedConfig.empty()) {
