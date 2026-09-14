@@ -72,6 +72,14 @@ struct BitSpot {
     uint8_t mask;        // kSpotBit: the bit. kSpotHatDir: the direction.
 };
 
+// A run of bytes that has one resting value: a stick's axes at centre, an
+// analog trigger at zero. A count of 0 marks an unused slot.
+struct RestRun {
+    int     firstByte;
+    int     count;
+    uint8_t value;
+};
+
 // One pad's input report, as the hooks see it AFTER the map.
 //
 // ⚠️ These are DESTINATION offsets -- what the virtual device emits -- not the
@@ -84,6 +92,12 @@ struct Layout {
     uint8_t     hatCentre;   // the ordinal meaning "nothing pressed"
     size_t      minLength;   // shortest report every spot below can be read from
     BitSpot     spots[kButtonCount];
+    // ⭐ What "nothing held" looks like beyond the buttons, for config mode: the
+    // analog runs at rest, and any bits no standard index names. ⓘ Both are
+    // bounds-checked per byte, so they may reach past minLength.
+    RestRun     rest[2];
+    int         extraByte;   // -1 when there are none
+    uint8_t     extraMask;
 };
 
 inline const Layout kDs5Layout = {
@@ -107,6 +121,10 @@ inline const Layout kDs5Layout = {
         { kSpotHatDir, 0, kDirRight },  // 15 d-pad right
         { kSpotBit,   10, 0x01 },   // 16 PS / home
     },
+    // Rest: LX LY RX RY centre at 0x80, then L2 and R2 analog at 0.
+    { { 1, 4, 0x80 }, { 5, 2, 0x00 } },
+    // Touchpad click 0x02 and mute 0x04 have no standard index.
+    10, 0x06,
 };
 
 // ⭐ THE XBOX GIP 0x20 REPORT, read off maps/xbox_gip_usb_over_xbox_bt.map.
@@ -149,6 +167,10 @@ inline const Layout kXboxLayout = {
         { kSpotBit,    5, 0x08 },   // 15 d-pad right
         { kSpotAbsent, 0, 0x00 },   // 16 Guide -- no byte in this report
     },
+    // Rest: LT and RT as u16 at [6..9], then LX LY RX RY as signed 16-bit at
+    // [10..17], whose centre is 0 -- not 0x80.
+    { { 6, 4, 0x00 }, { 10, 8, 0x00 } },
+    -1, 0x00,
 };
 
 // Which layout a pad reads. nullptr means "not one we can read", which is the
@@ -236,6 +258,47 @@ inline void clear_button(const Layout &lay, uint8_t *data, size_t len, int stand
         case kSpotAbsent:
         default:
             return;
+    }
+}
+
+// ⭐ CONFIG MODE'S "NOTHING HELD", AT THIS PAD'S OWN OFFSETS: every button up,
+// the hat centred, the sticks centred and the analog triggers at rest.
+//
+// ⛔⛔ WHY IT IS A LAYOUT FUNCTION (2026-09-13). Config mode wrote DualSense
+// positions into every report it gated: bytes 1-4 to 0x80, 5-6 to 0, 8 to 0x08,
+// and 9 and 10 masked. An Xbox pad has reached that branch since it was given a
+// layout, and on a GIP report bytes 1-3 are the HEADER -- flags, sequence and
+// length. Every report became a fragment with a broken length, and Windows
+// dropped it. The pad did not rest; it FROZE at its last state, so a button
+// held as the settings page took focus stayed held in the game.
+// ⓘ Measured on a bridged Series pad: XInput never moved while the page had
+// focus, and was live again within half a second of it losing focus.
+//
+// ⭐ keepStart leaves standard index 9 (Options, Menu) alone, which is what the
+// old line kept on a DualSense while the chord's own press was held.
+//
+// ⚠️ The DualSense result is byte-for-byte what the old lines wrote, for every
+// input -- tests/button_layout_test.cpp keeps a copy of them to compare against.
+inline void blank_to_rest(const Layout &lay, uint8_t *data, size_t len, bool keepStart)
+{
+    for (int i = 0; i < kButtonCount; ++i) {
+        if (keepStart && i == kBtnStart) continue;
+        clear_button(lay, data, len, i);
+    }
+    // ⓘ Written outright rather than trusted to the per-direction clears above:
+    // those leave an out-of-range ordinal untouched, and the old line centred it.
+    if (lay.hatByte >= 0 && len > static_cast<size_t>(lay.hatByte)) {
+        data[lay.hatByte] = static_cast<uint8_t>(
+            (data[lay.hatByte] & ~lay.hatMask) | lay.hatCentre);
+    }
+    for (const RestRun &run : lay.rest) {
+        for (int b = 0; b < run.count; ++b) {
+            const size_t at = static_cast<size_t>(run.firstByte + b);
+            if (at < len) data[at] = run.value;
+        }
+    }
+    if (lay.extraByte >= 0 && len > static_cast<size_t>(lay.extraByte)) {
+        data[lay.extraByte] = static_cast<uint8_t>(data[lay.extraByte] & ~lay.extraMask);
     }
 }
 

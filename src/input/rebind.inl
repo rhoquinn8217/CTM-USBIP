@@ -667,11 +667,12 @@ inline void apply(const void *deviceKey,
         // ⚠️ AFTER the loop above, deliberately: wiping first would erase the
         // buttons before they were read, and nothing would ever register.
         //
-        // ⓘ Sticks go to CENTRE (0x80) -- zero is full deflection, not neutral.
+        // ⓘ Sticks go to CENTRE, not zero: 0x80 on a DualSense, where zero is
+        // full deflection, and 0 on an Xbox pad's signed axes. The layout knows.
         // ⛔⛔ READ THE BUTTONS BEFORE THE REPORT IS WIPED (2026-09-03).
         //
-        // ⚠️ The lines below blank byte 9, which carries L1, R1, L2, R2,
-        // Create, Options, L3 and R3. The keyboard-and-mouse exception below
+        // ⚠️ The blanking below clears a DualSense's byte 9, which carries L1,
+        // R1, L2, R2, Create, Options, L3 and R3. The keyboard-and-mouse exception below
         // ran AFTER that, so is_pressed always answered false and the triggers
         // appeared to do nothing at all -- with no log line, because the log
         // was inside the same `if (pressed)`.
@@ -681,13 +682,12 @@ inline void apply(const void *deviceKey,
         bool gatePressed[kButtonCount] = {};
         for (int i = 0; i < kButtonCount; ++i) gatePressed[i] = is_pressed(*layout, data, len, i);
 
-        data[1] = data[2] = data[3] = data[4] = 0x80;   // LX LY RX RY
-        data[5] = data[6] = 0x00;                       // L2 R2 analog
-        // ⓘ Options (0x20) survives while the chord's own press is held --
-        // otherwise the button that triggered this would be eaten by it.
-        data[9] = g_passOptions ? static_cast<uint8_t>(data[9] & 0x20) : 0x00;
-        data[10] = static_cast<uint8_t>(data[10] & ~0x07);   // PS, touchpad, mute
-        data[8] = 0x08;                                 // faces clear, hat centred
+        // ⛔ AT THIS PAD'S OWN OFFSETS. These were five lines of DualSense
+        // positions, which broke an Xbox report's header -- blank_to_rest()
+        // says what that did and why a layout answers it.
+        // ⓘ Options survives while the chord's own press is held -- otherwise
+        // the button that triggered this would be eaten by it.
+        blank_to_rest(*layout, data, len, g_passOptions);
 
         if (gateCount > 0 && ctm_verbose_logs()) {
             device_log::input(device_log::msg()

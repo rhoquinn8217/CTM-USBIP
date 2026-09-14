@@ -39,6 +39,18 @@ std::vector<uint8_t> blank_report(size_t len)
     return std::vector<uint8_t>(len, 0);
 }
 
+// ⛔ THE OLD CONFIG-MODE LINES, KEPT VERBATIM from rebind.inl as the reference
+// for blank_to_rest()'s DualSense half. They wrote these positions into EVERY
+// gated report, whatever the pad -- which is the fault on an Xbox one.
+void old_config_blank(uint8_t *data, bool passOptions)
+{
+    data[1] = data[2] = data[3] = data[4] = 0x80;   // LX LY RX RY
+    data[5] = data[6] = 0x00;                       // L2 R2 analog
+    data[9] = passOptions ? static_cast<uint8_t>(data[9] & 0x20) : 0x00;
+    data[10] = static_cast<uint8_t>(data[10] & ~0x07);   // PS, touchpad, mute
+    data[8] = 0x08;                                 // faces clear, hat centred
+}
+
 }  // namespace
 
 int run_button_layout_tests()
@@ -209,6 +221,111 @@ int run_button_layout_tests()
         std::vector<uint8_t> r = blank_report(48);
         CTM_CHECK(!is_pressed(*xbox, r.data(), r.size(), -1));
         CTM_CHECK(!is_pressed(*xbox, r.data(), r.size(), kButtonCount));
+    }
+
+    section("config mode rest: a DualSense report comes out exactly as the old lines left it");
+    {
+        // ⛔ The regression guard for the rewrite: every byte of every report,
+        // against the old lines kept above. Byte 8 runs through all 256 values,
+        // so every hat ordinal -- the out-of-range ones included -- and every
+        // face combination is covered, each with Options kept and not.
+        const uint8_t b9s[] = {0x00, 0x20, 0xDF, 0xFF};
+        const uint8_t b10s[] = {0x00, 0x07, 0xF8, 0xFF};
+        for (int pattern = 0; pattern < 3; ++pattern) {
+            for (int pass = 0; pass < 2; ++pass) {
+                int mismatches = 0;
+                for (int b8 = 0; b8 < 256; ++b8) {
+                    for (uint8_t b9 : b9s) {
+                        for (uint8_t b10 : b10s) {
+                            std::vector<uint8_t> r(64);
+                            for (size_t i = 0; i < r.size(); ++i) {
+                                r[i] = pattern == 0 ? 0x00
+                                     : pattern == 1 ? 0xFF
+                                     : static_cast<uint8_t>(i * 37 + 11);
+                            }
+                            r[8] = static_cast<uint8_t>(b8);
+                            r[9] = b9;
+                            r[10] = b10;
+                            std::vector<uint8_t> expected = r;
+                            old_config_blank(expected.data(), pass != 0);
+                            blank_to_rest(*ds5, r.data(), r.size(), pass != 0);
+                            if (r != expected) ++mismatches;
+                        }
+                    }
+                }
+                CTM_CHECK_EQ(mismatches, 0);
+            }
+        }
+    }
+
+    section("config mode rest: an Xbox report keeps its GIP header and rests at its own offsets");
+    {
+        // A 0x20 report's shape: header, buttons, triggers, sticks, then bytes
+        // this hook has no business with.
+        const uint8_t header[4] = {0x20, 0x00, 0x2a, 0x2c};
+        std::vector<uint8_t> r(48, 0x5A);
+        std::memcpy(r.data(), header, sizeof(header));
+        r[4] = 0xFC;  r[5] = 0xFF;         // every mapped button
+        r[6] = 0xFF;  r[7] = 0x03;         // LT full
+        r[8] = 0xFF;  r[9] = 0x03;         // RT full
+        r[10] = 0xFF; r[11] = 0x7F;        // LX full right
+        r[12] = 0x00; r[13] = 0x80;        // LY full the other way
+        r[14] = 0x34; r[15] = 0x12;        // RX
+        r[16] = 0xCD; r[17] = 0xAB;        // RY
+
+        // ⛔ What the old lines did to it, written down so this section fails
+        // loudly if they come back: the flags gain the fragment bit, and the
+        // length byte gains a continuation bit.
+        std::vector<uint8_t> old = r;
+        old_config_blank(old.data(), false);
+        CTM_CHECK_EQ(static_cast<int>(old[1]), 0x80);
+        CTM_CHECK_EQ(static_cast<int>(old[3]), 0x80);
+
+        blank_to_rest(*xbox, r.data(), r.size(), false);
+        CTM_CHECK(std::memcmp(r.data(), header, sizeof(header)) == 0);
+        CTM_CHECK_EQ(static_cast<int>(r[4]), 0x00);
+        CTM_CHECK_EQ(static_cast<int>(r[5]), 0x00);
+        int notAtRest = 0;
+        for (size_t i = 6; i <= 17; ++i) if (r[i] != 0) ++notAtRest;
+        CTM_CHECK_EQ(notAtRest, 0);
+        int touched = 0;
+        for (size_t i = 18; i < r.size(); ++i) if (r[i] != 0x5A) ++touched;
+        CTM_CHECK_EQ(touched, 0);
+    }
+
+    section("config mode rest: keeping Options holds back Menu only, and only if it is down");
+    {
+        std::vector<uint8_t> r = blank_report(48);
+        r[4] = 0xFC;                       // A B X Y View Menu
+        r[5] = 0xFF;
+        blank_to_rest(*xbox, r.data(), r.size(), true);
+        CTM_CHECK_EQ(static_cast<int>(r[4]), 0x04);   // Menu is the Xbox Options
+        CTM_CHECK_EQ(static_cast<int>(r[5]), 0x00);
+
+        // ⓘ Keeping is not pressing.
+        r = blank_report(48);
+        r[4] = 0xF8;                       // everything but Menu
+        blank_to_rest(*xbox, r.data(), r.size(), true);
+        CTM_CHECK_EQ(static_cast<int>(r[4]), 0x00);
+    }
+
+    section("config mode rest: nothing is written past the report's length");
+    {
+        // ⓘ An Xbox pad's rest runs reach past its minLength, so each byte is
+        // checked on its own. A 12-byte report inside a 48-byte buffer must leave
+        // byte 12 onwards alone.
+        std::vector<uint8_t> buf(48, 0xEE);
+        blank_to_rest(*xbox, buf.data(), 12, false);
+        CTM_CHECK_EQ(static_cast<int>(buf[11]), 0x00);
+        int past = 0;
+        for (size_t i = 12; i < buf.size(); ++i) if (buf[i] != 0xEE) ++past;
+        CTM_CHECK_EQ(past, 0);
+
+        std::vector<uint8_t> small(16, 0xEE);
+        blank_to_rest(*ds5, small.data(), 6, false);
+        past = 0;
+        for (size_t i = 6; i < small.size(); ++i) if (small[i] != 0xEE) ++past;
+        CTM_CHECK_EQ(past, 0);
     }
 
     return 0;
