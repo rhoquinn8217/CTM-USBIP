@@ -194,13 +194,17 @@ static void bridge_session_worker(AgentBridgeSession *session)
         // Agent-only session policy (the CLI bridge mode keeps wait-forever
         // defaults): bounded initial accept + reconnect grace, TCP keepalive
         // probing, and the idle rule — gamepads chatter constantly so silence
-        // means gone (15 s); mice/keyboards may idle legitimately (15 min).
-        // Generic "hid" gets the long window unless its HELLO descriptor is a
-        // gamepad, which the backend detects and tightens itself.
+        // means gone (15 s). A mouse, a keyboard or any other part may sit
+        // unused for as long as it likes: it has no idle rule at all, since
+        // 2026-09-14, because every part of a device is bridged together and
+        // a quiet one timing out would leave the device half bridged. A TV
+        // that has gone is still caught by the keepalive and the reconnect
+        // grace. Generic "hid" whose HELLO descriptor is a gamepad still gets
+        // the 15 s window, which the backend detects and applies itself.
         backend->set_session_timeouts(30000, 15000);
         const bool gamepadKind = session->kind == "ds4" || session->kind == "ds5" ||
                                  session->kind == "xbox" || session->kind == "puck";
-        backend->set_idle_timeouts(gamepadKind ? 15000 : 15 * 60 * 1000, 15000);
+        backend->set_idle_timeouts(gamepadKind ? 15000 : 0, 15000);
         // TCP path: when the TV client vanishes and the reconnect grace runs
         // out (or the idle rule fires), unplug the virtual device and reap the
         // session (mirrors the ENet link-down behavior; a reaped port also

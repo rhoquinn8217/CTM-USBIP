@@ -181,7 +181,9 @@ public:
     // dead (closed callback fires). gamepadIdleMs is the tightened window the
     // reader applies instead when the HELLO descriptor's top-level collection
     // is a joystick/gamepad — pads chatter constantly, so silence means gone,
-    // while a mouse/keyboard may idle legitimately for a long time.
+    // while a mouse/keyboard may idle legitimately for a long time. An idleMs
+    // of 0 means no rule for anything else, and a gamepad descriptor still
+    // gets gamepadIdleMs.
     void set_idle_timeouts(int idleMs, int gamepadIdleMs)
     {
         idleTimeoutMs_ = idleMs;
@@ -820,14 +822,15 @@ private:
 
     int effective_idle_timeout_ms() const
     {
-        if (idleTimeoutMs_ <= 0) {
-            return 0;
-        }
-        if (gamepadIdleTimeoutMs_ > 0 && gamepadIdleTimeoutMs_ < idleTimeoutMs_ &&
+        // A gamepad's window applies with or without a general one: a generic
+        // "hid" session has no idle rule of its own, but one that is really a
+        // pad still falls silent only when it is gone.
+        if (gamepadIdleTimeoutMs_ > 0 &&
+            (idleTimeoutMs_ <= 0 || gamepadIdleTimeoutMs_ < idleTimeoutMs_) &&
             descriptor_is_gamepad()) {
             return gamepadIdleTimeoutMs_;
         }
-        return idleTimeoutMs_;
+        return idleTimeoutMs_ > 0 ? idleTimeoutMs_ : 0;
     }
 
     void reader_loop()
