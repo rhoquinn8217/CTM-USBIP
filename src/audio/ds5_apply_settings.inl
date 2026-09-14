@@ -266,3 +266,45 @@ static void ds5_apply_initial_settings(CtmBackend *backend,
         << ", speaker volume " << speakerPercent
         << "%, headset volume " << headsetPercent << "%");
 }
+
+// ⭐ The host-report entry point for trigger_effect::defend_host_report.
+//
+// ⓘ HERE, not beside the other overrides. ds5_output_overrides.inl is included
+// long before the encoder and is compiled on its own by tests/units.h, so it
+// cannot call it; and a non-inline function in trigger_effect.inl would be
+// defined twice in the test binary, which includes that file from two places.
+// This file is compiled by main.cpp alone, and device.inl reaches it through
+// the forward declaration there -- the same shape as trigger_click_apply.
+static std::atomic<uint64_t> g_triggerDefendCount{0};
+
+void trigger_defend_host_report(uint8_t *data, size_t length,
+                                const std::vector<unsigned char> &descriptor,
+                                const std::string &linkedConfig)
+{
+    // The same capability question the other overrides ask: this writes
+    // DualSense output report bytes, so it must not run for anything else.
+    if (data == nullptr || !device_has_ds5_audio(descriptor)) return;
+    const char *kind = device_section_for(descriptor);
+    if (kind == nullptr) return;
+    const std::string section = device_settings_section(kind, linkedConfig);
+
+    uint8_t before[22] = {};
+    if (length >= 33) memcpy(before, data + 11, sizeof(before));
+
+    const uint8_t replaced = trigger_effect::defend_host_report(section, data, length);
+    if (replaced == 0) return;
+
+    // ⚠️ A game streams these, so the log is sparse on purpose: the first few,
+    // then every thousandth. What the host sent is kept beside what went out.
+    const uint64_t count = ++g_triggerDefendCount;
+    if (count <= 3 || (count % 1000) == 0) {
+        device_log::report(device_log::msg()
+            << "[trigger-defend] " << section
+            << " kept the config's trigger effect over the host's"
+            << ((replaced & trigger_effect::kClaimR2) ? " R2" : "")
+            << ((replaced & trigger_effect::kClaimL2) ? " L2" : "")
+            << " host R2=" << ds5_hex(before, 11)
+            << " host L2=" << ds5_hex(before + 11, 11)
+            << " (#" << count << ")");
+    }
+}
