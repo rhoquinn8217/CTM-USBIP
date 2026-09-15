@@ -369,6 +369,20 @@ inline std::string steady_key(const char *sideName)
     return std::string(sideName) + "_trigger_steady_cursor_pull";
 }
 
+// Does a steady_key value switch the gesture ON? ⭐ The values that do, in one
+// place, for the same reason the key name is here.
+//
+// ⛔⛔ THE REBINDER ONCE ASKED A DIFFERENT QUESTION: whether the key held any
+// value at all. "off" is the page's default and gets saved like any other
+// choice, so the rebinder gave the trigger up to a gesture that was switched
+// off, and a bound trigger fired nothing. The setting's own help promises the
+// opposite: "off" makes it an ordinary button.
+inline bool steady_value_on(const std::string &value)
+{
+    return value == "immediate" || value == "true" || value == "1" ||
+           value == "before_press" || value == "after_press";
+}
+
 // How deep the press fires, when the effect does not name the point itself.
 inline std::string press_at_key(const char *sideName)
 {

@@ -287,6 +287,28 @@ int run_trigger_click_tests()
     }
     reset_all();
 
+    section("trigger click: the gesture takes a trigger exactly when the rebinder gives it up");
+    {
+        // ⛔⛔ The rebinder gives L2/R2 up when trigger_effect::steady_value_on says
+        // the switch is on; the gesture takes them when steadies_cursor does. Any
+        // value they disagree on is a trigger fired twice or not at all -- and
+        // "off", which the page saves as its default, was not at all: the
+        // rebinder's test was "the key has a value" (2026-09-15).
+        const char *const values[] = { "", "off", "false", "0", "none", "imediate",
+                                       "immediate", "true", "1", "before_press",
+                                       "after_press" };
+        for (const char *value : values) {
+            g_strings["ds5.right_trigger_steady_cursor_pull"] = value;
+            g_strings["ds4.left_trigger_steady_cursor_pull"] = value;
+            CTM_CHECK_EQ(steadies_cursor("ds5", "right"), trigger_effect::steady_value_on(value));
+            CTM_CHECK_EQ(steadies_cursor("ds4", "left"), trigger_effect::steady_value_on(value));
+        }
+        g_strings["ds5.right_trigger_steady_cursor_pull"] = "off";
+        CTM_CHECK(!trigger_effect::steady_value_on(
+            device_config_str("ds5", trigger_effect::steady_key("right").c_str())));
+    }
+    reset_all();
+
     section("trigger click: after_press leaves the pull alone and holds on the click");
     {
         // ⭐ For a trigger that is ALSO the gyro's gate. The cursor must stay

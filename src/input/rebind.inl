@@ -794,10 +794,15 @@ inline void apply(const void *deviceKey,
             // triggers press by travel now, with no bit behind them, and the
             // gesture never runs for that pad -- so giving one up here would
             // leave its binding with nothing to fire it.
+            // ⛔ AND ONLY WHILE THE SWITCH IS ON (2026-09-15). This asked whether
+            // the key held any value, so "off" -- the page's default, saved like
+            // any other choice -- gave the trigger up to a gesture that would
+            // not take it, and nothing fired. steady_value_on is the gesture's
+            // own test.
             if ((i == kBtnL2 || i == kBtnR2) && trigger_click_can_take(*layout) &&
-                !device_config_str(gateSection.c_str(),
-                                   trigger_effect::steady_key(i == kBtnR2 ? "right" : "left").c_str())
-                     .empty()) {
+                trigger_effect::steady_value_on(device_config_str(
+                    gateSection.c_str(),
+                    trigger_effect::steady_key(i == kBtnR2 ? "right" : "left").c_str()))) {
                 gateGaveUpATrigger = true;
                 continue;
             }
@@ -904,10 +909,12 @@ inline void apply(const void *deviceKey,
         // see, so a rename cannot leave the two disagreeing.
         // ⚠️ And only where the gesture can take the trigger at all, asked the
         // way the gesture asks it -- the same test as config mode's, above.
+        // ⛔ Including whether its switch is ON: a key set to "off" is still a
+        // key, and treating it as on left the trigger firing nothing.
         if ((i == kBtnL2 || i == kBtnR2) && trigger_click_can_take(*layout) &&
-            !device_config_str(section.c_str(),
-                               trigger_effect::steady_key(i == kBtnR2 ? "right" : "left").c_str())
-                 .empty()) {
+            trigger_effect::steady_value_on(device_config_str(
+                section.c_str(),
+                trigger_effect::steady_key(i == kBtnR2 ? "right" : "left").c_str()))) {
             // ⛔⛔ AND THE MASK STILL HAS TO BE PUBLISHED. Skipping the button
             // here also skips the publish below, which is what LATCHES it: if
             // this trigger was the only mouse binding, anyMouse stays false,

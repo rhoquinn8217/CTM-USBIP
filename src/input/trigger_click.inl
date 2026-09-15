@@ -379,7 +379,11 @@ inline Steady steady_mode(const std::string &section, const char *sideName)
 {
     const std::string v =
         device_config_str(section.c_str(), trigger_effect::steady_key(sideName).c_str());
-    if (v.empty()) return Steady::Off;
+    // ⛔ THE REBINDER ASKS THE SAME QUESTION, so the answer is one function both
+    // can see. When the two disagreed, a trigger set to "off" was given up by
+    // one and not taken by the other. A new mode goes in steady_value_on too, or
+    // it stays off here.
+    if (!trigger_effect::steady_value_on(v)) return Steady::Off;
     if (v == "immediate" || v == "true"  || v == "1") return Steady::Immediate;
     if (v == "before_press") return Steady::BeforePress;
     if (v == "after_press") return Steady::AfterPress;
