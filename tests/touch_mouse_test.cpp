@@ -129,7 +129,7 @@ inline bool gate_open(Gate gate, const ctm_rebind::Layout &lay, const uint8_t *d
 {
     switch (gate) {
         case Gate::Always: return true;
-        case Gate::L2: return ctm_rebind::trigger_travel(lay, d, len, true) >= 30;
+        case Gate::L2: return ctm_rebind::trigger_travel(lay, d, len, true) >= ctm_rebind::kTriggerPulledTravel;
         default: return false;
     }
 }

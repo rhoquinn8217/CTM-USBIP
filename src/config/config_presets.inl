@@ -315,6 +315,10 @@ inline const Preset kPresets[] = {
       "the one that needs no new habits. Square opens the on-screen keyboard.",
       // ⭐ Every pad with a layout: a stick is the one pointer they all have
       // (rhoquinn8217, 2026-09-15, "available to all controllers").
+      // ⓘ Its two trigger clicks reach an Xbox pad too. Those triggers have no
+      // bit, and until the same day nothing could press one, so the clicks
+      // were silent there; now a trigger past a threshold is a press
+      // (kSpotTriggerTravel, button_layout.inl).
       true, true, true, true, kStickMouseMode, CTM_PRESET_COUNT_OF(kStickMouseMode) },
     { "L2-gyro-mouse-aiming",
       "For playing, not for the desktop. Gyro aims only while L2 is held, so "

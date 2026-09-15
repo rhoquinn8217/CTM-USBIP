@@ -525,15 +525,17 @@ inline void on_ds5_input(const void *deviceKey,
     //
     // ⓘ An Xbox pad is left out on purpose, not by oversight. Its triggers are
     // 16-bit and it has no digital trigger bit, and taking a trigger over from
-    // the rebinder works by clearing that bit. Whether an Xbox trigger should
-    // click is its own decision.
+    // the rebinder works by clearing that bit.
+    // ✅ Its clicks were decided on 2026-09-15, and not here: a trigger with no
+    // bit presses once it travels past a threshold, as an ordinary button in
+    // the rebinder (kSpotTriggerTravel in button_layout.inl). ⛔ The rebinder
+    // gives a trigger up to this gesture only where trigger_click_can_take()
+    // says yes -- the test below -- so the two cannot disagree about a pad.
     // ⓘ Not called `pad`: that name is the trigger state further down.
     const InputPad inputPad = device_input_pad_for(descriptor);
     if (inputPad.layout == nullptr) return;
     const ctm_rebind::Layout &lay = *inputPad.layout;
-    if (lay.triggers.format != ctm_rebind::kTriggerU8 || !ctm_rebind::has_digital_triggers(lay)) {
-        return;
-    }
+    if (!ctm_rebind::trigger_click_can_take(lay)) return;
     const int lastTrigger = lay.triggers.r2 > lay.triggers.l2 ? lay.triggers.r2 : lay.triggers.l2;
     if (lastTrigger < 0 || len <= static_cast<size_t>(lastTrigger)) return;
     const std::string section = device_settings_section(inputPad.kind, linkedConfig);

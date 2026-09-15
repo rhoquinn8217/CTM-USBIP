@@ -175,9 +175,11 @@ inline bool gate_open(Gate gate, const ctm_rebind::Layout &lay, const uint8_t *d
             return true;
         case Gate::L2:
             // Analog, ~12% travel -- on the DualSense's 0..255 scale for every pad.
-            return ctm_rebind::trigger_travel(lay, d, len, true) >= 30;
+            // ⓘ The same depth an Xbox trigger presses a binding at, from one
+            // constant, so "pulled" cannot mean two things (2026-09-15).
+            return ctm_rebind::trigger_travel(lay, d, len, true) >= ctm_rebind::kTriggerPulledTravel;
         case Gate::R2:
-            return ctm_rebind::trigger_travel(lay, d, len, false) >= 30;
+            return ctm_rebind::trigger_travel(lay, d, len, false) >= ctm_rebind::kTriggerPulledTravel;
         case Gate::L1:
             return ctm_rebind::is_pressed(lay, d, len, ctm_rebind::kBtnL1);
         case Gate::R1:

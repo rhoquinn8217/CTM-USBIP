@@ -57,19 +57,31 @@ enum : int {
 //
 // ⓘ The same double-meaning trap ds5_output_overrides.inl records for
 // device_section_for's null return, arriving in a different file.
+//
+// ⭐⭐ AND A FOURTH, FOR A TRIGGER THAT IS ONLY A TRAVEL (2026-09-15). An Xbox
+// pad's triggers have no bit behind them, so as buttons they were absent -- and
+// every binding on them was silent, including the two clicks stick-to-mouse
+// binds on a pad it is offered to. rhoquinn8217: *"A trigger past a threshold
+// should count as a press."*
 enum SpotHow : uint8_t {
-    kSpotAbsent = 0,   // this pad does not report this button anywhere
-    kSpotBit,          // a plain bit: byteIndex + mask
-    kSpotHatDir,       // one direction of a hat: mask carries the direction
+    kSpotAbsent = 0,     // this pad does not report this button anywhere
+    kSpotBit,            // a plain bit: byteIndex + mask
+    kSpotHatDir,         // one direction of a hat: mask carries the direction
+    kSpotTriggerTravel,  // an analog trigger with no bit: mask carries which one
 };
 
 // The hat ordinal for each pure direction. 0=N 1=NE 2=E ... 7=NW, 8=centred.
 enum : uint8_t { kDirUp = 0, kDirRight = 2, kDirDown = 4, kDirLeft = 6 };
 
+// Which trigger a kSpotTriggerTravel spot reads. ⓘ The bytes come from the
+// layout's TriggerSpots, the way a hat direction's byte comes from hatByte.
+enum : uint8_t { kTriggerLeft = 0, kTriggerRight = 1 };
+
 struct BitSpot {
     SpotHow how;
     int     byteIndex;   // kSpotBit only
     uint8_t mask;        // kSpotBit: the bit. kSpotHatDir: the direction.
+                         // kSpotTriggerTravel: kTriggerLeft or kTriggerRight.
 };
 
 // A run of bytes that has one resting value: a stick's axes at centre, an
@@ -285,10 +297,14 @@ inline const Layout kDs4Layout = {
 // DualSense offset.
 //
 // ⛔ The triggers have NO digital bit -- op.16 copies them in as u16 values at
-// [6..7] and [8..9] and no op ever thresholds them. And Guide has no byte at
-// all: real hardware sends it as a separate GIP message this map does not
-// define. Both are kSpotAbsent, which is the honest answer rather than a bit
-// that would never fire.
+// [6..7] and [8..9] and no op ever thresholds them. So the layout does: each is
+// kSpotTriggerTravel, pressed once it travels past kTriggerPulledTravel and
+// cleared by zeroing its whole value. ⓘ They were kSpotAbsent until 2026-09-15,
+// "the honest answer rather than a bit that would never fire" -- honest, and it
+// left every binding on LT and RT with nothing to fire it.
+//
+// ⛔ And Guide has no byte at all: real hardware sends it as a separate GIP
+// message this map does not define. It stays kSpotAbsent.
 inline const Layout kXboxLayout = {
     "xbox", -1, 0x00, 0, 6,
     {
@@ -298,8 +314,8 @@ inline const Layout kXboxLayout = {
         { kSpotBit,    4, 0x80 },   // 3  Y
         { kSpotBit,    5, 0x10 },   // 4  LB
         { kSpotBit,    5, 0x20 },   // 5  RB
-        { kSpotAbsent, 0, 0x00 },   // 6  LT -- analog only, u16 at [6..7]
-        { kSpotAbsent, 0, 0x00 },   // 7  RT -- analog only, u16 at [8..9]
+        { kSpotTriggerTravel, 0, kTriggerLeft },    // 6  LT -- no bit: u16 at [6..7], by travel
+        { kSpotTriggerTravel, 0, kTriggerRight },   // 7  RT -- no bit: u16 at [8..9], by travel
         { kSpotBit,    4, 0x08 },   // 8  View  (select)
         { kSpotBit,    4, 0x04 },   // 9  Menu  (start)
         { kSpotBit,    5, 0x40 },   // 10 LS
@@ -382,6 +398,21 @@ inline void hat_clear(const Layout &lay, uint8_t *data, size_t len, uint8_t dir)
     data[lay.hatByte] = static_cast<uint8_t>((data[lay.hatByte] & ~lay.hatMask) | next);
 }
 
+// ⭐ HOW FAR A TRIGGER WITH NO BIT TRAVELS BEFORE IT COUNTS AS PRESSED: 30, on
+// the DualSense's 0..255 scale that trigger_travel() gives every pad -- about
+// 12%, or raw 121 of an Xbox trigger's 1023.
+//
+// ⛔ NOT A NEW NUMBER. It is the travel the gyro gate has always called "L2
+// held" (gyro_mouse.inl, gate_open), which now reads it from here, so "pulled"
+// is one depth wherever a trigger is asked. Two numbers for one idea is how
+// this project's depths have drifted apart before.
+constexpr int kTriggerPulledTravel = 30;
+
+// ⓘ Declared here for the trigger spots below, and defined further down with the
+// other readers of what lies beyond the buttons.
+inline int  trigger_travel(const Layout &lay, const uint8_t *data, size_t len, bool left);
+inline void blank_trigger(const Layout &lay, uint8_t *data, size_t len, bool left);
+
 inline bool is_pressed(const Layout &lay, const uint8_t *data, size_t len, int standardIndex)
 {
     if (standardIndex < 0 || standardIndex >= kButtonCount) return false;
@@ -393,6 +424,10 @@ inline bool is_pressed(const Layout &lay, const uint8_t *data, size_t len, int s
         case kSpotBit:
             return len > static_cast<size_t>(spot.byteIndex) &&
                    (data[spot.byteIndex] & spot.mask) != 0;
+        case kSpotTriggerTravel:
+            // ⓘ trigger_travel() answers -1 for a report too short to hold the
+            // whole value, which is below any threshold: not pressed.
+            return trigger_travel(lay, data, len, spot.mask == kTriggerLeft) >= kTriggerPulledTravel;
         case kSpotAbsent:
         default:
             // ⓘ The pad has no such button. Never pressed, and nothing to clear.
@@ -412,6 +447,15 @@ inline void clear_button(const Layout &lay, uint8_t *data, size_t len, int stand
             if (len > static_cast<size_t>(spot.byteIndex)) {
                 data[spot.byteIndex] = static_cast<uint8_t>(data[spot.byteIndex] & ~spot.mask);
             }
+            return;
+        case kSpotTriggerTravel:
+            // ⛔ ZEROED, NOT MASKED. There is no bit to take away, so a rebound
+            // trigger whose travel still reached the game would act twice: as
+            // its binding, and as itself. The whole value goes to rest -- the
+            // same "a rebound button is never seen" a bit gets.
+            // ⚠️ Cleared at ANY depth, not only past the threshold, exactly as a
+            // bit is cleared whether or not it is set.
+            blank_trigger(lay, data, len, spot.mask == kTriggerLeft);
             return;
         case kSpotAbsent:
         default:
@@ -437,6 +481,11 @@ inline void clear_button(const Layout &lay, uint8_t *data, size_t len, int stand
 //
 // ⚠️ The DualSense result is byte-for-byte what the old lines wrote, for every
 // input -- tests/button_layout_test.cpp keeps a copy of them to compare against.
+//
+// ⓘ An Xbox pad's triggers are rested twice since they became buttons: cleared
+// as LT and RT, then again by the rest run over [6..9]. Both write zero, so its
+// result has not moved either, and the same test file proves it against the
+// table as it was.
 inline void blank_to_rest(const Layout &lay, uint8_t *data, size_t len, bool keepStart)
 {
     for (int i = 0; i < kButtonCount; ++i) {
@@ -547,12 +596,43 @@ inline int trigger_travel(const Layout &lay, const uint8_t *data, size_t len, bo
     }
 }
 
+// A trigger at rest: its whole value to zero, one byte or two. What clearing a
+// kSpotTriggerTravel button means. ⓘ Like every reader here it writes nothing a
+// short report does not hold -- and such a report never read as pressed.
+inline void blank_trigger(const Layout &lay, uint8_t *data, size_t len, bool left)
+{
+    if (data == nullptr) return;
+    const int offset = left ? lay.triggers.l2 : lay.triggers.r2;
+    const int width = lay.triggers.format == kTriggerU8  ? 1
+                    : lay.triggers.format == kTriggerU16 ? 2
+                                                         : 0;
+    if (width == 0 || !fits(len, offset, width)) return;
+    for (int i = 0; i < width; ++i) data[offset + i] = 0;
+}
+
 // ⓘ Whether the pad reports each trigger as a BUTTON as well as a travel. The
 // trigger click takes a trigger over from the rebinder by clearing that bit, so
 // a pad without one -- an Xbox pad -- cannot hand it over cleanly.
+//
+// ⛔ A kSpotTriggerTravel trigger PRESSES, and it is still not a digital trigger:
+// the press is a depth this file reads off the travel, not a bit the gesture
+// could clear. So an Xbox pad still answers no here (2026-09-15).
 inline bool has_digital_triggers(const Layout &lay)
 {
     return lay.spots[kBtnL2].how == kSpotBit && lay.spots[kBtnR2].how == kSpotBit;
+}
+
+// ⭐ Whether the trigger click (trigger_click.inl) can take this pad's triggers
+// at all: one-byte travels, each with a bit behind it.
+//
+// ⛔⛔ ONE ANSWER, ASKED BY BOTH SIDES. The gesture asks it before acting, and the
+// rebinder asks it before giving a trigger up to the gesture. The rebinder used
+// to give L2 and R2 up whenever a config set them to steady the cursor, on any
+// pad -- harmless while an Xbox trigger could never press, and a binding that
+// nothing fires once it could: the gesture never runs for that pad.
+inline bool trigger_click_can_take(const Layout &lay)
+{
+    return lay.triggers.format == kTriggerU8 && has_digital_triggers(lay);
 }
 
 struct MotionSample {

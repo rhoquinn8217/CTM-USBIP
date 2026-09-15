@@ -789,7 +789,12 @@ inline void apply(const void *deviceKey,
             // the observation that cracked it, *"the clicks are only
             // registering on the config window and nothing else"*, which is
             // exactly the scope of this branch.
-            if ((i == kBtnL2 || i == kBtnR2) &&
+            //
+            // ⚠️ ONLY TO A GESTURE THAT CAN TAKE IT (2026-09-15). An Xbox pad's
+            // triggers press by travel now, with no bit behind them, and the
+            // gesture never runs for that pad -- so giving one up here would
+            // leave its binding with nothing to fire it.
+            if ((i == kBtnL2 || i == kBtnR2) && trigger_click_can_take(*layout) &&
                 !device_config_str(gateSection.c_str(),
                                    trigger_effect::steady_key(i == kBtnR2 ? "right" : "left").c_str())
                      .empty()) {
@@ -894,7 +899,9 @@ inline void apply(const void *deviceKey,
         // equivalent, and hiding that would be worse than choosing.
         // ⚠️ The key name comes from trigger_effect.inl, which both files can
         // see, so a rename cannot leave the two disagreeing.
-        if ((i == kBtnL2 || i == kBtnR2) &&
+        // ⚠️ And only where the gesture can take the trigger at all, asked the
+        // way the gesture asks it -- the same test as config mode's, above.
+        if ((i == kBtnL2 || i == kBtnR2) && trigger_click_can_take(*layout) &&
             !device_config_str(section.c_str(),
                                trigger_effect::steady_key(i == kBtnR2 ? "right" : "left").c_str())
                  .empty()) {

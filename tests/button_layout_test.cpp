@@ -284,19 +284,17 @@ int run_button_layout_tests()
 
     section("layout: a button the pad does not have is never pressed");
     {
-        // ⛔ Guide has no byte in this report at all, and the triggers have no
-        // digital bit -- they arrive as u16 values with nothing thresholding
-        // them. A whole report of 0xFF must still report all three as up,
-        // because "absent" is not "look at byte 0".
+        // ⛔ Guide has no byte in this report at all. A whole report of 0xFF must
+        // still report it as up, because "absent" is not "look at byte 0".
+        // ⓘ The triggers were checked here too while they were absent. They have
+        // no bit, but since 2026-09-15 they press by travel -- see the trigger
+        // sections at the end of this file.
         std::vector<uint8_t> r(48, 0xFF);
         CTM_CHECK(!is_pressed(*xbox, r.data(), r.size(), kBtnHome));
-        CTM_CHECK(!is_pressed(*xbox, r.data(), r.size(), kBtnL2));
-        CTM_CHECK(!is_pressed(*xbox, r.data(), r.size(), kBtnR2));
 
-        // And clearing one must not write anywhere.
+        // And clearing it must not write anywhere.
         std::vector<uint8_t> before = r;
         clear_button(*xbox, r.data(), r.size(), kBtnHome);
-        clear_button(*xbox, r.data(), r.size(), kBtnL2);
         CTM_CHECK(std::memcmp(r.data(), before.data(), r.size()) == 0);
     }
 
@@ -624,6 +622,195 @@ int run_button_layout_tests()
         CTM_CHECK_EQ(trigger_travel(*xbox, r.data(), r.size(), true), 255);
         CTM_CHECK_EQ(trigger_travel(*xbox, r.data(), r.size(), false), 127);
         CTM_CHECK_EQ(trigger_travel(*xbox, r.data(), 8, false), -1);      // too short
+    }
+
+    // ---- A trigger with no bit, as a button ---------------------------------------
+    //
+    // ⭐ rhoquinn8217, 2026-09-15: "A trigger past a threshold should count as a
+    // press." Until then an Xbox pad's LT and RT were kSpotAbsent, so
+    // stick-to-mouse -- offered to that pad -- bound two clicks nothing fired.
+
+    // An Xbox 0x20 report with LT and RT at these raw values, 0 to 1023.
+    auto xbox_triggers = [](int lt, int rt) {
+        std::vector<uint8_t> r(48, 0);
+        r[0] = 0x20;
+        r[6] = static_cast<uint8_t>(lt & 0xff);
+        r[7] = static_cast<uint8_t>((lt >> 8) & 0xff);
+        r[8] = static_cast<uint8_t>(rt & 0xff);
+        r[9] = static_cast<uint8_t>((rt >> 8) & 0xff);
+        return r;
+    };
+
+    section("trigger as a button: an Xbox trigger presses at the threshold, and not one step before");
+    {
+        // ⓘ The gyro gate's number, on the DualSense's 0..255 scale: raw 120 of
+        // 1023 is 29 there, and raw 121 is 30.
+        CTM_CHECK_EQ(kTriggerPulledTravel, 30);
+        std::vector<uint8_t> r = xbox_triggers(120, 0);
+        CTM_CHECK_EQ(trigger_travel(*xbox, r.data(), r.size(), true), kTriggerPulledTravel - 1);
+        CTM_CHECK(!is_pressed(*xbox, r.data(), r.size(), kBtnL2));
+        r = xbox_triggers(121, 0);
+        CTM_CHECK_EQ(trigger_travel(*xbox, r.data(), r.size(), true), kTriggerPulledTravel);
+        CTM_CHECK(is_pressed(*xbox, r.data(), r.size(), kBtnL2));
+        r = xbox_triggers(1023, 0);
+        CTM_CHECK(is_pressed(*xbox, r.data(), r.size(), kBtnL2));
+
+        // The right trigger the same, from its own bytes.
+        r = xbox_triggers(0, 120);
+        CTM_CHECK(!is_pressed(*xbox, r.data(), r.size(), kBtnR2));
+        r = xbox_triggers(0, 121);
+        CTM_CHECK(is_pressed(*xbox, r.data(), r.size(), kBtnR2));
+
+        // At rest, neither.
+        r = xbox_triggers(0, 0);
+        CTM_CHECK(!is_pressed(*xbox, r.data(), r.size(), kBtnL2));
+        CTM_CHECK(!is_pressed(*xbox, r.data(), r.size(), kBtnR2));
+
+        // ⛔ Each answers for itself: one trigger pulled is not both.
+        r = xbox_triggers(1023, 0);
+        CTM_CHECK(!is_pressed(*xbox, r.data(), r.size(), kBtnR2));
+        r = xbox_triggers(0, 1023);
+        CTM_CHECK(!is_pressed(*xbox, r.data(), r.size(), kBtnL2));
+
+        // ⛔ And a trigger is no other button: both pulled all the way, and only
+        // indices 6 and 7 read as held.
+        r = xbox_triggers(1023, 1023);
+        int others = 0;
+        for (int i = 0; i < kButtonCount; ++i) {
+            if (i != kBtnL2 && i != kBtnR2 && is_pressed(*xbox, r.data(), r.size(), i)) ++others;
+        }
+        CTM_CHECK_EQ(others, 0);
+
+        // A report must hold the WHOLE value: LT needs [6] and [7], RT [8] and [9].
+        CTM_CHECK(is_pressed(*xbox, r.data(), 8, kBtnL2));
+        CTM_CHECK(!is_pressed(*xbox, r.data(), 7, kBtnL2));
+        CTM_CHECK(!is_pressed(*xbox, r.data(), 9, kBtnR2));
+    }
+
+    section("trigger as a button: clearing an Xbox trigger zeroes its two bytes and nothing else");
+    {
+        // ⭐ A rebound trigger must not ALSO reach the game, and there is no bit to
+        // take away -- so its whole 16-bit value goes to rest.
+        std::vector<uint8_t> seed(48);
+        for (size_t i = 0; i < seed.size(); ++i) seed[i] = static_cast<uint8_t>(0x5A + i * 7);
+        CTM_CHECK(is_pressed(*xbox, seed.data(), seed.size(), kBtnL2) &&
+                  is_pressed(*xbox, seed.data(), seed.size(), kBtnR2));
+
+        std::vector<uint8_t> r = seed;
+        clear_button(*xbox, r.data(), r.size(), kBtnR2);
+        int wrong = 0;
+        for (size_t i = 0; i < r.size(); ++i) {
+            const bool rt = (i == 8 || i == 9);
+            if (rt ? r[i] != 0 : r[i] != seed[i]) ++wrong;
+        }
+        CTM_CHECK_EQ(wrong, 0);
+        CTM_CHECK(!is_pressed(*xbox, r.data(), r.size(), kBtnR2));
+        CTM_CHECK(is_pressed(*xbox, r.data(), r.size(), kBtnL2));       // LT untouched
+
+        r = seed;
+        clear_button(*xbox, r.data(), r.size(), kBtnL2);
+        wrong = 0;
+        for (size_t i = 0; i < r.size(); ++i) {
+            const bool lt = (i == 6 || i == 7);
+            if (lt ? r[i] != 0 : r[i] != seed[i]) ++wrong;
+        }
+        CTM_CHECK_EQ(wrong, 0);
+
+        // ⛔ A report too short to hold the whole value is not written at all.
+        std::vector<uint8_t> buf(48, 0xEE);
+        clear_button(*xbox, buf.data(), 9, kBtnR2);
+        clear_button(*xbox, buf.data(), 7, kBtnL2);
+        int written = 0;
+        for (uint8_t b : buf) if (b != 0xEE) ++written;
+        CTM_CHECK_EQ(written, 0);
+
+        // ⓘ The one-byte form rests one byte, for a pad whose travel is a byte.
+        std::vector<uint8_t> d(16, 0xEE);
+        blank_trigger(*ds5, d.data(), d.size(), false);                  // R2 at [6]
+        written = 0;
+        for (size_t i = 0; i < d.size(); ++i) if (d[i] != (i == 6 ? 0x00 : 0xEE)) ++written;
+        CTM_CHECK_EQ(written, 0);
+    }
+
+    section("trigger as a button: an Xbox report rests exactly as it did while its triggers were absent");
+    {
+        // ⛔ blank_to_rest() now clears LT and RT as buttons before the rest run
+        // zeroes [6..9] again. The result must not move by a byte: checked against
+        // the same table with the triggers put back to kSpotAbsent, at every
+        // length up to a whole report, over three fills, with Options kept and not.
+        Layout before = *xbox;
+        before.spots[kBtnL2] = BitSpot{ kSpotAbsent, 0, 0x00 };
+        before.spots[kBtnR2] = BitSpot{ kSpotAbsent, 0, 0x00 };
+        for (int pass = 0; pass < 2; ++pass) {
+            int mismatches = 0;
+            for (int pattern = 0; pattern < 3; ++pattern) {
+                for (size_t len = 0; len <= 48; ++len) {
+                    std::vector<uint8_t> want(48);
+                    for (size_t i = 0; i < want.size(); ++i) {
+                        want[i] = pattern == 0 ? 0x00
+                                : pattern == 1 ? 0xFF
+                                : static_cast<uint8_t>(i * 37 + 11);
+                    }
+                    std::vector<uint8_t> got = want;
+                    blank_to_rest(before, want.data(), len, pass != 0);
+                    blank_to_rest(*xbox, got.data(), len, pass != 0);
+                    if (got != want) ++mismatches;
+                }
+            }
+            CTM_CHECK_EQ(mismatches, 0);
+        }
+    }
+
+    section("trigger as a button: a DualSense and a DS4 still read the bit, not the travel");
+    {
+        // ⛔ Only the Xbox rows changed. These pads report each trigger as a bit
+        // AND a travel, and as buttons they read the bit alone, as they always
+        // did: pulled all the way with the bit clear is not pressed, and clearing
+        // one leaves its travel where it was.
+        CTM_CHECK(ds5->spots[kBtnL2].how == kSpotBit && ds5->spots[kBtnL2].byteIndex == 9 &&
+                  ds5->spots[kBtnL2].mask == 0x04);
+        CTM_CHECK(ds5->spots[kBtnR2].how == kSpotBit && ds5->spots[kBtnR2].byteIndex == 9 &&
+                  ds5->spots[kBtnR2].mask == 0x08);
+        CTM_CHECK(ds4->spots[kBtnL2].how == kSpotBit && ds4->spots[kBtnL2].byteIndex == 6 &&
+                  ds4->spots[kBtnL2].mask == 0x04);
+        CTM_CHECK(ds4->spots[kBtnR2].how == kSpotBit && ds4->spots[kBtnR2].byteIndex == 6 &&
+                  ds4->spots[kBtnR2].mask == 0x08);
+
+        // DualSense: travel at [5] and [6] all the way, no bits -- nothing held.
+        std::vector<uint8_t> r(64, 0);
+        r[1] = r[2] = r[3] = r[4] = 0x80;
+        r[8] = 0x08;                                  // hat centred
+        r[5] = 0xFF;
+        r[6] = 0xFF;
+        int held = 0;
+        for (int i = 0; i < kButtonCount; ++i) if (is_pressed(*ds5, r.data(), r.size(), i)) ++held;
+        CTM_CHECK_EQ(held, 0);
+        r[9] = 0x04;                                  // the L2 bit
+        CTM_CHECK(is_pressed(*ds5, r.data(), r.size(), kBtnL2));
+        CTM_CHECK(!is_pressed(*ds5, r.data(), r.size(), kBtnR2));
+        clear_button(*ds5, r.data(), r.size(), kBtnL2);
+        CTM_CHECK_EQ(static_cast<int>(r[9]), 0x00);
+        CTM_CHECK_EQ(static_cast<int>(r[5]), 0xFF);   // the travel is not touched
+
+        // DS4, from the real pad at rest: travel at [8] and [9] all the way.
+        std::vector<uint8_t> d(kDs4Rest, kDs4Rest + 64);
+        d[8] = 0xFF;
+        d[9] = 0xFF;
+        held = 0;
+        for (int i = 0; i < kButtonCount; ++i) if (is_pressed(*ds4, d.data(), d.size(), i)) ++held;
+        CTM_CHECK_EQ(held, 0);
+        d[6] = 0x08;                                  // the R2 bit
+        CTM_CHECK(is_pressed(*ds4, d.data(), d.size(), kBtnR2));
+        clear_button(*ds4, d.data(), d.size(), kBtnR2);
+        CTM_CHECK_EQ(static_cast<int>(d[6]), 0x00);
+        CTM_CHECK_EQ(static_cast<int>(d[9]), 0xFF);
+
+        // ⭐ And the answers the trigger click stands on. An Xbox trigger presses,
+        // and it is still not a digital trigger the gesture could take.
+        CTM_CHECK(has_digital_triggers(*ds5) && has_digital_triggers(*ds4));
+        CTM_CHECK(!has_digital_triggers(*xbox));
+        CTM_CHECK(trigger_click_can_take(*ds5) && trigger_click_can_take(*ds4));
+        CTM_CHECK(!trigger_click_can_take(*xbox));
     }
 
     return 0;
