@@ -137,6 +137,9 @@ void trigger_click_forget(const void *deviceKey);
 // ⓘ Releases only THIS controller's held keys -- they are kept per device so
 // two gated pads cannot cancel each other.
 void ctm_keyboard_forget_device(const void *deviceKey);
+// ⓘ And this controller's chord and on-screen keyboard state, kept per pad for
+// the same reason. No ctm_ prefix: new, and ours.
+void rebind_forget_pad(const void *deviceKey);
 // Swallow whatever is held, so a button that dismissed the overlay cannot also
 // reach the game on the next report.
 void ctm_rebind_swallow_held();

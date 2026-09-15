@@ -343,6 +343,24 @@ int run_gyro_mouse_tests()
         CTM_CHECK(gate_open(Gate::TouchpadClick, ctm_rebind::kDs4Layout, r.data(), r.size()));
     }
 
+    section("gyro-mouse: \"move unless a finger is down\" is open on a pad with no touchpad");
+    {
+        // ⛔ Found in review, 2026-09-15: touch_finger_up() rightly answers false
+        // for a pad with no touchpad, which shut this gate forever on an Xbox pad
+        // -- a stick mouse gated on !touchpad never moved. No finger can be down
+        // on a pad with no touchpad, so the gate is open there.
+        std::vector<uint8_t> xbox(48, 0);
+        xbox[0] = 0x20;
+        CTM_CHECK(gate_open(Gate::NotTouchpad, ctm_rebind::kXboxLayout, xbox.data(), xbox.size()));
+        // ⓘ The gates that need a touchpad to open stay shut on one without.
+        CTM_CHECK(!gate_open(Gate::Touchpad, ctm_rebind::kXboxLayout, xbox.data(), xbox.size()));
+        CTM_CHECK(!gate_open(Gate::TouchpadClick, ctm_rebind::kXboxLayout, xbox.data(), xbox.size()));
+        // ⓘ And a pad WITH a touchpad still pauses for a finger.
+        auto r = ds4_report(0, 0);
+        r[35] = 0x05;
+        CTM_CHECK(!gate_open(Gate::NotTouchpad, ctm_rebind::kDs4Layout, r.data(), r.size()));
+    }
+
     section("gyro-mouse: a DS4's L2 gate is [8], not a face button");
     {
         auto r = ds4_report(0, 0);

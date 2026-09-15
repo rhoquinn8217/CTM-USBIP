@@ -232,6 +232,7 @@ public:
         // able to release it -- and clearing everyone's would release the other
         // pad's keys mid-press.
         ctm_keyboard_forget_device(this);
+        rebind_forget_pad(this);
         stop_audio_stream();
     }
 

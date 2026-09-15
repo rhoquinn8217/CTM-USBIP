@@ -176,9 +176,38 @@ inline std::atomic_bool g_configMode{false};
 // say so again.
 inline std::atomic_bool g_gateHold{false};
 
-// ⭐ Set while the chord's own Options press is still held, so the gate below
-// leaves that one button alone and the game can pause itself.
-inline bool g_passOptions = false;
+// ⭐ The chord's memory, PER PAD: its last Options state (for the edge),
+// whether its own chord press is still held -- so the gate below leaves that one
+// button alone and the game can pause itself -- and what chord_debug last said.
+//
+// ⛔⛔ THESE WERE THREE STATICS AND ONE GLOBAL, SHARED BY EVERY PAD (found in
+// review, 2026-09-15). With two pads bridged, the idle pad's report -- Options up
+// -- landed between the other pad's reports and cleared the pass-through, so the
+// gate ate the chord's Options and the game never paused; and it re-armed the
+// edge, so a held Options could look freshly pressed again. Two DualSenses always
+// shared it; a DualSense beside a DS4 started to once the chord read a DS4.
+// ⓘ Every relay thread runs the chord, so the map is locked.
+struct ChordPad {
+    bool lastOptions = false;
+    bool passOptions = false;
+    int  lastDebugState = -1;
+};
+
+inline std::mutex g_chordMutex;
+inline std::map<const void *, ChordPad> g_chordPads;
+
+inline bool pass_options_for(const void *deviceKey)
+{
+    std::lock_guard<std::mutex> lock(g_chordMutex);
+    const auto it = g_chordPads.find(deviceKey);
+    return it != g_chordPads.end() && it->second.passOptions;
+}
+
+inline void forget_chord_pad(const void *deviceKey)
+{
+    std::lock_guard<std::mutex> lock(g_chordMutex);
+    g_chordPads.erase(deviceKey);
+}
 
 inline bool gate_hold() { return g_gateHold.load(std::memory_order_relaxed); }
 
@@ -393,10 +422,8 @@ inline void apply(const void *deviceKey,
 
         // ⛔ EDGE, not level. Options is held for about 300ms and this runs at
         // 250Hz, so a level check would fire seventy times for one press.
-        static bool lastOptions = false;
-        const bool optionsPressedNow = options && !lastOptions;
-        lastOptions = options;
-
+        // ⓘ This pad's own edge -- see ChordPad for why it is not shared.
+        //
         // ⛔ LET OPTIONS THROUGH FOR THIS PRESS.
         //
         // Measured 2026-08-29: the chord fires, config mode turns on, and then
@@ -406,8 +433,14 @@ inline void apply(const void *deviceKey,
         //
         // ⓘ Held until Options is RELEASED, not for a fixed time: the game needs
         // the whole press, and its length is the person's to decide.
-        static bool passOptionsThrough = false;
-        if (!options) passOptionsThrough = false;
+        bool optionsPressedNow = false;
+        {
+            std::lock_guard<std::mutex> lock(g_chordMutex);
+            ChordPad &chordState = g_chordPads[deviceKey];
+            optionsPressedNow = options && !chordState.lastOptions;
+            chordState.lastOptions = options;
+            if (!options) chordState.passOptions = false;
+        }
 
         // ⛔ NOT WHILE THE GATE IS ALREADY ON. If the window is up and in front,
         // the chord has nothing to do -- and firing anyway closed and reopened
@@ -418,7 +451,10 @@ inline void apply(const void *deviceKey,
         if (f1 && f2 && optionsPressedNow && !config_mode()) {
             device_log::input(device_log::msg()
                 << "chord: two fingers + Options -- showing the settings window");
-            passOptionsThrough = true;
+            {
+                std::lock_guard<std::mutex> lock(g_chordMutex);
+                g_chordPads[deviceKey].passOptions = true;
+            }
             // ⓘ The chord belongs to a CONTROLLER, and this function has that
             // device in hand -- so the window can open on its tab rather than
             // on Overview.
@@ -428,7 +464,6 @@ inline void apply(const void *deviceKey,
             g_gateProvisionalUntil.store(chord_now_ms() + 4000);
             ctm_chord_show_ui(chordOrdinal);
         }
-        g_passOptions = passOptionsThrough;
 
         if (device_config_bool("global", "chord_debug", false)) {
             // ⚠️ TOUCH-ERA NARROWING (2026-08-31): fingers are a CURSOR now,
@@ -436,19 +471,25 @@ inline void apply(const void *deviceKey,
             // -- dozens of lines a minute of pure churn. Only chord-relevant
             // states speak: Options involved, or both fingers down -- entering
             // OR leaving them, so a chord attempt still traces end to end.
-            static int lastState = -1;
+            // ⓘ Per pad, so two pads' states do not read as changes of each other.
             const int state = (f1 ? 4 : 0) | (f2 ? 2 : 0) | (options ? 1 : 0);
-            const bool was = lastState >= 0 &&
-                ((lastState & 1) != 0 || (lastState & 6) == 6);
-            const bool is = (state & 1) != 0 || (state & 6) == 6;
-            if (state != lastState) {
-                if (was || is) {
-                    device_log::input(device_log::msg()
-                        << "chord: finger1=" << (f1 ? "down" : "up")
-                        << " finger2=" << (f2 ? "down" : "up")
-                        << " options=" << (options ? "down" : "up"));
+            bool speak = false;
+            {
+                std::lock_guard<std::mutex> lock(g_chordMutex);
+                int &lastState = g_chordPads[deviceKey].lastDebugState;
+                const bool was = lastState >= 0 &&
+                    ((lastState & 1) != 0 || (lastState & 6) == 6);
+                const bool is = (state & 1) != 0 || (state & 6) == 6;
+                if (state != lastState) {
+                    speak = was || is;
+                    lastState = state;
                 }
-                lastState = state;
+            }
+            if (speak) {
+                device_log::input(device_log::msg()
+                    << "chord: finger1=" << (f1 ? "down" : "up")
+                    << " finger2=" << (f2 ? "down" : "up")
+                    << " options=" << (options ? "down" : "up"));
             }
         }
     }
@@ -699,7 +740,7 @@ inline void apply(const void *deviceKey,
         // says what that did and why a layout answers it.
         // ⓘ Options survives while the chord's own press is held -- otherwise
         // the button that triggered this would be eaten by it.
-        blank_to_rest(*layout, data, len, g_passOptions);
+        blank_to_rest(*layout, data, len, pass_options_for(deviceKey));
 
         if (gateCount > 0 && ctm_verbose_logs()) {
             device_log::input(device_log::msg()
@@ -1031,6 +1072,14 @@ void ctm_rebind_swallow_held()
 void ctm_keyboard_forget_device(const void *deviceKey)
 {
     ctm_keyboard_device::forget_device(deviceKey);
+}
+
+// ⓘ A pad going away takes its chord memory and its on-screen keyboard state with
+// it, so a later pad handed the same address starts clean.
+void rebind_forget_pad(const void *deviceKey)
+{
+    ctm_rebind::forget_chord_pad(deviceKey);
+    ctm_overlay::forget_device(deviceKey);
 }
 
 bool ctm_rebind_config_mode()

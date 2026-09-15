@@ -62,7 +62,15 @@ inline std::atomic_int g_openedBy{-1};
 // next report -- four milliseconds later -- saw that same press as a fresh edge
 // and closed it. Opening and closing on one button means the press that opened
 // it must not count.
-inline std::atomic_bool g_closeArmed{false};
+//
+// ⛔⛔ PER PAD (found in review, 2026-09-15). This was one flag for every pad, so
+// with a second pad bridged its very next report -- Square up -- armed it while
+// the first pad was still holding the Square that opened the keyboard, and that
+// held press typed a Backspace: the exact fault above. Two DualSenses always
+// shared it; a DualSense beside a DS4 started to once the keyboard read a DS4.
+// ➡️ Each pad arms on seeing the button up in ITS OWN report. Cleared by show().
+// Guarded by g_padMutex, declared with the pad edges below.
+inline std::map<const void *, bool> g_closeArmedFor;
 
 // ⓘ Declared here: handle_report closes the window, and is defined above hide.
 inline void hide();
@@ -83,6 +91,10 @@ inline std::atomic_bool g_atTop{false};
 
 // ⓘ Held, not latched: L1 shows capitals while you hold it, L2 shows the F
 // keys. A held layer needs no state to get out of -- letting go is the exit.
+// ⭐ Held on ANY pad (2026-09-15): each pad's shoulders are kept apart in
+// g_layersHeldFor and these two are what the drawing reads. ⛔ They were written
+// straight from each report, so an idle second pad wrote "not held" between the
+// holding pad's reports and the layer flickered.
 inline std::atomic_bool g_shiftHeld{false};
 inline std::atomic_bool g_fnHeld{false};
 
@@ -548,10 +560,13 @@ inline int g_tapFrames = 0;
 // after Circle sent it; Circle closes the keyboard now, so nothing sets it.
 // ⓘ Removed rather than left -- unused state is what someone later wires back
 // up, and T-079 keeps collecting exactly this.
-// ⓘ How long a direction has been held, in reports. ⛔ Not per device: it is
-// one highlight, and two pads holding opposite directions should fight over it
-// exactly as two hands on one keyboard would.
-inline int g_dirHeld = 0;
+// ⓘ How long a direction has been held, in reports.
+// ⛔⛔ PER PAD NOW (found in review, 2026-09-15). It was one counter so that two
+// pads holding opposite directions would fight over the one highlight -- but an
+// IDLE second pad reset it to zero on every one of its reports, so a held
+// direction never reached the repeat at all. Both pads still move the one
+// highlight; each one's own hold decides when it repeats. Kept in g_dirHeldFor
+// beside the pad edges below, under g_padMutex.
 
 // ⭐⭐ WHERE YOU ARE AND WHAT IS PRESSED ARE DIFFERENT THINGS (rhoquinn8217,
 // 2026-09-02). A filled key was being asked to mean three things at once --
@@ -1510,6 +1525,12 @@ inline bool visible() { return g_running.load() && g_hwnd != nullptr; }
 // keyboard is shared, so they share the cursor on it.
 inline std::map<const void *, uint32_t> g_padPrev;
 inline std::mutex g_padMutex;
+// ⓘ The rest of each pad's own keyboard state, under the same lock: how long its
+// direction has been held, and which of its shoulders are down (bit 0 L1, bit 1
+// R1). See the notes on the held direction and on g_shiftHeld above for why
+// neither is shared.
+inline std::map<const void *, int> g_dirHeldFor;
+inline std::map<const void *, uint8_t> g_layersHeldFor;
 
 inline bool edge(const void *deviceKey, int index, bool downNow)
 {
@@ -1525,6 +1546,9 @@ inline void forget_device(const void *deviceKey)
 {
     std::lock_guard<std::mutex> lock(g_padMutex);
     g_padPrev.erase(deviceKey);
+    g_dirHeldFor.erase(deviceKey);
+    g_layersHeldFor.erase(deviceKey);
+    g_closeArmedFor.erase(deviceKey);
 }
 
 // ⓘ Everything neutral: sticks centred, triggers released, no buttons, hat
@@ -1568,13 +1592,15 @@ inline bool handle_report(const void *deviceKey, const ctm_rebind::Layout &lay,
     const int kFirst = 90;      // ~360ms at 250Hz
     const int kThen  = 14;      // ~56ms between repeats
     const bool anyDir = up || down || left || right;
-    if (!anyDir) {
-        g_dirHeld = 0;
-    } else {
-        ++g_dirHeld;
+    int dirHeld = 0;
+    {
+        std::lock_guard<std::mutex> lock(g_padMutex);
+        int &held = g_dirHeldFor[deviceKey];
+        held = anyDir ? held + 1 : 0;
+        dirHeld = held;
     }
-    const bool repeatNow = (g_dirHeld > kFirst)
-                        && ((g_dirHeld - kFirst) % kThen == 0);
+    const bool repeatNow = (dirHeld > kFirst)
+                        && ((dirHeld - kFirst) % kThen == 0);
 
     if (edge(deviceKey, 0, up)    || (repeatNow && up))    move_v(-1);
     if (edge(deviceKey, 1, down)  || (repeatNow && down))  move_v(1);
@@ -1593,8 +1619,19 @@ inline bool handle_report(const void *deviceKey, const ctm_rebind::Layout &lay,
     // layers, so they cannot also be space and backspace. Both are on the face.
     const bool l1 = button_down(lay, data, len, 4);
     const bool r1 = button_down(lay, data, len, 5);
-    if (l1 != g_shiftHeld.load()) { g_shiftHeld.store(l1); invalidate(); }
-    if (r1 != g_fnHeld.load())    { g_fnHeld.store(r1);   invalidate(); }
+    // ⓘ This pad's shoulders, then whether ANY pad holds each -- see g_shiftHeld.
+    bool anyL1 = false;
+    bool anyR1 = false;
+    {
+        std::lock_guard<std::mutex> lock(g_padMutex);
+        g_layersHeldFor[deviceKey] = static_cast<uint8_t>((l1 ? 1 : 0) | (r1 ? 2 : 0));
+        for (const auto &pad : g_layersHeldFor) {
+            if (pad.second & 1) anyL1 = true;
+            if (pad.second & 2) anyR1 = true;
+        }
+    }
+    if (anyL1 != g_shiftHeld.load()) { g_shiftHeld.store(anyL1); invalidate(); }
+    if (anyR1 != g_fnHeld.load())    { g_fnHeld.store(anyR1);   invalidate(); }
 
     // ⭐ THE BUTTON THAT OPENED IT ALSO CLOSES IT.
     //
@@ -1619,8 +1656,14 @@ inline bool handle_report(const void *deviceKey, const ctm_rebind::Layout &lay,
     const int openedBy = g_openedBy.load();
     const bool openBtnStillDown =
         (openedBy >= 0 && button_down(lay, data, len, openedBy));
-    if (!g_closeArmed.load() && !openBtnStillDown) g_closeArmed.store(true);
-    const bool faceArmed = g_closeArmed.load();
+    // ⓘ THIS pad's arming, from this pad's own report -- see g_closeArmedFor.
+    bool faceArmed = false;
+    {
+        std::lock_guard<std::mutex> lock(g_padMutex);
+        bool &armed = g_closeArmedFor[deviceKey];
+        if (!armed && !openBtnStillDown) armed = true;
+        faceArmed = armed;
+    }
 
     // ⭐ CIRCLE IS ESC. Sent straight through rather than moving the highlight,
     // so backing out of a dialog costs one press from wherever you are.
@@ -1850,7 +1893,11 @@ inline void show(int width = 0, int height = 0, int openedByButton = -1)
 {
     if (width <= 0 || height <= 0) size_for(&width, &height);
     g_openedBy.store(openedByButton);
-    g_closeArmed.store(false);          // the opening press must not close it
+    {
+        // ⓘ The opening press must not close it, or type -- on any pad.
+        std::lock_guard<std::mutex> lock(g_padMutex);
+        g_closeArmedFor.clear();
+    }
     if (g_running.exchange(true)) return;      // already up
     g_thread = std::thread(thread_main, width, height);
     g_thread.detach();
@@ -1875,7 +1922,13 @@ inline void hide()
         // ⓘ T-142's latched key goes with it, or a key held when the keyboard
         // closed would still be the "held" one when it next opens.
         heldUsageFor.clear();
+        // ⓘ And each pad's held direction and shoulders, so a pad that leaves
+        // with L1 down cannot hold the capitals layer on the next keyboard.
+        g_dirHeldFor.clear();
+        g_layersHeldFor.clear();
     }
+    g_shiftHeld.store(false);
+    g_fnHeld.store(false);
     // ⓘ Posting rather than destroying from here: the window belongs to the
     // thread that created it, and destroying it from another one is undefined.
     if (g_hwnd != nullptr) PostMessageW(g_hwnd, WM_CLOSE, 0, 0);

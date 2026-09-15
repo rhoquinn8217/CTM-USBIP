@@ -185,6 +185,12 @@ inline bool gate_open(Gate gate, const ctm_rebind::Layout &lay, const uint8_t *d
         case Gate::Touchpad:
             return ctm_rebind::touch_finger_down(lay, d, len, 0);   // finger 1 down
         case Gate::NotTouchpad:
+            // ⓘ "Move unless a finger is down" -- and a pad with no touchpad has
+            // no finger to pause for, so it is open there. ⛔ touch_finger_up()
+            // answers false for such a pad on purpose (a report has to STATE "no
+            // finger"), which shut this gate forever on an Xbox pad once the stick
+            // mouse reached one (found in review, 2026-09-15).
+            if (!lay.touch.present) return true;
             return ctm_rebind::touch_finger_up(lay, d, len, 0);     // ratchet: touch pauses
         case Gate::TouchpadClick:
             return ctm_rebind::touch_pressed(lay, d, len);          // pad pressed in
