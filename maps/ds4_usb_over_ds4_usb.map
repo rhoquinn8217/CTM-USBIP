@@ -1,0 +1,61 @@
+# Virtual DualShock 4 USB over physical DualShock 4 USB (wired).
+# Full passthrough: the virtual device IS the physical device, so input,
+# output, and feature requests are forwarded verbatim. No BT reformatting,
+# no CRC signing, no report reshaping.
+#
+# ⭐ WHY THIS MAP EXISTS. A cabled DS4 was being sent through
+# ds4_usb_over_ds4_bt.map, which triggers on source report 0x11 while a cabled
+# pad sends 0x01. Nothing parsed its input, so the pad bridged, showed as
+# plugged, and did nothing in the game. Its own 0x01 report is already exactly
+# what the virtual wired DS4 emits, so no translation is wanted here -- only a
+# map that says so.
+#
+# Report IDs are left at 0, which selects the runtime's passthrough paths
+# (translate_controller_input/output copy the whole report verbatim and
+# ignore the copy range). The copy = lines below are required by the map
+# loader's validation but are NOT used at runtime in passthrough mode.
+#
+# ⛔ NO AUDIO IN THIS MAP, DELIBERATELY. A DS4 is a USB audio device when
+# cabled -- 32 kHz stereo speaker out on ISO 0x01, 16 kHz mono headset mic in
+# on ISO 0x82 -- so the wired ISO passthrough the DualSense uses could carry
+# it. It is not built yet, and the runtime still stubs the mic IN with
+# zero-filled packets, so both flags below say false: an absent capability is
+# better than one that enumerates and then produces silence.
+# ⓘ The headset jack, not the speaker, is what makes that work worth doing.
+# Almost no PC game drives the DS4's speaker, but the jack and its mic are
+# ordinary sound devices that need no game support at all.
+
+[map]
+id = ds4_usb_over_ds4_usb
+version = 1
+virtual_device = ds4_usb
+physical_device = ds4_usb
+
+[usb.endpoints]
+hid_in = 0x84
+hid_out = 0x03
+
+[path.input.controller_to_virtual]
+trigger = physical.read
+destination_length = 64
+copy = source[0..63] -> destination[0..63]
+
+[path.output.virtual_to_controller]
+# ⚠️ 32, NOT 64. A DS4's USB output report 0x05 is 32 bytes, measured in this
+# project's own Wireshark capture of a wired pad (docs/ds4_knowledge.md: "HID
+# OUT ep 0x03 payloads are 32 bytes (not 64)"). The DualSense's is 64, so this
+# is the one line that must not be copied from its map unread.
+trigger = usb.endpoint.hid_out
+destination_length = 32
+copy = source[0..31] -> destination[0..31]
+
+[advertise]
+controller_name = DualShock 4 (Wired)
+vendor = Sony
+rumble = true
+leds = true
+adaptive_triggers = false
+haptics = false
+audio_output = false
+audio_input = false
+battery = true

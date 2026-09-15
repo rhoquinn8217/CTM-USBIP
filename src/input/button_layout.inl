@@ -127,6 +127,66 @@ inline const Layout kDs5Layout = {
     10, 0x06,
 };
 
+// ⭐ THE DS4 USB REPORT 0x01, which is what both DS4 maps put on the wire: the
+// Bluetooth map copies it out of report 0x11, and the wired map is a straight
+// pass-through of the pad's own.
+//
+// ⚠️⚠️ IT IS THE DUALSENSE'S ORDER, SHIFTED -- and that near-miss is exactly why
+// a DS4 wore the DualSense's table for so long. The buttons sit three bytes
+// EARLIER and the analog triggers three bytes LATER:
+//
+//   DualSense   buttons [8][9][10],  analog triggers [5][6]
+//   DualShock 4 buttons [5][6][7],   analog triggers [8][9]
+//
+//   [5]  low nibble: the d-pad as an 8-way HAT, centred at 8
+//        high nibble: square 0x10, cross 0x20, circle 0x40, triangle 0x80
+//   [6]  L1 0x01, R1 0x02, L2 0x04, R2 0x08,
+//        share 0x10, options 0x20, L3 0x40, R3 0x80
+//   [7]  PS 0x01, touchpad-click 0x02, then a COUNTER in the upper six bits
+//
+// ⛔⛔ THE COUNTER IS WHAT MADE THE OLD MISTAKE SO BAD. Reading this pad with
+// the DualSense's table put index 16 (PS) on [10], a DS4 timestamp byte that
+// changes on most reports: a home button firing continuously. It is also why
+// extraMask below is 0x02 and NOT the remainder of [7] -- config mode asks "is
+// anything held", and a counter would answer yes forever.
+//
+// ✅ THE REST STATE IS MEASURED, not assumed. 1,468,405 reports from a wired
+// DS4, captured through this project's own listener on 2026-09-14, were every
+// one of them [5]=0x08 (hat centred, no face bits) and [6]=0x00. ⓘ They were
+// logged as unmapped SOURCE reports; the wired map is a pass-through, so the
+// destination bytes these offsets describe are the same ones.
+//
+// ⓘ Unlike the Xbox pad, the triggers have BOTH: digital bits at [6] and analog
+// values at [8][9]. And unlike a DualShock 3, the face buttons are plain bits
+// -- Sony dropped pressure sensitivity for this pad.
+inline const Layout kDs4Layout = {
+    "ds4", 5, 0x0f, 8, 8,
+    {
+        { kSpotBit,    5, 0x20 },   // 0  cross
+        { kSpotBit,    5, 0x40 },   // 1  circle
+        { kSpotBit,    5, 0x10 },   // 2  square
+        { kSpotBit,    5, 0x80 },   // 3  triangle
+        { kSpotBit,    6, 0x01 },   // 4  L1
+        { kSpotBit,    6, 0x02 },   // 5  R1
+        { kSpotBit,    6, 0x04 },   // 6  L2 (digital bit; the analog value is at [8])
+        { kSpotBit,    6, 0x08 },   // 7  R2 (analog at [9])
+        { kSpotBit,    6, 0x10 },   // 8  share / select
+        { kSpotBit,    6, 0x20 },   // 9  options / start
+        { kSpotBit,    6, 0x40 },   // 10 L3
+        { kSpotBit,    6, 0x80 },   // 11 R3
+        { kSpotHatDir, 0, kDirUp },     // 12 d-pad up    -- hat in [5], low nibble
+        { kSpotHatDir, 0, kDirDown },   // 13 d-pad down
+        { kSpotHatDir, 0, kDirLeft },   // 14 d-pad left
+        { kSpotHatDir, 0, kDirRight },  // 15 d-pad right
+        { kSpotBit,    7, 0x01 },   // 16 PS / home
+    },
+    // Rest: LX LY RX RY centre at 0x80, then L2 and R2 analog at 0.
+    { { 1, 4, 0x80 }, { 8, 2, 0x00 } },
+    // Touchpad click 0x02 has no standard index. ⛔ The counter filling the top
+    // six bits of [7] is deliberately NOT here -- see the note above.
+    7, 0x02,
+};
+
 // ⭐ THE XBOX GIP 0x20 REPORT, read off maps/xbox_gip_usb_over_xbox_bt.map.
 //
 // Derived three times independently and cross-checked before it was written;
@@ -176,17 +236,22 @@ inline const Layout kXboxLayout = {
 // Which layout a pad reads. nullptr means "not one we can read", which is the
 // gate: a pad with no layout never reaches a byte.
 //
-// ⚠️⚠️ A DS4 IS GIVEN THE DUALSENSE LAYOUT, AND THAT IS KNOWN TO BE WRONG.
-// Its buttons sit at [5]/[6]/[7] where a DualSense puts them at [8]/[9]/[10],
-// so index 16 reads a timestamp byte that flips most reports. That is today's
-// behaviour, preserved deliberately: correcting it needs a DS4 table derived
-// from its own map with the same care this Xbox one was, and guessing it here
-// would trade a known fault for an unknown one. It has its own ticket.
+// ⚠️ A DS4 USED TO BE HANDED THE DUALSENSE LAYOUT, and it was known to be
+// wrong: its buttons sit at [5]/[6]/[7] where a DualSense puts them at
+// [8]/[9]/[10], so index 16 read a timestamp byte that flips on most reports.
+// ✅ Corrected 2026-09-14 with kDs4Layout above, derived from the DS4's own
+// report with its rest state measured off real hardware.
+//
+// ⓘ THE VOCABULARY HERE IS THE SETTINGS KIND -- what device_button_section_for()
+// answers from the descriptor -- and NOT the session kind the TV sends. So
+// "ds4" covers a cabled pad as well as a Bluetooth one, and there is
+// deliberately no "ds4_usb" arm: config_store::settings_kind_for() collapses
+// the two before anything gets here.
 inline const Layout *layout_for(const char *kind)
 {
     if (kind == nullptr) return nullptr;
     if (std::strcmp(kind, "ds5") == 0 || std::strcmp(kind, "ds5_edge") == 0) return &kDs5Layout;
-    if (std::strcmp(kind, "ds4") == 0) return &kDs5Layout;   // see the warning above
+    if (std::strcmp(kind, "ds4") == 0) return &kDs4Layout;
     if (std::strcmp(kind, "xbox") == 0) return &kXboxLayout;
     return nullptr;
 }

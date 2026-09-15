@@ -345,8 +345,8 @@ static bool rest_valid_busid(const std::string &busid)
 static bool rest_valid_kind(const std::string &kind)
 {
     // Mirror of the kind list in handle_agent_client — keep the two in sync.
-    return kind == "ds4" || kind == "ds5" || kind == "ds5_usb" || kind == "ds5e_usb" ||
-           kind == "hid" || kind == "puck" || kind == "xbox";
+    return kind == "ds4" || kind == "ds4_usb" || kind == "ds5" || kind == "ds5_usb" ||
+           kind == "ds5e_usb" || kind == "hid" || kind == "puck" || kind == "xbox";
 }
 
 static bool rest_bearer_matches(const std::string &headerValue, const std::string &token)

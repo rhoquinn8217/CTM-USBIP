@@ -57,6 +57,7 @@ int run_button_layout_tests()
 {
     const Layout *ds5 = layout_for("ds5");
     const Layout *edge = layout_for("ds5_edge");
+    const Layout *ds4 = layout_for("ds4");
     const Layout *xbox = layout_for("xbox");
 
     section("layout: a pad resolves to a layout, and an unknown one to none");
@@ -66,10 +67,11 @@ int run_button_layout_tests()
         CTM_CHECK(xbox != nullptr);
         // An Edge reads the same bytes as a DualSense.
         CTM_CHECK(ds5 == edge);
-        // ⓘ A DS4 is deliberately given the DualSense layout today, which is
-        // KNOWN WRONG and has its own ticket. Written down so the day it is
-        // corrected, this line fails and says why.
-        CTM_CHECK(layout_for("ds4") == ds5);
+        // ✅ A DS4 HAS ITS OWN LAYOUT NOW. This line used to assert that it got
+        // the DualSense's, with a note saying it should fail the day someone
+        // corrected that. 2026-09-14 was the day.
+        CTM_CHECK(ds4 != nullptr);
+        CTM_CHECK(ds4 != ds5);
         CTM_CHECK(layout_for("puck") == nullptr);
         CTM_CHECK(layout_for("") == nullptr);
         CTM_CHECK(layout_for(nullptr) == nullptr);
@@ -131,6 +133,97 @@ int run_button_layout_tests()
         r[9] = 0xFF;
         clear_button(*ds5, r.data(), r.size(), kBtnL1);   // 0x01
         CTM_CHECK_EQ(static_cast<int>(r[9]), 0xFE);
+    }
+
+    section("layout: the DS4 buttons sit in bytes 5, 6 and 7");
+    {
+        std::vector<uint8_t> r = blank_report(16);
+        r[5] = 0x20;                       // cross
+        CTM_CHECK(is_pressed(*ds4, r.data(), r.size(), kBtnFaceDown));
+        CTM_CHECK(!is_pressed(*ds4, r.data(), r.size(), kBtnFaceRight));
+
+        r = blank_report(16);
+        r[5] = 0x80;                       // triangle -- the TOP face button
+        CTM_CHECK(is_pressed(*ds4, r.data(), r.size(), kBtnFaceUp));
+        r[5] = 0x10;                       // square -- the LEFT one
+        CTM_CHECK(is_pressed(*ds4, r.data(), r.size(), kBtnFaceLeft));
+
+        r = blank_report(16);
+        r[6] = 0x01;                       // L1
+        CTM_CHECK(is_pressed(*ds4, r.data(), r.size(), kBtnL1));
+        r[6] = 0x80;                       // R3
+        CTM_CHECK(is_pressed(*ds4, r.data(), r.size(), kBtnR3));
+        r[6] = 0x10;                       // share, which is select
+        CTM_CHECK(is_pressed(*ds4, r.data(), r.size(), kBtnSelect));
+
+        r = blank_report(16);
+        r[7] = 0x01;                       // PS / home
+        CTM_CHECK(is_pressed(*ds4, r.data(), r.size(), kBtnHome));
+    }
+
+    section("layout: the DS4 d-pad is a hat in the low nibble of byte 5");
+    {
+        std::vector<uint8_t> r = blank_report(16);
+        r[5] = 8;                          // centred
+        CTM_CHECK(!is_pressed(*ds4, r.data(), r.size(), kBtnDpadUp));
+        CTM_CHECK(!is_pressed(*ds4, r.data(), r.size(), kBtnDpadLeft));
+
+        r[5] = 0;                          // up
+        CTM_CHECK(is_pressed(*ds4, r.data(), r.size(), kBtnDpadUp));
+        r[5] = 1;                          // up-right holds BOTH
+        CTM_CHECK(is_pressed(*ds4, r.data(), r.size(), kBtnDpadUp));
+        CTM_CHECK(is_pressed(*ds4, r.data(), r.size(), kBtnDpadRight));
+
+        // ⭐ The face buttons share this byte, so a held direction must survive
+        // a face press and vice versa.
+        r[5] = static_cast<uint8_t>(2 | 0x20);   // right, plus cross
+        CTM_CHECK(is_pressed(*ds4, r.data(), r.size(), kBtnDpadRight));
+        CTM_CHECK(is_pressed(*ds4, r.data(), r.size(), kBtnFaceDown));
+    }
+
+    section("layout: the DS4 counter in byte 7 is not a home button");
+    {
+        // ⛔⛔ THE EXACT FAULT THE OLD TABLE CAUSED, in one check. A DS4 read
+        // with the DualSense layout put home on byte 10 -- a DS4 timestamp --
+        // and byte 7's top six bits are a counter that advances every report.
+        // Either way a home button fires continuously. Neither may happen here.
+        std::vector<uint8_t> r = blank_report(16);
+        r[7] = 0xFC;                       // counter at maximum, PS bit clear
+        CTM_CHECK(!is_pressed(*ds4, r.data(), r.size(), kBtnHome));
+        r[7] = 0xFD;                       // same counter, PS bit set
+        CTM_CHECK(is_pressed(*ds4, r.data(), r.size(), kBtnHome));
+    }
+
+    section("layout: a DS4 trigger pull is not a face button");
+    {
+        // ⭐ WHY THE OLD MISTAKE WAS INVISIBLE RATHER THAN OBVIOUS. The two
+        // pads' fields overlap: byte 8 is an analog trigger on a DS4 and the
+        // face buttons on a DualSense. So pulling L2 on a DS4 looked like
+        // pressing face buttons, and no button was reported wrong until then.
+        std::vector<uint8_t> r = blank_report(16);
+        r[5] = 8;                          // hat centred, no faces
+        r[8] = 0x80;                       // L2 pulled halfway
+        CTM_CHECK(!is_pressed(*ds4, r.data(), r.size(), kBtnFaceUp));
+        CTM_CHECK(!is_pressed(*ds4, r.data(), r.size(), kBtnFaceDown));
+        // The DualSense table, on the very same bytes, disagrees -- which is
+        // the bug, written down.
+        CTM_CHECK(is_pressed(*ds5, r.data(), r.size(), kBtnFaceUp));
+    }
+
+    section("layout: a DS4 blanked to rest matches what real hardware sends");
+    {
+        // ✅ Measured: 1,468,405 reports from a wired DS4 were every one of
+        // them [5]=0x08 and [6]=0x00 while nothing was touched.
+        std::vector<uint8_t> r(16, 0xFF);
+        blank_to_rest(*ds4, r.data(), r.size(), false);
+        CTM_CHECK(r[5] == 0x08);           // hat centred, faces clear
+        CTM_CHECK(r[6] == 0x00);           // shoulders, start, stick clicks
+        CTM_CHECK(r[1] == 0x80 && r[2] == 0x80 && r[3] == 0x80 && r[4] == 0x80);
+        CTM_CHECK(r[8] == 0x00 && r[9] == 0x00);   // analog L2 and R2
+        CTM_CHECK((r[7] & 0x03) == 0x00);  // PS and touchpad-click cleared
+        // ⛔ AND THE COUNTER IS LEFT ALONE. It is not a button, and blanking it
+        // would be writing over a field the game may be counting on.
+        CTM_CHECK((r[7] & 0xFC) == 0xFC);
     }
 
     section("layout: the Xbox buttons sit in bytes 4 and 5, behind the GIP header");

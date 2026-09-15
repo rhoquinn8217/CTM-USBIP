@@ -134,7 +134,11 @@ inline std::string settings_kind_for(const std::string &sessionKind)
     // ⓘ These are the session kinds the TV actually sends -- checked against
     // bridge_profile_for_kind(). Adding one here that the TV never sends would
     // create a config nothing can ever link to.
-    if (sessionKind == "ds4") return "ds4";
+    // ⚠️ BOTH DS4 KINDS COLLAPSE TO ONE SECTION, for the reason spelled out
+    // above: "ds4_usb" is how the pad is ATTACHED, and a config file is named
+    // for what the pad IS. Miss this and a cabled DS4's config links with a
+    // cheerful success and silently resolves nothing.
+    if (sessionKind == "ds4" || sessionKind == "ds4_usb") return "ds4";
     if (sessionKind == "xbox") return "xbox";
     // ⛔ NOT "puck". Composite devices take an early return in handle_input and
     // are forwarded verbatim -- they never reach the paths a config would act

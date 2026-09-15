@@ -71,7 +71,8 @@ static std::wstring find_relative_asset(const std::wstring &relative)
 
 static std::wstring bridge_profile_for_kind(const std::string &kind)
 {
-    if (kind == "ds4") {
+    if (kind == "ds4" || kind == "ds4_usb") {
+        // The same pad either way. Only the wire format the map reads differs.
         return find_relative_asset(L"profiles\\descriptors\\ds4_composite.profile");
     }
     if (kind == "ds5") {
@@ -96,6 +97,17 @@ static std::wstring bridge_map_for_kind(const std::string &kind)
 {
     if (kind == "ds4") {
         return find_relative_asset(L"maps\\ds4_usb_over_ds4_bt.map");
+    }
+    if (kind == "ds4_usb") {
+        // ⭐⭐ A CABLED DS4 NEEDS NO TRANSLATION. Its own report 0x01 is already
+        // what the virtual wired DS4 emits, so this map is a pass-through, the
+        // way the wired DualSense's is.
+        //
+        // ⛔ Sending a cabled pad through the BLUETOOTH map was the fault: that
+        // map triggers on source report 0x11, a cabled pad sends 0x01, so
+        // nothing parsed its input. The pad bridged, read PLUGGED, and did
+        // nothing in the game.
+        return find_relative_asset(L"maps\\ds4_usb_over_ds4_usb.map");
     }
     if (kind == "ds5") {
         return find_ds5_map_file();
@@ -785,8 +797,8 @@ static void handle_agent_client(SOCKET client, const sockaddr_in &peer)
         unsigned long port = 0;
         std::string busIdAscii;
         input >> kind >> port >> busIdAscii;
-        if ((kind != "ds4" && kind != "ds5" && kind != "ds5_usb" && kind != "ds5e_usb" &&
-             kind != "hid" && kind != "puck" && kind != "xbox") ||
+        if ((kind != "ds4" && kind != "ds4_usb" && kind != "ds5" && kind != "ds5_usb" &&
+             kind != "ds5e_usb" && kind != "hid" && kind != "puck" && kind != "xbox") ||
             port < 1024 || port > 65535 ||
             busIdAscii.empty() || busIdAscii.size() > 31) {
             send_text(client, "ERR bad bridge args\n");
