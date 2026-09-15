@@ -111,7 +111,7 @@ inline const Setting kGyroMouseMode[] = {
        controllers that have no touchpad at all, and a preset that needs one
        cannot serve them. This is a DESKTOP config -- it already binds Cross to
        Enter and the d-pad to the arrows, so there is no game to protect a stick
-       for. The DS5-only shapes now say so in their names instead.
+       for. The pad-specific shapes name their pads instead.
        ⛔ So do not "restore" the touchpad here. The pad-specific version of this
        idea is DS5-gyro-to-mouse, which uses the touchpad because it can. */
     { "left_stick_mode", "scroll" },
@@ -326,20 +326,18 @@ inline const Preset kPresets[] = {
       "else is bound: every button stays with the game.",
       // A gyro and an analog L2: DualSense, Edge, DS4.
       true, true, true, false, kL2GyroAiming, CTM_PRESET_COUNT_OF(kL2GyroAiming) },
-    { "DS5-touchpad-to-mouse",
+    { "DS5-DS4-touchpad-to-mouse",
       "The touchpad behaves like a laptop trackpad: one finger moves the "
       "cursor, two fingers scroll the page with them, and a tap clicks. The "
       "most familiar of the three, and the easiest to pick up, but your hand "
       "leaves the sticks to use it. Square opens the on-screen keyboard.",
-      // A two-finger touchpad: DualSense, Edge, DS4.
-      // ⛔⛔ THE NAME STILL SAYS DS5, AND NOT FOR WANT OF A DECISION. rhoquinn8217
-      // chose "DS5/DS4-touchpad-to-mouse" (2026-09-15), and a "/" cannot go in a
-      // preset name: the page names every config made from a preset after it
-      // (nextConfigName swaps hyphens for underscores and keeps the "/"), and
-      // config_store::valid_name() refuses anything but letters, digits, _ and
-      // -, because a config name is a filename and a URL path segment. Every
-      // attempt to use the preset would be refused with a 409. A name that keeps
-      // to those characters is rhoquinn8217's call.
+      // A two-finger touchpad: DualSense, Edge, DS4, and the name says both
+      // (rhoquinn8217, 2026-09-15).
+      // ⛔ A HYPHEN, NOT "DS5/DS4", which was the first choice. The page names
+      // every config made from a preset after it (nextConfigName swaps only the
+      // hyphens), and config_store::valid_name() takes letters, digits, _ and -
+      // alone, because a config name is a filename and a URL path segment. A "/"
+      // here would refuse every attempt to use the preset with a 409.
       // ⓘ The description needs no change: it names no controller.
       true, true, true, false, kTouchpadMouseMode, CTM_PRESET_COUNT_OF(kTouchpadMouseMode) },
     { "DS5-gyro-to-mouse",
