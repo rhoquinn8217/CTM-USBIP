@@ -860,8 +860,11 @@ inline void apply(const void *deviceKey,
         // ⭐ Publish when we have an opinion, giving a trigger up included --
         // the same rule as the main path, and for the same reason: going
         // silent leaves whatever was last published held forever.
+        // ⓘ PER DEVICE, like the keys above and for the same reason: every
+        // gated pad publishes here on every report, and one shared level let a
+        // pad at rest release another pad's click at report rate.
         if (gateAnyMouse || gateGaveUpATrigger) {
-            ctm_mouse_device::set_buttons(gateMouseButtons);
+            ctm_mouse_device::set_buttons_for(deviceKey, gateMouseButtons);
         }
         if (gateAnyMouse) {
             ctm_gyro_mouse_ensure_mouse_started();
@@ -908,9 +911,9 @@ inline void apply(const void *deviceKey,
             // ⛔⛔ AND THE MASK STILL HAS TO BE PUBLISHED. Skipping the button
             // here also skips the publish below, which is what LATCHES it: if
             // this trigger was the only mouse binding, anyMouse stays false,
-            // set_buttons is never called again, and whatever g_buttons last
-            // held is held forever. rhoquinn8217, 2026-09-11: *"click with R2
-            // is still sticking and won't unstick."*
+            // set_buttons_for is never called again, and whatever this pad last
+            // published is held forever. rhoquinn8217, 2026-09-11: *"click with
+            // R2 is still sticking and won't unstick."*
             // ⓘ The comment on the gate path above had already worked out that
             // publishing only while something is HELD latches the release. This
             // is one step further out: publishing only while something is BOUND
@@ -1033,14 +1036,20 @@ inline void apply(const void *deviceKey,
         ctm_keyboard_device::set_state_for(deviceKey, modifiers, keys, keyCount);
     }
     // ⓘ Only when something is bound to a mouse button, so a controller with no
-    // mouse bindings never touches the shared state.
+    // mouse bindings never touches the mouse's state.
     // ⭐ PUBLISH WHENEVER WE HAVE AN OPINION, which includes "this trigger is
     // not mine any more" -- that is precisely when the bit needs clearing.
     // ⓘ Starting the mouse is a separate question: a suppressed trigger may be
     // bound to a key, and trigger_click starts the mouse itself when it needs
     // one.
+    // ⛔⛔ UNDER THIS PAD'S OWN KEY (rhoquinn8217, 2026-09-15). This was one
+    // level every pad wrote whole, and every pad with a mouse binding publishes
+    // on every report: with a DS4 and an Xbox pad bridged, the DS4 at rest
+    // released the Xbox pad's held RT between its reports, and a drag became
+    // *"double or multi clicking"*. Each pad's mask is kept apart now and the
+    // mouse sends the union (mouse_held.inl).
     if (anyMouse || gaveUpATrigger) {
-        ctm_mouse_device::set_buttons(mouseButtons);
+        ctm_mouse_device::set_buttons_for(deviceKey, mouseButtons);
         if (device_config_bool(section.c_str(), "trigger_probe", false)) {
             static uint8_t lastPublished = 0xff;
             if (mouseButtons != lastPublished) {

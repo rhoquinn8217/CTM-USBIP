@@ -34,6 +34,9 @@ int g_pushCount = 0;
 int g_wheelSum = 0;
 uint8_t g_lastClick = 0;
 uint8_t g_dragMask = 0;
+// ⓘ Each pad's drag, kept apart as the mouse keeps it; g_dragMask is every
+// pad's OR'd, which is what the host would see held.
+std::map<const void *, uint8_t> g_dragFor;
 int g_clickCount = 0;
 int g_ensureCalls = 0;
 
@@ -47,6 +50,7 @@ void reset_stubs()
     g_wheelSum = 0;
     g_lastClick = 0;
     g_dragMask = 0;
+    g_dragFor.clear();
     g_clickCount = 0;
     g_ensureCalls = 0;
 }
@@ -158,7 +162,13 @@ namespace ctm_mouse_device {
 namespace {   // internal linkage, same reason as above
 inline void add_wheel(int ticks) { g_wheelSum += ticks; }
 inline void add_click(uint8_t mask) { g_lastClick = mask; ++g_clickCount; }
-inline void set_drag(uint8_t mask) { g_dragMask = mask; }
+inline void set_drag_for(const void *deviceKey, uint8_t mask)
+{
+    if (mask != 0) g_dragFor[deviceKey] = mask;
+    else g_dragFor.erase(deviceKey);
+    g_dragMask = 0;
+    for (const auto &entry : g_dragFor) g_dragMask = static_cast<uint8_t>(g_dragMask | entry.second);
+}
 }
 } // namespace ctm_mouse_device
 
@@ -510,6 +520,40 @@ int run_touch_mouse_tests()
         CTM_CHECK_EQ(static_cast<int>(g_dragMask), 0x01);
         ctm_touch_mouse::forget(kDev);
         CTM_CHECK_EQ(static_cast<int>(g_dragMask), 0);
+    }
+
+    section("touch drag: one pad dropping its drag leaves another pad's held");
+    {
+        // ⛔ The drag was one level for every pad until 2026-09-15, so a second
+        // pad lifting its finger let go of the first pad's drag mid-move. ⓘ The
+        // stub keeps each pad's drag apart as the mouse does, so this also fails
+        // if the hook stops passing its own pad.
+        reset_stubs();
+        fresh_device();
+        const void *const kOtherDev = reinterpret_cast<const void *>(0x4);
+        ctm_touch_mouse::forget(kOtherDev);
+        g_cfg["touchpad_click_drag"] = "true";
+
+        auto a = rest_report();
+        set_point(a, 0, true, 1, 300, 300);
+        a[10] |= 0x02;
+        run_step(a, 0);                                  // this pad grabs
+        auto b = rest_report();
+        set_point(b, 0, true, 1, 900, 600);
+        b[10] |= 0x02;
+        ctm_touch_mouse::step(kOtherDev, "ds5", b.data(), b.size(), 0);   // so does the other
+        CTM_CHECK_EQ(static_cast<int>(g_dragMask), 0x01);
+
+        set_point(b, 0, false, 1, 900, 600);
+        b[10] &= ~0x02;
+        ctm_touch_mouse::step(kOtherDev, "ds5", b.data(), b.size(), 16);  // the other lifts
+        CTM_CHECK_EQ(static_cast<int>(g_dragMask), 0x01); // ⭐ this pad's drag holds
+
+        a[10] &= ~0x02;
+        set_point(a, 0, false, 1, 300, 300);
+        run_step(a, 32);                                 // this pad lifts too
+        CTM_CHECK_EQ(static_cast<int>(g_dragMask), 0);
+        ctm_touch_mouse::forget(kOtherDev);
     }
 
     // ⭐ THE RULE CHANGED HERE (rhoquinn8217, 2026-09-02). This used to assert

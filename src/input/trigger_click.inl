@@ -580,7 +580,7 @@ inline void on_ds5_input(const void *deviceKey,
                 return;
             }
         }
-        ctm_mouse_device::set_trigger_buttons(0);
+        ctm_mouse_device::set_trigger_buttons_for(deviceKey, 0);
         if (had) ctm_keyboard_device::set_trigger_keys_for(deviceKey, 0, nullptr, 0);
         ctm_gyro_mouse::set_gyro_hold(deviceKey, false);
         return;
@@ -745,7 +745,10 @@ inline void on_ds5_input(const void *deviceKey,
         }
     }
 
-    ctm_mouse_device::set_trigger_buttons(buttons);
+    // ⓘ Under this pad's key, as the keys below are: every pad with a bound
+    // trigger publishes here on every report, and one shared level let a pad at
+    // rest release another pad's press (2026-09-15, mouse_held.inl).
+    ctm_mouse_device::set_trigger_buttons_for(deviceKey, buttons);
     if (wantsKeys) {
         ctm_keyboard_device::set_trigger_keys_for(deviceKey, mods, keys, keyCount);
         ctm_rebind_ensure_keyboard_started();
@@ -768,7 +771,8 @@ inline void forget(const void *deviceKey)
         }
     }
     if (had) {
-        ctm_mouse_device::set_trigger_buttons(0);
+        // ⓘ This pad's press only; another pad's carries on.
+        ctm_mouse_device::set_trigger_buttons_for(deviceKey, 0);
         ctm_keyboard_device::set_trigger_keys_for(deviceKey, 0, nullptr, 0);
     }
     ctm_gyro_mouse::set_gyro_hold(deviceKey, false);

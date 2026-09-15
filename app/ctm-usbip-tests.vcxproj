@@ -83,6 +83,7 @@
     <ClCompile Include="..\tests\touch_mouse_test.cpp" />
     <ClCompile Include="..\tests\trigger_effect_test.cpp" />
     <ClCompile Include="..\tests\trigger_click_test.cpp" />
+    <ClCompile Include="..\tests\mouse_held_test.cpp" />
     <ClCompile Include="..\tests\button_layout_test.cpp" />
     <ClCompile Include="..\tests\schema_json_test.cpp" />
     <ClCompile Include="..\tests\stick_mouse_test.cpp" />

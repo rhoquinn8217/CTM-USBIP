@@ -24,6 +24,7 @@ int run_same_controller_tests();
 int run_host_audio_settings_tests();
 int run_trigger_effect_tests();
 int run_trigger_click_tests();
+int run_mouse_held_tests();
 int run_button_layout_tests();
 int run_schema_json_tests();
 
@@ -91,6 +92,7 @@ int main(int argc, char **argv)
     run_touch_mouse_tests();
     run_trigger_effect_tests();
     run_trigger_click_tests();
+    run_mouse_held_tests();
     run_button_layout_tests();
     run_stick_mouse_tests();
     run_osk_tests();

@@ -232,6 +232,10 @@ public:
         // able to release it -- and clearing everyone's would release the other
         // pad's keys mid-press.
         ctm_keyboard_forget_device(this);
+        // ⛔ And its held MOUSE buttons, on every level, for the same two reasons
+        // (2026-09-15): they are per device now too, so nothing else would ever
+        // release a button this pad held at unbridge.
+        mouse_forget_device(this);
         rebind_forget_pad(this);
         stop_audio_stream();
     }

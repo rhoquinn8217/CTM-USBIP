@@ -137,6 +137,9 @@ void trigger_click_forget(const void *deviceKey);
 // ⓘ Releases only THIS controller's held keys -- they are kept per device so
 // two gated pads cannot cancel each other.
 void ctm_keyboard_forget_device(const void *deviceKey);
+// ⓘ And its held MOUSE buttons, kept per device for the same reason. Defined in
+// mouse_device.inl. No ctm_ prefix: new, and ours.
+void mouse_forget_device(const void *deviceKey);
 // ⓘ And this controller's chord and on-screen keyboard state, kept per pad for
 // the same reason. No ctm_ prefix: new, and ours.
 void rebind_forget_pad(const void *deviceKey);

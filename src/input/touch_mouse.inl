@@ -114,7 +114,12 @@ inline void forget(const void *deviceKey)
     auto it = g_touch.find(deviceKey);
     // ⛔ A controller that unbridges mid-drag must not leave the mouse button
     // held down on the desktop with nothing able to release it.
-    if (it != g_touch.end() && it->second.dragging) ctm_mouse_device::set_drag(0x00);
+    // ⓘ ITS OWN drag only: the level is kept per pad (mouse_held.inl), so a drag
+    // another pad is holding carries on. The device's stop() also releases every
+    // mouse button this pad holds; this lets the drag go with its own state.
+    if (it != g_touch.end() && it->second.dragging) {
+        ctm_mouse_device::set_drag_for(deviceKey, 0x00);
+    }
     g_touch.erase(deviceKey);
 }
 
@@ -173,7 +178,7 @@ inline void step(const void *deviceKey, const std::string &section,
     // clean rather than against a stale anchor.
     if (!cursorOn && !scrollOn && !tapsOn &&
         !device_config_bool(section.c_str(), "touchpad_click_drag", false)) {
-        if (st.dragging) ctm_mouse_device::set_drag(0x00);
+        if (st.dragging) ctm_mouse_device::set_drag_for(deviceKey, 0x00);
         st = TouchState();
         return;
     }
@@ -197,7 +202,7 @@ inline void step(const void *deviceKey, const std::string &section,
     // anchor rather than measuring movement against where a finger was before
     // the gate closed -- which would arrive as one jump.
     if (!ctm_gyro_mouse::gate_open(gate, lay, data, len)) {
-        if (st.dragging) ctm_mouse_device::set_drag(0x00);
+        if (st.dragging) ctm_mouse_device::set_drag_for(deviceKey, 0x00);
         st = TouchState();
         return;
     }
@@ -216,7 +221,7 @@ inline void step(const void *deviceKey, const std::string &section,
             // finger is an ordinary click and is left alone.
             if (padPressed && anyFinger) {
                 st.dragging = true;
-                ctm_mouse_device::set_drag(0x01);
+                ctm_mouse_device::set_drag_for(deviceKey, 0x01);
                 ctm_gyro_mouse_ensure_mouse_started();
             }
         } else if (!anyFinger) {
@@ -224,12 +229,12 @@ inline void step(const void *deviceKey, const std::string &section,
             // released -- holding a button down for the length of a drag is
             // the thing this exists to avoid.
             st.dragging = false;
-            ctm_mouse_device::set_drag(0x00);
+            ctm_mouse_device::set_drag_for(deviceKey, 0x00);
         }
     } else if (st.dragging) {
         // Turned off mid-drag: never leave the button held.
         st.dragging = false;
-        ctm_mouse_device::set_drag(0x00);
+        ctm_mouse_device::set_drag_for(deviceKey, 0x00);
     }
 
     const TouchPoint p1 = read_point(data, static_cast<size_t>(lay.touch.finger1));

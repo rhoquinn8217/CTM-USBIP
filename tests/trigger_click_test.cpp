@@ -92,6 +92,9 @@ std::string device_settings_section(const char *kind, const std::string &linked)
 }
 
 // What the module drives, recorded rather than performed.
+// ⓘ Each pad's trigger buttons, kept apart as the mouse keeps them; g_buttons is
+// every pad's OR'd, which is what the host would see held.
+std::map<const void *, uint8_t> g_buttonsFor;
 uint8_t g_buttons = 0;
 std::map<const void *, bool> g_held;
 std::map<const void *, std::vector<uint8_t>> g_keys;
@@ -128,7 +131,13 @@ inline const KeyName *key_for(const std::string &code)
 }  // namespace ctm_rebind
 
 namespace ctm_mouse_device {
-inline void set_trigger_buttons(uint8_t mask) { g_buttons = mask; }
+inline void set_trigger_buttons_for(const void *key, uint8_t mask)
+{
+    if (mask != 0) g_buttonsFor[key] = mask;
+    else g_buttonsFor.erase(key);
+    g_buttons = 0;
+    for (const auto &entry : g_buttonsFor) g_buttons = static_cast<uint8_t>(g_buttons | entry.second);
+}
 }
 
 namespace ctm_gyro_mouse {
@@ -179,6 +188,7 @@ void reset_all()
     g_strings.clear();
     g_ints.clear();
     g_bools.clear();
+    g_buttonsFor.clear();
     g_buttons = 0;
     g_held.clear();
     g_keys.clear();
@@ -690,6 +700,9 @@ int run_trigger_click_tests()
         on_ds5_input(&padB, descriptor, "", report_with(0, 0).data(), 16);
         CTM_CHECK(!held_for(&padB));
         CTM_CHECK(held_for(&padA));               // ⭐ A is untouched by B
+        // ⛔ Nor is A's press. B at rest publishes "nothing held" on every report,
+        // and until 2026-09-15 that went into the one level A was holding.
+        CTM_CHECK_EQ((int)g_buttons, 0x01);
         // ⛔ And a pad that goes away leaves nothing held behind it.
         forget(&padA);
         CTM_CHECK(!held_for(&padA));
