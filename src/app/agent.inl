@@ -445,6 +445,10 @@ static void bridge_session_worker(AgentBridgeSession *session)
     // ⓘ Unfocused but open counts as closed here: it is rebuilt on the new
     // controller, which is what makes a pad picked up from the sofa land
     // somewhere useful.
+    //
+    // ⭐ EVERY KIND, a keyboard or a mouse as much as a controller (rhoquinn8217,
+    // 2026-09-15): "I want this to be a confirmation for the user that the device
+    // they wanted to bridge has." A device that takes no config still opens it.
     if (ctm_open_ui::g_open_ui && !ctm_open_ui::window_has_foreground()) {
         device_log::session_w() << L"bridge: opening the settings window on "
                    << widen_ascii(session->ordinal.c_str(), session->ordinal.size());
@@ -473,7 +477,9 @@ static void bridge_session_worker(AgentBridgeSession *session)
         // ⓘ ctm_chord_show_ui takes the one-at-a-time claim itself and leaves
         // if it cannot get it -- and it sets the target first either way, so
         // bridging two pads in quick succession lands on the second, which is
-        // the one just picked up.
+        // the one just picked up. ⚠️ Only while the open in flight has not
+        // built its URL yet; after that the window keeps the device it was
+        // launched for (see the note beside claim_open_on).
         const std::string target = session->ordinal;
         std::thread([target]() { ctm_chord_show_ui(target); }).detach();
     }

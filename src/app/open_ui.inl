@@ -139,12 +139,10 @@ inline std::wstring new_ui_token()
 // is claiming to be a newer window.
 // ⭐ Which controller the NEXT window should open on. Set just before opening,
 // cleared as it is used -- so a target can never leak into an unrelated open.
+// ⚠️ Both this and the claim below are under g_open_mutex: bridges set the
+// target from their own threads, and raise_when_ready clears it from another.
+inline std::mutex g_open_mutex;
 inline std::wstring g_open_on_tab;
-
-inline void open_on_tab(const std::string &ordinal)
-{
-    g_open_on_tab.assign(ordinal.begin(), ordinal.end());
-}
 
 // ⛔⛔ ONE OPEN AT A TIME (rhoquinn8217, 2026-09-01: two bridged controllers
 // rapid-fired every button; bisected to this half).
@@ -157,16 +155,34 @@ inline void open_on_tab(const std::string &ordinal)
 //
 // ⓘ The loser does not queue: it has already set the target, and the open in
 // flight reads the target when it builds its URL -- so the LAST controller to
-// bridge is the one the window comes up on, which is the one you just picked up.
-inline std::atomic_bool g_open_in_flight{false};
+// bridge before then is the one the window comes up on, which is the one you
+// just picked up.
+// ⭐ After the URL is built the claim is still held, until the window exists
+// (raise_when_ready), and a target left in that time is forgotten: the window
+// keeps the device it was launched for, and the others are tabs in it.
+inline bool g_open_in_flight = false;
 
-inline bool claim_open()
+// ⛔ The target and the claim in ONE step. Apart, the open in flight could
+// clear the target between the two, and this caller then took the freed claim
+// with no target and opened on the wrong tab.
+inline bool claim_open_on(const std::string &ordinal)
 {
-    bool expected = false;
-    return g_open_in_flight.compare_exchange_strong(expected, true);
+    std::lock_guard<std::mutex> lock(g_open_mutex);
+    if (!ordinal.empty()) g_open_on_tab.assign(ordinal.begin(), ordinal.end());
+    if (g_open_in_flight) return false;
+    g_open_in_flight = true;
+    return true;
 }
 
-inline void release_open() { g_open_in_flight.store(false); }
+// ⓘ And the target goes with it. A launched window carries its own, so one a
+// loser left since belongs to nothing, and an open that never launched has no
+// window to give it to.
+inline void release_open()
+{
+    std::lock_guard<std::mutex> lock(g_open_mutex);
+    g_open_on_tab.clear();
+    g_open_in_flight = false;
+}
 
 inline std::wstring page_url_untokened(uint16_t restPort)
 {
@@ -190,6 +206,7 @@ inline std::wstring page_url(uint16_t restPort)
     // find it.
     //
     // ⓘ Empty for an ordinary open, and the page then does what it always did.
+    std::lock_guard<std::mutex> lock(g_open_mutex);
     if (!g_open_on_tab.empty()) {
         url += L"&tab=" + g_open_on_tab;
         g_open_on_tab.clear();      // one open, one target
@@ -268,9 +285,24 @@ inline bool window_exists()
 //
 // ⚠️ Runs on a thread because the window does not exist yet when the browser is
 // launched -- it has to be waited for.
-inline void raise_when_ready()
+// ⭐⭐ `release_claim`: THE ONE-AT-A-TIME CLAIM ENDS WHEN THE WINDOW EXISTS, not
+// when it was launched (rhoquinn8217, 2026-09-15). A keyboard of three parts
+// bridged three times in 200 ms and opened a window each, one of them at the
+// wrong size, and several controllers bridging together do the same: the claim
+// was released right after each launch, so the next bridge took it, found no
+// window yet -- a browser takes a moment to start -- and launched another.
+// ➡️ The caller hands the claim to this thread, which lets it go once the
+// window is found and raised, or after its three seconds, and forgets any tab
+// target a loser left in the meantime: the launched window already carries its
+// own. ⓘ Here rather than in the caller, which may be a controller's report
+// thread that must not wait.
+inline void raise_when_ready(bool release_claim = false)
 {
-    std::thread([]() {
+    std::thread([release_claim]() {
+        struct Done {
+            bool release;
+            ~Done() { if (release) release_open(); }
+        } done{release_claim};
         for (int i = 0; i < 60; ++i) {
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
             FindState state;
