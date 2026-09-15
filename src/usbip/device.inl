@@ -455,10 +455,12 @@ public:
         if (logMappedInput) {
             log_mapped_input_debug(data, length, report);
         }
-        // Gyro-to-mouse: read the DS5 motion out of the mapped report and feed
-        // the synthetic mouse. Never modifies `report` -- the controller passes
-        // through untouched; this only pushes a mouse delta into the mailbox.
-        // No-op for non-DualSense devices and when no gate is configured.
+        // Gyro-to-mouse: read the pad's motion out of the mapped report, at its
+        // own layout's offsets, and feed the synthetic mouse. Never modifies
+        // `report` -- the controller passes through untouched; this only pushes
+        // a mouse delta into the mailbox. No-op for a pad whose layout has no
+        // motion sensor (an Xbox pad, one with no layout) and when no gate is
+        // configured.
         ctm_gyro_mouse::on_ds5_input(this, profile_.device_descriptor, linked_config(),
                                      report.data, report.length);
 

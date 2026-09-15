@@ -34,6 +34,10 @@
 //   accel x int16 LE at [22], y at [24], z at [26]
 //   L2 analog [5], R2 analog [6]; buttons byte [9] (L1 bit0, R1 bit1)
 //   touchpad finger-1-down = !(byte[33] & 0x80)
+// ⓘ Those are the DUALSENSE'S. Every pad's own now lives in its layout
+// (input/button_layout.inl, MotionSpots and friends), and this file reads
+// through that: a DS4's gyro sits at [13] [15] [17] and its first finger at
+// [35], because [33] on a DS4 is the touch-packet count.
 //
 // GATE VALUES (config, per §6 of the design doc). Naming the gate turns the
 // feature on; blank/absent = off. always | L2 | R2 | L1 | R1 | touchpad |
@@ -315,7 +319,8 @@ public:
         motion_.SetCalibrationMode(GamepadMotionHelpers::CalibrationMode::Stillness);
     }
 
-    // Feed one mapped DS5 report. Returns true and fills `out` when there is a
+    // Feed one mapped report, read at `lay`'s offsets (the overload below takes
+    // a DualSense's). Returns true and fills `out` when there is a
     // non-zero mouse movement to emit; returns false when the gate is closed,
     // the config is off, or the movement rounded to zero this tick.
     // The controller's own gyro calibration. Set once when the session comes up;
@@ -723,8 +728,9 @@ inline MouseMailbox &shared_mailbox()
 inline std::atomic<uint32_t> g_diag_last_dx{0};
 inline std::atomic<uint32_t> g_diag_last_dy{0};
 
-// Called once per mapped DS5 input report. `descriptor` is the device
+// Called once per mapped input report, from any pad. `descriptor` is the device
 // descriptor (for vendor/product section matching); `d`/`len` is the report.
+// ⓘ The name is historical: a DualSense was the only pad it read.
 // Never modifies the report.
 // `deviceKey` identifies the physical controller for motion-state purposes --
 // pass the CtmUsbipDevice instance. It is used only as a map key and never
@@ -739,12 +745,10 @@ inline void on_ds5_input(const void *deviceKey,
                          const std::string &linkedConfig,
                          const uint8_t *d, size_t len)
 {
-    // ⛔ The CAPABILITY question. This reads motion out of the DUALSENSE input
-    // report at DualSense offsets -- the DS4 has a gyro too, but at different
-    // positions, so a kind check would have silently read the wrong bytes.
-    //
-    // ⓘ device_section_for now answers for controllers this path cannot handle,
-    // which is why it is no longer the right question to ask here.
+    // ⓘ The CAPABILITY question is answered below, by the pad's layout. It was
+    // once a kind check, which would have read a DS4's motion at DualSense
+    // offsets; device_section_for() says yes to a DS4, so it is not the
+    // question to ask here either.
     // ⛔ NOT WHILE THE PAD IS DRIVING THE SETTINGS PAGE.
     //
     // ⚠️ A pointer that moves while its buttons do nothing is a BROKEN mouse,

@@ -40,12 +40,11 @@
 
 namespace ctm_stick_mouse {
 
-// Stick axis byte offsets in the mapped DS5 report (id at [0]), the same
-// numbering as the confirmed trigger offsets at [5] and [6].
-constexpr size_t kLeftX = 1;
-constexpr size_t kLeftY = 2;
-constexpr size_t kRightX = 3;
-constexpr size_t kRightY = 4;
+// ⓘ The stick offsets are the pad's layout's (StickSpots in
+// input/button_layout.inl), read through axis_value() below. A DualSense and a
+// DS4 carry one byte per axis at [1] to [4]; an Xbox pad signed 16-bit values
+// at [10] to [16], with up reading positive. The DualSense-only constants that
+// stood here had no reader left and went (2026-09-15).
 
 // A report gap longer than this is treated as this long. A stall -- a paused
 // session, a breakpoint, a lost connection -- must not fling the cursor across
