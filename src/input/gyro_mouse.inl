@@ -1,4 +1,11 @@
-// Gyro-to-mouse for DualSense / DualSense Edge.
+// Gyro-to-mouse for any pad whose layout names a motion sensor: DualSense,
+// DualSense Edge and DualShock 4.
+//
+// ⭐ OFFSETS COME FROM THE PAD'S LAYOUT (input/button_layout.inl), not from the
+// DualSense numbers below, which are kept as the record of where they came from.
+// A DS4 carries the same sensor three bytes earlier -- gyro at [13] [15] [17],
+// accelerometer at [19] [21] [23] -- and the touchpad and the buttons a gate
+// reads sit elsewhere too.
 //
 // WHAT THIS IS. A DS5 input report carries the gyroscope and accelerometer.
 // This turns the gyro's angular velocity into relative mouse movement, so a
@@ -40,6 +47,9 @@
 // hpp here lands its class inside the same anonymous namespace, which is fine
 // -- it is self-contained and needs no external linkage.
 #include "gamepadmotion/GamepadMotion.hpp"
+// ⓘ Where each pad keeps what the gates and the motion read. Depends on nothing,
+// so including it here keeps this file compiling in the test binary too.
+#include "input/button_layout.inl"
 
 namespace ctm_gyro_mouse {
 
@@ -122,12 +132,22 @@ inline Gate parse_gate(const std::string &raw)
 }
 
 // True when the gate condition says gyro should be producing movement right
-// now. `d` is the mapped DS5 report (id at [0]); `len` must cover the gate
-// byte the chosen gate reads.
+// now. `d` is the mapped report (id at [0]), read at `lay`'s offsets.
 // ⓘ The device key is optional because every gate but one is a pure function of
 // the report bytes, and every existing caller passes only those. Gate::TriggerHold
 // is the exception: whose trigger is being worked is a question about a pad.
-inline bool gate_open(Gate gate, const uint8_t *d, size_t len, const void *deviceKey = nullptr)
+//
+// ⛔⛔ EVERY GATE READ DUALSENSE BYTES, FOR EVERY PAD. L2 was [5], the PS button
+// [10], a finger [33]. On a DS4 those are the hat and face buttons, a timestamp
+// that changes on most reports, and the touch-packet count -- so the gyro
+// preset's recenter button, touchpad_click, would have fired over and over, and
+// a touchpad gate would have read "finger down" forever. The stick and touchpad
+// mouse share these gates, so they had the same fault.
+//
+// ⚠️ For a DualSense each case below is exactly the read it replaced, bounds
+// checks included.
+inline bool gate_open(Gate gate, const ctm_rebind::Layout &lay, const uint8_t *d, size_t len,
+                      const void *deviceKey = nullptr)
 {
     // ⭐⭐ THE TRIGGER'S STEADY SUPPRESSES THE GYRO WHATEVER THE GATE IS
     // (rhoquinn8217, 2026-09-11).
@@ -150,27 +170,34 @@ inline bool gate_open(Gate gate, const uint8_t *d, size_t len, const void *devic
         case Gate::Always:
             return true;
         case Gate::L2:
-            return len > 5 && d[5] >= 30;               // analog, ~12% travel
+            // Analog, ~12% travel -- on the DualSense's 0..255 scale for every pad.
+            return ctm_rebind::trigger_travel(lay, d, len, true) >= 30;
         case Gate::R2:
-            return len > 6 && d[6] >= 30;
+            return ctm_rebind::trigger_travel(lay, d, len, false) >= 30;
         case Gate::L1:
-            return len > 9 && (d[9] & 0x01);
+            return ctm_rebind::is_pressed(lay, d, len, ctm_rebind::kBtnL1);
         case Gate::R1:
-            return len > 9 && (d[9] & 0x02);
+            return ctm_rebind::is_pressed(lay, d, len, ctm_rebind::kBtnR1);
         case Gate::Touchpad:
-            return len > 33 && !(d[33] & 0x80);          // finger 1 down
+            return ctm_rebind::touch_finger_down(lay, d, len, 0);   // finger 1 down
         case Gate::NotTouchpad:
-            return len > 33 && (d[33] & 0x80);           // ratchet: touch pauses
+            return ctm_rebind::touch_finger_up(lay, d, len, 0);     // ratchet: touch pauses
         case Gate::TouchpadClick:
-            return len > 10 && (d[10] & 0x02);           // pad pressed in
+            return ctm_rebind::touch_pressed(lay, d, len);          // pad pressed in
         case Gate::PS:
-            return len > 10 && (d[10] & 0x01);
+            return ctm_rebind::is_pressed(lay, d, len, ctm_rebind::kBtnHome);
         case Gate::TriggerHold:
             // ⓘ Kept so configs written before 2026-09-11 still parse. The hold
             // is checked above for every gate now, so this IS Always.
             return true;
     }
     return false;
+}
+
+// ⓘ The DualSense's gates, for callers that only ever had a DualSense report.
+inline bool gate_open(Gate gate, const uint8_t *d, size_t len, const void *deviceKey = nullptr)
+{
+    return gate_open(gate, ctm_rebind::kDs5Layout, d, len, deviceKey);
 }
 
 // ---- Config (read live per report; the watcher applies changes instantly) --
@@ -295,30 +322,41 @@ public:
     // defaults to the old fixed divisor so an uncalibrated pad still works.
     void set_calibration(const ctm_gyro_calib::Scale &s) { cal_ = s; }
 
+    // ⓘ A DualSense report, for callers that only ever had one.
     bool on_report(const uint8_t *d, size_t len, const char *section, MouseDelta *out)
     {
-        if (d == nullptr || len < 28 || out == nullptr) {
+        return on_report(ctm_rebind::kDs5Layout, d, len, section, out);
+    }
+
+    bool on_report(const ctm_rebind::Layout &lay, const uint8_t *d, size_t len,
+                   const char *section, MouseDelta *out)
+    {
+        if (d == nullptr || out == nullptr || !lay.motion.present ||
+            len < ctm_rebind::motion_min_len(lay)) {
             return false;                       // need through the accel block
         }
 
         const Config cfg = load_config(section);
 
         // ⓘ Gate diagnostic. Off unless gyro_mouse_debug_gate is set, and rate
-        // limited to twice a second -- this path runs 250x/sec. Prints the raw
-        // bytes every gate reads so a gate that never opens can be diagnosed by
-        // measurement rather than by guessing at offsets.
+        // limited to twice a second -- this path runs 250x/sec. Prints what every
+        // gate reads, AT THIS PAD'S OFFSETS, so a gate that never opens can be
+        // diagnosed by measurement rather than by guessing at them.
         if (device_config_bool(section, "gyro_mouse_debug_gate", false)) {
             static auto lastPrint = std::chrono::steady_clock::now();
             const auto nowDbg = std::chrono::steady_clock::now();
             if (std::chrono::duration_cast<std::chrono::milliseconds>(nowDbg - lastPrint).count() >= 500) {
                 lastPrint = nowDbg;
-                device_log::input_s() << "[gyro] len=" << len
-                          << " L2[5]=" << (len > 5 ? (int)d[5] : -1)
-                          << " R2[6]=" << (len > 6 ? (int)d[6] : -1)
-                          << " btn[9]=0x" << std::hex << (len > 9 ? (int)d[9] : 0)
-                          << " btn[10]=0x" << (len > 10 ? (int)d[10] : 0) << std::dec
-                          << " touch[33]=0x" << std::hex << (len > 33 ? (int)d[33] : 0) << std::dec
-                          << " gateOpen=" << (gate_open(cfg.gate, d, len, key_) ? 1 : 0)
+                using namespace ctm_rebind;
+                device_log::input_s() << "[gyro] pad=" << lay.name << " len=" << len
+                          << " L2=" << trigger_travel(lay, d, len, true)
+                          << " R2=" << trigger_travel(lay, d, len, false)
+                          << " L1=" << (is_pressed(lay, d, len, kBtnL1) ? 1 : 0)
+                          << " R1=" << (is_pressed(lay, d, len, kBtnR1) ? 1 : 0)
+                          << " PS=" << (is_pressed(lay, d, len, kBtnHome) ? 1 : 0)
+                          << " finger1=" << (touch_finger_down(lay, d, len, 0) ? 1 : 0)
+                          << " click=" << (touch_pressed(lay, d, len) ? 1 : 0)
+                          << " gateOpen=" << (gate_open(cfg.gate, lay, d, len, key_) ? 1 : 0)
                           << std::endl;
             }
         }
@@ -329,7 +367,7 @@ public:
         //
         // Edge-triggered: fires once on press, not repeatedly while held.
         if (cfg.recenter != Gate::Off) {
-            const bool down = gate_open(cfg.recenter, d, len);
+            const bool down = gate_open(cfg.recenter, lay, d, len);
             if (down && !recenterWasDown_) {
                 warp_cursor_to_centre();
             }
@@ -356,12 +394,11 @@ public:
         // treats it as a still-sample tick).
         if (dt < 0.0f || dt > 0.1f) dt = 0.0f;
 
-        // Raw signed 16-bit little-endian reads at our offsets.
-        auto rd16 = [&](size_t off) -> int32_t {
-            return static_cast<int16_t>(
-                static_cast<uint16_t>(d[off]) |
-                (static_cast<uint16_t>(d[off + 1]) << 8));
-        };
+        // Raw signed 16-bit little-endian reads, at this pad's offsets.
+        ctm_rebind::MotionSample m;
+        if (!ctm_rebind::read_motion(lay, d, len, &m)) {
+            return false;
+        }
 
         // Convert to the library's units.
         //
@@ -375,14 +412,15 @@ public:
         // ⓘ When calibration is unavailable the Scale defaults to the old
         // 1/1024 with zero bias, so behaviour is unchanged rather than absent.
         const ctm_gyro_calib::Scale &cal = cal_;
-        const float gyroPitch = (rd16(16) - cal.biasPitch) * cal.pitch;
-        const float gyroYaw   = (rd16(18) - cal.biasYaw)   * cal.yaw;
-        const float gyroRoll  = (rd16(20) - cal.biasRoll)  * cal.roll;
+        const float gyroPitch = (m.gyroPitch - cal.biasPitch) * cal.pitch;
+        const float gyroYaw   = (m.gyroYaw   - cal.biasYaw)   * cal.yaw;
+        const float gyroRoll  = (m.gyroRoll  - cal.biasRoll)  * cal.roll;
         // accel: 8192 raw units per g, and not calibrated here -- the library
-        // only uses it to work out which way is down.
-        const float accelX    = rd16(22) / 8192.0f;
-        const float accelY    = rd16(24) / 8192.0f;
-        const float accelZ    = rd16(26) / 8192.0f;
+        // only uses it to work out which way is down. ⓘ The same units on a DS4:
+        // the Linux driver's DS4_ACC_RES_PER_G is 8192 as well.
+        const float accelX    = m.accelX / 8192.0f;
+        const float accelY    = m.accelY / 8192.0f;
+        const float accelZ    = m.accelZ / 8192.0f;
 
         // The library ALWAYS runs -- its calibration must keep observing even
         // when the gate is shut, or it never learns the bias. Axis order is the
@@ -393,7 +431,7 @@ public:
 
         // Gate AFTER processing, so calibration is continuous but movement only
         // emits when the player is actually aiming.
-        if (!gate_open(cfg.gate, d, len, key_)) {
+        if (!gate_open(cfg.gate, lay, d, len, key_)) {
             reset_remainder();
             return false;
         }
@@ -728,15 +766,16 @@ inline void on_ds5_input(const void *deviceKey,
     // ⓘ Kept as a comment rather than deleted so the next person wondering why
     // the cursor works here finds the reasoning instead of the absence.
 
-    if (!device_has_ds5_motion(descriptor)) {
-        return;
-    }
-    const char *kind = device_section_for(descriptor);
-    if (kind == nullptr) {
+    // ⭐ ANY PAD WHOSE LAYOUT NAMES A MOTION SENSOR, read at that layout's
+    // offsets. ⓘ This replaces a DualSense-only capability check, which was the
+    // right answer while the offsets below were DualSense numbers and is the
+    // wrong one now that each pad's layout carries its own.
+    const InputPad pad = device_input_pad_for(descriptor);
+    if (pad.layout == nullptr || !pad.layout->motion.present) {
         return;
     }
     // Same resolution the audio path uses: shared section unless linked.
-    const std::string resolved = device_settings_section(kind, linkedConfig);
+    const std::string resolved = device_settings_section(pad.kind, linkedConfig);
     const char *section = resolved.c_str();
     MouseDelta delta;
     GyroMouse &g = gyro_for(deviceKey);
@@ -744,7 +783,7 @@ inline void on_ds5_input(const void *deviceKey,
     // Cheap: a struct copy per report, and it keeps the calibration lookup off
     // the report path where it would need a mutex 250 times a second.
     g.set_calibration(ctm_gyro_calib::scale_for(deviceKey));
-    if (g.on_report(d, len, section, &delta)) {
+    if (g.on_report(*pad.layout, d, len, section, &delta)) {
         shared_mailbox().push(delta);
         g_diag_last_dx.store(static_cast<uint32_t>(delta.dx < 0 ? -delta.dx : delta.dx));
         g_diag_last_dy.store(static_cast<uint32_t>(delta.dy < 0 ? -delta.dy : delta.dy));

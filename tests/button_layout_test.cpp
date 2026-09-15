@@ -22,6 +22,7 @@
 
 #include "harness.h"
 
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <vector>
@@ -419,6 +420,167 @@ int run_button_layout_tests()
         past = 0;
         for (size_t i = 6; i < small.size(); ++i) if (small[i] != 0xEE) ++past;
         CTM_CHECK_EQ(past, 0);
+    }
+
+    // ---- Beyond the buttons: sticks, triggers, motion, touchpad -----------------
+
+    section("layout: every pad's sensor and touch offsets are the verified ones");
+    {
+        // DualSense: the numbers every hook hardcoded before they asked a layout.
+        CTM_CHECK(ds5->sticks.format == kAxisU8 && ds5->sticks.lx == 1 && ds5->sticks.ry == 4 &&
+                  !ds5->sticks.upIsPositive);
+        CTM_CHECK(ds5->triggers.format == kTriggerU8 && ds5->triggers.l2 == 5 && ds5->triggers.r2 == 6);
+        CTM_CHECK(ds5->triggers.statusR2 == 42 && ds5->triggers.statusL2 == 43);
+        CTM_CHECK(ds5->motion.present && ds5->motion.gyroPitch == 16 && ds5->motion.accelZ == 26);
+        CTM_CHECK(ds5->touch.present && ds5->touch.finger1 == 33 && ds5->touch.finger2 == 37);
+        CTM_CHECK(ds5->touch.clickByte == 10 && ds5->touch.clickMask == 0x02);
+        // DS4: from the Linux driver's struct, confirmed on a real pad.
+        CTM_CHECK(ds4->triggers.l2 == 8 && ds4->triggers.r2 == 9 && ds4->triggers.statusR2 < 0);
+        CTM_CHECK(ds4->motion.gyroPitch == 13 && ds4->motion.gyroYaw == 15 && ds4->motion.gyroRoll == 17);
+        CTM_CHECK(ds4->motion.accelX == 19 && ds4->motion.accelY == 21 && ds4->motion.accelZ == 23);
+        CTM_CHECK(ds4->touch.finger1 == 35 && ds4->touch.finger2 == 39);
+        CTM_CHECK(ds4->touch.older[0] == 44 && ds4->touch.older[3] == 57);
+        CTM_CHECK(ds4->touch.clickByte == 7 && ds4->touch.clickMask == 0x02);
+        // Xbox: 16-bit sticks with Y inverted by the map; no motion, no touchpad.
+        CTM_CHECK(xbox->sticks.format == kAxisS16 && xbox->sticks.lx == 10 && xbox->sticks.ry == 16 &&
+                  xbox->sticks.upIsPositive);
+        CTM_CHECK(xbox->triggers.format == kTriggerU16 && xbox->triggers.fullScale == 1023);
+        CTM_CHECK(!xbox->motion.present && !xbox->touch.present);
+        CTM_CHECK(!has_digital_triggers(*xbox) && has_digital_triggers(*ds4) && has_digital_triggers(*ds5));
+        // Minimum lengths match the checks the hooks made before.
+        CTM_CHECK_EQ(static_cast<int>(motion_min_len(*ds5)), 28);   // gyro_mouse: len < 28
+        CTM_CHECK_EQ(static_cast<int>(touch_min_len(*ds5)), 41);    // touch: len <= 40
+        CTM_CHECK_EQ(static_cast<int>(stick_min_len(*ds5)), 5);     // stick: len <= 4
+        CTM_CHECK_EQ(static_cast<int>(stick_min_len(*xbox)), 18);
+    }
+
+    section("layout: a DualSense's mouse-exclusive blanking is byte-for-byte the old lines");
+    {
+        // ⛔ The hook these replaced wrote exactly this. Every byte must match for
+        // every input, or a DualSense would have changed under a DS4 change.
+        std::vector<uint8_t> seed(64);
+        for (size_t i = 0; i < seed.size(); ++i) seed[i] = static_cast<uint8_t>(0x5A + i * 7);
+
+        std::vector<uint8_t> want = seed;
+        for (size_t i = 16; i <= 27; ++i) want[i] = 0;                // gyro and accel
+        for (size_t i = 33; i <= 40; i += 4) {                       // both touch points
+            want[i] = 0x80; want[i + 1] = 0; want[i + 2] = 0; want[i + 3] = 0;
+        }
+        want[10] = static_cast<uint8_t>(want[10] & ~0x02);           // the click
+        want[3] = 0x80; want[4] = 0x80;                              // right stick
+        want[1] = 0x80; want[2] = 0x80;                              // left stick
+
+        std::vector<uint8_t> got = seed;
+        blank_motion(*ds5, got.data(), got.size());
+        blank_touch(*ds5, got.data(), got.size());
+        blank_stick(*ds5, got.data(), got.size(), false);
+        blank_stick(*ds5, got.data(), got.size(), true);
+        int differ = 0;
+        for (size_t i = 0; i < got.size(); ++i) if (got[i] != want[i]) ++differ;
+        CTM_CHECK_EQ(differ, 0);
+    }
+
+    // A DS4 USB report at rest, read off a real wired pad on 2026-09-15.
+    const uint8_t kDs4Rest[64] = {
+        0x01, 0x7c, 0x80, 0x85, 0x81, 0x08, 0x00, 0xe4, 0x00, 0x00, 0x85, 0x95, 0x16, 0xfd, 0xff, 0x02,
+        0x00, 0xfd, 0xff, 0xa5, 0xff, 0x7b, 0x1f, 0x79, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1b, 0x00,
+        0x00, 0x01, 0x8b, 0xa4, 0x26, 0xf0, 0x22, 0xa2, 0x84, 0x60, 0x16, 0x00, 0x80, 0x00, 0x00, 0x00,
+        0x80, 0x00, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x80, 0x00,
+    };
+
+    section("layout: a real DS4 at rest reads as a pad at rest");
+    {
+        MotionSample m;
+        CTM_CHECK(read_motion(*ds4, kDs4Rest, sizeof(kDs4Rest), &m));
+        // ✅ Gravity: -91, 8059, 2169 -- about 1.02 g at 8192 per g.
+        const double ax = m.accelX, ay = m.accelY, az = m.accelZ;
+        const double g = std::sqrt(ax * ax + ay * ay + az * az) / 8192.0;
+        CTM_CHECK(g > 0.95 && g < 1.10);
+        CTM_CHECK(m.gyroPitch > -10 && m.gyroPitch < 10);
+        CTM_CHECK(m.gyroYaw > -10 && m.gyroYaw < 10);
+        CTM_CHECK(m.gyroRoll > -10 && m.gyroRoll < 10);
+        // No finger, no press, no chord -- and the packet count is not a finger.
+        CTM_CHECK(!two_fingers_down(*ds4, kDs4Rest, sizeof(kDs4Rest)));
+        CTM_CHECK(touch_finger_up(*ds4, kDs4Rest, sizeof(kDs4Rest), 0));
+        CTM_CHECK(touch_finger_up(*ds4, kDs4Rest, sizeof(kDs4Rest), 1));
+        CTM_CHECK(!touch_pressed(*ds4, kDs4Rest, sizeof(kDs4Rest)));
+        CTM_CHECK_EQ(trigger_travel(*ds4, kDs4Rest, sizeof(kDs4Rest), true), 0);
+        // ⛔ Read with a DualSense's layout the same pad looks busy: a finger down
+        // for good, and the PS button pressed.
+        CTM_CHECK(touch_finger_down(*ds5, kDs4Rest, sizeof(kDs4Rest), 0));
+        CTM_CHECK(is_pressed(*ds5, kDs4Rest, sizeof(kDs4Rest), kBtnHome));
+    }
+
+    section("layout: a DS4's chord needs both fingers of the newest packet");
+    {
+        std::vector<uint8_t> r(kDs4Rest, kDs4Rest + 64);
+        r[35] = 0x10;                                // finger 1 down
+        CTM_CHECK(!two_fingers_down(*ds4, r.data(), r.size()));
+        r[39] = 0x11;                                // finger 2 down
+        CTM_CHECK(two_fingers_down(*ds4, r.data(), r.size()));
+        CTM_CHECK(!two_fingers_down(*ds4, r.data(), 39));   // too short to hold finger 2's byte
+    }
+
+    section("layout: a DS4's touch blanking reaches every packet and spares the counter");
+    {
+        std::vector<uint8_t> r(kDs4Rest, kDs4Rest + 64);
+        r[35] = 0x10; r[39] = 0x11; r[44] = 0x12; r[57] = 0x13;   // fingers everywhere
+        r[7] = static_cast<uint8_t>(r[7] | 0x02);                 // pressed in
+        blank_touch(*ds4, r.data(), r.size());
+        CTM_CHECK_EQ(static_cast<int>(r[35]), 0x80);
+        CTM_CHECK_EQ(static_cast<int>(r[39]), 0x80);
+        CTM_CHECK_EQ(static_cast<int>(r[44]), 0x80);
+        CTM_CHECK_EQ(static_cast<int>(r[57]), 0x80);
+        CTM_CHECK_EQ(static_cast<int>(r[7] & 0x02), 0);
+        CTM_CHECK_EQ(static_cast<int>(r[7] & 0xfc), 0xe4);       // counter untouched
+        CTM_CHECK_EQ(static_cast<int>(r[33]), 0x01);             // count untouched
+        // Motion blanking lands on [13..24] and nowhere else.
+        std::vector<uint8_t> m(64, 0x77);
+        blank_motion(*ds4, m.data(), m.size());
+        int zeroed = 0;
+        for (size_t i = 0; i < m.size(); ++i) if (m[i] == 0) ++zeroed;
+        CTM_CHECK_EQ(zeroed, 12);
+        CTM_CHECK_EQ(static_cast<int>(m[12]), 0x77);
+        CTM_CHECK_EQ(static_cast<int>(m[13]), 0);
+        CTM_CHECK_EQ(static_cast<int>(m[24]), 0);
+        CTM_CHECK_EQ(static_cast<int>(m[25]), 0x77);
+    }
+
+    section("layout: an Xbox stick is signed 16-bit, and up comes back negative");
+    {
+        std::vector<uint8_t> r(48, 0);
+        r[0] = 0x20;
+        auto put = [&r](int at, int16_t v) {
+            r[at] = static_cast<uint8_t>(v & 0xff);
+            r[at + 1] = static_cast<uint8_t>((v >> 8) & 0xff);
+        };
+        put(10, -32768);                             // LX hard left
+        put(12, 32767);                              // LY hard UP -- positive on GIP
+        float v = 0.0f;
+        CTM_CHECK(stick_axis(*xbox, r.data(), r.size(), kStickLX, &v) && v < -0.99f);
+        CTM_CHECK(stick_axis(*xbox, r.data(), r.size(), kStickLY, &v) && v < -0.99f);   // up is negative
+        CTM_CHECK(stick_axis(*xbox, r.data(), r.size(), kStickRX, &v) && v == 0.0f);    // zero is centre
+        CTM_CHECK(!stick_axis(*xbox, r.data(), 17, kStickRY, &v));                      // too short
+        // A DualSense byte uses the formula the stick mouse always did.
+        std::vector<uint8_t> d(8, 0x80);
+        d[2] = 0;                                    // LY hard up
+        CTM_CHECK(stick_axis(*ds5, d.data(), d.size(), kStickLY, &v) &&
+                  v == (0.0f - 128.0f) / 127.0f);
+        // Resting an Xbox stick writes zeros, not 0x80.
+        put(14, 1234);
+        put(16, -4321);
+        blank_stick(*xbox, r.data(), r.size(), false);
+        CTM_CHECK(r[14] == 0 && r[15] == 0 && r[16] == 0 && r[17] == 0);
+    }
+
+    section("layout: a 16-bit trigger is scaled onto the DualSense's 0..255");
+    {
+        std::vector<uint8_t> r(48, 0);
+        r[6] = 0xff; r[7] = 0x03;                    // LT 1023, fully pulled
+        r[8] = 0x00; r[9] = 0x02;                    // RT 512, about half
+        CTM_CHECK_EQ(trigger_travel(*xbox, r.data(), r.size(), true), 255);
+        CTM_CHECK_EQ(trigger_travel(*xbox, r.data(), r.size(), false), 127);
+        CTM_CHECK_EQ(trigger_travel(*xbox, r.data(), 8, false), -1);      // too short
     }
 
     return 0;

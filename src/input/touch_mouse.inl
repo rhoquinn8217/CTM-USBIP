@@ -23,7 +23,16 @@
 //     x = b1 | ((b2 & 0x0f) << 8)        0..1919 left to right
 //     y = ((b2 & 0xf0) >> 4) | (b3 << 4) 0..1079 top to bottom
 //
-// ⓘ Relies on its includer (main.cpp) for: device_config_*, device_section_for,
+// ⭐ WHERE THE FINGERS ARE COMES FROM THE PAD'S LAYOUT. The numbers above are a
+// DualSense's. A DS4 encodes a finger identically but keeps its newest two at
+// [35] and [39] -- ⛔ its [33] is the touch-packet COUNT, whose high bit is always
+// clear, so reading it as a finger said "down" forever -- presses at [7] 0x02,
+// and its pad is only 942 units tall.
+// ⚠️ Movement stays in raw pad units, as it always was, so a full-height swipe
+// on a DS4 travels 942 pixels at speed 100 where a DualSense's travels 1080.
+// Width is the same 1920 on both.
+//
+// ⓘ Relies on its includer (main.cpp) for: device_config_*, device_input_pad_for,
 // device_settings_section, ctm_rebind_config_mode_effective, the gyro mailbox,
 // ctm_mouse_device, and ctm_gyro_mouse_ensure_mouse_started -- the same pattern
 // as gyro_mouse.inl and rebind.inl.
@@ -109,11 +118,23 @@ inline void forget(const void *deviceKey)
     g_touch.erase(deviceKey);
 }
 
-// The core, with the clock passed in so tests can drive time directly.
+inline void step(const void *deviceKey, const std::string &section,
+                 const ctm_rebind::Layout &lay, const uint8_t *data, size_t len,
+                 long long nowMs);
+
+// ⓘ A DualSense report, for callers that only ever had one.
 inline void step(const void *deviceKey, const std::string &section,
                  const uint8_t *data, size_t len, long long nowMs)
 {
-    if (data == nullptr || len <= 40) return;
+    step(deviceKey, section, ctm_rebind::kDs5Layout, data, len, nowMs);
+}
+
+// The core, with the clock passed in so tests can drive time directly.
+inline void step(const void *deviceKey, const std::string &section,
+                 const ctm_rebind::Layout &lay, const uint8_t *data, size_t len,
+                 long long nowMs)
+{
+    if (data == nullptr || !lay.touch.present || len < ctm_rebind::touch_min_len(lay)) return;
 
     // ⭐ THE SAME GATE VOCABULARY AS GYRO AND THE STICK, parsed by the same
     // function (rhoquinn8217, 2026-08-31). ⚠️ DEFAULT IS ALWAYS, not off:
@@ -175,7 +196,7 @@ inline void step(const void *deviceKey, const std::string &section,
     // ⛔ A SHUT GATE DROPS THE STATE, so re-opening it starts from a clean
     // anchor rather than measuring movement against where a finger was before
     // the gate closed -- which would arrive as one jump.
-    if (!ctm_gyro_mouse::gate_open(gate, data, len)) {
+    if (!ctm_gyro_mouse::gate_open(gate, lay, data, len)) {
         if (st.dragging) ctm_mouse_device::set_drag(0x00);
         st = TouchState();
         return;
@@ -185,9 +206,9 @@ inline void step(const void *deviceKey, const std::string &section,
     // Read before anything else so a drag survives whatever the cursor and tap
     // paths decide to do with the same touch.
     if (device_config_bool(section.c_str(), "touchpad_click_drag", false)) {
-        const bool padPressed = len > 10 && (data[10] & 0x02) != 0;
-        const TouchPoint d1 = read_point(data, 33);
-        const TouchPoint d2 = read_point(data, 37);
+        const bool padPressed = ctm_rebind::touch_pressed(lay, data, len);
+        const TouchPoint d1 = read_point(data, static_cast<size_t>(lay.touch.finger1));
+        const TouchPoint d2 = read_point(data, static_cast<size_t>(lay.touch.finger2));
         const bool anyFinger = d1.down || d2.down;
 
         if (!st.dragging) {
@@ -211,8 +232,8 @@ inline void step(const void *deviceKey, const std::string &section,
         ctm_mouse_device::set_drag(0x00);
     }
 
-    const TouchPoint p1 = read_point(data, 33);
-    const TouchPoint p2 = read_point(data, 37);
+    const TouchPoint p1 = read_point(data, static_cast<size_t>(lay.touch.finger1));
+    const TouchPoint p2 = read_point(data, static_cast<size_t>(lay.touch.finger2));
     const int fingers = (p1.down ? 1 : 0) + (p2.down ? 1 : 0);
     const TouchPoint &only = p1.down ? p1 : p2;   // meaningful when fingers == 1
 
@@ -357,10 +378,11 @@ inline void on_ds5_input(const void *deviceKey,
                          const std::string &linkedConfig,
                          const uint8_t *data, size_t len)
 {
-    const char *kind = device_section_for(descriptor);
-    if (kind == nullptr) return;
-    step(deviceKey, device_settings_section(kind, linkedConfig), data, len,
-         touch_now_ms());
+    // ⭐ Any pad whose layout names a touchpad, read at that layout's offsets.
+    const InputPad pad = device_input_pad_for(descriptor);
+    if (pad.layout == nullptr || !pad.layout->touch.present) return;
+    step(deviceKey, device_settings_section(pad.kind, linkedConfig), *pad.layout,
+         data, len, touch_now_ms());
 }
 
 } // namespace ctm_touch_mouse

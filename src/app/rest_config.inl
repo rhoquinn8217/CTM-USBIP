@@ -780,8 +780,20 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
             body += "]";
             body += ",\"kinds\":[";
             bool first = true;
-            if (p.ds5) { body += "\"ds5\""; first = false; }
-            if (p.ds5_edge) { body += first ? "\"ds5_edge\"" : ",\"ds5_edge\""; }
+            // ⓘ Every kind the preset suits, because the settings page filters its
+            // picker by this list: a kind missing here is a preset the page never
+            // offers, however well it would work.
+            auto addKind = [&](bool suits, const char *kind) {
+                if (!suits) return;
+                body += first ? "\"" : ",\"";
+                body += kind;
+                body += "\"";
+                first = false;
+            };
+            addKind(p.ds5, "ds5");
+            addKind(p.ds5_edge, "ds5_edge");
+            addKind(p.ds4, "ds4");
+            addKind(p.xbox, "xbox");
             body += "]}";
         }
         body += "]}";

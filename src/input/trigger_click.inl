@@ -514,16 +514,44 @@ inline void on_ds5_input(const void *deviceKey,
                          const std::string &linkedConfig,
                          const uint8_t *data, size_t len)
 {
-    if (data == nullptr || len <= kR2Position) return;
+    if (data == nullptr) return;
 
-    const char *kind = device_section_for(descriptor);
-    if (kind == nullptr) return;                    // not a DualSense
-    const std::string section = device_settings_section(kind, linkedConfig);
+    // ⭐ A PAD WHOSE TRIGGERS ARE BYTES AND ALSO BUTTONS: a DualSense or a DS4.
+    //
+    // ⛔⛔ THIS ASKED device_section_for(), which also says yes to a DS4, and then
+    // read DUALSENSE positions: [5] and [6]. On a DS4 those are the hat and face
+    // buttons, and the shoulder buttons -- so at the default 6% a face button
+    // engaged the "L2" side, and Share, Options, L3 or R3 the "R2" side.
+    //
+    // ⓘ An Xbox pad is left out on purpose, not by oversight. Its triggers are
+    // 16-bit and it has no digital trigger bit, and taking a trigger over from
+    // the rebinder works by clearing that bit. Whether an Xbox trigger should
+    // click is its own decision.
+    // ⓘ Not called `pad`: that name is the trigger state further down.
+    const InputPad inputPad = device_input_pad_for(descriptor);
+    if (inputPad.layout == nullptr) return;
+    const ctm_rebind::Layout &lay = *inputPad.layout;
+    if (lay.triggers.format != ctm_rebind::kTriggerU8 || !ctm_rebind::has_digital_triggers(lay)) {
+        return;
+    }
+    const int lastTrigger = lay.triggers.r2 > lay.triggers.l2 ? lay.triggers.r2 : lay.triggers.l2;
+    if (lastTrigger < 0 || len <= static_cast<size_t>(lastTrigger)) return;
+    const std::string section = device_settings_section(inputPad.kind, linkedConfig);
 
-    probe_report(deviceKey, section, data, len);
+    // ⭐ ONLY A PAD WITH ADAPTIVE TRIGGERS REPORTS AN EFFECT STATUS. A DS4 has no
+    // such byte, so it never fires on one: every effect-driven decision below is
+    // switched off for it, and it keeps the travel threshold.
+    const bool statusKnown = lay.triggers.statusR2 >= 0 && lay.triggers.statusL2 >= 0;
 
-    static const Side kR2{ "right", kR2Position, kRightStatusByte, 7 };
-    static const Side kL2{ "left", kL2Position, kLeftStatusByte, 6 };
+    // ⓘ The probe studies the status byte, so it has nothing to study without one.
+    if (statusKnown) probe_report(deviceKey, section, data, len);
+
+    // ⓘ Per report, from the layout, rather than static: which bytes hold a
+    // trigger depends on the pad.
+    const Side kR2{ "right", static_cast<size_t>(lay.triggers.r2),
+                    statusKnown ? static_cast<size_t>(lay.triggers.statusR2) : 0u, 7 };
+    const Side kL2{ "left", static_cast<size_t>(lay.triggers.l2),
+                    statusKnown ? static_cast<size_t>(lay.triggers.statusL2) : 0u, 6 };
 
     // ⛔ BOTH HALVES OR NEITHER. The gesture needs something to send and a
     // reason to take the trigger over. A switch with no remap behind it would
@@ -598,8 +626,8 @@ inline void on_ds5_input(const void *deviceKey,
         engage_percent(section, kL2.name, sharedFreezeAt, pressAtL2));
     // ⓘ Which triggers have a break to fire on. A wall or a notch does not
     // give way, so those keep a travel threshold.
-    const bool effectR2 = has_effect(section, kR2.name);
-    const bool effectL2 = has_effect(section, kL2.name);
+    const bool effectR2 = statusKnown && has_effect(section, kR2.name);
+    const bool effectL2 = statusKnown && has_effect(section, kL2.name);
     const bool breaksR2 = shape_breaks(section, kR2.name);
     const bool breaksL2 = shape_breaks(section, kL2.name);
     const long long nowMs = now_ms();
@@ -705,10 +733,10 @@ inline void on_ds5_input(const void *deviceKey,
             };
             device_log::input_s()
                 << "[trigger-click] "
-                << side("r2", kR2Position, kRightStatusByte, effectR2, breaksR2,
+                << side("r2", kR2.position, kR2.statusByte, effectR2, breaksR2,
                         clickR2, r2State, engageR2)
                 << " | "
-                << side("l2", kL2Position, kLeftStatusByte, effectL2, breaksL2,
+                << side("l2", kL2.position, kL2.statusByte, effectL2, breaksL2,
                         clickL2, l2State, engageL2)
                 << " | freeze=" << ((combined & 1) ? 1 : 0)
                 << std::endl;

@@ -365,19 +365,31 @@ inline void apply(const void *deviceKey,
     // Three clean repetitions showed both fingers held steady for the whole
     // press with no flicker, landing 8-16ms apart. So an instant check is enough
     // and no memory window is needed.
-    // The offsets below are DUALSENSE offsets, so the pad has to be one.
     //
-    // Without this an Xbox GIP report -- 48 bytes, so it passes `len > 40` --
+    // ⭐⭐ AT THE PAD'S OWN OFFSETS NOW, AND ONLY ON A PAD WITH A TOUCHPAD.
+    // Those numbers are a DualSense's. A DS4 keeps its newest two fingers at [35]
+    // and [39] and Options at [6] 0x20; its layout says so, and the chord asks it.
+    //
+    // ⛔ The first guard was "is it a DualSense", and it was there for a reason
+    // worth keeping: an Xbox GIP report -- 48 bytes, so it passed `len > 40` --
     // was read here every report. Bytes 18..47 of that report are always zero,
     // and "finger down" is bit 0x80 CLEAR, so BOTH fingers read as permanently
     // resting; and [9] is the right trigger's high byte, so RT alone supplied
-    // the Options edge. The chord could therefore fire on a pad with no
-    // touchpad. A DS4 has a touchpad but not at these offsets, so it is
-    // excluded too.
-    if (device_has_ds5_input_layout(descriptor) && len > 40) {
-        const bool f1 = (data[33] & 0x80) == 0;
-        const bool f2 = (data[37] & 0x80) == 0;
-        const bool options = (data[9] & 0x20) != 0;
+    // the Options edge. The chord could fire on a pad with no touchpad at all.
+    // ➡️ The layout keeps that out -- an Xbox layout has no touchpad -- without
+    // also keeping out a DS4, which has one.
+    // ⛔ And merely dropping that guard would have been wrong in a different way:
+    // on a DS4 the DualSense reads are not absent but MISLEADING. Its [33] is the
+    // touch-packet count, whose high bit is always clear, so "finger 1 down"
+    // would have been true forever. ⓘ On hardware (2026-09-15) the chord simply
+    // did nothing on a DS4, because the guard kept it out.
+    const InputPad chordPad = device_input_pad_for(descriptor);
+    if (chordPad.layout != nullptr && chordPad.layout->touch.present &&
+        len >= ctm_rebind::touch_min_len(*chordPad.layout)) {
+        const ctm_rebind::Layout &chordLayout = *chordPad.layout;
+        const bool f1 = ctm_rebind::touch_finger_down(chordLayout, data, len, 0);
+        const bool f2 = ctm_rebind::touch_finger_down(chordLayout, data, len, 1);
+        const bool options = ctm_rebind::is_pressed(chordLayout, data, len, ctm_rebind::kBtnStart);
 
         // ⛔ EDGE, not level. Options is held for about 300ms and this runs at
         // 250Hz, so a level check would fire seventy times for one press.

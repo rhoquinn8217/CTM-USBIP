@@ -436,9 +436,42 @@ int run_config_store_tests()
         const ctm_presets::Preset *gyro = ctm_presets::find("gyro-to-mouse");
         CTM_CHECK(ctm_presets::suits(*gyro, "ds5"));
         CTM_CHECK(ctm_presets::suits(*gyro, "ds5_edge"));
-        // A kind that carries no preset is refused rather than quietly
-        // accepted: a preset that cannot act is a config that does nothing.
-        CTM_CHECK(!ctm_presets::suits(*gyro, "ds4"));
+        // ✅ A DS4 has a gyro, read at its own offsets since 2026-09-15. This line
+        // used to assert the opposite, back when every mouse hook read DualSense
+        // bytes and a DS4 preset would have been a config that did nothing.
+        CTM_CHECK(ctm_presets::suits(*gyro, "ds4"));
+        // ⛔ An Xbox pad has no gyro, and a kind that cannot act is still refused
+        // rather than quietly accepted.
+        CTM_CHECK(!ctm_presets::suits(*gyro, "xbox"));
+        CTM_CHECK(!ctm_presets::suits(*gyro, "puck"));
+    }
+
+    section("presets: which pads each mouse preset suits");
+    {
+        // ⭐ Every pad with a layout has sticks (rhoquinn8217, 2026-09-15).
+        const ctm_presets::Preset *stick = ctm_presets::find("stick-to-mouse");
+        CTM_CHECK(stick != nullptr);
+        if (stick) {
+            CTM_CHECK(ctm_presets::suits(*stick, "ds5"));
+            CTM_CHECK(ctm_presets::suits(*stick, "ds5_edge"));
+            CTM_CHECK(ctm_presets::suits(*stick, "ds4"));
+            CTM_CHECK(ctm_presets::suits(*stick, "xbox"));
+        }
+        // A touchpad: DualSense, Edge, DS4.
+        const ctm_presets::Preset *touch = ctm_presets::find("DS5-touchpad-to-mouse");
+        CTM_CHECK(touch != nullptr);
+        if (touch) {
+            CTM_CHECK(ctm_presets::suits(*touch, "ds4"));
+            CTM_CHECK(!ctm_presets::suits(*touch, "xbox"));
+        }
+        // ⛔ Built around the adaptive trigger's break, which a DS4 does not have.
+        const ctm_presets::Preset *steady = ctm_presets::find("DS5-gyro-to-mouse");
+        CTM_CHECK(steady != nullptr);
+        if (steady) {
+            CTM_CHECK(ctm_presets::suits(*steady, "ds5"));
+            CTM_CHECK(!ctm_presets::suits(*steady, "ds4"));
+            CTM_CHECK(!ctm_presets::suits(*steady, "xbox"));
+        }
     }
 
     section("presets: every mouse mode shares the desktop bindings");

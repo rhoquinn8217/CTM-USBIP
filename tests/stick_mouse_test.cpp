@@ -16,6 +16,9 @@
 #include <string>
 #include <vector>
 
+// ⓘ Every pad's layout: where its sticks are and in what form.
+#include "input/button_layout.inl"
+
 using namespace ctmtest;
 
 namespace {
@@ -56,7 +59,20 @@ static std::string device_settings_section(const char *kind, const std::string &
     if (linkedConfig.empty()) return std::string(kind);
     return "cfg:" + linkedConfig;
 }
-static const char *device_section_for(const std::vector<unsigned char> &) { return "ds5"; }
+// ⓘ The real resolver lives in ds5_output_overrides.inl. Every descriptor here
+// is a DualSense, as the stub it replaced always answered; the DS4 and Xbox
+// checks drive step() with their layouts directly.
+struct InputPad {
+    const char *kind = nullptr;
+    const ctm_rebind::Layout *layout = nullptr;
+};
+static InputPad device_input_pad_for(const std::vector<unsigned char> &)
+{
+    InputPad pad;
+    pad.kind = "ds5";
+    pad.layout = &ctm_rebind::kDs5Layout;
+    return pad;
+}
 static bool device_config_bool(const char *, const char *key, bool fallback)
 {
     auto it = g_cfg.find(key);
@@ -98,12 +114,14 @@ inline Gate parse_gate(const std::string &raw)
     return Gate::Off;
 }
 
-inline bool gate_open(Gate gate, const uint8_t *d, size_t len)
+// ⓘ Reads the triggers through the layout, as the real gate does now, so the
+// gate checks below exercise a DualSense's [5] and [6] the way they always did.
+inline bool gate_open(Gate gate, const ctm_rebind::Layout &lay, const uint8_t *d, size_t len)
 {
     switch (gate) {
         case Gate::Always: return true;
-        case Gate::L2: return len > 5 && d[5] >= 30;
-        case Gate::R2: return len > 6 && d[6] >= 30;
+        case Gate::L2: return ctm_rebind::trigger_travel(lay, d, len, true) >= 30;
+        case Gate::R2: return ctm_rebind::trigger_travel(lay, d, len, false) >= 30;
         default: return false;
     }
 }
@@ -526,6 +544,106 @@ int run_stick_mouse_tests()
         run_step(r, 0);
         run_step(r, 100);
         CTM_CHECK(g_pushCount > 0);
+    }
+
+    // ---- Every controller with a layout (rhoquinn8217, 2026-09-15) ------------
+
+    section("stick: a DS4 moves the cursor with the same bytes a DualSense uses");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["right_stick_mode"] = "mouse";
+        g_cfg["right_stick_mouse_speed"] = "1000";
+        g_cfg["right_stick_mouse_curve"] = "linear";
+        std::vector<uint8_t> r(64, 0);
+        r[0] = 0x01;
+        r[1] = r[2] = r[4] = 128;
+        r[3] = 255;                        // right stick hard right
+        r[5] = 0x08;                       // DS4 hat centred
+        ctm_stick_mouse::step(kDev, "ds4", ctm_rebind::kDs4Layout, r.data(), r.size(), 0);
+        ctm_stick_mouse::step(kDev, "ds4", ctm_rebind::kDs4Layout, r.data(), r.size(), 50);
+        CTM_CHECK(g_pushedX >= 48 && g_pushedX <= 52);
+        CTM_CHECK_EQ(g_pushedY, 0);
+    }
+
+    // An Xbox GIP report: 48 bytes, sticks signed 16-bit at [10] [12] [14] [16].
+    auto xbox_report = [](int16_t rx, int16_t ry) {
+        std::vector<uint8_t> r(48, 0);
+        r[0] = 0x20;
+        r[14] = static_cast<uint8_t>(rx & 0xff);
+        r[15] = static_cast<uint8_t>((rx >> 8) & 0xff);
+        r[16] = static_cast<uint8_t>(ry & 0xff);
+        r[17] = static_cast<uint8_t>((ry >> 8) & 0xff);
+        return r;
+    };
+
+    section("stick: an Xbox pad's signed 16-bit stick moves the cursor");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["right_stick_mode"] = "mouse";
+        g_cfg["right_stick_mouse_speed"] = "1000";
+        g_cfg["right_stick_mouse_curve"] = "linear";
+        auto r = xbox_report(32767, 0);    // hard right, centred vertically
+        ctm_stick_mouse::step(kDev, "xbox", ctm_rebind::kXboxLayout, r.data(), r.size(), 0);
+        ctm_stick_mouse::step(kDev, "xbox", ctm_rebind::kXboxLayout, r.data(), r.size(), 50);
+        CTM_CHECK(g_pushedX >= 48 && g_pushedX <= 52);
+        CTM_CHECK_EQ(g_pushedY, 0);
+    }
+
+    section("stick: pushing an Xbox stick UP moves the cursor UP");
+    {
+        // ⛔⛔ The Xbox map inverts Y, so up reads POSITIVE there where a
+        // DualSense's reads low. Taken as a DualSense would take it, pushing up
+        // would drive the cursor down.
+        reset_stubs();
+        fresh_device();
+        g_cfg["right_stick_mode"] = "mouse";
+        g_cfg["right_stick_mouse_speed"] = "1000";
+        g_cfg["right_stick_mouse_curve"] = "linear";
+        auto r = xbox_report(0, 32767);    // hard up
+        ctm_stick_mouse::step(kDev, "xbox", ctm_rebind::kXboxLayout, r.data(), r.size(), 0);
+        ctm_stick_mouse::step(kDev, "xbox", ctm_rebind::kXboxLayout, r.data(), r.size(), 50);
+        CTM_CHECK(g_pushedY <= -48 && g_pushedY >= -52);
+        CTM_CHECK_EQ(g_pushedX, 0);
+    }
+
+    section("stick: an Xbox stick at rest is centre, not full deflection");
+    {
+        // ⓘ Zero is centre in 16 bits. Read as a DualSense byte, the same zero
+        // would be hard left and up.
+        reset_stubs();
+        fresh_device();
+        g_cfg["right_stick_mode"] = "mouse";
+        auto r = xbox_report(0, 0);
+        ctm_stick_mouse::step(kDev, "xbox", ctm_rebind::kXboxLayout, r.data(), r.size(), 0);
+        ctm_stick_mouse::step(kDev, "xbox", ctm_rebind::kXboxLayout, r.data(), r.size(), 100);
+        CTM_CHECK_EQ(g_pushCount, 0);
+    }
+
+    section("stick: pushing an Xbox stick up scrolls the content up, as on a DualSense");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["left_stick_mode"] = "scroll";
+        std::vector<uint8_t> up(48, 0);
+        up[0] = 0x20;
+        const int16_t hardUp = 32767;
+        up[12] = static_cast<uint8_t>(hardUp & 0xff);           // left stick Y
+        up[13] = static_cast<uint8_t>((hardUp >> 8) & 0xff);
+        for (long long at = 0; at <= 500; at += 8) {
+            ctm_stick_mouse::scroll_step(kDev, "xbox", ctm_rebind::kXboxLayout, up.data(), up.size(), at);
+        }
+        const int xboxWheel = g_wheelSum;
+
+        reset_stubs();
+        fresh_device();
+        g_cfg["left_stick_mode"] = "scroll";
+        auto ds5Up = rest_report();
+        ds5Up[2] = 0;                                         // DualSense left stick hard up
+        scroll_for(ds5Up, 500);
+        CTM_CHECK(xboxWheel != 0);
+        CTM_CHECK((xboxWheel > 0) == (g_wheelSum > 0));      // same direction
     }
 
     return 0;

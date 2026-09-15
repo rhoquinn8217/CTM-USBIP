@@ -2038,24 +2038,44 @@ function transportOf(sessionKind) {
   return '';
 }
 
+// ⭐ The product a session kind names, for labels -- or '' for one this page
+// does not know, which then shows its own kind string as before.
+// ⛔ Every label used to say "DualSense" unless the kind was an Edge, so a
+// bridged DualShock 4 was shown by its raw kind string, ds4_usb.
+function productOf(kind) {
+  if (kind === 'ds5e_usb' || kind === 'ds5_edge') return 'DualSense Edge';
+  if (kind === 'ds5' || kind === 'ds5_usb') return 'DualSense';
+  if (kind === 'ds4' || kind === 'ds4_usb') return 'DualShock 4';
+  if (kind === 'xbox') return 'Xbox Controller';
+  return '';
+}
+
 // ⓘ Short form for the tab, where a full "DualSense (Bluetooth)" alongside a
 // name makes the label long enough to wrap.
 function deviceLabelShort(d) {
-  var base = (d.kind === 'ds5e_usb') ? 'DualSense Edge' : 'DualSense';
-  if (d.kind === 'ds5') return base + ' (BT)';
-  if (d.kind === 'ds5_usb' || d.kind === 'ds5e_usb') return base + ' (USB)';
-  return d.kind || 'controller';
+  var base = productOf(d.kind);
+  if (d.kind === 'ds5' || d.kind === 'ds4') return base + ' (BT)';
+  if (d.kind === 'ds5_usb' || d.kind === 'ds5e_usb' || d.kind === 'ds4_usb') return base + ' (USB)';
+  return base || d.kind || 'controller';
 }
 
 function deviceLabel(d) {
-  var base = (d.kind === 'ds5e_usb') ? 'DualSense Edge' : 'DualSense';
-  var how = transportOf(d.kind);
-  return how ? (base + ' (' + how + ')') : (d.kind || 'controller');
+  var base = productOf(d.kind);
+  // ⓘ transportOf() is also asked elsewhere about DualSense audio, so a DS4's
+  // transport is named here rather than taught to it.
+  var how = transportOf(d.kind) ||
+            (d.kind === 'ds4' ? 'Bluetooth' : (d.kind === 'ds4_usb' ? 'USB' : ''));
+  if (base && how) return base + ' (' + how + ')';
+  return base || d.kind || 'controller';
 }
 
 function settingsKindOf(sessionKind) {
   if (sessionKind === 'ds5' || sessionKind === 'ds5_usb') return 'ds5';
   if (sessionKind === 'ds5e_usb' || sessionKind === 'ds5_edge') return 'ds5_edge';
+  // ⛔ A cabled DS4 is "ds4_usb" on the wire and "ds4" as a settings kind, the
+  // same collapse config_store::settings_kind_for() makes. Without it the preset
+  // picker, which filters by settings kind, offered a cabled DS4 nothing.
+  if (sessionKind === 'ds4_usb') return 'ds4';
   return sessionKind;
 }
 

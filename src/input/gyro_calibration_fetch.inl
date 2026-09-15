@@ -17,15 +17,19 @@ namespace ctm_gyro_calib {
 // ⚠️ Runs at session-ready, on the agent loop. The request is a round trip to
 // the TV, so it is given a short timeout and is best-effort: a controller whose
 // calibration cannot be read still works, just on the old scale.
-inline void fetch(const void *deviceKey, CtmBackend *backend, const std::string &label)
+// ⓘ `report` says which feature report carries this pad's calibration and in
+// which order its fields come -- see the table in gyro_calibration.inl. It
+// defaults to the DualSense's, which is all this fetched before a DS4 could be.
+inline void fetch(const void *deviceKey, CtmBackend *backend, const std::string &label,
+                  const CalibReport &report = kDs5Calibration)
 {
     if (backend == nullptr) return;
 
     std::vector<CtmMapRuntime::PhysicalFeatureAction> actions;
     CtmMapRuntime::PhysicalFeatureAction get;
     get.operation = CtmMapRuntime::PhysicalFeatureOperation::GetFeature;
-    get.report = 0x05;
-    get.length = 41;
+    get.report = report.id;
+    get.length = report.length;
     get.bestEffort = true;
     actions.push_back(get);
 
@@ -59,7 +63,7 @@ inline void fetch(const void *deviceKey, CtmBackend *backend, const std::string 
                                               "gyro calibration", 250)) {
             continue;
         }
-        if (parse(response, responseLen, &s)) {
+        if (parse(response, responseLen, report, &s)) {
             ok = true;
             if (attempt > 1) {
                 device_log::config(device_log::msg()

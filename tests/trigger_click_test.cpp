@@ -30,6 +30,9 @@
 #include <string>
 #include <vector>
 
+// ⓘ Every pad's layout: where its triggers are, which trigger_click.inl asks.
+#include "input/button_layout.inl"
+
 using namespace ctmtest;
 
 namespace {
@@ -58,7 +61,30 @@ bool device_config_bool(const char *section, const char *key, bool fallback)
     return it == g_bools.end() ? fallback : it->second;
 }
 
-const char *device_section_for(const std::vector<unsigned char> &) { return "ds5"; }
+// ⓘ The real resolver lives in ds5_output_overrides.inl. A blank descriptor is a
+// DualSense here, as the stub this replaced answered for every descriptor, so
+// the end-to-end checks below still drive a DualSense; a DS4 and an Xbox pad
+// are named by their real ids.
+struct InputPad {
+    const char *kind = nullptr;
+    const ctm_rebind::Layout *layout = nullptr;
+};
+static InputPad device_input_pad_for(const std::vector<unsigned char> &d)
+{
+    InputPad pad;
+    uint16_t vendor = 0;
+    uint16_t product = 0;
+    if (d.size() >= 12) {
+        vendor = static_cast<uint16_t>(d[8] | (d[9] << 8));
+        product = static_cast<uint16_t>(d[10] | (d[11] << 8));
+    }
+    const char *kind = "ds5";
+    if (vendor == 0x054c && (product == 0x09cc || product == 0x05c4)) kind = "ds4";
+    else if (vendor == 0x045e && product == 0x0b12) kind = "xbox";
+    pad.layout = ctm_rebind::layout_for(kind);
+    pad.kind = kind;
+    return pad;
+}
 
 std::string device_settings_section(const char *kind, const std::string &linked)
 {
@@ -668,6 +694,88 @@ int run_trigger_click_tests()
         forget(&padA);
         CTM_CHECK(!held_for(&padA));
         CTM_CHECK_EQ((int)g_buttons, 0);
+    }
+
+    // ---- DualShock 4: triggers at [8] and [9], and no effect status -------------
+
+    const std::vector<unsigned char> ds4Descriptor = { 0x12, 0x01, 0x00, 0x02, 0x00, 0x00, 0x00, 0x40,
+                                                      0x4c, 0x05, 0xc4, 0x05 };
+    auto ds4_report = [](int l2, int r2) {
+        std::vector<uint8_t> d(64, 0);
+        d[0] = 0x01;
+        d[1] = d[2] = d[3] = d[4] = 0x80;
+        d[5] = 0x08;                                  // hat centred, no face buttons
+        d[8] = static_cast<uint8_t>(l2);
+        d[9] = static_cast<uint8_t>(r2);
+        return d;
+    };
+
+    section("trigger click: a DS4's R2 at [9] clicks");
+    reset_all();
+    g_strings["ds4.right_trigger_steady_cursor_pull"] = "immediate";
+    g_strings["ds4.rebind_7"] = "MouseLeft";
+    {
+        int pad = 0;
+        on_ds5_input(&pad, ds4Descriptor, "", ds4_report(0, 240).data(), 64);
+        CTM_CHECK_EQ((int)g_buttons, 0x01);
+        CTM_CHECK(held_for(&pad));
+        forget(&pad);
+    }
+
+    section("trigger click: a DS4 face button or Options is not a trigger pull");
+    reset_all();
+    g_strings["ds4.right_trigger_steady_cursor_pull"] = "immediate";
+    g_strings["ds4.rebind_7"] = "MouseLeft";
+    g_strings["ds4.left_trigger_steady_cursor_pull"] = "immediate";
+    g_strings["ds4.rebind_6"] = "MouseRight";
+    {
+        // ⛔⛔ THE FAULT, pinned. At DualSense offsets a DS4's cross ([5] 0x28)
+        // read as L2 at 40 of 255, and Options ([6] 0x20) as R2 at 32 -- both past
+        // the default 6%, so both triggers engaged and froze the cursor.
+        int pad = 0;
+        std::vector<uint8_t> d = ds4_report(0, 0);
+        d[5] = 0x28;                                  // cross
+        d[6] = 0x20;                                  // Options
+        on_ds5_input(&pad, ds4Descriptor, "", d.data(), 64);
+        CTM_CHECK_EQ((int)g_buttons, 0);
+        CTM_CHECK(!held_for(&pad));
+        forget(&pad);
+    }
+
+    section("trigger click: a DS4 has no effect status, so an effect clicks on travel");
+    reset_all();
+    g_strings["ds4.right_trigger_steady_cursor_pull"] = "immediate";
+    g_strings["ds4.rebind_7"] = "MouseLeft";
+    g_strings["ds4.right_trigger_effect"] = "click";
+    {
+        // ⓘ [42] on a DS4 is a touch coordinate. Read as a DualSense status byte,
+        // a high nybble of 2 would say "past the break" at a light pull.
+        int pad = 0;
+        std::vector<uint8_t> light = ds4_report(0, 100);
+        light[42] = 0x27;
+        on_ds5_input(&pad, ds4Descriptor, "", light.data(), 64);
+        CTM_CHECK_EQ((int)g_buttons, 0);              // below the 90% press point
+        on_ds5_input(&pad, ds4Descriptor, "", ds4_report(0, 240).data(), 64);
+        CTM_CHECK_EQ((int)g_buttons, 0x01);           // past it on travel
+        forget(&pad);
+    }
+
+    section("trigger click: an Xbox pad is left alone");
+    reset_all();
+    g_strings["xbox.right_trigger_steady_cursor_pull"] = "immediate";
+    g_strings["xbox.rebind_7"] = "MouseLeft";
+    {
+        // ⓘ Deliberate: its triggers are 16-bit with no digital bit to take over.
+        const std::vector<unsigned char> xboxDescriptor = { 0x12, 0x01, 0x00, 0x02, 0x00, 0x00, 0x00, 0x40,
+                                                           0x5e, 0x04, 0x12, 0x0b };
+        std::vector<uint8_t> d(48, 0);
+        d[0] = 0x20;
+        d[8] = 0xff;                                  // RT low byte, fully pulled
+        d[9] = 0x03;
+        int pad = 0;
+        on_ds5_input(&pad, xboxDescriptor, "", d.data(), 48);
+        CTM_CHECK_EQ((int)g_buttons, 0);
+        CTM_CHECK(!held_for(&pad));
     }
 
     reset_all();

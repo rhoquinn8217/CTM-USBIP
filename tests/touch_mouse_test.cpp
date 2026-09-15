@@ -16,6 +16,9 @@
 #include <string>
 #include <vector>
 
+// ⓘ Every pad's layout: where its fingers sit, which touch_mouse.inl now asks.
+#include "input/button_layout.inl"
+
 using namespace ctmtest;
 
 // ---- Stand-ins for what touch_mouse.inl calls -------------------------------
@@ -73,9 +76,19 @@ static std::string device_settings_section(const char *kind, const std::string &
     if (linkedConfig.empty()) return std::string(kind);
     return "cfg:" + linkedConfig;
 }
-static const char *device_section_for(const std::vector<unsigned char> &)
+// ⓘ The real resolver lives in ds5_output_overrides.inl. Every descriptor here
+// is a DualSense, as the stub it replaced always answered; the DS4 checks drive
+// step() with the DS4's layout directly.
+struct InputPad {
+    const char *kind = nullptr;
+    const ctm_rebind::Layout *layout = nullptr;
+};
+static InputPad device_input_pad_for(const std::vector<unsigned char> &)
 {
-    return "ds5";
+    InputPad pad;
+    pad.kind = "ds5";
+    pad.layout = &ctm_rebind::kDs5Layout;
+    return pad;
 }
 static bool ctm_rebind_config_mode_effective() { return g_configModeEffective; }
 
@@ -110,11 +123,13 @@ inline Gate parse_gate(const std::string &raw)
     return Gate::Off;
 }
 
-inline bool gate_open(Gate gate, const uint8_t *d, size_t len)
+// ⓘ Reads L2 through the layout, as the real gate does now, so the L2 gate check
+// below exercises a DualSense's [5] the same way it always did.
+inline bool gate_open(Gate gate, const ctm_rebind::Layout &lay, const uint8_t *d, size_t len)
 {
     switch (gate) {
         case Gate::Always: return true;
-        case Gate::L2: return len > 5 && d[5] >= 30;
+        case Gate::L2: return ctm_rebind::trigger_travel(lay, d, len, true) >= 30;
         default: return false;
     }
 }
@@ -513,6 +528,92 @@ int run_touch_mouse_tests()
         set_point(r, 0, true, 1, 500, 500);
         run_step(r, 16);
         CTM_CHECK(g_pushCount > 0);
+    }
+
+    // ---- DualShock 4: the same touchpad, at its own offsets --------------------
+
+    // A DS4 USB report at rest, taken from a real pad on 2026-09-15: one touch
+    // packet, both fingers up (0xa4 and 0xa2 carry stale coordinates), older
+    // packets inactive.
+    const uint8_t kDs4Rest[64] = {
+        0x01, 0x7c, 0x80, 0x85, 0x81, 0x08, 0x00, 0xe4, 0x00, 0x00, 0x85, 0x95, 0x16, 0xfd, 0xff, 0x02,
+        0x00, 0xfd, 0xff, 0xa5, 0xff, 0x7b, 0x1f, 0x79, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1b, 0x00,
+        0x00, 0x01, 0x8b, 0xa4, 0x26, 0xf0, 0x22, 0xa2, 0x84, 0x60, 0x16, 0x00, 0x80, 0x00, 0x00, 0x00,
+        0x80, 0x00, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x80, 0x00,
+    };
+    auto ds4_point = [](std::vector<uint8_t> &r, int slot, bool down, int id, int x, int y) {
+        const size_t base = (slot == 0) ? 35 : 39;
+        r[base] = static_cast<uint8_t>((down ? 0x00 : 0x80) | (id & 0x7f));
+        r[base + 1] = static_cast<uint8_t>(x & 0xff);
+        r[base + 2] = static_cast<uint8_t>(((x >> 8) & 0x0f) | ((y & 0x0f) << 4));
+        r[base + 3] = static_cast<uint8_t>((y >> 4) & 0xff);
+    };
+    auto ds4_step = [](std::vector<uint8_t> &r, long long nowMs) {
+        ctm_touch_mouse::step(kDev, "ds4", ctm_rebind::kDs4Layout, r.data(), r.size(), nowMs);
+    };
+
+    section("touch: a DS4 finger at [35] moves the cursor");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_to_mouse"] = "true";
+        std::vector<uint8_t> r(kDs4Rest, kDs4Rest + 64);
+        ds4_point(r, 0, true, 5, 300, 200);
+        ds4_step(r, 0);
+        CTM_CHECK_EQ(g_pushCount, 0);          // anchor only
+        ds4_point(r, 0, true, 5, 340, 225);
+        ds4_step(r, 8);
+        CTM_CHECK_EQ(g_pushedX, 40);
+        CTM_CHECK_EQ(g_pushedY, 25);
+    }
+
+    section("touch: a DS4 at rest moves nothing, and its packet count is not a finger");
+    {
+        // ⛔⛔ THE FAULT, pinned. Read at DualSense offsets, a DS4's [33] -- the
+        // count of touch packets, 0x01 here -- has its high bit clear, which is
+        // "finger down". With the DS4 layout the same bytes are no fingers at all.
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_to_mouse"] = "true";
+        g_cfg["touchpad_tap_click"] = "true";
+        std::vector<uint8_t> r(kDs4Rest, kDs4Rest + 64);
+        ds4_step(r, 0);
+        ds4_step(r, 8);
+        ds4_step(r, 300);
+        CTM_CHECK_EQ(g_pushCount, 0);
+        CTM_CHECK_EQ(g_clickCount, 0);
+        CTM_CHECK(!ctm_rebind::touch_finger_down(ctm_rebind::kDs4Layout, r.data(), r.size(), 0));
+        CTM_CHECK(ctm_rebind::touch_finger_down(ctm_rebind::kDs5Layout, r.data(), r.size(), 0));
+    }
+
+    section("touch: a DS4 two-finger drag scrolls");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_scroll"] = "2";
+        std::vector<uint8_t> r(kDs4Rest, kDs4Rest + 64);
+        ds4_point(r, 0, true, 1, 800, 300);
+        ds4_point(r, 1, true, 2, 1000, 300);
+        ds4_step(r, 0);
+        ds4_point(r, 0, true, 1, 800, 480);
+        ds4_point(r, 1, true, 2, 1000, 480);
+        ds4_step(r, 8);
+        CTM_CHECK(g_wheelSum != 0);
+    }
+
+    section("touch: a DS4 press at [7] drags, and the counter bits beside it do not");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_click_drag"] = "true";
+        std::vector<uint8_t> r(kDs4Rest, kDs4Rest + 64);
+        // [7] is 0xe4 at rest: counter bits set, PS and press clear. No drag.
+        ds4_point(r, 0, true, 1, 500, 500);
+        ds4_step(r, 0);
+        CTM_CHECK_EQ(g_dragMask, 0);
+        r[7] = static_cast<uint8_t>(r[7] | 0x02);   // the pad pressed in
+        ds4_step(r, 8);
+        CTM_CHECK_EQ(g_dragMask, 1);
     }
 
     return 0;

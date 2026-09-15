@@ -80,6 +80,61 @@ struct RestRun {
     uint8_t value;
 };
 
+// ---- Beyond the buttons: sticks, triggers, motion and the touchpad -----------
+//
+// ⭐⭐ WHY THESE LIVE IN THE LAYOUT TOO. The mouse presets, the chord that opens
+// the settings window and the mouse-exclusive blanking all read these bytes.
+// Each one used to hardcode DualSense positions and ask device_section_for(),
+// which ALSO says yes to a DS4 -- so on a DS4 they read the wrong bytes rather
+// than none: the touchpad count as a finger, the hat and face buttons as trigger
+// travel, a timestamp as the PS button. One place per pad now says where each
+// thing is, and every reader asks it.
+
+enum AxisFormat : uint8_t {
+    kAxisU8 = 0,    // one byte per axis, centre 0x80 (DualSense, DS4)
+    kAxisS16,       // signed 16-bit little endian, centre 0 (Xbox GIP)
+};
+
+struct StickSpots {
+    AxisFormat format;
+    int        lx, ly, rx, ry;   // byte offsets; the LOW byte for kAxisS16
+    // ⚠️ The PlayStation pads read LOWER when pushed up. The Xbox map inverts Y
+    // on purpose, because GIP and XInput are Y-up, so its sticks read HIGHER.
+    bool       upIsPositive;
+};
+
+enum TriggerFormat : uint8_t {
+    kTriggerAbsent = 0,
+    kTriggerU8,     // one byte, 0 at rest to 255 at the stop
+    kTriggerU16,    // little endian, 0 at rest to fullScale
+};
+
+struct TriggerSpots {
+    TriggerFormat format;
+    int           l2, r2;             // byte offsets; the LOW byte for kTriggerU16
+    int           fullScale;          // 255, or 1023 for an Xbox trigger
+    int           statusR2, statusL2; // adaptive-trigger effect status, -1 = none
+};
+
+struct MotionSpots {
+    bool present;
+    int  gyroPitch, gyroYaw, gyroRoll;   // signed 16-bit little endian
+    int  accelX, accelY, accelZ;         // signed 16-bit little endian
+};
+
+struct TouchSpots {
+    bool    present;
+    // Contact bytes of the NEWEST touch packet's two fingers. Bit 0x80 SET means
+    // no finger; the next three bytes hold a 12-bit X and a 12-bit Y.
+    int     finger1, finger2;
+    // ⓘ A DS4 carries up to three touch packets per report, older ones behind
+    // the newest. Only blanking needs them, so a game is not handed a finger
+    // from one packet back. -1 marks an unused slot.
+    int     older[4];
+    int     clickByte;                   // touchpad pressed in; -1 = none
+    uint8_t clickMask;
+};
+
 // One pad's input report, as the hooks see it AFTER the map.
 //
 // ⚠️ These are DESTINATION offsets -- what the virtual device emits -- not the
@@ -98,6 +153,12 @@ struct Layout {
     RestRun     rest[2];
     int         extraByte;   // -1 when there are none
     uint8_t     extraMask;
+    // ⚠️ Appended, never inserted: every table below initialises this struct in
+    // order, and C++17 has no designated initialisers to catch a shifted field.
+    StickSpots   sticks;
+    TriggerSpots triggers;
+    MotionSpots  motion;
+    TouchSpots   touch;
 };
 
 inline const Layout kDs5Layout = {
@@ -125,6 +186,14 @@ inline const Layout kDs5Layout = {
     { { 1, 4, 0x80 }, { 5, 2, 0x00 } },
     // Touchpad click 0x02 and mute 0x04 have no standard index.
     10, 0x06,
+    // Sticks one byte each, pushing up reads lower.
+    { kAxisU8, 1, 2, 3, 4, false },
+    // Triggers at [5] and [6]; effect status in the high nibbles of [42] R2, [43] L2.
+    { kTriggerU8, 5, 6, 255, 42, 43 },
+    // Gyro pitch, yaw, roll at [16] [18] [20]; accelerometer at [22] [24] [26].
+    { true, 16, 18, 20, 22, 24, 26 },
+    // One touch packet: fingers at [33] and [37], pressed in at [10] 0x02.
+    { true, 33, 37, { -1, -1, -1, -1 }, 10, 0x02 },
 };
 
 // ⭐ THE DS4 USB REPORT 0x01, which is what both DS4 maps put on the wire: the
@@ -185,6 +254,20 @@ inline const Layout kDs4Layout = {
     // Touchpad click 0x02 has no standard index. ⛔ The counter filling the top
     // six bits of [7] is deliberately NOT here -- see the note above.
     7, 0x02,
+    // Sticks one byte each, pushing up reads lower -- the same as a DualSense.
+    { kAxisU8, 1, 2, 3, 4, false },
+    // Triggers at [8] and [9]. No adaptive triggers, so no status bytes.
+    { kTriggerU8, 8, 9, 255, -1, -1 },
+    // ✅ Gyro pitch, yaw, roll at [13] [15] [17]; accelerometer at [19] [21]
+    // [23]. From the Linux driver's report struct, and confirmed on a real
+    // wired pad at rest (2026-09-15): the accelerometer read -91, 8059, 2169,
+    // a magnitude of 1.02 g at 8192 per g, while the gyro sat within 3 of 0.
+    { true, 13, 15, 17, 19, 21, 23 },
+    // ⛔ [33] IS THE NUMBER OF TOUCH PACKETS, NOT A FINGER. The newest packet's
+    // fingers are at [35] and [39]; older packets hold theirs at [44] [48] and
+    // [53] [57]. Pressed in is [7] 0x02. The same live report read 0x01 at [33]
+    // and 0xa4 and 0xa2 at the fingers: no finger down, as expected.
+    { true, 35, 39, { 44, 48, 53, 57 }, 7, 0x02 },
 };
 
 // ⭐ THE XBOX GIP 0x20 REPORT, read off maps/xbox_gip_usb_over_xbox_bt.map.
@@ -231,6 +314,16 @@ inline const Layout kXboxLayout = {
     // [10..17], whose centre is 0 -- not 0x80.
     { { 6, 4, 0x00 }, { 10, 8, 0x00 } },
     -1, 0x00,
+    // ⭐ Sticks signed 16-bit at [10] [12] [14] [16], and UP READS POSITIVE:
+    // ops 17 to 20 of the map recentre X and invert Y, "because BT HID is Y-down
+    // (up=0x0000) but GIP/XInput is Y-up=positive".
+    { kAxisS16, 10, 12, 14, 16, true },
+    // Triggers little endian at [6] and [8], 0 to 1023, copied from the
+    // Bluetooth report by op 16. No digital bit and no effect status.
+    { kTriggerU16, 6, 8, 1023, -1, -1 },
+    // No motion sensor and no touchpad.
+    { false, -1, -1, -1, -1, -1, -1 },
+    { false, -1, -1, { -1, -1, -1, -1 }, -1, 0x00 },
 };
 
 // Which layout a pad reads. nullptr means "not one we can read", which is the
@@ -364,6 +457,233 @@ inline void blank_to_rest(const Layout &lay, uint8_t *data, size_t len, bool kee
     }
     if (lay.extraByte >= 0 && len > static_cast<size_t>(lay.extraByte)) {
         data[lay.extraByte] = static_cast<uint8_t>(data[lay.extraByte] & ~lay.extraMask);
+    }
+}
+
+// ---- Reading and writing what the layout names beyond the buttons ------------
+//
+// ⓘ Pure functions of the report, like everything above, so the tests can drive
+// them with no device. Every one checks every byte it touches: a report too
+// short to hold a thing is "nothing to read", never a read past its end.
+//
+// ⚠️ Each DualSense answer here is BYTE-FOR-BYTE what the hook it replaced
+// computed, bounds checks included. That is what lets the hooks switch to these
+// without a DualSense noticing, and button_layout_test.cpp pins it.
+
+inline bool fits(size_t len, int offset, int width)
+{
+    return offset >= 0 && static_cast<size_t>(offset) + static_cast<size_t>(width) <= len;
+}
+
+inline int16_t read_s16(const uint8_t *data, int offset)
+{
+    return static_cast<int16_t>(static_cast<uint16_t>(data[offset]) |
+                                (static_cast<uint16_t>(data[offset + 1]) << 8));
+}
+
+enum StickAxis : int { kStickLX = 0, kStickLY, kStickRX, kStickRY };
+
+// ⭐ One stick axis from -1 to +1, with LEFT and UP NEGATIVE on every pad --
+// the convention the stick mouse was written against. False when the report is
+// too short to hold it.
+//
+// ⚠️ The one-byte formula is exactly the one stick_mouse.inl always used,
+// (raw - 128) / 127. It reaches a hair past -1 at full left and is not clamped
+// here, because it never was.
+inline bool stick_axis(const Layout &lay, const uint8_t *data, size_t len, int axis, float *out)
+{
+    if (data == nullptr || out == nullptr) return false;
+    int offset = -1;
+    switch (axis) {
+        case kStickLX: offset = lay.sticks.lx; break;
+        case kStickLY: offset = lay.sticks.ly; break;
+        case kStickRX: offset = lay.sticks.rx; break;
+        case kStickRY: offset = lay.sticks.ry; break;
+        default: return false;
+    }
+    float value = 0.0f;
+    if (lay.sticks.format == kAxisU8) {
+        if (!fits(len, offset, 1)) return false;
+        value = (static_cast<float>(data[offset]) - 128.0f) / 127.0f;
+    } else {
+        if (!fits(len, offset, 2)) return false;
+        value = static_cast<float>(read_s16(data, offset)) / 32767.0f;
+    }
+    const bool vertical = (axis == kStickLY || axis == kStickRY);
+    *out = (vertical && lay.sticks.upIsPositive) ? -value : value;
+    return true;
+}
+
+// The shortest report holding all four stick axes.
+inline size_t stick_min_len(const Layout &lay)
+{
+    int last = lay.sticks.lx;
+    if (lay.sticks.ly > last) last = lay.sticks.ly;
+    if (lay.sticks.rx > last) last = lay.sticks.rx;
+    if (lay.sticks.ry > last) last = lay.sticks.ry;
+    return static_cast<size_t>(last + (lay.sticks.format == kAxisU8 ? 1 : 2));
+}
+
+// ⭐ How far a trigger is pulled, ON THE DUALSENSE'S 0..255 SCALE whatever the
+// pad reports, so a threshold written against a DualSense means the same travel
+// on any pad. -1 when the pad has no such trigger or the report is too short.
+inline int trigger_travel(const Layout &lay, const uint8_t *data, size_t len, bool left)
+{
+    if (data == nullptr) return -1;
+    const int offset = left ? lay.triggers.l2 : lay.triggers.r2;
+    switch (lay.triggers.format) {
+        case kTriggerU8:
+            return fits(len, offset, 1) ? static_cast<int>(data[offset]) : -1;
+        case kTriggerU16: {
+            if (!fits(len, offset, 2) || lay.triggers.fullScale <= 0) return -1;
+            const int raw = static_cast<int>(static_cast<uint16_t>(
+                data[offset] | (static_cast<uint16_t>(data[offset + 1]) << 8)));
+            const int scaled = raw * 255 / lay.triggers.fullScale;
+            return scaled > 255 ? 255 : scaled;
+        }
+        case kTriggerAbsent:
+        default:
+            return -1;
+    }
+}
+
+// ⓘ Whether the pad reports each trigger as a BUTTON as well as a travel. The
+// trigger click takes a trigger over from the rebinder by clearing that bit, so
+// a pad without one -- an Xbox pad -- cannot hand it over cleanly.
+inline bool has_digital_triggers(const Layout &lay)
+{
+    return lay.spots[kBtnL2].how == kSpotBit && lay.spots[kBtnR2].how == kSpotBit;
+}
+
+struct MotionSample {
+    int16_t gyroPitch = 0, gyroYaw = 0, gyroRoll = 0;
+    int16_t accelX = 0, accelY = 0, accelZ = 0;
+};
+
+// The shortest report holding every motion field; 0 for a pad with no sensor.
+inline size_t motion_min_len(const Layout &lay)
+{
+    if (!lay.motion.present) return 0;
+    const int offsets[6] = { lay.motion.gyroPitch, lay.motion.gyroYaw, lay.motion.gyroRoll,
+                             lay.motion.accelX, lay.motion.accelY, lay.motion.accelZ };
+    int last = offsets[0];
+    for (int offset : offsets) if (offset > last) last = offset;
+    return static_cast<size_t>(last + 2);
+}
+
+inline bool read_motion(const Layout &lay, const uint8_t *data, size_t len, MotionSample *out)
+{
+    if (!lay.motion.present || data == nullptr || out == nullptr) return false;
+    if (len < motion_min_len(lay)) return false;
+    out->gyroPitch = read_s16(data, lay.motion.gyroPitch);
+    out->gyroYaw   = read_s16(data, lay.motion.gyroYaw);
+    out->gyroRoll  = read_s16(data, lay.motion.gyroRoll);
+    out->accelX    = read_s16(data, lay.motion.accelX);
+    out->accelY    = read_s16(data, lay.motion.accelY);
+    out->accelZ    = read_s16(data, lay.motion.accelZ);
+    return true;
+}
+
+// The contact byte of finger 0 or 1 in the newest touch packet, or -1.
+inline int touch_finger_byte(const Layout &lay, int finger)
+{
+    if (!lay.touch.present) return -1;
+    if (finger == 0) return lay.touch.finger1;
+    if (finger == 1) return lay.touch.finger2;
+    return -1;
+}
+
+// The shortest report holding both newest fingers WITH their coordinates.
+inline size_t touch_min_len(const Layout &lay)
+{
+    if (!lay.touch.present) return 0;
+    const int last = lay.touch.finger1 > lay.touch.finger2 ? lay.touch.finger1 : lay.touch.finger2;
+    return static_cast<size_t>(last + 4);
+}
+
+inline bool touch_finger_down(const Layout &lay, const uint8_t *data, size_t len, int finger)
+{
+    const int at = touch_finger_byte(lay, finger);
+    return data != nullptr && fits(len, at, 1) && (data[at] & 0x80) == 0;
+}
+
+// ⚠️ NOT simply the opposite of touch_finger_down. A pad with no touchpad, or a
+// report too short to say, answers false to BOTH -- "no finger" is something a
+// report has to state, the same as a finger is.
+inline bool touch_finger_up(const Layout &lay, const uint8_t *data, size_t len, int finger)
+{
+    const int at = touch_finger_byte(lay, finger);
+    return data != nullptr && fits(len, at, 1) && (data[at] & 0x80) != 0;
+}
+
+inline bool touch_pressed(const Layout &lay, const uint8_t *data, size_t len)
+{
+    return lay.touch.present && data != nullptr && fits(len, lay.touch.clickByte, 1) &&
+           (data[lay.touch.clickByte] & lay.touch.clickMask) != 0;
+}
+
+// ⭐ The settings-window chord's touch half: both fingers of the newest packet
+// down. ⛔ On a DS4 the byte a DualSense calls finger 1 is the PACKET COUNT,
+// whose high bit is always clear, so the old read said "finger down" forever.
+inline bool two_fingers_down(const Layout &lay, const uint8_t *data, size_t len)
+{
+    return touch_finger_down(lay, data, len, 0) && touch_finger_down(lay, data, len, 1);
+}
+
+// ⭐ "No finger" at every touch point the pad reports, and the press released.
+// ⛔ The high bit SET means no finger, so a contact byte becomes 0x80, never 0:
+// zero would tell a game a finger rests permanently in the top-left corner.
+inline void blank_touch(const Layout &lay, uint8_t *data, size_t len)
+{
+    if (!lay.touch.present || data == nullptr) return;
+    auto blank_point = [data, len](int base) {
+        if (base < 0) return;
+        for (int i = 0; i < 4; ++i) {
+            const size_t at = static_cast<size_t>(base + i);
+            if (at < len) data[at] = (i == 0) ? 0x80 : 0x00;
+        }
+    };
+    blank_point(lay.touch.finger1);
+    blank_point(lay.touch.finger2);
+    for (int base : lay.touch.older) blank_point(base);
+    if (fits(len, lay.touch.clickByte, 1)) {
+        data[lay.touch.clickByte] =
+            static_cast<uint8_t>(data[lay.touch.clickByte] & ~lay.touch.clickMask);
+    }
+}
+
+// The gyro AND the accelerometer to zero: one motion sensor as far as a game is
+// concerned, so leaving the accelerometer alive would still hand it the tilt.
+inline void blank_motion(const Layout &lay, uint8_t *data, size_t len)
+{
+    if (!lay.motion.present || data == nullptr) return;
+    const int offsets[6] = { lay.motion.gyroPitch, lay.motion.gyroYaw, lay.motion.gyroRoll,
+                             lay.motion.accelX, lay.motion.accelY, lay.motion.accelZ };
+    for (int offset : offsets) {
+        for (int i = 0; i < 2; ++i) {
+            const size_t at = static_cast<size_t>(offset + i);
+            if (offset >= 0 && at < len) data[at] = 0;
+        }
+    }
+}
+
+// A stick at rest: 0x80 for a one-byte axis, 0 for a 16-bit one.
+// ⛔ 0x80 is centre, not 0: a zeroed one-byte stick reads fully left and up.
+inline void blank_stick(const Layout &lay, uint8_t *data, size_t len, bool left)
+{
+    if (data == nullptr) return;
+    const int x = left ? lay.sticks.lx : lay.sticks.rx;
+    const int y = left ? lay.sticks.ly : lay.sticks.ry;
+    if (lay.sticks.format == kAxisU8) {
+        if (fits(len, x, 1) && fits(len, y, 1)) {
+            data[x] = 0x80;
+            data[y] = 0x80;
+        }
+    } else if (fits(len, x, 2) && fits(len, y, 2)) {
+        data[x] = 0;
+        data[x + 1] = 0;
+        data[y] = 0;
+        data[y + 1] = 0;
     }
 }
 

@@ -48,8 +48,13 @@ struct Preset {
     // Which device kinds it suits. ⓘ A preset that cannot act on a controller
     // is not offered for it -- a gyro preset on a pad with no gyro would be a
     // config that silently does nothing.
+    // ⭐ A DS4 has a gyro, a two-finger touchpad and analog triggers, and every
+    // pad with a layout has sticks -- so these are no longer DualSense-only now
+    // that the mouse hooks read each pad at its own offsets.
     bool ds5;
     bool ds5_edge;
+    bool ds4;
+    bool xbox;
     const Setting *settings;
     size_t count;
 };
@@ -302,28 +307,38 @@ inline const Preset kPresets[] = {
       "that takes most getting used to. Scrolling is one finger on the "
       "touchpad, reachable without either thumb leaving a stick. Square "
       "opens the on-screen keyboard.",
-      true, true, kGyroMouseMode, CTM_PRESET_COUNT_OF(kGyroMouseMode) },
+      // DualSense, Edge, DS4: a gyro. Not an Xbox pad, which has none.
+      true, true, true, false, kGyroMouseMode, CTM_PRESET_COUNT_OF(kGyroMouseMode) },
     { "stick-to-mouse",
       "Right stick moves the cursor, left stick scrolls -- both thumbs where "
       "they already are. The least precise of the three for fine work, and "
       "the one that needs no new habits. Square opens the on-screen keyboard.",
-      true, true, kStickMouseMode, CTM_PRESET_COUNT_OF(kStickMouseMode) },
+      // ⭐ Every pad with a layout: a stick is the one pointer they all have
+      // (rhoquinn8217, 2026-09-15, "available to all controllers").
+      true, true, true, true, kStickMouseMode, CTM_PRESET_COUNT_OF(kStickMouseMode) },
     { "L2-gyro-mouse-aiming",
       "For playing, not for the desktop. Gyro aims only while L2 is held, so "
       "the camera is steady while you move and precise when you aim. Nothing "
       "else is bound: every button stays with the game.",
-      true, true, kL2GyroAiming, CTM_PRESET_COUNT_OF(kL2GyroAiming) },
+      // A gyro and an analog L2: DualSense, Edge, DS4.
+      true, true, true, false, kL2GyroAiming, CTM_PRESET_COUNT_OF(kL2GyroAiming) },
     { "DS5-touchpad-to-mouse",
       "The touchpad behaves like a laptop trackpad: one finger moves the "
       "cursor, two fingers scroll the page with them, and a tap clicks. The "
       "most familiar of the three, and the easiest to pick up, but your hand "
       "leaves the sticks to use it. Square opens the on-screen keyboard.",
-      true, true, kTouchpadMouseMode, CTM_PRESET_COUNT_OF(kTouchpadMouseMode) },
+      // A two-finger touchpad: DualSense, Edge, DS4. ⚠️ The name still says DS5;
+      // renaming a preset is rhoquinn8217's call, so it is left as it was.
+      true, true, true, false, kTouchpadMouseMode, CTM_PRESET_COUNT_OF(kTouchpadMouseMode) },
     { "DS5-gyro-to-mouse",
       "The gyro moves the cursor and a trigger holds it still. Start to pull "
       "and the cursor stops; push past the break and it clicks. Keep holding "
       "to drag. R2 is left click, L2 is right click, one finger scrolls.",
-      true, true, kSteadyGyroMouseMode, CTM_PRESET_COUNT_OF(kSteadyGyroMouseMode) },
+      // ⛔ DualSense and Edge only. It is built around the adaptive trigger's
+      // BREAK -- "push past the break and it clicks" -- and a DS4 has no
+      // adaptive trigger. It would still click on travel there, but not as this
+      // describes, so it is not offered.
+      true, true, false, false, kSteadyGyroMouseMode, CTM_PRESET_COUNT_OF(kSteadyGyroMouseMode) },
 };
 
 inline size_t preset_count()
@@ -347,11 +362,15 @@ inline const Preset *find(const std::string &name)
     return nullptr;
 }
 
-// Whether a preset suits a settings kind ("ds5", "ds5_edge").
+// Whether a preset suits a settings kind ("ds5", "ds5_edge", "ds4", "xbox").
+// ⓘ SETTINGS kinds: a cabled DS4's session kind "ds4_usb" is collapsed to "ds4"
+// before it gets here, by config_store::settings_kind_for().
 inline bool suits(const Preset &preset, const std::string &settingsKind)
 {
     if (settingsKind == "ds5") return preset.ds5;
     if (settingsKind == "ds5_edge") return preset.ds5_edge;
+    if (settingsKind == "ds4") return preset.ds4;
+    if (settingsKind == "xbox") return preset.xbox;
     return false;
 }
 

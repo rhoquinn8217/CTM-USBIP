@@ -412,6 +412,19 @@ static void bridge_session_worker(AgentBridgeSession *session)
         if (session->kind == "ds5" || session->kind == "ds5_usb" ||
             session->kind == "ds5e_usb") {
             ctm_gyro_calib::fetch(session->device.get(), backendPtr, session->ordinal);
+        } else if (session->kind == "ds4_usb") {
+            // ⭐ A DS4 HAS A GYRO TOO, and ships its own calibration. Without it
+            // the fallback scale makes motion about 60 times too slow, which looks
+            // like a broken gyro rather than a missing read. On a cable it is
+            // report 0x02, in the DualSense's field order.
+            ctm_gyro_calib::fetch(session->device.get(), backendPtr, session->ordinal,
+                                  ctm_gyro_calib::kDs4UsbCalibration);
+        } else if (session->kind == "ds4") {
+            // ⚠️ Over Bluetooth it is report 0x05 with the plus values grouped
+            // first. Read off the Linux driver, NOT measured: no TV here can pair a
+            // DS4 over Bluetooth.
+            ctm_gyro_calib::fetch(session->device.get(), backendPtr, session->ordinal,
+                                  ctm_gyro_calib::kDs4BtCalibration);
         }
     }
 
@@ -468,8 +481,12 @@ static void bridge_session_worker(AgentBridgeSession *session)
     // ready. Idempotent -- later sessions are no-ops. Always-present by design:
     // the gyro gate decides whether it MOVES, not whether it exists, so
     // enabling gyro mid-session through live config works without a reseat.
+    // ⛔ A DS4 AS WELL, now that its gyro is read. The gyro never starts the mouse
+    // itself -- the touchpad, stick and trigger hooks do when they emit -- so a
+    // DS4 left off this list would pile movement into a mailbox nothing drains.
     if (session->kind == "ds5" || session->kind == "ds5_usb" ||
-        session->kind == "ds5e_usb") {
+        session->kind == "ds5e_usb" || session->kind == "ds4" ||
+        session->kind == "ds4_usb") {
         ctm_gyro_mouse_ensure_mouse_started();   // defined in mouse_device.inl
     }
 
