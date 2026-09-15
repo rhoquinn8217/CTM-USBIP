@@ -1131,30 +1131,28 @@ void ctm_rebind_apply(const void *deviceKey,
     // ⛔ When it consumes the input, the game must see NOTHING -- so the report
     // is blanked rather than merely left alone. A keyboard on screen that lets
     // stray presses through to what is behind it is worse than no keyboard.
-    // ⛔ BOTH OF THESE READ, AND WRITE, DUALSENSE BYTE POSITIONS -- and neither
-    // is even handed the descriptor, so neither can check for itself. The guard
-    // belongs here, at the one place that has both the descriptor and the calls.
+    // ⛔ BOTH OF THESE READ, AND WRITE, THE REPORT -- and neither is handed the
+    // descriptor, so the layout is resolved here, at the one place that has both
+    // the descriptor and the calls, and handed to them.
     //
-    // What it was doing without one: overlay_window.inl carries its own copy of
-    // the DualSense bit table and reads the d-pad as `data[8] & 0x0f`, while
-    // blank_report WRITES data[1..6], [8], [9] and [10]. On an Xbox GIP report
-    // those land on the header, the sequence counter, the length byte, both
-    // button bytes and the trigger field -- so a pad that merely had the overlay
-    // open could have its report corrupted on the way to the game.
-    //
-    // ⓘ This makes the overlay keyboard and the Options-moves-the-window gesture
-    // DualSense-only, which is what they have always actually been. They
-    // appeared to work elsewhere only in the sense that they read something.
-    if (device_has_ds5_input_layout(descriptor)) {
-        if (ctm_overlay::handle_report(deviceKey, data, len)) {
-            ctm_overlay::blank_report(data, len);
+    // ⓘ They used to be DualSense-only behind a guard: overlay_window.inl kept
+    // its own copy of the DualSense bit table and blanked DualSense positions,
+    // which on an Xbox GIP report land on the header, the sequence counter and
+    // the length byte. ✅ Both read and write through the pad's layout now
+    // (2026-09-15), so a DS4 or an Xbox pad types on the keyboard and moves
+    // either window, and a pad with no layout is still left alone.
+    const InputPad overlayPad = device_input_pad_for(descriptor);
+    if (overlayPad.layout != nullptr) {
+        const ctm_rebind::Layout &overlayLayout = *overlayPad.layout;
+        if (ctm_overlay::handle_report(deviceKey, overlayLayout, data, len)) {
+            ctm_overlay::blank_report(overlayLayout, data, len);
             return;
         }
     // ⭐ Options moves the settings page while it is up and in front, the way
     // it moves the keyboard (2026-09-08). ⓘ After the keyboard on purpose: if
     // both are showing, the keyboard has the pad, as it always has.
-        if (config_move::handle_report(deviceKey, data, len)) {
-            ctm_overlay::blank_report(data, len);
+        if (config_move::handle_report(deviceKey, overlayLayout, data, len)) {
+            ctm_overlay::blank_report(overlayLayout, data, len);
             return;
         }
     }

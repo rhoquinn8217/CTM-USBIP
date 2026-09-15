@@ -323,6 +323,9 @@ int run_button_layout_tests()
         // against the old lines kept above. Byte 8 runs through all 256 values,
         // so every hat ordinal -- the out-of-range ones included -- and every
         // face combination is covered, each with Options kept and not.
+        // ⓘ The on-screen keyboard's blank_report() (overlay_window.inl) wrote
+        // these same lines with Options not kept, and now calls
+        // blank_to_rest(..., false) -- so the pass == 0 half pins it too.
         const uint8_t b9s[] = {0x00, 0x20, 0xDF, 0xFF};
         const uint8_t b10s[] = {0x00, 0x07, 0xF8, 0xFF};
         for (int pattern = 0; pattern < 3; ++pattern) {
@@ -571,6 +574,46 @@ int run_button_layout_tests()
         put(16, -4321);
         blank_stick(*xbox, r.data(), r.size(), false);
         CTM_CHECK(r[14] == 0 && r[15] == 0 && r[16] == 0 && r[17] == 0);
+    }
+
+    section("layout: the window-steering stick is raw - 128 on a one-byte stick, and that scale on a 16-bit one");
+    {
+        // ⓘ window_move.inl steers with lround(stick_axis() * 127), where it used
+        // to read (int)data[1] - 128. Its deadzone of 18 was tuned in those
+        // steps, so the conversion must give back exactly that on every byte.
+        auto steps = [](const Layout &lay, const std::vector<uint8_t> &r, int axis) {
+            float f = 0.0f;
+            return stick_axis(lay, r.data(), r.size(), axis, &f)
+                 ? static_cast<int>(std::lround(f * 127.0f)) : 9999;
+        };
+        int mismatches = 0;
+        for (int raw = 0; raw < 256; ++raw) {
+            std::vector<uint8_t> r(64, 0x80);
+            r[1] = static_cast<uint8_t>(raw);
+            r[2] = static_cast<uint8_t>(255 - raw);
+            if (steps(*ds5, r, kStickLX) != raw - 128) ++mismatches;
+            if (steps(*ds5, r, kStickLY) != (255 - raw) - 128) ++mismatches;
+            if (steps(*ds4, r, kStickLX) != raw - 128) ++mismatches;
+            if (steps(*ds4, r, kStickLY) != (255 - raw) - 128) ++mismatches;
+        }
+        CTM_CHECK_EQ(mismatches, 0);
+
+        // An Xbox stick: hard right is +127, hard UP is -127 like a DualSense's,
+        // and a small rest drift stays inside the deadzone.
+        std::vector<uint8_t> x(48, 0);
+        auto put = [&x](int at, int16_t v) {
+            x[at] = static_cast<uint8_t>(v & 0xff);
+            x[at + 1] = static_cast<uint8_t>((v >> 8) & 0xff);
+        };
+        put(10, 32767);
+        put(12, 32767);
+        CTM_CHECK_EQ(steps(*xbox, x, kStickLX), 127);
+        CTM_CHECK_EQ(steps(*xbox, x, kStickLY), -127);
+        put(10, 1500);                               // about 5% off centre
+        CTM_CHECK(steps(*xbox, x, kStickLX) < 18);
+        // Too short to hold the stick: nothing to steer with.
+        std::vector<uint8_t> tiny(1, 0);
+        CTM_CHECK_EQ(steps(*ds5, tiny, kStickLX), 9999);
     }
 
     section("layout: a 16-bit trigger is scaled onto the DualSense's 0..255");

@@ -185,31 +185,20 @@ inline int overlay_y(int height)
     return g_atTop.load() ? 80 : (screenH - height - 80);
 }
 
-// ⓘ COPIED FROM rebind.inl's kDs5Spots (this repo, src/input/rebind.inl, as of
-// 2026-09-01) rather than shared: rebind.inl calls into this file and is
-// included after it, so reaching back would be a cycle. It must stay in step
-// with the original -- if the report layout changes, both change.
-struct Spot { int byteIndex; uint8_t mask; };
-inline const Spot kSpots[12] = {
-    { 8, 0x20 },   // 0  cross
-    { 8, 0x40 },   // 1  circle
-    { 8, 0x10 },   // 2  square
-    { 8, 0x80 },   // 3  triangle
-    { 9, 0x01 },   // 4  L1
-    { 9, 0x02 },   // 5  R1
-    { 9, 0x04 },   // 6  L2
-    { 9, 0x08 },   // 7  R2
-    { 9, 0x10 },   // 8  create
-    { 9, 0x20 },   // 9  options
-    { 9, 0x40 },   // 10 L3
-    { 9, 0x80 },   // 11 R3
-};
-
-inline bool button_down(const uint8_t *data, size_t len, int index)
+// ⭐ READ THROUGH THE PAD'S OWN LAYOUT (input/button_layout.inl), so a DS4 or an
+// Xbox pad drives the keyboard with its own bytes.
+//
+// ⛔ This used to be a COPY of the DualSense's bit table, kept here because
+// rebind.inl calls into this file and is included after it. The layout table
+// depends on nothing and is included long before either, so the copy -- and
+// the DualSense-only guard it forced on the caller -- went (2026-09-15).
+//
+// ⓘ The indices are the standard ones, 0 cross through 11 R3: the order the copy
+// already used, so no caller's number changed.
+inline bool button_down(const ctm_rebind::Layout &lay, const uint8_t *data, size_t len, int index)
 {
     if (index < 0 || index >= 12) return false;
-    const Spot &s = kSpots[index];
-    return len > (size_t)s.byteIndex && (data[s.byteIndex] & s.mask) != 0;
+    return ctm_rebind::is_pressed(lay, data, len, index);
 }
 
 // ⭐⭐ THE LAYOUT IS A TABLE, NOT A DRAWING.
@@ -1538,37 +1527,36 @@ inline void forget_device(const void *deviceKey)
     g_padPrev.erase(deviceKey);
 }
 
-// ⓘ Everything neutral. Copied in shape from the gate's own blanking in
-// rebind.inl (ctm_rebind::apply, config-mode branch) so the two agree about
-// what "the game sees nothing" means: sticks centred, triggers released, no
-// buttons, hat centred.
-inline void blank_report(uint8_t *data, size_t len)
+// ⓘ Everything neutral: sticks centred, triggers released, no buttons, hat
+// centred. ⭐ The SAME function config mode rests a gated pad with, so the two
+// cannot disagree about what "the game sees nothing" means.
+//
+// ⚠️ This used to write DualSense positions outright -- [1..4] 0x80, [5] [6] 0,
+// [8] 0x08, [9] 0, [10] less 0x07 -- which are exactly the old config-mode lines
+// that tests/button_layout_test.cpp keeps and proves blank_to_rest() matches on a
+// DualSense, byte for byte. On a DS4 the same lines would have zeroed its hat
+// byte -- which reads as d-pad UP held -- set its left trigger to 8 and masked
+// bits of its timestamp.
+inline void blank_report(const ctm_rebind::Layout &lay, uint8_t *data, size_t len)
 {
-    if (data == nullptr || len < 11) return;
-    data[1] = data[2] = data[3] = data[4] = 0x80;   // LX LY RX RY
-    data[5] = data[6] = 0x00;                       // L2 R2 analog
-    data[8] = 0x08;                                 // faces clear, hat centred
-    data[9] = 0x00;
-    data[10] = static_cast<uint8_t>(data[10] & ~0x07);
+    if (data == nullptr || len < lay.minLength) return;
+    ctm_rebind::blank_to_rest(lay, data, len, false);
 }
 
 // Returns true when the overlay consumed the input, so the game does not also
 // see it. ⛔ False when the overlay is down -- it must cost nothing when unused.
-inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len)
+inline bool handle_report(const void *deviceKey, const ctm_rebind::Layout &lay,
+                          const uint8_t *data, size_t len)
 {
-    if (!visible() || data == nullptr || len < 11) return false;
+    if (!visible() || data == nullptr || len < lay.minLength) return false;
 
-    // ⛔ READ HERE, NOT THROUGH rebind's helper. rebind.inl calls into this
-    // file, so depending on it back would be a cycle -- and this file is
-    // included first precisely so the call above resolves.
-    //
-    // ⓘ The DualSense hat is the low nibble of byte 8: 0 is up and it goes
-    // clockwise, 8 is centred. Same encoding rebind.inl reads.
-    const uint8_t hat = static_cast<uint8_t>(data[8] & 0x0f);
-    const bool up    = (hat == 7 || hat == 0 || hat == 1);
-    const bool right = (hat == 1 || hat == 2 || hat == 3);
-    const bool down  = (hat == 3 || hat == 4 || hat == 5);
-    const bool left  = (hat == 5 || hat == 6 || hat == 7);
+    // ⓘ The d-pad through the layout: a DualSense's and a DS4's are a hat, 0 up
+    // and clockwise to 7, centred at 8; an Xbox pad's are four plain bits. A
+    // diagonal counts as both of its directions either way.
+    const bool up    = ctm_rebind::is_pressed(lay, data, len, ctm_rebind::kBtnDpadUp);
+    const bool right = ctm_rebind::is_pressed(lay, data, len, ctm_rebind::kBtnDpadRight);
+    const bool down  = ctm_rebind::is_pressed(lay, data, len, ctm_rebind::kBtnDpadDown);
+    const bool left  = ctm_rebind::is_pressed(lay, data, len, ctm_rebind::kBtnDpadLeft);
 
     // ⭐⭐ A HELD DIRECTION REPEATS (rhoquinn8217, 2026-09-02: "instinctually I
     // expect it to repeat"). Every keyboard does, and without it crossing this
@@ -1603,8 +1591,8 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
     //
     // ⓘ And the shoulder SHORTCUTS are gone with them: L1 and R1 now shift the
     // layers, so they cannot also be space and backspace. Both are on the face.
-    const bool l1 = button_down(data, len, 4);
-    const bool r1 = button_down(data, len, 5);
+    const bool l1 = button_down(lay, data, len, 4);
+    const bool r1 = button_down(lay, data, len, 5);
     if (l1 != g_shiftHeld.load()) { g_shiftHeld.store(l1); invalidate(); }
     if (r1 != g_fnHeld.load())    { g_fnHeld.store(r1);   invalidate(); }
 
@@ -1630,7 +1618,7 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
     // ⓘ Armed only once that button has been seen released.
     const int openedBy = g_openedBy.load();
     const bool openBtnStillDown =
-        (openedBy >= 0 && button_down(data, len, openedBy));
+        (openedBy >= 0 && button_down(lay, data, len, openedBy));
     if (!g_closeArmed.load() && !openBtnStillDown) g_closeArmed.store(true);
     const bool faceArmed = g_closeArmed.load();
 
@@ -1643,7 +1631,7 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
     // desktop layout. ⭐ And Escape is not lost -- there is an `esc` key on the
     // keyboard itself, which is the honest place for it: a keystroke that fires
     // into whatever is BEHIND the keyboard was a surprise, not a feature.
-    if (edge(deviceKey, 5, button_down(data, len, 1))) {
+    if (edge(deviceKey, 5, button_down(lay, data, len, 1))) {
         hide();
         return true;
     }
@@ -1664,7 +1652,8 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
     // ⭐ The gesture is window_move::Mover, shared with the settings page. What
     // stays here is what the KEYBOARD does with it: a tap flips top/bottom,
     // a nudge is queued for the window's own thread.
-    const window_move::Step mv = g_movers.for_key(deviceKey).step(button_down(data, len, 9), data, len);
+    const window_move::Step mv =
+        g_movers.for_key(deviceKey).step(button_down(lay, data, len, 9), lay, data, len);
     if (mv.tapped) {
         g_atTop.store(!g_atTop.load());
         if (g_hwnd != nullptr) PostMessageW(g_hwnd, WM_CTM_REPOSITION, 0, 0);
@@ -1702,17 +1691,17 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
     // ⓘ R3 is genuinely free -- the keyboard does not use the right stick --
     // and the gyro layouts already put secondary toggles on it. The right thumb
     // is idle while typing; the left is on the d-pad.
-    if (edge(deviceKey, 7, button_down(data, len, 8))) {
+    if (edge(deviceKey, 7, button_down(lay, data, len, 8))) {
         switch_face();               // the same thing the tab's \|/ key does
     }
-    if (edge(deviceKey, 11, button_down(data, len, 11))) {
+    if (edge(deviceKey, 11, button_down(lay, data, len, 11))) {
         g_size.store((g_size.load() + 1) % 3);
         if (g_hwnd != nullptr) PostMessageW(g_hwnd, WM_CTM_RESIZE, 0, 0);
     }
 
     // ⭐⭐ CROSS PRESSES THE HIGHLIGHTED KEY.
     const Key &k = key_at(g_row, g_col);
-    const bool cross = (data[8] & 0x20) != 0;
+    const bool cross = button_down(lay, data, len, 0);
 
     // ⛔ AGAIN: ONE IMPLEMENTATION. This was a second copy of the latch rules,
     // and it drifted exactly as the actions did -- the guard that stops fn
@@ -1774,8 +1763,8 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
     // keyboard as a key meanwhile.
     uint8_t faceUsage = 0;
     if (faceArmed) {
-        if (button_down(data, len, 2))      faceUsage = 0x2A;   // square: backspace
-        else if (button_down(data, len, 3)) faceUsage = 0x2C;   // triangle: space
+        if (button_down(lay, data, len, 2))      faceUsage = 0x2A;   // square: backspace
+        else if (button_down(lay, data, len, 3)) faceUsage = 0x2C;   // triangle: space
     }
 
     // ⓘ PER DEVICE, using the file's own edge helper (slot 6 was free) rather
