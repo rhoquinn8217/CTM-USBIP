@@ -181,6 +181,19 @@ void scroll_for(std::vector<uint8_t> &r, long long ms, long long everyMs = 8)
     }
 }
 
+// ⛔⛔ BOTH HALVES, CURSOR FIRST, AS on_ds5_input() RUNS THEM. scroll_for() drives
+// the scroll alone, and the one check that ran both had the right stick pointing
+// -- so no check saw the cursor's "off" erase the entry the two share, the
+// scroll's clock with it, on every report. On hardware (rhoquinn8217,
+// 2026-09-15) gyro-to-mouse's left stick never scrolled; stick-to-mouse's did.
+void both_halves_for(std::vector<uint8_t> &r, long long ms, long long everyMs = 8)
+{
+    for (long long at = 0; at <= ms; at += everyMs) {
+        ctm_stick_mouse::step(kDev, "ds5", r.data(), r.size(), at);
+        ctm_stick_mouse::scroll_step(kDev, "ds5", r.data(), r.size(), at);
+    }
+}
+
 } // namespace
 
 int run_stick_mouse_tests()
@@ -527,6 +540,53 @@ int run_stick_mouse_tests()
         }
         CTM_CHECK(g_pushedX > 0);                              // cursor moved
         CTM_CHECK(g_wheelSum >= 4);          // and it scrolled
+    }
+
+    section("stick scroll: the left stick scrolls when no stick moves the cursor");
+    {
+        // ⭐ gyro-to-mouse's shape: the left stick scrolls and neither stick is a
+        // mouse, so the cursor half is off on every report.
+        reset_stubs();
+        fresh_device();
+        g_cfg["left_stick_mode"] = "scroll";
+        g_cfg["left_stick_scroll_speed"] = "10";        // 10 clicks a second
+        g_cfg["left_stick_scroll_deadzone"] = "0";
+        auto r = rest_report();
+        r[2] = 0;                                      // left stick hard up
+        both_halves_for(r, 500);
+        CTM_CHECK(g_wheelSum >= 4 && g_wheelSum <= 6);
+        CTM_CHECK_EQ(g_pushCount, 0);                  // and nothing pointed
+    }
+
+    section("stick scroll: it still scrolls with a stick set to mouse beside it");
+    {
+        // stick-to-mouse's shape, which scrolled all along.
+        reset_stubs();
+        fresh_device();
+        g_cfg["left_stick_mode"] = "scroll";
+        g_cfg["right_stick_mode"] = "mouse";
+        g_cfg["left_stick_scroll_speed"] = "10";
+        g_cfg["left_stick_scroll_deadzone"] = "0";
+        auto r = rest_report();
+        r[2] = 0;                                      // left hard up, right centred
+        both_halves_for(r, 500);
+        CTM_CHECK(g_wheelSum >= 4 && g_wheelSum <= 6);
+    }
+
+    section("stick: the cursor keeps its pace when no stick scrolls");
+    {
+        // ⓘ The same rule the other way round: the scroll's "off" must leave the
+        // cursor's clock and remainder alone.
+        reset_stubs();
+        fresh_device();
+        g_cfg["right_stick_mode"] = "mouse";
+        g_cfg["right_stick_mouse_speed"] = "1000";
+        g_cfg["right_stick_mouse_curve"] = "linear";
+        auto r = rest_report();
+        r[3] = 255;                                    // right stick hard right
+        both_halves_for(r, 48);                        // 48ms after the first report
+        CTM_CHECK(g_pushedX >= 44 && g_pushedX <= 50);
+        CTM_CHECK_EQ(g_wheelSum, 0);
     }
 
     // ⭐ THE RULE CHANGED HERE (rhoquinn8217, 2026-09-02). The gate used to

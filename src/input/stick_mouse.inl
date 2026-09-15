@@ -152,6 +152,8 @@ struct StickState {
     float carryY = 0.0f;
     // Scroll keeps its own clock and remainder: it can be on while the cursor
     // is off, and the two are driven by different sticks.
+    // ⛔ So each half resets only its own fields, and neither erases the entry
+    // (step()'s "off" did, and silenced the scroll -- see there).
     long long scrollLastMs = 0;
     bool scrollHaveLast = false;
     float scrollCarry = 0.0f;
@@ -185,8 +187,22 @@ inline void step(const void *deviceKey, const std::string &section,
 
     const Which which = which_for(section, "mouse");
     if (which == Which::Off) {
+        // ⛔⛔ THE CURSOR'S OWN FIELDS, NEVER THE ENTRY (2026-09-15). The entry is
+        // shared with the scroll, and this used to erase it -- on every report,
+        // just before scroll_step() ran. With no stick set to mouse, the scroll's
+        // clock was new on every report, so it never measured a gap and never
+        // ticked. On hardware (rhoquinn8217) gyro-to-mouse's left stick, which
+        // scrolls while neither stick points, did nothing, and the same stick
+        // scrolled under stick-to-mouse, whose right stick points.
+        // ⓘ scroll_step()'s own "off" already reset only its half; this mirrors
+        // it. forget() still erases the entry: that is the device going away.
         std::lock_guard<std::mutex> lock(g_stickMutex);
-        g_sticks.erase(deviceKey);
+        auto it = g_sticks.find(deviceKey);
+        if (it != g_sticks.end()) {
+            it->second.haveLast = false;
+            it->second.carryX = 0.0f;
+            it->second.carryY = 0.0f;
+        }
         return;
     }
 
