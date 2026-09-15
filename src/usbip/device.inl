@@ -612,6 +612,27 @@ public:
         const size_t copy = (std::min<size_t>)(report.length, transferLength);
         inData->assign(report.data, report.data + copy);
         state.deliveredSequence = deliveredSequence;
+        // ⭐ MEASUREMENT: does the host actually COLLECT what we queue?
+        //
+        // ⛔ Without this the two halves are indistinguishable from outside. A
+        // pad can arrive at 250 Hz, map cleanly, and queue perfectly while the
+        // host never polls the endpoint -- and the only symptom is "nothing
+        // moves", with every log line looking healthy. One line per 500 served
+        // reports says which half is which. Rate-limited so it costs nothing.
+        if (ctm_verbose_logs()) {
+            ++state.servedCount;
+            if (state.servedCount == 1 || (state.servedCount % 500) == 0) {
+                device_log::usb_s() << "input served ep=0x" << std::hex << std::setw(2)
+                    << std::setfill('0') << static_cast<unsigned int>(endpointAddress)
+                    << std::dec << std::setfill(' ')
+                    << " n=" << state.servedCount
+                    << " len=" << report.length
+                    << " asked=" << transferLength
+                    << " gave=" << copy
+                    << " head=" << hex_span(report.data, (std::min<size_t>)(report.length, 10))
+                    << std::endl;
+            }
+        }
         if (submitInfo != nullptr) {
             submitInfo->inputReply = InputReplyKind::Fresh;
             submitInfo->inputWaitUs = static_cast<uint32_t>(
@@ -644,6 +665,10 @@ private:
 
     struct InputEndpointState {
         uint32_t deliveredSequence = 0;
+        // How many reports this endpoint has actually handed to the host. Only
+        // read by the verbose "input served" line, which exists to tell a host
+        // that is not polling from a device that is not producing.
+        unsigned long servedCount = 0;
     };
 
     void configure_audio_stream_from_map()
