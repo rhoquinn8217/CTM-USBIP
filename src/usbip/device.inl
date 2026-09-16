@@ -420,7 +420,11 @@ public:
         // ⓘ This is also the branch a decoder would live in, if the feature
         // is ever built: the frame starts at byte 3, runs to the end of the
         // report, and is stereo CELT at 10 ms. See bt-microphone-findings.md.
-        if (length >= 2 && data[0] >= 0x31 && (data[1] & 0x02)) {
+        //
+        // ⛔⛔ A DualSense's or an Edge's reports only. The shape alone once
+        // dropped a Switch Pro Controller's handshake reply as audio -- see
+        // input/mic_report.inl.
+        if (mic_report::is_audio_only(info_.vid, info_.pid, data, length)) {
             static unsigned long micDropped = 0;
             ++micDropped;
             if (micDropped == 1 || (micDropped % 500) == 0) {
