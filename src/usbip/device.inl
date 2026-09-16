@@ -602,8 +602,12 @@ public:
         });
         CTM_INPUT_REPORT report = {};
         uint32_t deliveredSequence = 0;
+        // ⭐ WHICH HALF ANSWERED, for the log below: a packet the map queued
+        // (a handshake) or the live input the pad is sending.
+        bool fromQueue = false;
         auto pendingIt = pendingForEndpoint();
         if (pendingIt != pendingInputReports_.end()) {
+            fromQueue = true;
             report = pendingIt->report;
             deliveredSequence = pendingIt->sequence;
             pendingInputReports_.erase(pendingIt);
@@ -628,7 +632,11 @@ public:
         // reports says which half is which. Rate-limited so it costs nothing.
         if (ctm_verbose_logs()) {
             ++state.servedCount;
-            if (state.servedCount == 1 || (state.servedCount % 500) == 0) {
+            // ⭐ THE FIRST FIFTY, THEN ONE IN FIVE HUNDRED (2026-09-15). A
+            // handshake lives in the first few serves of a session, and one
+            // sampled line could not say whether it went out at all -- which
+            // is the whole question when Windows will not promote an Xbox pad.
+            if (state.servedCount <= 50 || (state.servedCount % 500) == 0) {
                 device_log::usb_s() << "input served ep=0x" << std::hex << std::setw(2)
                     << std::setfill('0') << static_cast<unsigned int>(endpointAddress)
                     << std::dec << std::setfill(' ')
@@ -636,6 +644,8 @@ public:
                     << " len=" << report.length
                     << " asked=" << transferLength
                     << " gave=" << copy
+                    << " src=" << (fromQueue ? "queue" : "live")
+                    << " queued=" << pendingInputReports_.size()
                     << " head=" << hex_span(report.data, (std::min<size_t>)(report.length, 10))
                     << std::endl;
             }
@@ -716,7 +726,18 @@ private:
         hasInput_ = true;
         ++inputSequence_;
         pendingInputReports_.push_back(QueuedInputReport{inputSequence_, report});
+        // ⛔ THE CAP DROPS THE OLDEST, WHICH IS THE ONE THAT MATTERS. A map's
+        // handshake is queued once, at the front of this deque, and a pad
+        // reporting fast enough could push it out before the host's first poll.
+        // Say so the first time it happens rather than losing it in silence.
         while (pendingInputReports_.size() > 64) {
+            if (ctm_verbose_logs() && !droppedQueuedLogged_) {
+                droppedQueuedLogged_ = true;
+                device_log::usb_s() << "queued input dropped by the 64 cap"
+                          << " head=" << hex_span(pendingInputReports_.front().report.data,
+                                                  (std::min<size_t>)(pendingInputReports_.front().report.length, 6))
+                          << std::endl;
+            }
             pendingInputReports_.pop_front();
         }
         inputCv_.notify_all();
@@ -1830,6 +1851,8 @@ private:
     uint32_t inputSequence_ = 0;
     CTM_INPUT_REPORT latestInput_ = {};
     std::deque<QueuedInputReport> pendingInputReports_;
+    // ⓘ One line per session when the cap above evicts something, no more.
+    bool droppedQueuedLogged_ = false;
     std::map<uint8_t, InputEndpointState> inputEndpointStates_;
     std::array<bool, 256> compInLogged_ = {};    // diag: first input report seen per endpoint
     std::array<bool, 256> compPollLogged_ = {};  // diag: first interrupt-IN poll seen per endpoint
