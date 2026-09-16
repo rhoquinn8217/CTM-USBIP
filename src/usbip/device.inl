@@ -580,14 +580,24 @@ public:
         const auto waitStart = clock::now();
         std::unique_lock<std::mutex> lock(inputMutex_);
         InputEndpointState &state = inputEndpointStates_[endpointAddress];
+        // ⭐⭐ THE MAP'S PACKETS FIRST, then the pad's own input in order.
+        //
+        // ⛔ Insertion order alone was not enough: a pad reporting every few
+        // milliseconds has already filled this deque by the time a handshake is
+        // built, so the handshake left as packet forty-five and Windows had
+        // already given up on the device. See QueuedInputReport::priority.
         auto pendingForEndpoint = [&]() {
-            return std::find_if(
-                pendingInputReports_.begin(),
-                pendingInputReports_.end(),
-                [&](const QueuedInputReport &item) {
-                    return item.report.endpoint_address == endpointAddress &&
-                        item.sequence > state.deliveredSequence;
-                });
+            auto match = [&](const QueuedInputReport &item) {
+                return item.report.endpoint_address == endpointAddress &&
+                    item.sequence > state.deliveredSequence;
+            };
+            auto first = std::find_if(
+                pendingInputReports_.begin(), pendingInputReports_.end(),
+                [&](const QueuedInputReport &item) { return item.priority && match(item); });
+            if (first != pendingInputReports_.end()) {
+                return first;
+            }
+            return std::find_if(pendingInputReports_.begin(), pendingInputReports_.end(), match);
         };
         inputCv_.wait(lock, [&]() {
             const bool hasPending = pendingForEndpoint() != pendingInputReports_.end();
@@ -678,6 +688,19 @@ private:
     struct QueuedInputReport {
         uint32_t sequence = 0;
         CTM_INPUT_REPORT report = {};
+        /* ⭐⭐ A PACKET THE MAP BUILT, not the pad's own input.
+         *
+         * ⛔ THE FAULT THIS EXISTS FOR (measured 2026-09-15): an Xbox pad's GIP
+         * handshake is queued on SET_CONFIGURATION, and a pad that reports
+         * steadily has already filled this queue by then. The announce went out
+         * as the FORTY-FIFTH packet, behind forty-four input frames, and
+         * Windows will not promote a device that sends input before it has
+         * announced itself -- so the pad arrived with no XInput child and no
+         * game could see it.
+         *
+         * ⓘ It used to work by luck: before the TV kept a still pad reporting
+         * every 4 ms, the queue was empty when the handshake was built. */
+        bool priority = false;
     };
 
     struct InputEndpointState {
@@ -716,29 +739,42 @@ private:
                   << std::endl;
     }
 
-    void enqueue_input_report(const CTM_INPUT_REPORT &report)
+    // ⭐ `priority` marks a packet the MAP built -- a handshake, not the pad's
+    // own input. It is served before anything the pad is sending and the cap
+    // below never drops it. See QueuedInputReport::priority for what that cost
+    // when it was not true.
+    void enqueue_input_report(const CTM_INPUT_REPORT &report, bool priority = false)
     {
         if (report.length == 0 || report.length > sizeof(report.data)) {
             return;
         }
         std::lock_guard<std::mutex> lock(inputMutex_);
-        latestInput_ = report;
-        hasInput_ = true;
+        // ⛔ A HANDSHAKE IS NOT THE LATEST INPUT. Writing it here would hand it
+        // to an endpoint poll that finds no pending packet, and worse, leave it
+        // as the state a later poll repeats.
+        if (!priority) {
+            latestInput_ = report;
+            hasInput_ = true;
+        }
         ++inputSequence_;
-        pendingInputReports_.push_back(QueuedInputReport{inputSequence_, report});
-        // ⛔ THE CAP DROPS THE OLDEST, WHICH IS THE ONE THAT MATTERS. A map's
-        // handshake is queued once, at the front of this deque, and a pad
-        // reporting fast enough could push it out before the host's first poll.
-        // Say so the first time it happens rather than losing it in silence.
+        pendingInputReports_.push_back(QueuedInputReport{inputSequence_, report, priority});
+        // ⛔ THE CAP DROPS THE OLDEST INPUT, NEVER A MAP PACKET. A pad reporting
+        // every 4 ms fills this deque in a quarter of a second, and the
+        // handshake queued behind that traffic is exactly what must survive.
         while (pendingInputReports_.size() > 64) {
+            auto victim = std::find_if(pendingInputReports_.begin(), pendingInputReports_.end(),
+                                       [](const QueuedInputReport &item) { return !item.priority; });
+            if (victim == pendingInputReports_.end()) {
+                break;      // all of it is the map's: keep it and stop trimming
+            }
             if (ctm_verbose_logs() && !droppedQueuedLogged_) {
                 droppedQueuedLogged_ = true;
                 device_log::usb_s() << "queued input dropped by the 64 cap"
-                          << " head=" << hex_span(pendingInputReports_.front().report.data,
-                                                  (std::min<size_t>)(pendingInputReports_.front().report.length, 6))
+                          << " head=" << hex_span(victim->report.data,
+                                                  (std::min<size_t>)(victim->report.length, 6))
                           << std::endl;
             }
-            pendingInputReports_.pop_front();
+            pendingInputReports_.erase(victim);
         }
         inputCv_.notify_all();
     }
@@ -753,7 +789,7 @@ private:
             }
         }
         for (const CTM_INPUT_REPORT &report : reports) {
-            enqueue_input_report(report);
+            enqueue_input_report(report, /* priority */ true);
         }
         if (!reports.empty()) {
             if (ctm_verbose_logs()) device_log::usb_s() << "virtual input queued"
