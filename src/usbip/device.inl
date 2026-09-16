@@ -163,6 +163,16 @@ public:
         }
         info_ = parse_usb_info(profile_);
         device_log::usb_w() << L"virtual USB serial: " << virtualSerial;
+        // ⭐ The map replays captured packets, and an announce carries an id
+        // Windows keys an XInput device on. Give it this controller's, derived
+        // from the serial above, so two bridged pads are two devices.
+        {
+            std::string serialAscii;
+            for (wchar_t c : virtualSerial) {
+                if (c < 128) serialAscii.push_back(static_cast<char>(c));
+            }
+            map_.set_device_identity(serialAscii);
+        }
         // ⏱️ TIMED. A Bluetooth bridge takes seven seconds against a cable's
         // one, and the TV finishes its whole side in 1.2s -- so the rest is
         // here. Nine feature reports time out on Bluetooth and none on a cable,
