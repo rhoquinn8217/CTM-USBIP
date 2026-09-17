@@ -2050,13 +2050,25 @@ function productOf(kind) {
   return '';
 }
 
+// ⭐⭐ NEVER "hid" WHERE ANYTHING BETTER IS KNOWN (rhoquinn8217, 2026-09-13):
+// the model name first, then what sort of device it is, and the raw kind last.
+// ⓘ A kind this page names above keeps that name; this is for the rest -- a Pro
+// Controller, a GameSir, a keyboard dongle -- which all used to read "hid".
+// Both come from the listener: `product` is the name the TV sent, `device_type`
+// is read off the report descriptor.
+function modelOrType(d) {
+  if (d.product) return d.product;
+  if (d.device_type) return d.device_type.charAt(0).toUpperCase() + d.device_type.slice(1);
+  return '';
+}
+
 // ⓘ Short form for the tab, where a full "DualSense (Bluetooth)" alongside a
 // name makes the label long enough to wrap.
 function deviceLabelShort(d) {
   var base = productOf(d.kind);
   if (d.kind === 'ds5' || d.kind === 'ds4') return base + ' (BT)';
   if (d.kind === 'ds5_usb' || d.kind === 'ds5e_usb' || d.kind === 'ds4_usb') return base + ' (USB)';
-  return base || d.kind || 'controller';
+  return base || modelOrType(d) || d.kind || 'controller';
 }
 
 function deviceLabel(d) {
@@ -2066,7 +2078,7 @@ function deviceLabel(d) {
   var how = transportOf(d.kind) ||
             (d.kind === 'ds4' ? 'Bluetooth' : (d.kind === 'ds4_usb' ? 'USB' : ''));
   if (base && how) return base + ' (' + how + ')';
-  return base || d.kind || 'controller';
+  return base || modelOrType(d) || d.kind || 'controller';
 }
 
 function settingsKindOf(sessionKind) {

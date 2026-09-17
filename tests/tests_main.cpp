@@ -30,6 +30,7 @@ int run_schema_json_tests();
 int run_mic_report_tests();
 int run_capped_log_tests();
 int run_product_version_tests();
+int run_device_type_tests();
 
 // ⛔⛔ THE TEST BINARY RUNS FROM THE SAME DIRECTORY AS THE AGENT.
 //
@@ -105,5 +106,6 @@ int main(int argc, char **argv)
     run_host_audio_settings_tests();
     run_capped_log_tests();
     run_product_version_tests();
+    run_device_type_tests();
     return ctmtest::summary();
 }

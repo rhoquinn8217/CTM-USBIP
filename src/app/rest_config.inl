@@ -26,6 +26,8 @@ struct RestDeviceView {
     std::string serial;
     std::string linkedConfig;   // "" = shared [kind] section
     bool ready = false;         // false = still starting or tearing down
+    std::string product;        // the device's own name, from the TV at HELLO
+    std::string deviceType;     // "controller", "keyboard", "mouse" or ""
 };
 static std::vector<RestDeviceView> rest_collect_devices();
 static bool rest_link_device(const std::string &ordinal, const std::string &configName,
@@ -49,6 +51,11 @@ static std::string rest_device_json(const RestDeviceView &d)
            rest_json_escape(d.linkedConfig.empty() ? std::string(kSharedName) : d.linkedConfig) +
            "\"";
     out += ",\"ready\":" + std::string(d.ready ? "true" : "false");
+    // ⭐ What the page names a device by when its kind is not one it knows:
+    // the model name, then the type, and the raw kind only last
+    // (rhoquinn8217, 2026-09-13: never "hid" where anything better is known).
+    out += ",\"product\":\"" + rest_json_escape(d.product) + "\"";
+    out += ",\"device_type\":\"" + rest_json_escape(d.deviceType) + "\"";
     out += ",\"supports_config\":" +
            std::string(config_store::kind_supports_config(d.kind) ? "true" : "false") + "}";
     return out;

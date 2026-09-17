@@ -32,6 +32,11 @@ static std::vector<RestDeviceView> rest_collect_devices()
             view.serial = session->physicalSerial;
             view.linkedConfig = session->linkedConfig;
         }
+        // ⓘ Empty until the TV's HELLO has arrived, like the serial.
+        if (session->device) {
+            view.product = session->device->product_name();
+            view.deviceType = session->device->device_kind_by_descriptor();
+        }
         out.push_back(std::move(view));
     }
     return out;

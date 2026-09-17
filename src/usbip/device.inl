@@ -215,6 +215,28 @@ public:
         return physicalSerial_;
     }
 
+    // ⭐ The device's own name as the TV sent it at HELLO ("Pro Controller",
+    // "GameSir-G8+"), read live like the serial above. Empty when none arrived.
+    std::string product_name() const
+    {
+        std::string out;
+        if (backend_ != nullptr) {
+            for (wchar_t c : backend_->caps().product) {
+                if (c == 0) break;
+                out.push_back(c < 128 ? static_cast<char>(c) : '?');
+            }
+        }
+        return out;
+    }
+
+    // ⭐ What the device is by its report descriptor: "controller", "keyboard",
+    // "mouse", or empty (device_type.inl).
+    std::string device_kind_by_descriptor() const
+    {
+        if (backend_ == nullptr) return std::string();
+        return device_type::from_descriptor(backend_->caps().hidReportDescriptor);
+    }
+
     // The per-controller config this device reads, or empty for the shared
     // section. Set by the agent at bridge time and whenever a link changes.
     std::string linked_config() const

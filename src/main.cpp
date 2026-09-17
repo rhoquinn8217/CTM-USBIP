@@ -161,6 +161,7 @@ void ctm_stick_mouse_forget(const void *deviceKey);
 // dismissed by the same button that opened it.
 void ctm_osk_toggle(const std::string &section, int button, int program);
 #include "input/mic_report.inl"  // which input reports are a DualSense's microphone audio
+#include "app/device_type.inl"   // controller, keyboard or mouse by descriptor; device.inl asks it
 #include "usbip/device.inl"
 #include "audio/iso_in_pacing.inl"
 #include "usbip/server.inl"
