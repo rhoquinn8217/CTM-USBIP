@@ -188,20 +188,32 @@ int run_gyro_mouse_tests()
         // L2 as the gate silently gave up the steady. It is a suppression on
         // top of whichever gate was chosen now.
         //
-        // ⚠️ THE SUPPRESSION ITSELF IS NOT ASSERTED HERE, deliberately.
-        // trigger_click_test.cpp defines its own ctm_gyro_mouse::set_gyro_hold
-        // stub, this file links the real one, and both are inline with the same
-        // signature -- so the linker picks one for the whole binary. Calling it
-        // from here made trigger_click's own assertions start failing, because
-        // its writes went to the real map while its reads came from the stub.
-        // ⓘ The behaviour is covered end to end over there, where held_for()
-        // reads whatever set_gyro_hold actually wrote.
         auto r = make_report(0, 0, /*l2*/ 40);
         // No hold in play, so every gate answers on its own terms.
         CTM_CHECK(gate_open(Gate::L2, r.data(), r.size()));
         CTM_CHECK(gate_open(Gate::Always, r.data(), r.size()));
         // ⓘ And the old value is now exactly Always rather than a special case.
         CTM_CHECK(gate_open(Gate::TriggerHold, r.data(), r.size()));
+    }
+
+    section("gyro-mouse: a trigger's hold closes every gate, for its own pad only");
+    {
+        // ⭐ Asserted here at last. This could not be checked while
+        // trigger_click_test.cpp stood in for set_gyro_hold under the same name:
+        // one binary kept one copy, and calling the real one from this file
+        // sent the trigger tests' writes and reads to different maps. Both
+        // files now include the one real flag (gyro_hold.inl).
+        auto r = make_report(0, 0, /*l2*/ 40);
+        int padA = 0, padB = 0;
+        set_gyro_hold(&padA, true);
+        CTM_CHECK(!gate_open(Gate::Always, r.data(), r.size(), &padA));
+        CTM_CHECK(!gate_open(Gate::L2, r.data(), r.size(), &padA));
+        // ⚠️ Another pad's cursor is not held by A's trigger.
+        CTM_CHECK(gate_open(Gate::Always, r.data(), r.size(), &padB));
+        // ⓘ No pad in play (the recenter check) is never held.
+        CTM_CHECK(gate_open(Gate::Always, r.data(), r.size()));
+        set_gyro_hold(&padA, false);
+        CTM_CHECK(gate_open(Gate::Always, r.data(), r.size(), &padA));
     }
 
     section("gyro-mouse: \"trigger\" still parses, as always");

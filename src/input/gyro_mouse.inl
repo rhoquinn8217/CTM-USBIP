@@ -54,6 +54,9 @@
 // ⓘ Where each pad keeps what the gates and the motion read. Depends on nothing,
 // so including it here keeps this file compiling in the test binary too.
 #include "input/button_layout.inl"
+// ⓘ The trigger's hold on this pad's cursor, which gate_open reads. Depends on
+// nothing, so the trigger's tests include the real one too.
+#include "input/gyro_hold.inl"
 
 namespace ctm_gyro_mouse {
 
@@ -84,29 +87,8 @@ enum class Gate {
     TriggerHold,
 };
 
-// ⭐ WHOSE FLAG THIS IS. trigger_click.inl decides when the cursor should be
-// frozen, because it is the code that knows whether a pull is a click, the
-// second half of a double click, or a drag. But the GATE is asked here, several
-// files earlier in the include order, so the flag lives here and the trigger
-// writes it. That keeps the dependency pointing one way.
-inline std::mutex g_gyroHoldMutex;
-inline std::map<const void *, bool> g_gyroHold;
-
-inline void set_gyro_hold(const void *deviceKey, bool held)
-{
-    std::lock_guard<std::mutex> lock(g_gyroHoldMutex);
-    if (held) g_gyroHold[deviceKey] = true;
-    else g_gyroHold.erase(deviceKey);
-}
-
-// ⚠️ Per pad, never global. Two bridged controllers must not freeze each
-// other's cursor -- the same fault T-162 fixed for the settings window.
-inline bool gyro_hold(const void *deviceKey)
-{
-    if (deviceKey == nullptr) return false;
-    std::lock_guard<std::mutex> lock(g_gyroHoldMutex);
-    return g_gyroHold.find(deviceKey) != g_gyroHold.end();
-}
+// ⓘ The trigger's hold on the cursor, set_gyro_hold() and gyro_hold(), is in
+// input/gyro_hold.inl, included at the top of this file.
 
 inline Gate parse_gate(const std::string &raw)
 {

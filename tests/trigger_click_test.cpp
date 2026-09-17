@@ -32,6 +32,9 @@
 
 // ⓘ Every pad's layout: where its triggers are, which trigger_click.inl asks.
 #include "input/button_layout.inl"
+// ⭐ The REAL hold flag, not a stand-in: see gyro_hold.inl for what a stub of it
+// once did to this binary.
+#include "input/gyro_hold.inl"
 
 using namespace ctmtest;
 
@@ -96,16 +99,25 @@ std::string device_settings_section(const char *kind, const std::string &linked)
 // every pad's OR'd, which is what the host would see held.
 std::map<const void *, uint8_t> g_buttonsFor;
 uint8_t g_buttons = 0;
-std::map<const void *, bool> g_held;
 std::map<const void *, std::vector<uint8_t>> g_keys;
 int g_mouseStarts = 0;
 int g_keyboardStarts = 0;
 
 }  // namespace
 
+// ⛔⛔ EVERY STAND-IN BELOW IS IN AN UNNAMED NAMESPACE, and that is load-bearing.
+// Each wears a real module function's name, and at plain inline scope it would
+// have external linkage: the moment any other test in this binary compiled the
+// real module, the linker would keep one copy for both files, whichever it
+// liked. That happened to the gyro's hold (2026-09-11), which is why the hold is
+// no longer stood in for at all (gyro_hold.inl). An unnamed namespace gives each
+// stand-in internal linkage, so this file's copy can only ever be this file's,
+// the same rule touch_mouse_test.cpp follows for its mailbox.
+
 // Standing in for the rebinder's name lookup, with just enough vocabulary to
 // prove the binding is resolved rather than assumed.
 namespace ctm_rebind {
+namespace {
 enum MouseAction { kMouseNone = 0, kMouseLeft, kMouseRight, kMouseMiddle,
                    kMouseWheelUp, kMouseWheelDown };
 
@@ -128,9 +140,11 @@ inline const KeyName *key_for(const std::string &code)
     if (code == "ShiftA") return &kShiftA;
     return nullptr;
 }
+}  // namespace
 }  // namespace ctm_rebind
 
 namespace ctm_mouse_device {
+namespace {
 inline void set_trigger_buttons_for(const void *key, uint8_t mask)
 {
     if (mask != 0) g_buttonsFor[key] = mask;
@@ -138,17 +152,11 @@ inline void set_trigger_buttons_for(const void *key, uint8_t mask)
     g_buttons = 0;
     for (const auto &entry : g_buttonsFor) g_buttons = static_cast<uint8_t>(g_buttons | entry.second);
 }
-}
-
-namespace ctm_gyro_mouse {
-inline void set_gyro_hold(const void *key, bool held)
-{
-    if (held) g_held[key] = true;
-    else g_held.erase(key);
-}
-}
+}  // namespace
+}  // namespace ctm_mouse_device
 
 namespace ctm_keyboard_device {
+namespace {
 inline void set_trigger_keys_for(const void *key, uint8_t /*mods*/,
                                  const uint8_t *keys, size_t count)
 {
@@ -157,21 +165,26 @@ inline void set_trigger_keys_for(const void *key, uint8_t /*mods*/,
     if (v.empty()) g_keys.erase(key);
     else g_keys[key] = v;
 }
-}
+}  // namespace
+}  // namespace ctm_keyboard_device
 
 // The state log writes here in the product. The tests only need it to compile:
 // what it says is judged by eye in device.log, not asserted.
 namespace device_log {
+namespace {
 inline std::ostream &input_s()
 {
     static std::ostringstream sink;
     sink.str(std::string());
     return sink;
 }
-}
+}  // namespace
+}  // namespace device_log
 
+namespace {
 inline void ctm_gyro_mouse_ensure_mouse_started() { ++g_mouseStarts; }
 inline void ctm_rebind_ensure_keyboard_started() { ++g_keyboardStarts; }
+}  // namespace
 
 // ⓘ The REAL shape parser rather than a stub. trigger_click asks it whether a
 // trigger has an effect at all, and a stub would let the two drift: a shape
@@ -190,7 +203,10 @@ void reset_all()
     g_bools.clear();
     g_buttonsFor.clear();
     g_buttons = 0;
-    g_held.clear();
+    {
+        std::lock_guard<std::mutex> hold(ctm_gyro_mouse::g_gyroHoldMutex);
+        ctm_gyro_mouse::g_gyroHold.clear();
+    }
     g_keys.clear();
     g_mouseStarts = 0;
     g_keyboardStarts = 0;
@@ -206,7 +222,8 @@ std::vector<uint8_t> report_with(int l2, int r2)
     return d;
 }
 
-bool held_for(const void *key) { return g_held.find(key) != g_held.end(); }
+// ⭐ What the trigger actually wrote, read through the real flag.
+bool held_for(const void *key) { return ctm_gyro_mouse::gyro_hold(key); }
 
 // A full-length report, so the status bytes exist. `status` is the value the
 // controller would put in the HIGH nybble: 0 short of the effect, 1 inside it.
