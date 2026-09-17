@@ -26,14 +26,21 @@ if (-not (Test-Path (Join-Path $binaries 'ctm-usbip.exe'))) {
     throw "ctm-usbip.exe not found in $binaries -- run build.ps1 first"
 }
 
-# ⚠️ Version from the exe rather than a parameter by default. A hand-typed
-# version that does not match the binary is worse than none: it names the wrong
-# build with total confidence.
+# ⚠️ Not a hand-typed version by default. One that does not match the binary is
+# worse than none: it names the wrong build with total confidence.
+#
+# DS5-USBIP's own version (2026-09-16): read from include/ctm/product.h, the one
+# place it is written, instead of the exe's timestamp. That constant is what the
+# window title, --version and the exe's product fields show too, so the zip and
+# the program cannot disagree. The zip and its folder carry the product's name.
 if (-not $Version) {
-    $Version = (Get-Item (Join-Path $binaries 'ctm-usbip.exe')).LastWriteTime.ToString('yyyyMMdd-HHmm')
+    $productHeader = Join-Path $Root 'include\ctm\product.h'
+    $match = Select-String -Path $productHeader -Pattern '#define PRODUCT_VERSION\s+"([0-9]+\.[0-9]+\.[0-9]+)"'
+    if (-not $match) { throw "no PRODUCT_VERSION in $productHeader" }
+    $Version = $match.Matches[0].Groups[1].Value
 }
 
-$stage = Join-Path $Root "out\release\ctm-usbip-$Version"
+$stage = Join-Path $Root "out\release\DS5-USBIP-$Version"
 if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
 New-Item -ItemType Directory -Force -Path $stage | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $stage 'profiles\descriptors') | Out-Null
@@ -61,7 +68,7 @@ Copy-Item -Force -Path $launcher -Destination $stage
 
 # A README in the zip, because the first question is always how to start it.
 $readme = @"
-CTM-USBIP $Version
+DS5-USBIP $Version
 ==================
 
 Start it: double-click start-ctm-usbip.bat
@@ -105,7 +112,7 @@ Full documentation: https://github.com/rhoquinn8217/CTM-USBIP
 [System.IO.File]::WriteAllText((Join-Path $stage 'README.txt'), $readme,
                                (New-Object System.Text.UTF8Encoding($false)))
 
-$zip = Join-Path $Root "out\release\ctm-usbip-$Version.zip"
+$zip = Join-Path $Root "out\release\DS5-USBIP-$Version.zip"
 if (Test-Path $zip) { Remove-Item -Force $zip }
 # ⭐ The FOLDER, not its contents. Extracting loose files into whatever
 # directory the user picked scatters them among what is already there -- and

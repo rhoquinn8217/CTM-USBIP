@@ -526,7 +526,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Controller config API — test client</title>
+<title>DS5-USBIP Device Config</title>
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
@@ -6709,6 +6709,15 @@ function startPage() {
   // settings window" took someone's whole browser with it.
   BASE_TITLE = document.title;
   paintTitle();
+  // ⭐ THE PRODUCT'S VERSION COMES FROM THE LISTENER, never a copy here
+  // (include/ctm/product.h, served by /api/v1/status). The title is composed
+  // from parts and painted again, so the [ctm-app] marker stays on it.
+  call('GET', '/api/v1/status', undefined, true).then(function(d) {
+    if (d && d.product && d.product_version) {
+      BASE_TITLE = d.product + ' Device Config - v' + d.product_version;
+      paintTitle();
+    }
+  }).catch(function() {});
   fitWindowIfOversized();
   refreshAll();
   restorePlace();

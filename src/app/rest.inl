@@ -479,6 +479,11 @@ static std::string rest_handle_status(uint16_t agentPort)
         std::chrono::steady_clock::now() - g_rest_agent_start).count();
     const std::vector<RestSessionSnapshot> sessions = collect_bridge_session_snapshots();
     std::string body = "{\"version\":\"" + rest_json_escape(CTM_VERSION_DISPLAY) + "\"";
+    // ⭐ The product's own name and version (include/ctm/product.h), beside the
+    // relay's above. The settings page titles its window from these and keeps
+    // no copy of its own.
+    body += ",\"product\":\"" + rest_json_escape(PRODUCT_NAME) + "\"";
+    body += ",\"product_version\":\"" + rest_json_escape(PRODUCT_VERSION) + "\"";
     body += ",\"transport\":\"" + std::string(g_use_enet.load() ? "enet" : "tcp") + "\"";
     body += ",\"control_port\":" + std::to_string(agentPort);
     body += ",\"usbip_port\":" + std::to_string(kDefaultUsbipPort);

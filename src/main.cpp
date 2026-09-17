@@ -11,6 +11,7 @@
 #include "ctm/map/runtime.h"
 #include "ctm/profile.h"
 #include "ctm/version.h"
+#include "ctm/product.h"
 
 #include <hidsdi.h>
 
@@ -326,7 +327,12 @@ int wmain(int argc, wchar_t **argv)
 
     std::wstring mode = argv[1];
     if (mode == L"version" || mode == L"--version" || mode == L"-v") {
-        std::wcout << L"ctm-usbip " << widen_ascii(CTM_VERSION_DISPLAY, strlen(CTM_VERSION_DISPLAY)) << L"\n";
+        // ⭐ The product AND the relay it is built around, since both are true
+        // (include/ctm/product.h).
+        std::wcout << widen_ascii(PRODUCT_NAME, strlen(PRODUCT_NAME)) << L" "
+                   << widen_ascii(PRODUCT_VERSION, strlen(PRODUCT_VERSION))
+                   << L" (relay: ctm-usbip " << widen_ascii(CTM_VERSION_DISPLAY, strlen(CTM_VERSION_DISPLAY))
+                   << L")\n";
         return 0;
     }
 
