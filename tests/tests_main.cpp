@@ -28,6 +28,7 @@ int run_mouse_held_tests();
 int run_button_layout_tests();
 int run_schema_json_tests();
 int run_mic_report_tests();
+int run_capped_log_tests();
 
 // ⛔⛔ THE TEST BINARY RUNS FROM THE SAME DIRECTORY AS THE AGENT.
 //
@@ -101,5 +102,6 @@ int main(int argc, char **argv)
     run_same_controller_tests();
     run_mic_report_tests();
     run_host_audio_settings_tests();
+    run_capped_log_tests();
     return ctmtest::summary();
 }

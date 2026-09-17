@@ -413,10 +413,15 @@ int wmain(int argc, wchar_t **argv)
                 }
                 g_rest_port = static_cast<uint16_t>(value);
             } else if (arg == L"--verbose") {
-                // ⓘ Everything the agent can say. Off by default: the per-report
-                // lines run at roughly 250 a second and bury the handful a
-                // person actually needs.
+                // ⓘ Everything the agent can say, with the per-report lines
+                // sampled (ctm_log_report_line). Off by default: those lines run
+                // at roughly 250 a second and bury the handful a person needs.
                 g_verbose_flag = true;
+            } else if (arg == L"--verbose-reports") {
+                // ⓘ --verbose, and every per-report line too: for a run about
+                // rumble, trigger effects or anything else sent to the pad.
+                g_verbose_flag = true;
+                g_verbose_reports_flag = true;
             } else if (arg == L"--ui") {
                 // ⭐ Opens the settings page once the agent is up, or brings an
                 // already-open one forward. The launcher used to do this and

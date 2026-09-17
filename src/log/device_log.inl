@@ -8,7 +8,7 @@
 // NOTHING ELSE. Tail that file in a second window and you see only our output,
 // live, with the listener window left untouched.
 //
-//     tail -f device.log
+//     tail -F device.log
 //
 // !! UPSTREAM'S OWN LOG LINES ARE NOT TOUCHED. Retagging or rerouting them
 // !! would be a large diff across upstream files for no benefit -- and rhoquinn8217
@@ -33,6 +33,9 @@
 //
 // The file sits beside ctm-session.log in the repo root.
 //
+// ⭐ CAPPED AT 20 MB, WITH ONE OLDER FILE, device.log.1 (2026-09-16): see
+// capped_log.inl. Follow it with `tail -F`, which survives a new file.
+//
 // !! NAMING: no ctm- prefix, on purpose. This is the deliberate start of
 // !! dropping the CTM branding from OUR OWN files and names (rhoquinn8217,
 // !! 2026-08-01). The older ctm-session.log / ctm-device-config.txt /
@@ -50,9 +53,13 @@
 // INCLUDE ORDER: early -- before anything that logs through it.
 // ---------------------------------------------------------------------------
 
+#include "log/capped_log.inl"
+
 namespace device_log {
 
 inline const char *const kFileName = "device.log";
+inline const char *const kOlderFileName = "device.log.1";
+inline const uint64_t kMaxBytes = 20ull * 1024 * 1024;
 
 // Local wall-clock time, to the millisecond. Every line carries one: the
 // single most useful thing a log can have, and its absence on the TV side is
@@ -75,10 +82,10 @@ inline std::mutex &write_mutex()
 }
 
 // Opened once, in append mode so a restart adds to the session's history
-// rather than discarding it.
-inline std::ofstream &file()
+// rather than discarding it -- up to the cap, then a new file (capped_log.inl).
+inline capped_log &file()
 {
-    static std::ofstream f(kFileName, std::ios::app);
+    static capped_log f(kFileName, kOlderFileName, kMaxBytes);
     return f;
 }
 
@@ -99,10 +106,7 @@ inline void write(const char *tag, const std::string &message)
 
     std::lock_guard<std::mutex> guard(write_mutex());
     std::cout << line << std::endl;   // endl flushes -- deliberate, see above
-    std::ofstream &f = file();
-    if (f.is_open()) {
-        f << line << std::endl;
-    }
+    file().write_line(line, stamp() + " [log] ");
 }
 
 // Convenience wrappers so a call site reads as its own concern rather than as

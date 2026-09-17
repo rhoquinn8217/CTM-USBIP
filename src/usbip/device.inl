@@ -1453,7 +1453,8 @@ private:
             memcpy(event.data + offset, payload.data(), event.length - offset);
         }
         if (event.event_type == CTM_USB_EVENT_HID_OUTPUT) {
-            if (ctm_verbose_logs()) device_log::usb_s() << "usb hid set-output"
+            // ⓘ Every set-output: sampled unless --verbose-reports.
+            if (ctm_log_report_line(++setOutputLines_)) device_log::usb_s() << "usb hid set-output"
                       << " report=0x" << std::hex << std::setw(2) << std::setfill('0')
                       << static_cast<unsigned int>(reportId)
                       << std::dec << std::setfill(' ')
@@ -1697,7 +1698,9 @@ private:
         // triggers and rumble continuously, so this buried the handful of lines
         // a person actually needs -- and scrolled the console fast enough that
         // "controller bridged" was gone before it could be read.
-        if (ctm_verbose_logs()) device_log::usb_s() << "usb endpoint out"
+        // ⭐ So it is sampled unless --verbose-reports: the first fifty keep a
+        // host's start-up commands, which is where the evidence has been.
+        if (ctm_log_report_line(++endpointOutLines_)) device_log::usb_s() << "usb endpoint out"
                   << " ep=0x" << std::hex << std::setw(2) << std::setfill('0')
                   << static_cast<unsigned int>(endpointAddress)
                   << std::dec << std::setfill(' ')
@@ -1825,7 +1828,7 @@ private:
         }
         if (!ok) {
             record_unknown_report("hid-output", event.report_id);
-            if (ctm_verbose_logs()) {
+            if (ctm_log_report_line(++unmappedOutputLines_)) {
                 device_log::usb_s() << "hid output unmapped"
                           << " endpoint=0x" << std::hex << std::setw(2) << std::setfill('0')
                           << static_cast<unsigned int>(event.endpoint_address)
@@ -1903,6 +1906,11 @@ private:
     std::deque<QueuedInputReport> pendingInputReports_;
     // ⓘ One line per session when the cap above evicts something, no more.
     bool droppedQueuedLogged_ = false;
+    // ⓘ How many of each per-report line this device has reached, for
+    // ctm_log_report_line. Atomic: output arrives on the host's thread.
+    std::atomic<uint64_t> setOutputLines_{0};
+    std::atomic<uint64_t> endpointOutLines_{0};
+    std::atomic<uint64_t> unmappedOutputLines_{0};
     std::map<uint8_t, InputEndpointState> inputEndpointStates_;
     std::array<bool, 256> compInLogged_ = {};    // diag: first input report seen per endpoint
     std::array<bool, 256> compPollLogged_ = {};  // diag: first interrupt-IN poll seen per endpoint
