@@ -204,6 +204,25 @@ inline std::string normalise_serial(const std::string &raw)
         else if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) out.push_back(c);
         if (out.size() >= 32) break;
     }
+    // ⛔⛔ ALL ZEROS IS NOT AN IDENTITY (rhoquinn8217, 2026-09-13; the listener
+    // half of T-157). A device that fills its serial with zeros is not saying
+    // which unit it is: the Razer Orochi V2's dongle reports `000000000000`,
+    // and so does every other one, so a config claiming that string would
+    // follow the MODEL and jump to the next dongle of the same kind that is
+    // plugged in.
+    //
+    // ⭐ One place, so every caller inherits it: a claim of all zeros is
+    // dropped as a config file is read, `auto_link_for` finds nothing, and
+    // `add_auto_link` refuses with "no usable serial" rather than writing a
+    // claim that would misfire later.
+    //
+    // ⚠️ ALL zeros, NOT leading zeros. The Switch Pro Controller reports
+    // `000000000001`, which is a real per-unit serial and keeps its identity;
+    // a rule written as "starts with zeros" would have taken it away.
+    //
+    // ⓘ An empty string is already no identity and stays one: find_first_not_of
+    // returns npos for it too.
+    if (out.find_first_not_of('0') == std::string::npos) return std::string();
     return out;
 }
 
