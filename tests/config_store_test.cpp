@@ -105,6 +105,13 @@ int run_config_store_tests()
     CTM_CHECK_EQ(cs::normalise_serial("aa-bb-cc-dd-ee-ff"), std::string("aabbccddeeff"));
     CTM_CHECK_EQ(cs::normalise_serial("aabbccddeeff"), std::string("aabbccddeeff"));
     CTM_CHECK_EQ(cs::normalise_serial(""), std::string(""));
+    // ⛔ All zeros is no identity at all, however it is punctuated (T-157).
+    CTM_CHECK_EQ(cs::normalise_serial("000000000000"), std::string(""));
+    CTM_CHECK_EQ(cs::normalise_serial("00:00:00:00:00:00"), std::string(""));
+    CTM_CHECK_EQ(cs::normalise_serial("0"), std::string(""));
+    // ⚠️ ...and leading zeros are NOT all zeros: the Pro Controller keeps its
+    // serial.
+    CTM_CHECK_EQ(cs::normalise_serial("000000000001"), std::string("000000000001"));
 
     section("config store: the section a device reads");
     CTM_CHECK_EQ(cs::section_for("", "ds5"), std::string("ds5"));
@@ -344,6 +351,17 @@ int run_config_store_tests()
         CTM_CHECK_EQ(cs::auto_link_for("aabbccddeeff", "puck"), std::string(""));
         // an empty serial never auto-links
         CTM_CHECK_EQ(cs::auto_link_for("", "ds5"), std::string(""));
+        // ⛔ Nor on a serial of ALL ZEROS (T-157's listener half). The Razer
+        // Orochi V2's dongle reports `000000000000` -- and so does every other
+        // one, so a claim on it would follow the model to the next dongle.
+        CTM_CHECK_EQ(cs::auto_link_for("000000000000", "ds5"), std::string(""));
+        CTM_CHECK(!cs::add_auto_link("second", "00:00:00:00:00:00", &error));
+        CTM_CHECK(contains(error, "no usable serial"));
+        // ⚠️ A serial that merely BEGINS with zeros is a real identity, and a
+        // rule written as "starts with zeros" would have taken it away: the
+        // Switch Pro Controller's `000000000001` links like any other.
+        CTM_CHECK(cs::add_auto_link("second", "000000000001", &error));
+        CTM_CHECK_EQ(cs::auto_link_for("000000000001", "ds5"), std::string("second"));
 
         CTM_CHECK(cs::remove_auto_link("first", "aabbccddeeff", &error));
         CTM_CHECK_EQ(cs::auto_link_for("aabbccddeeff", "ds5"), std::string(""));
