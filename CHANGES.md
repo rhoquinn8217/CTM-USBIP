@@ -58,6 +58,23 @@ carry it; upstream's own history is unchanged.
 | 2026-09-11 | The gyro gate and the trigger's steady are separate settings, so one trigger can open the gate on a light hold and click at its break. The drag and double-click windows are per side, because which trigger wants them follows what it is bound to | `258c07b`, `fdbc0ca`, `ccfa2d0` |
 | 2026-09-11 | Two ways a mouse button could be left held down, both closed: the rebinder went silent once it gave a trigger up, and the pump recorded a release as sent before checking there was a device to send it to | `012fef6` |
 | 2026-09-11 | Settings page 2.64.48: trigger settings grouped and ordered, the compact config picker steps in place instead of opening a list taller than its window, preset previews drop tuning numbers and passthroughs, and the trigger log reports both sides | `dad60d1`, `f763fe1`, `e0b521d`, `91b2c38`, `b06d011`, `683b091`, `3daa7a3`, `3c33c4f`, `9d74ebd`, `012d986`, `9006b65` |
+| 2026-09-12 | Check which pad it is before reading the pad. The mouse hooks, the rebinder and the gates read DualSense offsets on whatever arrived, so a DS4's timestamp read as a button; each path now asks the layout first | `5e270d1` |
+| 2026-09-12 | A button layout per pad, resolved once per report, with an Xbox table read off its own map file. Config mode rests a pad at its own offsets, where DualSense positions had frozen an Xbox report instead of resting it | `96ecdcf`, `f60b096` |
+| 2026-09-12 | A config is no longer tied to a controller type. Any config links to any controller, each setting checks the pad before it acts, and an existing DS5 config keeps working unchanged | `3800cff` |
+| 2026-09-14 | A new bridge retires an older one only when the serial and the TV's node both match, so a second pad no longer displaces the first | `e99dcf5` |
+| 2026-09-14 | A mouse, keyboard or other bridged part is never dropped for being idle. Only a pad has an idle timeout, because only a pad is expected to keep talking | `8177f0e` |
+| 2026-09-15 | A cabled DualShock 4 is a controller in its own right: its own kind, map and button table, steering the mouse by gyro, touchpad and stick from its own layout, named as itself in the text and the presets | `c3e7852`, `a926df5`, `ef0c5a9`, `53bd775`, `d4c1d5b`, `dbbcd83` |
+| 2026-09-15 | An Xbox trigger pulled past a threshold presses like a button. Its triggers carry no digital bit, so every binding on them had been silent | `192e2d1` |
+| 2026-09-15 | Each pad keeps its own held mouse buttons and its own chord state, so a pad lying at rest no longer releases another pad's drag | `f955fd4`, `449003f` |
+| 2026-09-15 | The left stick scrolls even when no stick is moving the cursor | `d709b51` |
+| 2026-09-15 | A trigger whose steady switch is off fires its remap again | `15da386` |
+| 2026-09-15 | A map's handshake outranks the pad's own input in the queue, and every bridged pad announces its own id rather than the captured one | `55b6a79`, `581efbe` |
+| 2026-09-15 | Diagnostics: the first fifty served packets are written out, the queue cap says when it eats one, and the log says whether the host is collecting what we queue | `833029e`, `5bf617d` |
+| 2026-09-16 | The microphone guard writes to a DualSense, not to every device whose report is the same shape | `1f84fec` |
+| 2026-09-17 | The gyro's hold has one definition, shared with the trigger tests rather than copied | `5ce687a` |
+| 2026-09-17 | `device.log` is capped at 20 MB with one older file kept, and the every-report lines move behind their own switch. An unattended run had written 227 MB | `757b51a`, `61b0ddd` |
+| 2026-09-17 | DS5-USBIP has a name and a version of its own, 0.1.0, shown from one place: the command line, the file properties, the status endpoint and the page | `827556c` |
+| 2026-09-17 | A device is named by its model, then its type, and "hid" only when nothing else is known | `f407995` |
 
 ## Files changed
 
@@ -67,97 +84,115 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
 
 ```
  .gitattributes                                |   48 +
- .gitignore                                    |   28 +-
- CHANGES.md                                    |  156 +
+ .gitignore                                    |   30 +-
+ CHANGES.md                                    |  163 ++
  LINK                                          |    0
  README.md                                     |   18 +
- app/ctm-usbip-tests.vcxproj                   |   98 +
+ app/ctm-usbip-tests.vcxproj                   |  105 +
+ app/ctm-usbip.rc                              |   11 +-
  app/ctm-usbip.vcxproj                         |    4 +-
  attic/flydigi_apex4_identity.map              |   58 +
  attic/flydigi_apex4_usb.profile               |   24 +
  build-tests.ps1                               |   86 +
- build.ps1                                     |   87 +-
- device-config.md                              |  195 +
+ build.ps1                                     |   88 +-
+ device-config.md                              |  195 ++
  docs/rest_api.md                              |  139 +
- include/ctm/map/runtime.h                     |    5 +
+ include/ctm/map/runtime.h                     |   30 +
+ include/ctm/product.h                         |   32 +
+ maps/ds4_usb_over_ds4_usb.map                 |   61 +
  maps/ds5_usb_over_ds5_usb.map                 |   61 +
  maps/virtual_keyboard.map                     |   46 +
  maps/virtual_mouse.map                        |   54 +
+ maps/xbox_gip_usb_over_xbox_bt.map            |    5 +
  profiles/descriptors/ds5e_composite.profile   |   30 +
  profiles/descriptors/virtual_keyboard.profile |   74 +
  profiles/descriptors/virtual_mouse.profile    |   59 +
- release.ps1                                   |  145 +
- src/app/agent.inl                             |  419 +-
- src/app/agent_session_sweep.inl               |  313 ++
- src/app/cli.inl                               |   22 +-
- src/app/common.inl                            |    8 +
- src/app/config_move.inl                       |  534 ++
+ release.ps1                                   |  152 +
+ src/app/agent.inl                             |  479 +++-
+ src/app/agent_session_sweep.inl               |  313 +++
+ src/app/cli.inl                               |   24 +-
+ src/app/common.inl                            |   32 +
+ src/app/config_move.inl                       |  538 ++++
+ src/app/device_type.inl                       |   70 +
  src/app/nickname.inl                          |   90 +
- src/app/open_ui.inl                           |  457 ++
- src/app/overlay_window.inl                    | 1895 +++++++
- src/app/rest.inl                              |  755 +++
- src/app/rest_config.inl                       | 1067 ++++
- src/app/rest_config_sessions.inl              |  120 +
+ src/app/open_ui.inl                           |  457 +++
+ src/app/overlay_window.inl                    | 1937 +++++++++++++
+ src/app/rest.inl                              |  760 +++++
+ src/app/rest_config.inl                       | 1094 ++++++++
+ src/app/rest_config_sessions.inl              |  129 +
  src/app/rest_sessions.inl                     |   33 +
+ src/app/same_controller.inl                   |   38 +
  src/app/service.inl                           |   25 +-
- src/app/tray_icon.inl                         |  197 +
+ src/app/tray_icon.inl                         |  197 ++
  src/app/ui_page.inl                           |   73 +
- src/app/window_move.inl                       |  234 +
- src/audio/audio_gain.inl                      |  178 +
- src/audio/ds5_apply_settings.inl              |  268 +
- src/audio/ds5_output_overrides.inl            |  610 +++
- src/audio/iso_in_pacing.inl                   |  221 +
+ src/app/window_move.inl                       |  245 ++
+ src/audio/audio_gain.inl                      |  178 ++
+ src/audio/ds5_apply_settings.inl              |  268 ++
+ src/audio/ds5_output_overrides.inl            |  679 +++++
+ src/audio/iso_in_pacing.inl                   |  221 ++
  src/audio/iso_in_test_tone.inl                |   95 +
- src/audio/mic_ring.inl                        |  202 +
- src/audio/pcm_amplitude_log.inl               |  162 +
+ src/audio/mic_ring.inl                        |  202 ++
+ src/audio/pcm_amplitude_log.inl               |  162 ++
  src/backend/backend.inl                       |   29 +
- src/backend/bridge.inl                        |  241 +-
+ src/backend/bridge.inl                        |  256 +-
  src/backend/bridge_enet.inl                   |   35 +-
  src/backend/bt.inl                            |   16 +-
- src/config/config_presets.inl                 |  358 ++
- src/config/config_store.inl                   |  746 +++
- src/config/config_watcher.inl                 |  170 +
- src/config/device_config.inl                  |  218 +
- src/input/gyro_calibration.inl                |  131 +
- src/input/gyro_calibration_fetch.inl          |   95 +
- src/input/gyro_mouse.inl                      |  754 +++
+ src/config/config_presets.inl                 |  387 +++
+ src/config/config_store.inl                   |  801 ++++++
+ src/config/config_watcher.inl                 |  170 ++
+ src/config/device_config.inl                  |  218 ++
+ src/input/button_layout.inl                   |  770 ++++++
+ src/input/gyro_calibration.inl                |  168 ++
+ src/input/gyro_calibration_fetch.inl          |   99 +
+ src/input/gyro_hold.inl                       |   48 +
+ src/input/gyro_mouse.inl                      |  787 ++++++
  src/input/keyboard_device.inl                 |  301 ++
- src/input/mouse_device.inl                    |  260 +
- src/input/mouse_exclusive.inl                 |  130 +
- src/input/osk.inl                             |  200 +
- src/input/rebind.inl                          | 1223 +++++
- src/input/stick_mouse.inl                     |  410 ++
- src/input/touch_mouse.inl                     |  382 ++
- src/input/trigger_click.inl                   |  763 +++
- src/input/trigger_effect.inl                  |  564 +++
- src/log/device_log.inl                        |  229 +
- src/main.cpp                                  |  386 +-
- src/map/runtime.cpp                           |    4 +
- src/usbip/device.inl                          |  441 +-
+ src/input/mic_report.inl                      |   41 +
+ src/input/mouse_device.inl                    |  304 ++
+ src/input/mouse_exclusive.inl                 |  122 +
+ src/input/mouse_held.inl                      |   99 +
+ src/input/osk.inl                             |  200 ++
+ src/input/rebind.inl                          | 1232 +++++++++
+ src/input/stick_mouse.inl                     |  471 ++++
+ src/input/touch_mouse.inl                     |  409 +++
+ src/input/trigger_click.inl                   |  801 ++++++
+ src/input/trigger_effect.inl                  |  578 ++++
+ src/log/capped_log.inl                        |  117 +
+ src/log/device_log.inl                        |  233 ++
+ src/main.cpp                                  |  408 ++-
+ src/map/runtime.cpp                           |   68 +-
+ src/usbip/device.inl                          |  604 +++-
  src/usbip/server.inl                          |   55 +-
- tests/config_store_test.cpp                   |  640 +++
- tests/device_config_test.cpp                  |  463 ++
- tests/gyro_mouse_test.cpp                     |  274 +
+ tests/button_layout_test.cpp                  |  817 ++++++
+ tests/capped_log_test.cpp                     |  140 +
+ tests/config_store_test.cpp                   |  759 +++++
+ tests/device_config_test.cpp                  |  521 ++++
+ tests/device_type_test.cpp                    |   89 +
+ tests/gyro_mouse_test.cpp                     |  450 +++
  tests/harness.h                               |   55 +
  tests/host_audio_settings_test.cpp            |  125 +
  tests/iso_in_pacing_test.cpp                  |  118 +
  tests/map_defaults_test.cpp                   |  100 +
+ tests/mic_report_test.cpp                     |   64 +
+ tests/mouse_held_test.cpp                     |  162 ++
  tests/nickname_test.cpp                       |   98 +
  tests/osk_test.cpp                            |   81 +
- tests/rest_parser_test.cpp                    |  195 +
+ tests/product_version_test.cpp                |   33 +
+ tests/rest_parser_test.cpp                    |  195 ++
+ tests/same_controller_test.cpp                |   49 +
  tests/schema_json_test.cpp                    |  147 +
- tests/stick_mouse_test.cpp                    |  532 ++
- tests/tests_main.cpp                          |   97 +
- tests/touch_mouse_test.cpp                    |  519 ++
- tests/trigger_click_test.cpp                  |  675 +++
- tests/trigger_effect_test.cpp                 |  388 ++
+ tests/stick_mouse_test.cpp                    |  710 +++++
+ tests/tests_main.cpp                          |  111 +
+ tests/touch_mouse_test.cpp                    |  664 +++++
+ tests/trigger_click_test.cpp                  |  835 ++++++
+ tests/trigger_effect_test.cpp                 |  402 +++
  tests/units.h                                 |   54 +
- tools/controller-config-test-client.html      | 6669 +++++++++++++++++++++++++
+ tools/controller-config-test-client.html      | 6752 +++++++++++++++++++++++++++++++++++++++++++++
  tools/device-config-panel-edge.bat            |    9 +
- tools/device-config-panel-edge.ps1            |  327 ++
+ tools/device-config-panel-edge.ps1            |  327 +++
  tools/device-config-panel.bat                 |    4 +
  tools/device-config-panel.ps1                 |  303 ++
  tools/osk-mockups.py                          |  103 +
  tools/start-ctm-usbip.bat                     |   67 +
- 93 files changed, 29463 insertions(+), 114 deletions(-)
+ 111 files changed, 33938 insertions(+), 145 deletions(-)
 ```
