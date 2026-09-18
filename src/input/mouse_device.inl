@@ -20,6 +20,10 @@
 
 #pragma once
 
+// ⓘ Outside the namespace: the per-pad store is its own, and the test binary
+// includes it without any of this file's device machinery.
+#include "mouse_held.inl"
+
 namespace ctm_mouse_device {
 
 // Guards one-time creation and holds the long-lived objects.
@@ -40,7 +44,7 @@ inline std::wstring mouse_map_path()
 }
 
 // Drains the mailbox and pushes 4-byte boot-mouse reports. Runs until stop().
-// ⭐ Buttons and wheel, set by the rebinder and read by the pump.
+// ⭐ Buttons and wheel, set by the input hooks and read by the pump.
 //
 // ⓘ The device already declares all of this -- three buttons and a signed wheel
 // byte -- so nothing about the profile changes. Only the pump was hardcoding
@@ -48,17 +52,40 @@ inline std::wstring mouse_map_path()
 //
 // ⚠️ The wheel is a DELTA, not a state: it must be sent once and cleared, or the
 // page would scroll forever after one press.
-inline std::atomic<uint8_t> g_buttons{0};
 inline std::atomic<int> g_wheelPending{0};
 
-inline void set_buttons(uint8_t mask) { g_buttons.store(mask, std::memory_order_relaxed); }
 inline void add_wheel(int clicks) { g_wheelPending.fetch_add(clicks, std::memory_order_relaxed); }
 
-// ⭐ A momentary click, for tap-to-click. The buttons above are a LEVEL owned
-// by the rebinder (it writes the whole mask every report); a tap needs a
-// press-then-release the pad itself never produces. The pump ORs a pending
-// click over the level mask, holds it ~30ms (two host polls), then drops it --
-// so the two writers can never stomp each other.
+// ⭐⭐ THE HELD BUTTONS, KEPT PER PAD (rhoquinn8217, 2026-09-15: a DS4 and an
+// Xbox pad bridged together, and a drag with the Xbox pad's RT arrived as
+// *"double or multi clicking"*).
+//
+// ⛔ These were three global atomics -- g_buttons, g_dragMask, g_triggerMask --
+// and each hook writes its level WHOLE from whichever pad's relay thread runs.
+// The DS4 had mouse bindings too, so its reports (trigger up, 250 a second)
+// wrote 0 between the Xbox pad's and the host saw press, release, press. The
+// keyboard's fault of 2026-09-01, on the mouse. mouse_held.inl keeps every
+// pad's three levels apart, and the pump sends the union.
+//
+// ⛔ AND NO SETTER WITHOUT A PAD. The keyboard kept set_state for callers with no
+// controller in hand; every mouse caller has one, and a setter that takes none
+// is the fault itself, waiting for a caller.
+inline mouse_held::Buttons g_held;
+
+// The rebinder's level: every bound mouse button this pad has down right now,
+// config mode included. Written whole on every report the pad has a mouse
+// binding.
+inline void set_buttons_for(const void *deviceKey, uint8_t mask)
+{
+    g_held.set(deviceKey, mouse_held::kRebind, mask);
+}
+
+// ⭐ A momentary click, for tap-to-click. The levels here are HELD, rewritten
+// whole by their owners; a tap needs a press-then-release the pad itself never
+// produces. The pump ORs a pending click over the held mask, holds it ~30ms
+// (two host polls), then drops it -- so the two can never stomp each other.
+// ⓘ And it needs no pad: it only ever ADDS bits, and only the pump takes them
+// away, so one pad cannot erase another's tap.
 inline std::atomic<uint8_t> g_clickPending{0};
 inline void add_click(uint8_t mask) { g_clickPending.fetch_or(mask, std::memory_order_relaxed); }
 
@@ -66,18 +93,27 @@ inline void add_click(uint8_t mask) { g_clickPending.fetch_or(mask, std::memory_
 // owns a level it rewrites every report, and add_click is a momentary pulse.
 // A drag is neither -- it is held across many reports by something that is not
 // the rebinder, so it needs its own level to be OR'd in beside the others.
-inline std::atomic<uint8_t> g_dragMask{0};
-inline void set_drag(uint8_t mask) { g_dragMask.store(mask, std::memory_order_relaxed); }
+inline void set_drag_for(const void *deviceKey, uint8_t mask)
+{
+    g_held.set(deviceKey, mouse_held::kDrag, mask);
+}
 
 // ⭐ AND A LEVEL FOR THE TRIGGERS, held the same way a drag is but by a
-// different owner. ⛔ It cannot share g_dragMask: both write the WHOLE mask
-// every report, so whichever ran second would erase the other's button, and
-// the touchpad runs first on the input path. Its own level is the same answer
-// the comment above gives for the rebinder.
-inline std::atomic<uint8_t> g_triggerMask{0};
-inline void set_trigger_buttons(uint8_t mask)
+// different owner. ⛔ It cannot share the drag's level: the trigger gesture
+// writes its WHOLE mask every report, so it would erase a drag the same pad's
+// touchpad holds, and the touchpad runs first on the input path. Its own level
+// is the same answer the comment above gives for the rebinder.
+inline void set_trigger_buttons_for(const void *deviceKey, uint8_t mask)
 {
-    g_triggerMask.store(mask, std::memory_order_relaxed);
+    g_held.set(deviceKey, mouse_held::kTrigger, mask);
+}
+
+// ⛔ A pad going away releases every button IT holds, on every level, and
+// nobody else's. Called from the device's stop(): no report of its will ever
+// carry the release, so without this a button held at unbridge stays held.
+inline void forget_device(const void *deviceKey)
+{
+    g_held.forget(deviceKey);
 }
 
 inline void pump_loop()
@@ -104,7 +140,9 @@ inline void pump_loop()
 
         // ⭐ A button or a wheel click is worth a report on its own -- waiting
         // for movement would mean a click did nothing while the pad was still.
-        uint8_t buttons = g_buttons.load(std::memory_order_relaxed);
+        // ⓘ Every level of every pad, OR'd: a button is down while ANY pad holds
+        // it, which is the only meaning one mouse shared by several pads can have.
+        uint8_t buttons = g_held.combined();
         int wheel = g_wheelPending.exchange(0, std::memory_order_relaxed);
         if (wheel > 127) wheel = 127;
         if (wheel < -127) wheel = -127;
@@ -122,9 +160,7 @@ inline void pump_loop()
         } else if (nowMs - clickDownAtMs >= 30) {
             clickDown = 0;
         }
-        buttons = static_cast<uint8_t>(buttons | clickDown |
-                                       g_dragMask.load(std::memory_order_relaxed) |
-                                       g_triggerMask.load(std::memory_order_relaxed));
+        buttons = static_cast<uint8_t>(buttons | clickDown);
 
         const bool buttonsChanged = buttons != lastSent;
 
@@ -257,4 +293,12 @@ inline void stop()
 void ctm_gyro_mouse_ensure_mouse_started()
 {
     ctm_mouse_device::ensure_started();
+}
+
+// ⓘ The same shape for device.inl's stop(), which is included long before this
+// file: it releases only THIS controller's held mouse buttons. No ctm_ prefix:
+// new, and ours.
+void mouse_forget_device(const void *deviceKey)
+{
+    ctm_mouse_device::forget_device(deviceKey);
 }

@@ -163,6 +163,16 @@ public:
         }
         info_ = parse_usb_info(profile_);
         device_log::usb_w() << L"virtual USB serial: " << virtualSerial;
+        // ⭐ The map replays captured packets, and an announce carries an id
+        // Windows keys an XInput device on. Give it this controller's, derived
+        // from the serial above, so two bridged pads are two devices.
+        {
+            std::string serialAscii;
+            for (wchar_t c : virtualSerial) {
+                if (c < 128) serialAscii.push_back(static_cast<char>(c));
+            }
+            map_.set_device_identity(serialAscii);
+        }
         // ⏱️ TIMED. A Bluetooth bridge takes seven seconds against a cable's
         // one, and the TV finishes its whole side in 1.2s -- so the rest is
         // here. Nine feature reports time out on Bluetooth and none on a cable,
@@ -205,6 +215,28 @@ public:
         return physicalSerial_;
     }
 
+    // ⭐ The device's own name as the TV sent it at HELLO ("Pro Controller",
+    // "GameSir-G8+"), read live like the serial above. Empty when none arrived.
+    std::string product_name() const
+    {
+        std::string out;
+        if (backend_ != nullptr) {
+            for (wchar_t c : backend_->caps().product) {
+                if (c == 0) break;
+                out.push_back(c < 128 ? static_cast<char>(c) : '?');
+            }
+        }
+        return out;
+    }
+
+    // ⭐ What the device is by its report descriptor: "controller", "keyboard",
+    // "mouse", or empty (device_type.inl).
+    std::string device_kind_by_descriptor() const
+    {
+        if (backend_ == nullptr) return std::string();
+        return device_type::from_descriptor(backend_->caps().hidReportDescriptor);
+    }
+
     // The per-controller config this device reads, or empty for the shared
     // section. Set by the agent at bridge time and whenever a link changes.
     std::string linked_config() const
@@ -232,6 +264,11 @@ public:
         // able to release it -- and clearing everyone's would release the other
         // pad's keys mid-press.
         ctm_keyboard_forget_device(this);
+        // ⛔ And its held MOUSE buttons, on every level, for the same two reasons
+        // (2026-09-15): they are per device now too, so nothing else would ever
+        // release a button this pad held at unbridge.
+        mouse_forget_device(this);
+        rebind_forget_pad(this);
         stop_audio_stream();
     }
 
@@ -405,7 +442,11 @@ public:
         // ⓘ This is also the branch a decoder would live in, if the feature
         // is ever built: the frame starts at byte 3, runs to the end of the
         // report, and is stereo CELT at 10 ms. See bt-microphone-findings.md.
-        if (length >= 2 && data[0] >= 0x31 && (data[1] & 0x02)) {
+        //
+        // ⛔⛔ A DualSense's or an Edge's reports only. The shape alone once
+        // dropped a Switch Pro Controller's handshake reply as audio -- see
+        // input/mic_report.inl.
+        if (mic_report::is_audio_only(info_.vid, info_.pid, data, length)) {
             static unsigned long micDropped = 0;
             ++micDropped;
             if (micDropped == 1 || (micDropped % 500) == 0) {
@@ -455,10 +496,12 @@ public:
         if (logMappedInput) {
             log_mapped_input_debug(data, length, report);
         }
-        // Gyro-to-mouse: read the DS5 motion out of the mapped report and feed
-        // the synthetic mouse. Never modifies `report` -- the controller passes
-        // through untouched; this only pushes a mouse delta into the mailbox.
-        // No-op for non-DualSense devices and when no gate is configured.
+        // Gyro-to-mouse: read the pad's motion out of the mapped report, at its
+        // own layout's offsets, and feed the synthetic mouse. Never modifies
+        // `report` -- the controller passes through untouched; this only pushes
+        // a mouse delta into the mailbox. No-op for a pad whose layout has no
+        // motion sensor (an Xbox pad, one with no layout) and when no gate is
+        // configured.
         ctm_gyro_mouse::on_ds5_input(this, profile_.device_descriptor, linked_config(),
                                      report.data, report.length);
 
@@ -573,14 +616,24 @@ public:
         const auto waitStart = clock::now();
         std::unique_lock<std::mutex> lock(inputMutex_);
         InputEndpointState &state = inputEndpointStates_[endpointAddress];
+        // ⭐⭐ THE MAP'S PACKETS FIRST, then the pad's own input in order.
+        //
+        // ⛔ Insertion order alone was not enough: a pad reporting every few
+        // milliseconds has already filled this deque by the time a handshake is
+        // built, so the handshake left as packet forty-five and Windows had
+        // already given up on the device. See QueuedInputReport::priority.
         auto pendingForEndpoint = [&]() {
-            return std::find_if(
-                pendingInputReports_.begin(),
-                pendingInputReports_.end(),
-                [&](const QueuedInputReport &item) {
-                    return item.report.endpoint_address == endpointAddress &&
-                        item.sequence > state.deliveredSequence;
-                });
+            auto match = [&](const QueuedInputReport &item) {
+                return item.report.endpoint_address == endpointAddress &&
+                    item.sequence > state.deliveredSequence;
+            };
+            auto first = std::find_if(
+                pendingInputReports_.begin(), pendingInputReports_.end(),
+                [&](const QueuedInputReport &item) { return item.priority && match(item); });
+            if (first != pendingInputReports_.end()) {
+                return first;
+            }
+            return std::find_if(pendingInputReports_.begin(), pendingInputReports_.end(), match);
         };
         inputCv_.wait(lock, [&]() {
             const bool hasPending = pendingForEndpoint() != pendingInputReports_.end();
@@ -595,8 +648,12 @@ public:
         });
         CTM_INPUT_REPORT report = {};
         uint32_t deliveredSequence = 0;
+        // ⭐ WHICH HALF ANSWERED, for the log below: a packet the map queued
+        // (a handshake) or the live input the pad is sending.
+        bool fromQueue = false;
         auto pendingIt = pendingForEndpoint();
         if (pendingIt != pendingInputReports_.end()) {
+            fromQueue = true;
             report = pendingIt->report;
             deliveredSequence = pendingIt->sequence;
             pendingInputReports_.erase(pendingIt);
@@ -612,6 +669,33 @@ public:
         const size_t copy = (std::min<size_t>)(report.length, transferLength);
         inData->assign(report.data, report.data + copy);
         state.deliveredSequence = deliveredSequence;
+        // ⭐ MEASUREMENT: does the host actually COLLECT what we queue?
+        //
+        // ⛔ Without this the two halves are indistinguishable from outside. A
+        // pad can arrive at 250 Hz, map cleanly, and queue perfectly while the
+        // host never polls the endpoint -- and the only symptom is "nothing
+        // moves", with every log line looking healthy. One line per 500 served
+        // reports says which half is which. Rate-limited so it costs nothing.
+        if (ctm_verbose_logs()) {
+            ++state.servedCount;
+            // ⭐ THE FIRST FIFTY, THEN ONE IN FIVE HUNDRED (2026-09-15). A
+            // handshake lives in the first few serves of a session, and one
+            // sampled line could not say whether it went out at all -- which
+            // is the whole question when Windows will not promote an Xbox pad.
+            if (state.servedCount <= 50 || (state.servedCount % 500) == 0) {
+                device_log::usb_s() << "input served ep=0x" << std::hex << std::setw(2)
+                    << std::setfill('0') << static_cast<unsigned int>(endpointAddress)
+                    << std::dec << std::setfill(' ')
+                    << " n=" << state.servedCount
+                    << " len=" << report.length
+                    << " asked=" << transferLength
+                    << " gave=" << copy
+                    << " src=" << (fromQueue ? "queue" : "live")
+                    << " queued=" << pendingInputReports_.size()
+                    << " head=" << hex_span(report.data, (std::min<size_t>)(report.length, 10))
+                    << std::endl;
+            }
+        }
         if (submitInfo != nullptr) {
             submitInfo->inputReply = InputReplyKind::Fresh;
             submitInfo->inputWaitUs = static_cast<uint32_t>(
@@ -640,10 +724,27 @@ private:
     struct QueuedInputReport {
         uint32_t sequence = 0;
         CTM_INPUT_REPORT report = {};
+        /* ⭐⭐ A PACKET THE MAP BUILT, not the pad's own input.
+         *
+         * ⛔ THE FAULT THIS EXISTS FOR (measured 2026-09-15): an Xbox pad's GIP
+         * handshake is queued on SET_CONFIGURATION, and a pad that reports
+         * steadily has already filled this queue by then. The announce went out
+         * as the FORTY-FIFTH packet, behind forty-four input frames, and
+         * Windows will not promote a device that sends input before it has
+         * announced itself -- so the pad arrived with no XInput child and no
+         * game could see it.
+         *
+         * ⓘ It used to work by luck: before the TV kept a still pad reporting
+         * every 4 ms, the queue was empty when the handshake was built. */
+        bool priority = false;
     };
 
     struct InputEndpointState {
         uint32_t deliveredSequence = 0;
+        // How many reports this endpoint has actually handed to the host. Only
+        // read by the verbose "input served" line, which exists to tell a host
+        // that is not polling from a device that is not producing.
+        unsigned long servedCount = 0;
     };
 
     void configure_audio_stream_from_map()
@@ -674,18 +775,42 @@ private:
                   << std::endl;
     }
 
-    void enqueue_input_report(const CTM_INPUT_REPORT &report)
+    // ⭐ `priority` marks a packet the MAP built -- a handshake, not the pad's
+    // own input. It is served before anything the pad is sending and the cap
+    // below never drops it. See QueuedInputReport::priority for what that cost
+    // when it was not true.
+    void enqueue_input_report(const CTM_INPUT_REPORT &report, bool priority = false)
     {
         if (report.length == 0 || report.length > sizeof(report.data)) {
             return;
         }
         std::lock_guard<std::mutex> lock(inputMutex_);
-        latestInput_ = report;
-        hasInput_ = true;
+        // ⛔ A HANDSHAKE IS NOT THE LATEST INPUT. Writing it here would hand it
+        // to an endpoint poll that finds no pending packet, and worse, leave it
+        // as the state a later poll repeats.
+        if (!priority) {
+            latestInput_ = report;
+            hasInput_ = true;
+        }
         ++inputSequence_;
-        pendingInputReports_.push_back(QueuedInputReport{inputSequence_, report});
+        pendingInputReports_.push_back(QueuedInputReport{inputSequence_, report, priority});
+        // ⛔ THE CAP DROPS THE OLDEST INPUT, NEVER A MAP PACKET. A pad reporting
+        // every 4 ms fills this deque in a quarter of a second, and the
+        // handshake queued behind that traffic is exactly what must survive.
         while (pendingInputReports_.size() > 64) {
-            pendingInputReports_.pop_front();
+            auto victim = std::find_if(pendingInputReports_.begin(), pendingInputReports_.end(),
+                                       [](const QueuedInputReport &item) { return !item.priority; });
+            if (victim == pendingInputReports_.end()) {
+                break;      // all of it is the map's: keep it and stop trimming
+            }
+            if (ctm_verbose_logs() && !droppedQueuedLogged_) {
+                droppedQueuedLogged_ = true;
+                device_log::usb_s() << "queued input dropped by the 64 cap"
+                          << " head=" << hex_span(victim->report.data,
+                                                  (std::min<size_t>)(victim->report.length, 6))
+                          << std::endl;
+            }
+            pendingInputReports_.erase(victim);
         }
         inputCv_.notify_all();
     }
@@ -700,7 +825,7 @@ private:
             }
         }
         for (const CTM_INPUT_REPORT &report : reports) {
-            enqueue_input_report(report);
+            enqueue_input_report(report, /* priority */ true);
         }
         if (!reports.empty()) {
             if (ctm_verbose_logs()) device_log::usb_s() << "virtual input queued"
@@ -1350,7 +1475,8 @@ private:
             memcpy(event.data + offset, payload.data(), event.length - offset);
         }
         if (event.event_type == CTM_USB_EVENT_HID_OUTPUT) {
-            if (ctm_verbose_logs()) device_log::usb_s() << "usb hid set-output"
+            // ⓘ Every set-output: sampled unless --verbose-reports.
+            if (ctm_log_report_line(++setOutputLines_)) device_log::usb_s() << "usb hid set-output"
                       << " report=0x" << std::hex << std::setw(2) << std::setfill('0')
                       << static_cast<unsigned int>(reportId)
                       << std::dec << std::setfill(' ')
@@ -1594,7 +1720,9 @@ private:
         // triggers and rumble continuously, so this buried the handful of lines
         // a person actually needs -- and scrolled the console fast enough that
         // "controller bridged" was gone before it could be read.
-        if (ctm_verbose_logs()) device_log::usb_s() << "usb endpoint out"
+        // ⭐ So it is sampled unless --verbose-reports: the first fifty keep a
+        // host's start-up commands, which is where the evidence has been.
+        if (ctm_log_report_line(++endpointOutLines_)) device_log::usb_s() << "usb endpoint out"
                   << " ep=0x" << std::hex << std::setw(2) << std::setfill('0')
                   << static_cast<unsigned int>(endpointAddress)
                   << std::dec << std::setfill(' ')
@@ -1722,7 +1850,7 @@ private:
         }
         if (!ok) {
             record_unknown_report("hid-output", event.report_id);
-            if (ctm_verbose_logs()) {
+            if (ctm_log_report_line(++unmappedOutputLines_)) {
                 device_log::usb_s() << "hid output unmapped"
                           << " endpoint=0x" << std::hex << std::setw(2) << std::setfill('0')
                           << static_cast<unsigned int>(event.endpoint_address)
@@ -1798,6 +1926,13 @@ private:
     uint32_t inputSequence_ = 0;
     CTM_INPUT_REPORT latestInput_ = {};
     std::deque<QueuedInputReport> pendingInputReports_;
+    // ⓘ One line per session when the cap above evicts something, no more.
+    bool droppedQueuedLogged_ = false;
+    // ⓘ How many of each per-report line this device has reached, for
+    // ctm_log_report_line. Atomic: output arrives on the host's thread.
+    std::atomic<uint64_t> setOutputLines_{0};
+    std::atomic<uint64_t> endpointOutLines_{0};
+    std::atomic<uint64_t> unmappedOutputLines_{0};
     std::map<uint8_t, InputEndpointState> inputEndpointStates_;
     std::array<bool, 256> compInLogged_ = {};    // diag: first input report seen per endpoint
     std::array<bool, 256> compPollLogged_ = {};  // diag: first interrupt-IN poll seen per endpoint

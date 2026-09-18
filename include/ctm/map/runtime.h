@@ -4,6 +4,7 @@
 
 #include <chrono>
 #include <iostream>
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -75,6 +76,14 @@ public:
     uint16_t iso_frame_samples() const { return isoFrameSamples_; }
     uint8_t iso_channels() const { return isoChannels_; }
 
+    /* ⭐ THE ID THIS DEVICE ANNOUNCES AS, six bytes derived from the serial its
+     * virtual USB device carries. Set once, before any packet is built.
+     *
+     * ⓘ Derived rather than random so a controller announces the same id every
+     * time it is bridged: Windows remembers the XInput device it built from it.
+     * ⛔ Without this, every pad a map replays an announce for claims the same
+     * identity -- see VirtualInputRule::packetDeviceIdAt. */
+    void set_device_identity(const std::string &serial);
     void set_audio_latency(uint8_t latency) { audioLatency_ = latency; }
     void set_audio_block_id(uint8_t blockId) { audioBlockId_ = blockId; }
 
@@ -262,6 +271,19 @@ private:
         std::vector<uint8_t> matchPrefix;
         uint8_t destinationEndpoint = 0;
         std::vector<std::vector<uint8_t>> packets;
+        /* ⭐⭐ WHERE THIS DEVICE'S OWN ID GOES, per packet, or -1 for none.
+         *
+         * ⛔ THE FAULT THIS EXISTS FOR (2026-09-15): the Xbox map replays an
+         * announce captured from one real pad, id and all, and Windows keys the
+         * XInput device it creates on those six bytes. Two bridged Xbox pads
+         * therefore claimed ONE identity: the first was promoted and the second
+         * got no XInput device at all, while both bridged and both fed reports.
+         *
+         * ⓘ Six bytes, written over the captured ones. Stable for a given
+         * controller, because it is derived from the serial the virtual device
+         * carries -- a pad keeps its identity across bridges, which is what
+         * Windows expects of a controller it has seen before. */
+        std::vector<int> packetDeviceIdAt;
     };
     const FeaturePageRule *find_feature_page_rule(
         const CTM_USB_EVENT &event,
@@ -424,6 +446,9 @@ private:
     uint8_t sbcSubbands_ = 8;
     uint8_t sbcChannelMode_ = 1; // SBC dual-channel.
     uint8_t sbcAllocation_ = 0; // SBC loudness.
+    // ⓘ Six bytes written into a replayed announce; see set_device_identity.
+    std::array<uint8_t, 6> deviceId_ = {};
+    bool hasDeviceId_ = false;
     uint8_t audioLatency_ = 0x60;
     bool logMappedInput_ = false;
     bool isoPassthroughEnabled_ = false;  // wired ISO passthrough mode

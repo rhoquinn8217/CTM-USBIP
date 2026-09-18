@@ -494,9 +494,13 @@ inline void nudge(HWND hwnd, int dx, int dy)
 // True when the report was consumed by the gesture and must be blanked, so
 // that while steering nothing else on the pad acts -- the d-pad must not also
 // be walking the page's settings.
-inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len)
+//
+// ⓘ Options, R3 and the stick are read through the pad's own layout, so a DS4
+// or an Xbox pad moves the page as a DualSense does (2026-09-15).
+inline bool handle_report(const void *deviceKey, const ctm_rebind::Layout &lay,
+                          const uint8_t *data, size_t len)
 {
-    if (data == nullptr || len < 11) return false;
+    if (data == nullptr || len < lay.minLength) return false;
 
     if (!ctm_rebind_config_mode_effective()) {
         // ⛔ Not our window in front. Forget any hold in progress, on any pad,
@@ -508,7 +512,7 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
     }
 
     // ⓘ R3 is free on the page as Options is: it never reads index 10 or 11.
-    if (r3_edge(deviceKey, ctm_overlay::button_down(data, len, 11))) {
+    if (r3_edge(deviceKey, ctm_overlay::button_down(lay, data, len, 11))) {
         if (HWND h = page_window()) resize_next(h);
         // The press goes through; the page ignores R3.
     }
@@ -516,7 +520,7 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
     // ⭐ THIS pad's mover, so another pad's reports -- Options up, as always on
     // the pad not being held -- cannot end this pad's hold (T-162).
     const window_move::Step mv =
-        g_movers.for_key(deviceKey).step(ctm_overlay::button_down(data, len, 9), data, len);
+        g_movers.for_key(deviceKey).step(ctm_overlay::button_down(lay, data, len, 9), lay, data, len);
 
     if (mv.tapped) {
         if (HWND h = page_window()) snap_next(h);

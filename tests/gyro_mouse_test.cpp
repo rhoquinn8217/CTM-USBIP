@@ -32,6 +32,11 @@
 // needs it explicitly.
 #include <windows.h>
 
+#include <cmath>
+
+// ⓘ Every pad's layout, which gyro_mouse.inl reads motion and gates through.
+#include "input/button_layout.inl"
+
 using namespace ctmtest;
 
 namespace {
@@ -73,33 +78,34 @@ static std::string device_settings_section(const char *kind, const std::string &
 {
     if (kind == nullptr) return std::string();
     if (linkedConfig.empty()) return std::string(kind);
-    return "cfg:" + linkedConfig + "/" + kind;
+    return "cfg:" + linkedConfig;
 }
 
-static const char *device_section_for(const std::vector<unsigned char> &d)
-{
-    if (d.size() < 12) return nullptr;
-    const uint16_t v = static_cast<uint16_t>(d[8] | (d[9] << 8));
-    const uint16_t p = static_cast<uint16_t>(d[10] | (d[11] << 8));
-    if (v != 0x054c) return nullptr;
-    if (p == 0x0ce6) return "ds5";
-    if (p == 0x0df2) return "ds5_edge";
-    return nullptr;
-}
-
-// ⭐ The CAPABILITY question, stubbed alongside the kind question.
-//
-// gyro_mouse.inl asks this before reading motion, because device_section_for
-// now answers for controllers whose report layout it cannot handle -- a DS4 has
-// a gyro, at different offsets, so a kind check would silently read the wrong
-// bytes.
+// ⭐ The resolver gyro_mouse.inl asks for a pad's settings kind AND layout,
+// mirroring the real one in ds5_output_overrides.inl: Sony 0ce6, 0df2 and
+// 09cc/05c4 are a DualSense, an Edge and a DS4.
 //
 // ⚠️ The test binary is its own translation unit, so it sees nothing that
 // main.cpp includes. Anything the real code gains has to be stubbed here too.
-static bool device_has_ds5_motion(const std::vector<unsigned char> &d)
+struct InputPad {
+    const char *kind = nullptr;
+    const ctm_rebind::Layout *layout = nullptr;
+};
+
+static InputPad device_input_pad_for(const std::vector<unsigned char> &d)
 {
-    const char *kind = device_section_for(d);
-    return kind != nullptr;
+    InputPad pad;
+    if (d.size() < 12) return pad;
+    const uint16_t v = static_cast<uint16_t>(d[8] | (d[9] << 8));
+    const uint16_t p = static_cast<uint16_t>(d[10] | (d[11] << 8));
+    if (v != 0x054c) return pad;
+    const char *kind = nullptr;
+    if (p == 0x0ce6) kind = "ds5";
+    else if (p == 0x0df2) kind = "ds5_edge";
+    else if (p == 0x09cc || p == 0x05c4) kind = "ds4";
+    pad.layout = ctm_rebind::layout_for(kind);
+    if (pad.layout != nullptr) pad.kind = kind;
+    return pad;
 }
 
 // ⭐ The calibration half that gyro_mouse.inl READS. Not the fetch half -- that
@@ -182,20 +188,32 @@ int run_gyro_mouse_tests()
         // L2 as the gate silently gave up the steady. It is a suppression on
         // top of whichever gate was chosen now.
         //
-        // ⚠️ THE SUPPRESSION ITSELF IS NOT ASSERTED HERE, deliberately.
-        // trigger_click_test.cpp defines its own ctm_gyro_mouse::set_gyro_hold
-        // stub, this file links the real one, and both are inline with the same
-        // signature -- so the linker picks one for the whole binary. Calling it
-        // from here made trigger_click's own assertions start failing, because
-        // its writes went to the real map while its reads came from the stub.
-        // ⓘ The behaviour is covered end to end over there, where held_for()
-        // reads whatever set_gyro_hold actually wrote.
         auto r = make_report(0, 0, /*l2*/ 40);
         // No hold in play, so every gate answers on its own terms.
         CTM_CHECK(gate_open(Gate::L2, r.data(), r.size()));
         CTM_CHECK(gate_open(Gate::Always, r.data(), r.size()));
         // ⓘ And the old value is now exactly Always rather than a special case.
         CTM_CHECK(gate_open(Gate::TriggerHold, r.data(), r.size()));
+    }
+
+    section("gyro-mouse: a trigger's hold closes every gate, for its own pad only");
+    {
+        // ⭐ Asserted here at last. This could not be checked while
+        // trigger_click_test.cpp stood in for set_gyro_hold under the same name:
+        // one binary kept one copy, and calling the real one from this file
+        // sent the trigger tests' writes and reads to different maps. Both
+        // files now include the one real flag (gyro_hold.inl).
+        auto r = make_report(0, 0, /*l2*/ 40);
+        int padA = 0, padB = 0;
+        set_gyro_hold(&padA, true);
+        CTM_CHECK(!gate_open(Gate::Always, r.data(), r.size(), &padA));
+        CTM_CHECK(!gate_open(Gate::L2, r.data(), r.size(), &padA));
+        // ⚠️ Another pad's cursor is not held by A's trigger.
+        CTM_CHECK(gate_open(Gate::Always, r.data(), r.size(), &padB));
+        // ⓘ No pad in play (the recenter check) is never held.
+        CTM_CHECK(gate_open(Gate::Always, r.data(), r.size()));
+        set_gyro_hold(&padA, false);
+        CTM_CHECK(gate_open(Gate::Always, r.data(), r.size(), &padA));
     }
 
     section("gyro-mouse: \"trigger\" still parses, as always");
@@ -268,6 +286,164 @@ int run_gyro_mouse_tests()
         CTM_CHECK_EQ(static_cast<int>(dy2), -73);
         int8_t dx3 = 0, dy3 = 0;
         CTM_CHECK(!mb.drain(&dx3, &dy3));             // now empty
+    }
+
+    // ---- DualShock 4: the same sensor, three bytes earlier ----------------------
+
+    // A DS4 USB report: gyro pitch/yaw/roll at [13] [15] [17], accel at [19] [21]
+    // [23], hat centred, both fingers up with the packet count at [33].
+    auto ds4_report = [](int16_t yaw, int16_t pitch) {
+        std::vector<uint8_t> d(64, 0);
+        d[0] = 0x01;
+        d[1] = d[2] = d[3] = d[4] = 0x80;
+        d[5] = 0x08;
+        d[7] = 0xe4;                                  // counter bits, PS and press clear
+        d[10] = 0xff;                                 // a timestamp byte, all bits set
+        d[13] = static_cast<uint8_t>(pitch & 0xff);
+        d[14] = static_cast<uint8_t>((pitch >> 8) & 0xff);
+        d[15] = static_cast<uint8_t>(yaw & 0xff);
+        d[16] = static_cast<uint8_t>((yaw >> 8) & 0xff);
+        const int16_t az = 8192;                      // 1 g, so the filter has a gravity vector
+        d[23] = static_cast<uint8_t>(az & 0xff);
+        d[24] = static_cast<uint8_t>((az >> 8) & 0xff);
+        d[33] = 0x01;                                 // ONE touch packet -- not a finger
+        d[35] = 0x80;                                 // finger 1 up
+        d[39] = 0x80;                                 // finger 2 up
+        return d;
+    };
+
+    section("gyro-mouse: a DS4 moves the cursor from its own motion bytes");
+    {
+        g_gate = "always";
+        g_sens = 0;
+        g_player = false;
+        GyroMouse gm;
+        MouseDelta out{};
+        bool moved = false;
+        for (int i = 0; i < 300 && !moved; ++i) {
+            auto r = ds4_report(6000, 0);
+            if (gm.on_report(ctm_rebind::kDs4Layout, r.data(), r.size(), "ds4", &out)) {
+                moved = (out.dx != 0 || out.dy != 0);
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        CTM_CHECK(moved);
+    }
+
+    section("gyro-mouse: a DS4's PS gate is [7], not a timestamp byte");
+    {
+        // ⛔⛔ THE FAULT, pinned. The gyro preset's recenter button is a gate; at
+        // DualSense offsets PS is [10] 0x01, which on a DS4 is a timestamp that
+        // changes on most reports -- so recenter fired over and over.
+        auto r = ds4_report(0, 0);
+        CTM_CHECK(!gate_open(Gate::PS, ctm_rebind::kDs4Layout, r.data(), r.size()));
+        CTM_CHECK(gate_open(Gate::PS, ctm_rebind::kDs5Layout, r.data(), r.size()));
+        r[7] = static_cast<uint8_t>(r[7] | 0x01);
+        CTM_CHECK(gate_open(Gate::PS, ctm_rebind::kDs4Layout, r.data(), r.size()));
+    }
+
+    section("gyro-mouse: a DS4's touchpad gates read its fingers, not the packet count");
+    {
+        auto r = ds4_report(0, 0);
+        CTM_CHECK(!gate_open(Gate::Touchpad, ctm_rebind::kDs4Layout, r.data(), r.size()));
+        CTM_CHECK(gate_open(Gate::NotTouchpad, ctm_rebind::kDs4Layout, r.data(), r.size()));
+        // At DualSense offsets the count 0x01 reads as a finger that never lifts.
+        CTM_CHECK(gate_open(Gate::Touchpad, ctm_rebind::kDs5Layout, r.data(), r.size()));
+        r[35] = 0x05;                                 // a real finger down
+        CTM_CHECK(gate_open(Gate::Touchpad, ctm_rebind::kDs4Layout, r.data(), r.size()));
+        r[7] = static_cast<uint8_t>(r[7] | 0x02);     // and the pad pressed in
+        CTM_CHECK(gate_open(Gate::TouchpadClick, ctm_rebind::kDs4Layout, r.data(), r.size()));
+    }
+
+    section("gyro-mouse: \"move unless a finger is down\" is open on a pad with no touchpad");
+    {
+        // ⛔ Found in review, 2026-09-15: touch_finger_up() rightly answers false
+        // for a pad with no touchpad, which shut this gate forever on an Xbox pad
+        // -- a stick mouse gated on !touchpad never moved. No finger can be down
+        // on a pad with no touchpad, so the gate is open there.
+        std::vector<uint8_t> xbox(48, 0);
+        xbox[0] = 0x20;
+        CTM_CHECK(gate_open(Gate::NotTouchpad, ctm_rebind::kXboxLayout, xbox.data(), xbox.size()));
+        // ⓘ The gates that need a touchpad to open stay shut on one without.
+        CTM_CHECK(!gate_open(Gate::Touchpad, ctm_rebind::kXboxLayout, xbox.data(), xbox.size()));
+        CTM_CHECK(!gate_open(Gate::TouchpadClick, ctm_rebind::kXboxLayout, xbox.data(), xbox.size()));
+        // ⓘ And a pad WITH a touchpad still pauses for a finger.
+        auto r = ds4_report(0, 0);
+        r[35] = 0x05;
+        CTM_CHECK(!gate_open(Gate::NotTouchpad, ctm_rebind::kDs4Layout, r.data(), r.size()));
+    }
+
+    section("gyro-mouse: a DS4's L2 gate is [8], not a face button");
+    {
+        auto r = ds4_report(0, 0);
+        r[5] = 0x28;                                  // cross held, hat centred
+        CTM_CHECK(!gate_open(Gate::L2, ctm_rebind::kDs4Layout, r.data(), r.size()));
+        CTM_CHECK(gate_open(Gate::L2, ctm_rebind::kDs5Layout, r.data(), r.size()));   // the fault
+        r[8] = 40;
+        CTM_CHECK(gate_open(Gate::L2, ctm_rebind::kDs4Layout, r.data(), r.size()));
+        r[6] = 0x01;                                  // L1
+        CTM_CHECK(gate_open(Gate::L1, ctm_rebind::kDs4Layout, r.data(), r.size()));
+    }
+
+    // ---- Calibration: three reports, two field orders ---------------------------
+
+    // Distinct spans per axis, so a report read in the wrong order gives a
+    // DIFFERENT scale instead of the same one by symmetry.
+    auto calib = [](uint8_t id, bool grouped) {
+        std::vector<uint8_t> d(41, 0);
+        d[0] = id;
+        auto put = [&d](size_t off, int16_t v) {
+            d[off] = static_cast<uint8_t>(v & 0xff);
+            d[off + 1] = static_cast<uint8_t>((v >> 8) & 0xff);
+        };
+        // biases 0
+        if (!grouped) {
+            put(7, 8000);  put(9, -8000);             // pitch plus, minus
+            put(11, 7000); put(13, -7000);            // yaw
+            put(15, 6000); put(17, -6000);            // roll
+        } else {
+            put(7, 8000);  put(9, 7000);  put(11, 6000);    // every plus first
+            put(13, -8000); put(15, -7000); put(17, -6000); // then every minus
+        }
+        put(19, 540); put(21, 540);                   // speed plus, minus
+        return d;
+    };
+    auto closeTo = [](float a, float b) { return std::fabs(a - b) < 1e-5f; };
+    const float wantPitch = 1080.0f / 16000.0f;
+    const float wantYaw   = 1080.0f / 14000.0f;
+    const float wantRoll  = 1080.0f / 12000.0f;
+
+    section("gyro calibration: the DualSense's report reads as it always did");
+    {
+        const auto d = calib(0x05, false);
+        ctm_gyro_calib::Scale s;
+        CTM_CHECK(ctm_gyro_calib::parse(d.data(), d.size(), &s));
+        CTM_CHECK(closeTo(s.pitch, wantPitch) && closeTo(s.yaw, wantYaw) && closeTo(s.roll, wantRoll));
+    }
+
+    section("gyro calibration: a cabled DS4's report is 0x02 in the same order");
+    {
+        const auto d = calib(0x02, false);
+        ctm_gyro_calib::Scale s;
+        CTM_CHECK(ctm_gyro_calib::parse(d.data(), d.size(), ctm_gyro_calib::kDs4UsbCalibration, &s));
+        CTM_CHECK(closeTo(s.pitch, wantPitch) && closeTo(s.yaw, wantYaw) && closeTo(s.roll, wantRoll));
+        // ⛔ And the DualSense's parser refuses it by id rather than misreading it.
+        ctm_gyro_calib::Scale refused;
+        CTM_CHECK(!ctm_gyro_calib::parse(d.data(), d.size(), &refused));
+    }
+
+    section("gyro calibration: a Bluetooth DS4 groups the plus values first");
+    {
+        const auto d = calib(0x05, true);
+        ctm_gyro_calib::Scale s;
+        CTM_CHECK(ctm_gyro_calib::parse(d.data(), d.size(), ctm_gyro_calib::kDs4BtCalibration, &s));
+        CTM_CHECK(closeTo(s.pitch, wantPitch) && closeTo(s.yaw, wantYaw) && closeTo(s.roll, wantRoll));
+        // ⚠️ THE ORDER MATTERS: the same bytes read as paired give another pitch.
+        // ⓘ Pitch, not yaw: with these spans the misread yaw happens to land on
+        // the same 14000, so only pitch and roll can show the difference.
+        ctm_gyro_calib::Scale paired;
+        ctm_gyro_calib::parse(d.data(), d.size(), ctm_gyro_calib::kDs5Calibration, &paired);
+        CTM_CHECK(!closeTo(paired.pitch, wantPitch));
     }
 
     return 0;

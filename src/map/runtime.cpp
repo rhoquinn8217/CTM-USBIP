@@ -857,7 +857,23 @@ bool CtmMapRuntime::parse_map(std::wstring *error)
                 if (error) *error = L"Map virtual input rule has invalid packet bytes.";
                 return false;
             }
+            // ⭐ Optional: where this device's own id is written into the
+            // packet, e.g. `rule.1.packet.1.device_id_at = 4` for an
+            // announce. -1 means the packet is replayed verbatim.
+            const std::string at = ini_get(
+                ini,
+                "path.virtual.input_packets",
+                prefix + "packet." + std::to_string(packetIndex) + ".device_id_at");
+            int idAt = -1;
+            if (!at.empty()) {
+                idAt = std::atoi(at.c_str());
+                if (idAt < 0 || static_cast<size_t>(idAt) + 6 > bytes.size()) {
+                    if (error) *error = L"Map virtual input packet has an out of range device_id_at.";
+                    return false;
+                }
+            }
             rule.packets.push_back(std::move(bytes));
+            rule.packetDeviceIdAt.push_back(idAt);
         }
         if (rule.packets.empty()) {
             if (error) *error = L"Map virtual input rule has no packets.";
@@ -1682,6 +1698,43 @@ bool CtmMapRuntime::build_control_response(const CTM_USB_EVENT &event, CTM_USB_R
     return false;
 }
 
+/* ⭐⭐ THE ID A REPLAYED ANNOUNCE CARRIES, one per controller.
+ *
+ * ⛔ THE FAULT, measured 2026-09-15: the Xbox map replays an announce captured
+ * from a real pad, and Windows keys the XInput device it builds on the six
+ * bytes inside it. Bridge two Xbox pads and both announce the same id: the
+ * first is promoted, the second gets no XInput device at all while looking
+ * perfectly bridged from every other angle.
+ *
+ * ⭐ DERIVED, NOT RANDOM. The same controller must announce the same id every
+ * time it is bridged, because Windows remembers the device it built last time;
+ * a fresh id per session would litter the device tree and lose whatever was
+ * bound to it. The serial the virtual device carries is exactly that stable
+ * per-controller value, so the id is a hash of it.
+ *
+ * ⓘ FNV-1a, because it needs to be stable across builds and machines rather
+ * than cryptographic. The first byte is forced odd-free of 0x00 and 0xff so the
+ * id can never read as "unset" or "broadcast" to anything downstream. */
+void CtmMapRuntime::set_device_identity(const std::string &serial)
+{
+    if (serial.empty()) {
+        hasDeviceId_ = false;
+        return;
+    }
+    uint64_t hash = 1469598103934665603ull;          // FNV-1a offset basis
+    for (unsigned char c : serial) {
+        hash ^= static_cast<uint64_t>(c);
+        hash *= 1099511628211ull;                    // FNV-1a prime
+    }
+    for (size_t i = 0; i < deviceId_.size(); ++i) {
+        deviceId_[i] = static_cast<uint8_t>((hash >> (8 * i)) & 0xff);
+    }
+    if (deviceId_[0] == 0x00 || deviceId_[0] == 0xff) {
+        deviceId_[0] = 0x5a;
+    }
+    hasDeviceId_ = true;
+}
+
 bool CtmMapRuntime::build_virtual_input_reports(
     const CTM_USB_EVENT &event,
     std::vector<CTM_INPUT_REPORT> *reports)
@@ -1702,7 +1755,8 @@ bool CtmMapRuntime::build_virtual_input_reports(
             !bytes_match_prefix(event.data, event.length, 0, rule.matchPrefix)) {
             continue;
         }
-        for (const std::vector<uint8_t> &packet : rule.packets) {
+        for (size_t i = 0; i < rule.packets.size(); ++i) {
+            const std::vector<uint8_t> &packet = rule.packets[i];
             CTM_INPUT_REPORT report = {};
             report.endpoint_address = rule.destinationEndpoint;
             report.length = static_cast<uint16_t>(packet.size());
@@ -1712,6 +1766,14 @@ bool CtmMapRuntime::build_virtual_input_reports(
             }
             if (!packet.empty()) {
                 std::memcpy(report.data, packet.data(), packet.size());
+            }
+            // ⭐ THIS DEVICE'S OWN ID over the captured one, where the map asks
+            // for it. Without a serial to derive from, the captured bytes
+            // stand: one pad is still better than none.
+            const int idAt = i < rule.packetDeviceIdAt.size() ? rule.packetDeviceIdAt[i] : -1;
+            if (hasDeviceId_ && idAt >= 0 &&
+                static_cast<size_t>(idAt) + deviceId_.size() <= packet.size()) {
+                std::memcpy(report.data + idAt, deviceId_.data(), deviceId_.size());
             }
             reports->push_back(report);
         }

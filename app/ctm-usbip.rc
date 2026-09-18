@@ -1,15 +1,18 @@
 // Win32 version resource for ctm-usbip.exe. The version values come from
 // include/ctm/version.h (single source of truth) so the file's Properties >
 // Details tab and any tooling that reads the PE version match the product.
+// The PRODUCT fields are DS5-USBIP's own (include/ctm/product.h); the FILE
+// fields keep the relay's version, since the exe is still the relay's.
 #include <windows.h>
 #include "../include/ctm/version.h"
+#include "../include/ctm/product.h"
 
 // Application icon (lowest ID becomes the icon Explorer/taskbar show for the exe).
 1 ICON "ctm-usbip.ico"
 
 VS_VERSION_INFO VERSIONINFO
 FILEVERSION    CTM_VERSION_MAJOR, CTM_VERSION_MINOR, CTM_VERSION_PATCH, CTM_VERSION_BUILD
-PRODUCTVERSION CTM_VERSION_MAJOR, CTM_VERSION_MINOR, CTM_VERSION_PATCH, CTM_VERSION_BUILD
+PRODUCTVERSION PRODUCT_VERSION_MAJOR, PRODUCT_VERSION_MINOR, PRODUCT_VERSION_PATCH, 0
 FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
 FILEFLAGS 0x0L
 FILEOS VOS_NT_WINDOWS32
@@ -21,12 +24,12 @@ BEGIN
         BLOCK "040904b0"
         BEGIN
             VALUE "CompanyName", "CTM"
-            VALUE "FileDescription", "CTM USB/IP Bridge Agent"
+            VALUE "FileDescription", PRODUCT_NAME
             VALUE "FileVersion", CTM_VERSION_FULL_STR
             VALUE "InternalName", "ctm-usbip"
             VALUE "OriginalFilename", "ctm-usbip.exe"
-            VALUE "ProductName", "CTM Bridge"
-            VALUE "ProductVersion", CTM_VERSION_STR
+            VALUE "ProductName", PRODUCT_NAME
+            VALUE "ProductVersion", PRODUCT_VERSION
         END
     END
     BLOCK "VarFileInfo"

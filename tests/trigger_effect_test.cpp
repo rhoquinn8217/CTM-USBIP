@@ -229,6 +229,20 @@ int run_trigger_effect_tests()
     CTM_CHECK(shape_from("snap") == Shape::Snap);
     CTM_CHECK(shape_from("bow") == Shape::Snap);
 
+    section("trigger effect: which steady values switch the gesture on");
+    CTM_CHECK(steady_value_on("immediate"));
+    CTM_CHECK(steady_value_on("before_press"));
+    CTM_CHECK(steady_value_on("after_press"));
+    CTM_CHECK(steady_value_on("true"));
+    CTM_CHECK(steady_value_on("1"));
+    // ⛔ "off" is a value, not an absence: the page saves it as its default.
+    CTM_CHECK(!steady_value_on("off"));
+    CTM_CHECK(!steady_value_on(""));
+    CTM_CHECK(!steady_value_on("false"));
+    CTM_CHECK(!steady_value_on("0"));
+    // A typo leaves the trigger an ordinary button rather than taking it over.
+    CTM_CHECK(!steady_value_on("imediate"));
+
     section("trigger effect: an unconfigured trigger is never claimed");
     reset_config();
     {

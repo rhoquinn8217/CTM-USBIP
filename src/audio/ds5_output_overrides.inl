@@ -42,13 +42,17 @@ static const uint16_t kVendorSony = 0x054c;
 //
 // ⭐ THIS IS WHERE A LINKED CONFIG TAKES EFFECT. Without a link the answer is
 // the shared section for the device type, exactly as before. With one, it is
-// that config file's namespaced section -- and because config files store
-// their settings under the DEVICE KIND, the two are the same shape and every
-// accessor works unchanged.
+// that config file's section -- the same shape, so every accessor works
+// unchanged.
+//
+// ⭐⭐ AND THE CONFIG'S SECTION CARRIES NO KIND (2026-09-12). An Xbox pad and a
+// DualSense linked to one config read the same section; each uses what it can.
+// ⚠️ The kind still has to be non-null: a device with no kind at all is one
+// that takes no config, and gets no settings either way.
 //
 // ⓘ Built inline rather than calling config_store::section_for, because this
 // file is included before config_store.inl. Keep the two in step: the format
-// is "cfg:<lowered name>/<kind>".
+// is "cfg:<lowered name>".
 static std::string device_settings_section(const char *kind, const std::string &linkedConfig)
 {
     if (kind == nullptr) return std::string();
@@ -57,7 +61,7 @@ static std::string device_settings_section(const char *kind, const std::string &
     for (char c : linkedConfig) {
         name.push_back((c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c);
     }
-    return "cfg:" + name + "/" + kind;
+    return "cfg:" + name;
 }
 
 static const char *device_section_for(const std::vector<unsigned char> &descriptor)
@@ -95,11 +99,12 @@ static const char *device_section_for(const std::vector<unsigned char> &descript
 // ➡️ Each caller now says which question it is asking. This one is "does this
 // device speak the DS5 output report format", and only the two DualSense
 // product ids do.
-// ⓘ Motion is a separate question from audio, even though today they answer the
-// same. The DS4 HAS a gyro -- at different report offsets -- so when a DS4
-// motion path is written this changes and the audio one does not.
-static bool device_has_ds5_motion(const std::vector<unsigned char> &descriptor);
-
+// ⓘ Motion used to be asked here too, by a device_has_ds5_motion() that answered
+// the same as this, with a note that a DS4 motion path would change it. ✅ That
+// path was written (2026-09-15), and the question moved rather than changed:
+// whether a pad has a motion sensor, and where, is now its layout's to say
+// (ctm_rebind::Layout::motion, via device_input_pad_for below). This one is still
+// only about the OUTPUT report, and still only the two DualSense ids.
 static bool device_has_ds5_audio(const std::vector<unsigned char> &descriptor)
 {
     if (descriptor.size() < 12) {
@@ -117,10 +122,74 @@ static bool device_has_ds5_audio(const std::vector<unsigned char> &descriptor)
     return vendor == kVendorSony && (product == 0x0ce6 || product == 0x0df2);
 }
 
-static bool device_has_ds5_motion(const std::vector<unsigned char> &descriptor)
+// ⓘ "Does this device's INPUT report use DualSense byte positions?" was a third
+// question here, device_has_ds5_input_layout(), answering the same as the audio
+// one with a note that a DS4 input path would change it. Measured 2026-09-11: a
+// DS4 puts its buttons at bytes 5/6/7 where a DualSense puts them at 8/9/10, and
+// an Xbox GIP report at 4/5 behind a 4-byte header. ✅ Its last caller, the
+// on-screen keyboard's guard, went on 2026-09-15: every pad's input is read
+// through its own layout now, which device_input_pad_for() below hands out.
+
+// Which settings section does this pad's BUTTONS read from?
+//
+// ⛔ NOT device_section_for(). That one answers "does this speak the DS5 output
+// report", and its null return is what kept every non-Sony pad out of the
+// rebinder entirely -- an Xbox pad could be given a config and it would do
+// nothing, which is the silent-success failure this file warns about.
+//
+// ⓘ The vocabulary matches config_store::settings_kind_for() on purpose: a name
+// minted here that the config store does not know would create a section nothing
+// can ever link to.
+//
+// ⚠️ "puck" is deliberately absent. Composite devices are forwarded verbatim and
+// never reach a path a config acts on -- structural, not a gap to fill.
+static const char *device_button_section_for(const std::vector<unsigned char> &descriptor)
 {
-    // Same two devices today. Kept separate because the question is different.
-    return device_has_ds5_audio(descriptor);
+    if (descriptor.size() < 12) {
+        return nullptr;
+    }
+    const uint16_t vendor = static_cast<uint16_t>(
+        descriptor[8] | (static_cast<uint16_t>(descriptor[9]) << 8));
+    const uint16_t product = static_cast<uint16_t>(
+        descriptor[10] | (static_cast<uint16_t>(descriptor[11]) << 8));
+
+    if (vendor == kVendorSony) {
+        if (product == 0x0ce6) return "ds5";
+        if (product == 0x0df2) return "ds5_edge";
+        if (product == 0x09cc || product == 0x05c4) return "ds4";
+        return nullptr;
+    }
+    // Microsoft, the captured GIP pad the xbox profile describes.
+    if (vendor == 0x045e && product == 0x0b12) return "xbox";
+    return nullptr;
+}
+
+#include "input/button_layout.inl"
+
+// ⭐⭐ WHICH SETTINGS A PAD'S INPUT HOOKS USE, AND WHICH BYTES THEY READ, AS ONE
+// ANSWER. The gyro, touchpad, stick and trigger mouse, the settings-window chord
+// and the mouse-exclusive blanking all ask this, and only this.
+//
+// ⛔ They used to ask device_section_for(), which answers a different question --
+// does this pad speak the DualSense OUTPUT report -- and says yes to a DS4, whose
+// sensors and touchpad sit at other offsets. So a DS4 was not left alone by those
+// hooks; it was READ WRONG: its touch-packet count taken for a finger, its hat
+// and face buttons for trigger travel, a timestamp for the PS button.
+//
+// ⓘ Both halves come from the same function the rebinder asks, so the section a
+// preset writes and the section a hook reads can never disagree. A pad no table
+// describes gets nullptr for both.
+struct InputPad {
+    const char *kind = nullptr;
+    const ctm_rebind::Layout *layout = nullptr;
+};
+
+static InputPad device_input_pad_for(const std::vector<unsigned char> &descriptor)
+{
+    InputPad pad;
+    pad.layout = ctm_rebind::layout_for(device_button_section_for(descriptor));
+    if (pad.layout != nullptr) pad.kind = device_button_section_for(descriptor);
+    return pad;
 }
 
 // DualSense USB output report layout. Positions and claim bits are ours, from

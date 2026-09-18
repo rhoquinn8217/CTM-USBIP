@@ -62,7 +62,15 @@ inline std::atomic_int g_openedBy{-1};
 // next report -- four milliseconds later -- saw that same press as a fresh edge
 // and closed it. Opening and closing on one button means the press that opened
 // it must not count.
-inline std::atomic_bool g_closeArmed{false};
+//
+// ⛔⛔ PER PAD (found in review, 2026-09-15). This was one flag for every pad, so
+// with a second pad bridged its very next report -- Square up -- armed it while
+// the first pad was still holding the Square that opened the keyboard, and that
+// held press typed a Backspace: the exact fault above. Two DualSenses always
+// shared it; a DualSense beside a DS4 started to once the keyboard read a DS4.
+// ➡️ Each pad arms on seeing the button up in ITS OWN report. Cleared by show().
+// Guarded by g_padMutex, declared with the pad edges below.
+inline std::map<const void *, bool> g_closeArmedFor;
 
 // ⓘ Declared here: handle_report closes the window, and is defined above hide.
 inline void hide();
@@ -83,6 +91,10 @@ inline std::atomic_bool g_atTop{false};
 
 // ⓘ Held, not latched: L1 shows capitals while you hold it, L2 shows the F
 // keys. A held layer needs no state to get out of -- letting go is the exit.
+// ⭐ Held on ANY pad (2026-09-15): each pad's shoulders are kept apart in
+// g_layersHeldFor and these two are what the drawing reads. ⛔ They were written
+// straight from each report, so an idle second pad wrote "not held" between the
+// holding pad's reports and the layer flickered.
 inline std::atomic_bool g_shiftHeld{false};
 inline std::atomic_bool g_fnHeld{false};
 
@@ -185,31 +197,20 @@ inline int overlay_y(int height)
     return g_atTop.load() ? 80 : (screenH - height - 80);
 }
 
-// ⓘ COPIED FROM rebind.inl's kDs5Spots (this repo, src/input/rebind.inl, as of
-// 2026-09-01) rather than shared: rebind.inl calls into this file and is
-// included after it, so reaching back would be a cycle. It must stay in step
-// with the original -- if the report layout changes, both change.
-struct Spot { int byteIndex; uint8_t mask; };
-inline const Spot kSpots[12] = {
-    { 8, 0x20 },   // 0  cross
-    { 8, 0x40 },   // 1  circle
-    { 8, 0x10 },   // 2  square
-    { 8, 0x80 },   // 3  triangle
-    { 9, 0x01 },   // 4  L1
-    { 9, 0x02 },   // 5  R1
-    { 9, 0x04 },   // 6  L2
-    { 9, 0x08 },   // 7  R2
-    { 9, 0x10 },   // 8  create
-    { 9, 0x20 },   // 9  options
-    { 9, 0x40 },   // 10 L3
-    { 9, 0x80 },   // 11 R3
-};
-
-inline bool button_down(const uint8_t *data, size_t len, int index)
+// ⭐ READ THROUGH THE PAD'S OWN LAYOUT (input/button_layout.inl), so a DS4 or an
+// Xbox pad drives the keyboard with its own bytes.
+//
+// ⛔ This used to be a COPY of the DualSense's bit table, kept here because
+// rebind.inl calls into this file and is included after it. The layout table
+// depends on nothing and is included long before either, so the copy -- and
+// the DualSense-only guard it forced on the caller -- went (2026-09-15).
+//
+// ⓘ The indices are the standard ones, 0 cross through 11 R3: the order the copy
+// already used, so no caller's number changed.
+inline bool button_down(const ctm_rebind::Layout &lay, const uint8_t *data, size_t len, int index)
 {
     if (index < 0 || index >= 12) return false;
-    const Spot &s = kSpots[index];
-    return len > (size_t)s.byteIndex && (data[s.byteIndex] & s.mask) != 0;
+    return ctm_rebind::is_pressed(lay, data, len, index);
 }
 
 // ⭐⭐ THE LAYOUT IS A TABLE, NOT A DRAWING.
@@ -559,10 +560,13 @@ inline int g_tapFrames = 0;
 // after Circle sent it; Circle closes the keyboard now, so nothing sets it.
 // ⓘ Removed rather than left -- unused state is what someone later wires back
 // up, and T-079 keeps collecting exactly this.
-// ⓘ How long a direction has been held, in reports. ⛔ Not per device: it is
-// one highlight, and two pads holding opposite directions should fight over it
-// exactly as two hands on one keyboard would.
-inline int g_dirHeld = 0;
+// ⓘ How long a direction has been held, in reports.
+// ⛔⛔ PER PAD NOW (found in review, 2026-09-15). It was one counter so that two
+// pads holding opposite directions would fight over the one highlight -- but an
+// IDLE second pad reset it to zero on every one of its reports, so a held
+// direction never reached the repeat at all. Both pads still move the one
+// highlight; each one's own hold decides when it repeats. Kept in g_dirHeldFor
+// beside the pad edges below, under g_padMutex.
 
 // ⭐⭐ WHERE YOU ARE AND WHAT IS PRESSED ARE DIFFERENT THINGS (rhoquinn8217,
 // 2026-09-02). A filled key was being asked to mean three things at once --
@@ -1521,6 +1525,12 @@ inline bool visible() { return g_running.load() && g_hwnd != nullptr; }
 // keyboard is shared, so they share the cursor on it.
 inline std::map<const void *, uint32_t> g_padPrev;
 inline std::mutex g_padMutex;
+// ⓘ The rest of each pad's own keyboard state, under the same lock: how long its
+// direction has been held, and which of its shoulders are down (bit 0 L1, bit 1
+// R1). See the notes on the held direction and on g_shiftHeld above for why
+// neither is shared.
+inline std::map<const void *, int> g_dirHeldFor;
+inline std::map<const void *, uint8_t> g_layersHeldFor;
 
 inline bool edge(const void *deviceKey, int index, bool downNow)
 {
@@ -1536,39 +1546,41 @@ inline void forget_device(const void *deviceKey)
 {
     std::lock_guard<std::mutex> lock(g_padMutex);
     g_padPrev.erase(deviceKey);
+    g_dirHeldFor.erase(deviceKey);
+    g_layersHeldFor.erase(deviceKey);
+    g_closeArmedFor.erase(deviceKey);
 }
 
-// ⓘ Everything neutral. Copied in shape from the gate's own blanking in
-// rebind.inl (ctm_rebind::apply, config-mode branch) so the two agree about
-// what "the game sees nothing" means: sticks centred, triggers released, no
-// buttons, hat centred.
-inline void blank_report(uint8_t *data, size_t len)
+// ⓘ Everything neutral: sticks centred, triggers released, no buttons, hat
+// centred. ⭐ The SAME function config mode rests a gated pad with, so the two
+// cannot disagree about what "the game sees nothing" means.
+//
+// ⚠️ This used to write DualSense positions outright -- [1..4] 0x80, [5] [6] 0,
+// [8] 0x08, [9] 0, [10] less 0x07 -- which are exactly the old config-mode lines
+// that tests/button_layout_test.cpp keeps and proves blank_to_rest() matches on a
+// DualSense, byte for byte. On a DS4 the same lines would have zeroed its hat
+// byte -- which reads as d-pad UP held -- set its left trigger to 8 and masked
+// bits of its timestamp.
+inline void blank_report(const ctm_rebind::Layout &lay, uint8_t *data, size_t len)
 {
-    if (data == nullptr || len < 11) return;
-    data[1] = data[2] = data[3] = data[4] = 0x80;   // LX LY RX RY
-    data[5] = data[6] = 0x00;                       // L2 R2 analog
-    data[8] = 0x08;                                 // faces clear, hat centred
-    data[9] = 0x00;
-    data[10] = static_cast<uint8_t>(data[10] & ~0x07);
+    if (data == nullptr || len < lay.minLength) return;
+    ctm_rebind::blank_to_rest(lay, data, len, false);
 }
 
 // Returns true when the overlay consumed the input, so the game does not also
 // see it. ⛔ False when the overlay is down -- it must cost nothing when unused.
-inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len)
+inline bool handle_report(const void *deviceKey, const ctm_rebind::Layout &lay,
+                          const uint8_t *data, size_t len)
 {
-    if (!visible() || data == nullptr || len < 11) return false;
+    if (!visible() || data == nullptr || len < lay.minLength) return false;
 
-    // ⛔ READ HERE, NOT THROUGH rebind's helper. rebind.inl calls into this
-    // file, so depending on it back would be a cycle -- and this file is
-    // included first precisely so the call above resolves.
-    //
-    // ⓘ The DualSense hat is the low nibble of byte 8: 0 is up and it goes
-    // clockwise, 8 is centred. Same encoding rebind.inl reads.
-    const uint8_t hat = static_cast<uint8_t>(data[8] & 0x0f);
-    const bool up    = (hat == 7 || hat == 0 || hat == 1);
-    const bool right = (hat == 1 || hat == 2 || hat == 3);
-    const bool down  = (hat == 3 || hat == 4 || hat == 5);
-    const bool left  = (hat == 5 || hat == 6 || hat == 7);
+    // ⓘ The d-pad through the layout: a DualSense's and a DS4's are a hat, 0 up
+    // and clockwise to 7, centred at 8; an Xbox pad's are four plain bits. A
+    // diagonal counts as both of its directions either way.
+    const bool up    = ctm_rebind::is_pressed(lay, data, len, ctm_rebind::kBtnDpadUp);
+    const bool right = ctm_rebind::is_pressed(lay, data, len, ctm_rebind::kBtnDpadRight);
+    const bool down  = ctm_rebind::is_pressed(lay, data, len, ctm_rebind::kBtnDpadDown);
+    const bool left  = ctm_rebind::is_pressed(lay, data, len, ctm_rebind::kBtnDpadLeft);
 
     // ⭐⭐ A HELD DIRECTION REPEATS (rhoquinn8217, 2026-09-02: "instinctually I
     // expect it to repeat"). Every keyboard does, and without it crossing this
@@ -1580,13 +1592,15 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
     const int kFirst = 90;      // ~360ms at 250Hz
     const int kThen  = 14;      // ~56ms between repeats
     const bool anyDir = up || down || left || right;
-    if (!anyDir) {
-        g_dirHeld = 0;
-    } else {
-        ++g_dirHeld;
+    int dirHeld = 0;
+    {
+        std::lock_guard<std::mutex> lock(g_padMutex);
+        int &held = g_dirHeldFor[deviceKey];
+        held = anyDir ? held + 1 : 0;
+        dirHeld = held;
     }
-    const bool repeatNow = (g_dirHeld > kFirst)
-                        && ((g_dirHeld - kFirst) % kThen == 0);
+    const bool repeatNow = (dirHeld > kFirst)
+                        && ((dirHeld - kFirst) % kThen == 0);
 
     if (edge(deviceKey, 0, up)    || (repeatNow && up))    move_v(-1);
     if (edge(deviceKey, 1, down)  || (repeatNow && down))  move_v(1);
@@ -1603,10 +1617,21 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
     //
     // ⓘ And the shoulder SHORTCUTS are gone with them: L1 and R1 now shift the
     // layers, so they cannot also be space and backspace. Both are on the face.
-    const bool l1 = button_down(data, len, 4);
-    const bool r1 = button_down(data, len, 5);
-    if (l1 != g_shiftHeld.load()) { g_shiftHeld.store(l1); invalidate(); }
-    if (r1 != g_fnHeld.load())    { g_fnHeld.store(r1);   invalidate(); }
+    const bool l1 = button_down(lay, data, len, 4);
+    const bool r1 = button_down(lay, data, len, 5);
+    // ⓘ This pad's shoulders, then whether ANY pad holds each -- see g_shiftHeld.
+    bool anyL1 = false;
+    bool anyR1 = false;
+    {
+        std::lock_guard<std::mutex> lock(g_padMutex);
+        g_layersHeldFor[deviceKey] = static_cast<uint8_t>((l1 ? 1 : 0) | (r1 ? 2 : 0));
+        for (const auto &pad : g_layersHeldFor) {
+            if (pad.second & 1) anyL1 = true;
+            if (pad.second & 2) anyR1 = true;
+        }
+    }
+    if (anyL1 != g_shiftHeld.load()) { g_shiftHeld.store(anyL1); invalidate(); }
+    if (anyR1 != g_fnHeld.load())    { g_fnHeld.store(anyR1);   invalidate(); }
 
     // ⭐ THE BUTTON THAT OPENED IT ALSO CLOSES IT.
     //
@@ -1630,9 +1655,15 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
     // ⓘ Armed only once that button has been seen released.
     const int openedBy = g_openedBy.load();
     const bool openBtnStillDown =
-        (openedBy >= 0 && button_down(data, len, openedBy));
-    if (!g_closeArmed.load() && !openBtnStillDown) g_closeArmed.store(true);
-    const bool faceArmed = g_closeArmed.load();
+        (openedBy >= 0 && button_down(lay, data, len, openedBy));
+    // ⓘ THIS pad's arming, from this pad's own report -- see g_closeArmedFor.
+    bool faceArmed = false;
+    {
+        std::lock_guard<std::mutex> lock(g_padMutex);
+        bool &armed = g_closeArmedFor[deviceKey];
+        if (!armed && !openBtnStillDown) armed = true;
+        faceArmed = armed;
+    }
 
     // ⭐ CIRCLE IS ESC. Sent straight through rather than moving the highlight,
     // so backing out of a dialog costs one press from wherever you are.
@@ -1643,7 +1674,7 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
     // desktop layout. ⭐ And Escape is not lost -- there is an `esc` key on the
     // keyboard itself, which is the honest place for it: a keystroke that fires
     // into whatever is BEHIND the keyboard was a surprise, not a feature.
-    if (edge(deviceKey, 5, button_down(data, len, 1))) {
+    if (edge(deviceKey, 5, button_down(lay, data, len, 1))) {
         hide();
         return true;
     }
@@ -1664,7 +1695,8 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
     // ⭐ The gesture is window_move::Mover, shared with the settings page. What
     // stays here is what the KEYBOARD does with it: a tap flips top/bottom,
     // a nudge is queued for the window's own thread.
-    const window_move::Step mv = g_movers.for_key(deviceKey).step(button_down(data, len, 9), data, len);
+    const window_move::Step mv =
+        g_movers.for_key(deviceKey).step(button_down(lay, data, len, 9), lay, data, len);
     if (mv.tapped) {
         g_atTop.store(!g_atTop.load());
         if (g_hwnd != nullptr) PostMessageW(g_hwnd, WM_CTM_REPOSITION, 0, 0);
@@ -1702,17 +1734,17 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
     // ⓘ R3 is genuinely free -- the keyboard does not use the right stick --
     // and the gyro layouts already put secondary toggles on it. The right thumb
     // is idle while typing; the left is on the d-pad.
-    if (edge(deviceKey, 7, button_down(data, len, 8))) {
+    if (edge(deviceKey, 7, button_down(lay, data, len, 8))) {
         switch_face();               // the same thing the tab's \|/ key does
     }
-    if (edge(deviceKey, 11, button_down(data, len, 11))) {
+    if (edge(deviceKey, 11, button_down(lay, data, len, 11))) {
         g_size.store((g_size.load() + 1) % 3);
         if (g_hwnd != nullptr) PostMessageW(g_hwnd, WM_CTM_RESIZE, 0, 0);
     }
 
     // ⭐⭐ CROSS PRESSES THE HIGHLIGHTED KEY.
     const Key &k = key_at(g_row, g_col);
-    const bool cross = (data[8] & 0x20) != 0;
+    const bool cross = button_down(lay, data, len, 0);
 
     // ⛔ AGAIN: ONE IMPLEMENTATION. This was a second copy of the latch rules,
     // and it drifted exactly as the actions did -- the guard that stops fn
@@ -1774,8 +1806,8 @@ inline bool handle_report(const void *deviceKey, const uint8_t *data, size_t len
     // keyboard as a key meanwhile.
     uint8_t faceUsage = 0;
     if (faceArmed) {
-        if (button_down(data, len, 2))      faceUsage = 0x2A;   // square: backspace
-        else if (button_down(data, len, 3)) faceUsage = 0x2C;   // triangle: space
+        if (button_down(lay, data, len, 2))      faceUsage = 0x2A;   // square: backspace
+        else if (button_down(lay, data, len, 3)) faceUsage = 0x2C;   // triangle: space
     }
 
     // ⓘ PER DEVICE, using the file's own edge helper (slot 6 was free) rather
@@ -1861,7 +1893,11 @@ inline void show(int width = 0, int height = 0, int openedByButton = -1)
 {
     if (width <= 0 || height <= 0) size_for(&width, &height);
     g_openedBy.store(openedByButton);
-    g_closeArmed.store(false);          // the opening press must not close it
+    {
+        // ⓘ The opening press must not close it, or type -- on any pad.
+        std::lock_guard<std::mutex> lock(g_padMutex);
+        g_closeArmedFor.clear();
+    }
     if (g_running.exchange(true)) return;      // already up
     g_thread = std::thread(thread_main, width, height);
     g_thread.detach();
@@ -1886,7 +1922,13 @@ inline void hide()
         // ⓘ T-142's latched key goes with it, or a key held when the keyboard
         // closed would still be the "held" one when it next opens.
         heldUsageFor.clear();
+        // ⓘ And each pad's held direction and shoulders, so a pad that leaves
+        // with L1 down cannot hold the capitals layer on the next keyboard.
+        g_dirHeldFor.clear();
+        g_layersHeldFor.clear();
     }
+    g_shiftHeld.store(false);
+    g_fnHeld.store(false);
     // ⓘ Posting rather than destroying from here: the window belongs to the
     // thread that created it, and destroying it from another one is undefined.
     if (g_hwnd != nullptr) PostMessageW(g_hwnd, WM_CLOSE, 0, 0);

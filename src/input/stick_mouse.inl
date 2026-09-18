@@ -23,7 +23,16 @@
 //     stick being "sticky" near the axes
 //   - acceleration off by default, because predictability beats speed here
 //
-// ⓘ Relies on its includer (main.cpp) for device_config_*, device_section_for,
+// ⭐⭐ EVERY CONTROLLER WITH A LAYOUT, not only a DualSense (rhoquinn8217,
+// 2026-09-15: "This pre-set should be available to all controllers actually").
+// A stick is the one pointer every pad has. The pad's layout says where its
+// sticks are and in what form: a byte centred at 0x80 on a DualSense or DS4, a
+// signed 16-bit value centred at 0 on an Xbox pad -- ⚠️ whose map inverts Y, so
+// up reads POSITIVE there. ctm_rebind::stick_axis() hands every pad back with
+// left and up negative, which is what everything below was written against.
+// ⓘ A generic HID pad has no layout, so it is still left alone.
+//
+// ⓘ Relies on its includer (main.cpp) for device_config_*, device_input_pad_for,
 // device_settings_section, ctm_rebind_config_mode_effective, the gyro mailbox
 // and its gate parser, and ctm_gyro_mouse_ensure_mouse_started.
 
@@ -31,12 +40,11 @@
 
 namespace ctm_stick_mouse {
 
-// Stick axis byte offsets in the mapped DS5 report (id at [0]), the same
-// numbering as the confirmed trigger offsets at [5] and [6].
-constexpr size_t kLeftX = 1;
-constexpr size_t kLeftY = 2;
-constexpr size_t kRightX = 3;
-constexpr size_t kRightY = 4;
+// ⓘ The stick offsets are the pad's layout's (StickSpots in
+// input/button_layout.inl), read through axis_value() below. A DualSense and a
+// DS4 carry one byte per axis at [1] to [4]; an Xbox pad signed 16-bit values
+// at [10] to [16], with up reading positive. The DualSense-only constants that
+// stood here had no reader left and went (2026-09-15).
 
 // A report gap longer than this is treated as this long. A stall -- a paused
 // session, a breakpoint, a lost connection -- must not fling the cursor across
@@ -128,6 +136,15 @@ inline float axis_unit(uint8_t raw)
     return (static_cast<float>(raw) - 128.0f) / 127.0f;
 }
 
+// ⭐ One axis at this pad's offsets and in its own format, left and up negative.
+// ⓘ For a one-byte pad this is exactly axis_unit() of the same byte. A report too
+// short to hold it reads as centred, which moves nothing.
+inline float axis_value(const ctm_rebind::Layout &lay, const uint8_t *data, size_t len, int axis)
+{
+    float value = 0.0f;
+    return ctm_rebind::stick_axis(lay, data, len, axis, &value) ? value : 0.0f;
+}
+
 struct StickState {
     long long lastMs = 0;
     bool haveLast = false;
@@ -135,6 +152,8 @@ struct StickState {
     float carryY = 0.0f;
     // Scroll keeps its own clock and remainder: it can be on while the cursor
     // is off, and the two are driven by different sticks.
+    // ⛔ So each half resets only its own fields, and neither erases the entry
+    // (step()'s "off" did, and silenced the scroll -- see there).
     long long scrollLastMs = 0;
     bool scrollHaveLast = false;
     float scrollCarry = 0.0f;
@@ -150,14 +169,40 @@ inline void forget(const void *deviceKey)
 }
 
 inline void step(const void *deviceKey, const std::string &section,
+                 const ctm_rebind::Layout &lay, const uint8_t *data, size_t len,
+                 long long nowMs);
+
+// ⓘ A DualSense report, for callers that only ever had one.
+inline void step(const void *deviceKey, const std::string &section,
                  const uint8_t *data, size_t len, long long nowMs)
 {
-    if (data == nullptr || len <= kRightY) return;
+    step(deviceKey, section, ctm_rebind::kDs5Layout, data, len, nowMs);
+}
+
+inline void step(const void *deviceKey, const std::string &section,
+                 const ctm_rebind::Layout &lay, const uint8_t *data, size_t len,
+                 long long nowMs)
+{
+    if (data == nullptr || len < ctm_rebind::stick_min_len(lay)) return;
 
     const Which which = which_for(section, "mouse");
     if (which == Which::Off) {
+        // ⛔⛔ THE CURSOR'S OWN FIELDS, NEVER THE ENTRY (2026-09-15). The entry is
+        // shared with the scroll, and this used to erase it -- on every report,
+        // just before scroll_step() ran. With no stick set to mouse, the scroll's
+        // clock was new on every report, so it never measured a gap and never
+        // ticked. On hardware (rhoquinn8217) gyro-to-mouse's left stick, which
+        // scrolls while neither stick points, did nothing, and the same stick
+        // scrolled under stick-to-mouse, whose right stick points.
+        // ⓘ scroll_step()'s own "off" already reset only its half; this mirrors
+        // it. forget() still erases the entry: that is the device going away.
         std::lock_guard<std::mutex> lock(g_stickMutex);
-        g_sticks.erase(deviceKey);
+        auto it = g_sticks.find(deviceKey);
+        if (it != g_sticks.end()) {
+            it->second.haveLast = false;
+            it->second.carryX = 0.0f;
+            it->second.carryY = 0.0f;
+        }
         return;
     }
 
@@ -199,7 +244,7 @@ inline void step(const void *deviceKey, const std::string &section,
     if (dt <= 0) return;
     if (dt > kMaxStepMs) dt = kMaxStepMs;
 
-    if (!ctm_gyro_mouse::gate_open(gate, data, len)) {
+    if (!ctm_gyro_mouse::gate_open(gate, lay, data, len)) {
         st.carryX = 0.0f;
         st.carryY = 0.0f;
         return;
@@ -218,17 +263,17 @@ inline void step(const void *deviceKey, const std::string &section,
         // the two being summed. Summing would let opposite pushes cancel to a
         // dead cursor, and a thumb resting inside its deadzone on one stick
         // would still drag the other's direction off course.
-        const float lx = axis_unit(data[kLeftX]);
-        const float ly = axis_unit(data[kLeftY]);
-        const float rx = axis_unit(data[kRightX]);
-        const float ry = axis_unit(data[kRightY]);
+        const float lx = axis_value(lay, data, len, ctm_rebind::kStickLX);
+        const float ly = axis_value(lay, data, len, ctm_rebind::kStickLY);
+        const float rx = axis_value(lay, data, len, ctm_rebind::kStickRX);
+        const float ry = axis_value(lay, data, len, ctm_rebind::kStickRY);
         if ((rx * rx + ry * ry) >= (lx * lx + ly * ly)) { x = rx; y = ry; driving = Which::Right; }
         else { x = lx; y = ly; driving = Which::Left; }
     } else {
-        const size_t xi = (which == Which::Right) ? kRightX : kLeftX;
-        const size_t yi = (which == Which::Right) ? kRightY : kLeftY;
-        x = axis_unit(data[xi]);
-        y = axis_unit(data[yi]);
+        const int xi = (which == Which::Right) ? ctm_rebind::kStickRX : ctm_rebind::kStickLX;
+        const int yi = (which == Which::Right) ? ctm_rebind::kStickRY : ctm_rebind::kStickLY;
+        x = axis_value(lay, data, len, xi);
+        y = axis_value(lay, data, len, yi);
     }
 
     // ⭐ RADIAL deadzone, then RESCALE. Without the rescale the cursor jumps to
@@ -289,9 +334,21 @@ inline void step(const void *deviceKey, const std::string &section,
 // time a whole one is owed -- speed is ticks per second at full deflection,
 // measured against elapsed time exactly like the cursor.
 inline void scroll_step(const void *deviceKey, const std::string &section,
+                        const ctm_rebind::Layout &lay, const uint8_t *data, size_t len,
+                        long long nowMs);
+
+// ⓘ A DualSense report, for callers that only ever had one.
+inline void scroll_step(const void *deviceKey, const std::string &section,
                         const uint8_t *data, size_t len, long long nowMs)
 {
-    if (data == nullptr || len <= kRightY) return;
+    scroll_step(deviceKey, section, ctm_rebind::kDs5Layout, data, len, nowMs);
+}
+
+inline void scroll_step(const void *deviceKey, const std::string &section,
+                        const ctm_rebind::Layout &lay, const uint8_t *data, size_t len,
+                        long long nowMs)
+{
+    if (data == nullptr || len < ctm_rebind::stick_min_len(lay)) return;
 
     const Which which = which_for(section, "scroll");
     if (which == Which::Off) {
@@ -319,7 +376,7 @@ inline void scroll_step(const void *deviceKey, const std::string &section,
     if (dt <= 0) return;
     if (dt > kMaxStepMs) dt = kMaxStepMs;
 
-    if (!ctm_gyro_mouse::gate_open(gate, data, len)) {
+    if (!ctm_gyro_mouse::gate_open(gate, lay, data, len)) {
         st.scrollCarry = 0.0f;
         return;
     }
@@ -330,13 +387,14 @@ inline void scroll_step(const void *deviceKey, const std::string &section,
     float y = 0.0f;
     Which driving = which;
     if (which == Which::Both) {
-        const float ly = axis_unit(data[kLeftY]);
-        const float ry = axis_unit(data[kRightY]);
+        const float ly = axis_value(lay, data, len, ctm_rebind::kStickLY);
+        const float ry = axis_value(lay, data, len, ctm_rebind::kStickRY);
         const bool rightWins = (ry * ry >= ly * ly);
         y = rightWins ? ry : ly;
         driving = rightWins ? Which::Right : Which::Left;
     } else {
-        y = axis_unit((which == Which::Right) ? data[kRightY] : data[kLeftY]);
+        y = axis_value(lay, data, len,
+                       (which == Which::Right) ? ctm_rebind::kStickRY : ctm_rebind::kStickLY);
     }
 
     const float deadzone =
@@ -377,12 +435,15 @@ inline void on_ds5_input(const void *deviceKey,
                          const std::string &linkedConfig,
                          const uint8_t *data, size_t len)
 {
-    const char *kind = device_section_for(descriptor);
-    if (kind == nullptr) return;
-    const std::string section = device_settings_section(kind, linkedConfig);
+    // ⭐ ANY PAD WITH A LAYOUT. ⛔ This asked device_section_for(), which answers
+    // for Sony pads only, so an Xbox pad could be given stick_to_mouse and it
+    // did nothing while the setting looked applied.
+    const InputPad pad = device_input_pad_for(descriptor);
+    if (pad.layout == nullptr) return;
+    const std::string section = device_settings_section(pad.kind, linkedConfig);
     const long long now = stick_now_ms();
-    step(deviceKey, section, data, len, now);
-    scroll_step(deviceKey, section, data, len, now);
+    step(deviceKey, section, *pad.layout, data, len, now);
+    scroll_step(deviceKey, section, *pad.layout, data, len, now);
 }
 
 } // namespace ctm_stick_mouse

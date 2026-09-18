@@ -32,6 +32,11 @@ static std::vector<RestDeviceView> rest_collect_devices()
             view.serial = session->physicalSerial;
             view.linkedConfig = session->linkedConfig;
         }
+        // ⓘ Empty until the TV's HELLO has arrived, like the serial.
+        if (session->device) {
+            view.product = session->device->product_name();
+            view.deviceType = session->device->device_kind_by_descriptor();
+        }
         out.push_back(std::move(view));
     }
     return out;
@@ -47,33 +52,37 @@ static bool rest_find_device(const std::string &ordinal, RestDeviceView *out)
 
 // Links a device to a config, or unlinks when configName is empty.
 //
-// ⚠️ A kind mismatch is refused rather than honoured quietly: putting a
-// ds5_edge config on a ds5 is a user error worth naming, and silently applying
-// settings written for a different product is how a config becomes untrustable.
+// ⭐⭐ ANY CONFIG, ON ANY DEVICE THAT TAKES ONE (rhoquinn8217, 2026-09-12).
+// This used to refuse a "kind mismatch" -- a ds5_edge config on a ds5 -- on the
+// grounds that settings written for one product would misbehave on another.
+// ⛔ That premise did not hold: a config stores button positions, percents and
+// milliseconds, and each feature checks the pad before it acts, so a setting
+// a controller cannot use is unused on it rather than misapplied.
+//
+// ⚠️ What IS still refused is a device that takes no config at all, a keyboard
+// or a mouse. Linking one would report success and do nothing, which is the
+// worst shape a setting can take.
 static bool rest_link_device(const std::string &ordinal, const std::string &configName,
                              std::string *error)
 {
-    std::string kind;
     if (!configName.empty()) {
         config_store::ConfigFile cfg;
         if (!config_store::find_config(configName, &cfg)) {
             *error = "no config named " + configName;
             return false;
         }
-        kind = cfg.kind;
     }
 
     std::lock_guard<std::mutex> lock(g_agent_sessions_mutex);
     for (const auto &session : g_agent_sessions) {
         if (session->ordinal != ordinal) continue;
-        // ⚠️ Compare SETTINGS kinds, not session kinds. A "ds5_usb" device and a
-        // "ds5" config are the same controller family -- comparing the raw
-        // session kind refused every link a real DualSense ever attempted.
-        const std::string deviceKind = config_store::settings_kind_for(session->kind);
-        if (!configName.empty() && deviceKind != kind) {
-            *error = "kind mismatch: " + ordinal + " is " +
-                     (deviceKind.empty() ? session->kind : deviceKind) +
-                     ", config is " + kind;
+        // ⓘ Unlinking is always allowed: it only returns a device to the
+        // shared settings.
+        if (!configName.empty() && !config_store::kind_supports_config(session->kind)) {
+            RestDeviceView view;
+            view.ordinal = ordinal;
+            view.kind = session->kind;
+            *error = rest_no_config_error(view);
             return false;
         }
         std::lock_guard<std::mutex> sessionLock(session->mutex);

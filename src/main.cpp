@@ -11,6 +11,7 @@
 #include "ctm/map/runtime.h"
 #include "ctm/profile.h"
 #include "ctm/version.h"
+#include "ctm/product.h"
 
 #include <hidsdi.h>
 
@@ -137,6 +138,12 @@ void trigger_click_forget(const void *deviceKey);
 // ⓘ Releases only THIS controller's held keys -- they are kept per device so
 // two gated pads cannot cancel each other.
 void ctm_keyboard_forget_device(const void *deviceKey);
+// ⓘ And its held MOUSE buttons, kept per device for the same reason. Defined in
+// mouse_device.inl. No ctm_ prefix: new, and ours.
+void mouse_forget_device(const void *deviceKey);
+// ⓘ And this controller's chord and on-screen keyboard state, kept per pad for
+// the same reason. No ctm_ prefix: new, and ours.
+void rebind_forget_pad(const void *deviceKey);
 // Swallow whatever is held, so a button that dismissed the overlay cannot also
 // reach the game on the next report.
 void ctm_rebind_swallow_held();
@@ -153,6 +160,8 @@ void ctm_stick_mouse_forget(const void *deviceKey);
 // ⓘ `button` is the standard index that fired it, so an overlay keyboard can be
 // dismissed by the same button that opened it.
 void ctm_osk_toggle(const std::string &section, int button, int program);
+#include "input/mic_report.inl"  // which input reports are a DualSense's microphone audio
+#include "app/device_type.inl"   // controller, keyboard or mouse by descriptor; device.inl asks it
 #include "usbip/device.inl"
 #include "audio/iso_in_pacing.inl"
 #include "usbip/server.inl"
@@ -178,6 +187,7 @@ void ctm_gyro_mouse_ensure_mouse_started();
 void ctm_rebind_ensure_keyboard_started();
 #include "input/gyro_calibration_fetch.inl"   // needs CtmBackend; agent.inl calls it
 #include "app/nickname.inl"      // controller nicknames; agent.inl assigns one per session
+#include "app/same_controller.inl"   // which older session a new bridge retires; agent.inl asks it
 #include "app/agent.inl"
 #include "input/mouse_device.inl"      // needs g_agent_usbip_server, find_relative_asset, run_usbip_attach
 #include "input/keyboard_device.inl"   // same dependencies as the mouse above
@@ -318,7 +328,12 @@ int wmain(int argc, wchar_t **argv)
 
     std::wstring mode = argv[1];
     if (mode == L"version" || mode == L"--version" || mode == L"-v") {
-        std::wcout << L"ctm-usbip " << widen_ascii(CTM_VERSION_DISPLAY, strlen(CTM_VERSION_DISPLAY)) << L"\n";
+        // ⭐ The product AND the relay it is built around, since both are true
+        // (include/ctm/product.h).
+        std::wcout << widen_ascii(PRODUCT_NAME, strlen(PRODUCT_NAME)) << L" "
+                   << widen_ascii(PRODUCT_VERSION, strlen(PRODUCT_VERSION))
+                   << L" (relay: ctm-usbip " << widen_ascii(CTM_VERSION_DISPLAY, strlen(CTM_VERSION_DISPLAY))
+                   << L")\n";
         return 0;
     }
 
@@ -405,10 +420,15 @@ int wmain(int argc, wchar_t **argv)
                 }
                 g_rest_port = static_cast<uint16_t>(value);
             } else if (arg == L"--verbose") {
-                // ⓘ Everything the agent can say. Off by default: the per-report
-                // lines run at roughly 250 a second and bury the handful a
-                // person actually needs.
+                // ⓘ Everything the agent can say, with the per-report lines
+                // sampled (ctm_log_report_line). Off by default: those lines run
+                // at roughly 250 a second and bury the handful a person needs.
                 g_verbose_flag = true;
+            } else if (arg == L"--verbose-reports") {
+                // ⓘ --verbose, and every per-report line too: for a run about
+                // rumble, trigger effects or anything else sent to the pad.
+                g_verbose_flag = true;
+                g_verbose_reports_flag = true;
             } else if (arg == L"--ui") {
                 // ⭐ Opens the settings page once the agent is up, or brings an
                 // already-open one forward. The launcher used to do this and

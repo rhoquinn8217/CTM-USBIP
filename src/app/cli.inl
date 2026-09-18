@@ -84,5 +84,7 @@ static void print_usage()
         << L"                                               (internal: launched by the SCM)\n"
         << L"  ctm-usbip version\n"
         << L"  (--enet selects the additive ENet/UDP transport on the same port; without it the TCP transport is used.)\n"
-        << L"  (--rest serves an HTTP/JSON control API, loopback-only unless --rest-lan; see docs/rest_api.md.)\n";
+        << L"  (--rest serves an HTTP/JSON control API, loopback-only unless --rest-lan; see docs/rest_api.md.)\n"
+        << L"  (agent: --verbose logs everything, sampling the lines that fire on every report; --verbose-reports logs every one.\n"
+        << L"   device.log is capped at 20 MB, with the previous 20 MB kept in device.log.1.)\n";
 }

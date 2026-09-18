@@ -458,6 +458,64 @@ int run_device_config_tests()
         CTM_CHECK(body.find("flush-probe-marker") != std::string::npos);
     }
 
+    // ⭐⭐ WHICH BYTE POSITIONS EACH PAD'S INPUT IS READ AT.
+    //
+    // ⛔ This is the check whose absence let a real fault live. Code that reads
+    // DualSense offsets was guarded by device_section_for(), which says YES to a
+    // DS4, and guarded by NOTHING at all on the paths an Xbox pad reaches. So an
+    // Xbox GIP report was read at DualSense offsets on every report.
+    //
+    // ⓘ It used to pin device_has_ds5_input_layout(): DualSense ids only, with a
+    // check that would fail on the day a DS4 input path made the input and audio
+    // questions diverge. ✅ That day was 2026-09-15. Every input reader asks
+    // device_input_pad_for() for the pad's own layout, and the predicate had no
+    // caller left, so what is pinned now is the resolver's answer per pad.
+    //
+    // ⓘ Descriptors are built to the real shape: vendor at [8..9] and product at
+    // [10..11], little endian, which is what the resolver reads.
+    section("device layout: each pad resolves to its own input layout, and an unknown one to none");
+    {
+        auto descriptor_for = [](uint16_t vendor, uint16_t product) {
+            std::vector<unsigned char> d(12, 0);
+            d[8]  = static_cast<unsigned char>(vendor & 0xff);
+            d[9]  = static_cast<unsigned char>((vendor >> 8) & 0xff);
+            d[10] = static_cast<unsigned char>(product & 0xff);
+            d[11] = static_cast<unsigned char>((product >> 8) & 0xff);
+            return d;
+        };
+        auto layout_of = [&](uint16_t vendor, uint16_t product) {
+            return units::device_input_pad_for(descriptor_for(vendor, product)).layout;
+        };
+
+        // A DualSense and an Edge read the same bytes.
+        CTM_CHECK(layout_of(0x054c, 0x0ce6) == &units::ctm_rebind::kDs5Layout);
+        CTM_CHECK(layout_of(0x054c, 0x0df2) == &units::ctm_rebind::kDs5Layout);
+
+        // ⛔ A DS4 IS NOT A DUALSENSE, and this is the one that reads wrong. It is
+        // a Sony pad with a touchpad, so every instinct says yes -- but its
+        // buttons sit at bytes 5/6/7 where a DualSense puts them at 8/9/10.
+        CTM_CHECK(layout_of(0x054c, 0x09cc) == &units::ctm_rebind::kDs4Layout);
+        CTM_CHECK(layout_of(0x054c, 0x05c4) == &units::ctm_rebind::kDs4Layout);
+
+        // Xbox: Microsoft 045E:0B12, a 48-byte GIP report with a 4-byte header.
+        CTM_CHECK(layout_of(0x045e, 0x0b12) == &units::ctm_rebind::kXboxLayout);
+
+        // Anything unknown, and a descriptor too short to carry ids at all.
+        CTM_CHECK(layout_of(0x1234, 0x5678) == nullptr);
+        CTM_CHECK(units::device_input_pad_for(std::vector<unsigned char>(8, 0)).layout == nullptr);
+        CTM_CHECK(units::device_input_pad_for(std::vector<unsigned char>()).layout == nullptr);
+
+        // ⓘ The settings kind comes with the layout, and only with one.
+        CTM_CHECK(std::strcmp(units::device_input_pad_for(descriptor_for(0x054c, 0x05c4)).kind,
+                              "ds4") == 0);
+        CTM_CHECK(units::device_input_pad_for(descriptor_for(0x1234, 0x5678)).kind == nullptr);
+
+        // ⭐ The OUTPUT question stays DualSense-only: a DS4's input layout does
+        // not make it speak the DualSense's output report.
+        CTM_CHECK(units::device_has_ds5_audio(descriptor_for(0x054c, 0x0ce6)));
+        CTM_CHECK(!units::device_has_ds5_audio(descriptor_for(0x054c, 0x05c4)));
+    }
+
     std::remove("ctm-device-config.txt");
     return 0;
 }

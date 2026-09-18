@@ -23,6 +23,10 @@ struct AgentBridgeSession {
     // ordinal above and gone with the session, never used as a handle.
     std::string nickname;
     std::string physicalSerial;
+    // The device's node on the TV (/dev/hidraw2, /dev/input/event13). With the
+    // serial, it tells a re-bridge of one device from another device that
+    // shares the serial -- see same_controller.inl.
+    std::string tvPath;
     std::string linkedConfig;
 };
 
@@ -67,7 +71,8 @@ static std::wstring find_relative_asset(const std::wstring &relative)
 
 static std::wstring bridge_profile_for_kind(const std::string &kind)
 {
-    if (kind == "ds4") {
+    if (kind == "ds4" || kind == "ds4_usb") {
+        // The same pad either way. Only the wire format the map reads differs.
         return find_relative_asset(L"profiles\\descriptors\\ds4_composite.profile");
     }
     if (kind == "ds5") {
@@ -92,6 +97,17 @@ static std::wstring bridge_map_for_kind(const std::string &kind)
 {
     if (kind == "ds4") {
         return find_relative_asset(L"maps\\ds4_usb_over_ds4_bt.map");
+    }
+    if (kind == "ds4_usb") {
+        // ⭐⭐ A CABLED DS4 NEEDS NO TRANSLATION. Its own report 0x01 is already
+        // what the virtual wired DS4 emits, so this map is a pass-through, the
+        // way the wired DualSense's is.
+        //
+        // ⛔ Sending a cabled pad through the BLUETOOTH map was the fault: that
+        // map triggers on source report 0x11, a cabled pad sends 0x01, so
+        // nothing parsed its input. The pad bridged, read PLUGGED, and did
+        // nothing in the game.
+        return find_relative_asset(L"maps\\ds4_usb_over_ds4_usb.map");
     }
     if (kind == "ds5") {
         return find_ds5_map_file();
@@ -190,13 +206,17 @@ static void bridge_session_worker(AgentBridgeSession *session)
         // Agent-only session policy (the CLI bridge mode keeps wait-forever
         // defaults): bounded initial accept + reconnect grace, TCP keepalive
         // probing, and the idle rule — gamepads chatter constantly so silence
-        // means gone (15 s); mice/keyboards may idle legitimately (15 min).
-        // Generic "hid" gets the long window unless its HELLO descriptor is a
-        // gamepad, which the backend detects and tightens itself.
+        // means gone (15 s). A mouse, a keyboard or any other part may sit
+        // unused for as long as it likes: it has no idle rule at all, since
+        // 2026-09-14, because every part of a device is bridged together and
+        // a quiet one timing out would leave the device half bridged. A TV
+        // that has gone is still caught by the keepalive and the reconnect
+        // grace. Generic "hid" whose HELLO descriptor is a gamepad still gets
+        // the 15 s window, which the backend detects and applies itself.
         backend->set_session_timeouts(30000, 15000);
         const bool gamepadKind = session->kind == "ds4" || session->kind == "ds5" ||
                                  session->kind == "xbox" || session->kind == "puck";
-        backend->set_idle_timeouts(gamepadKind ? 15000 : 15 * 60 * 1000, 15000);
+        backend->set_idle_timeouts(gamepadKind ? 15000 : 0, 15000);
         // TCP path: when the TV client vanishes and the reconnect grace runs
         // out (or the idle rule fires), unplug the virtual device and reap the
         // session (mirrors the ENet link-down behavior; a reaped port also
@@ -318,9 +338,20 @@ static void bridge_session_worker(AgentBridgeSession *session)
     // serial, coexisting for five seconds. The SERIAL is what identifies the
     // physical device.
     //
+    // ⛔ WITH THE TV'S NODE, since 2026-09-14: one USB device can arrive as
+    // several bridges sharing its serial, and the pad of a GameSir retired its
+    // own keyboard interface. same_controller.inl has the rule and its tests.
+    //
     // ⛔ OUTSIDE the session->mutex block below, deliberately. Taking
     // g_agent_sessions_mutex while holding a session mutex inverts the lock
     // order the rest of this file uses, and stop_bridge_session takes both.
+    std::string myTvPath;
+    {
+        const BackendCaps capsNow = backendPtr->caps();
+        for (wchar_t c : capsNow.path) {
+            if (c < 128) myTvPath.push_back(static_cast<char>(c));
+        }
+    }
     {
         const std::string mySerial = session->device ? session->device->physical_serial()
                                                      : std::string();
@@ -334,7 +365,8 @@ static void bridge_session_worker(AgentBridgeSession *session)
                     // so it cannot be matched -- and does not need to be: it is
                     // not holding the pad's control endpoint either.
                     std::lock_guard<std::mutex> otherLock(other->mutex);
-                    if (other->physicalSerial == mySerial) {
+                    if (same_controller::matches(mySerial, myTvPath,
+                                                 other->physicalSerial, other->tvPath)) {
                         older.push_back(other->busId);
                     }
                 }
@@ -356,6 +388,7 @@ static void bridge_session_worker(AgentBridgeSession *session)
                                                    : std::string();
         std::lock_guard<std::mutex> lock(session->mutex);
         session->physicalSerial = serial;
+        session->tvPath = myTvPath;
         if (session->linkedConfig.empty()) {
             session->linkedConfig = config_store::auto_link_for(serial, session->kind);
             if (!session->linkedConfig.empty()) {
@@ -379,6 +412,19 @@ static void bridge_session_worker(AgentBridgeSession *session)
         if (session->kind == "ds5" || session->kind == "ds5_usb" ||
             session->kind == "ds5e_usb") {
             ctm_gyro_calib::fetch(session->device.get(), backendPtr, session->ordinal);
+        } else if (session->kind == "ds4_usb") {
+            // ⭐ A DS4 HAS A GYRO TOO, and ships its own calibration. Without it
+            // the fallback scale makes motion about 60 times too slow, which looks
+            // like a broken gyro rather than a missing read. On a cable it is
+            // report 0x02, in the DualSense's field order.
+            ctm_gyro_calib::fetch(session->device.get(), backendPtr, session->ordinal,
+                                  ctm_gyro_calib::kDs4UsbCalibration);
+        } else if (session->kind == "ds4") {
+            // ⚠️ Over Bluetooth it is report 0x05 with the plus values grouped
+            // first. Read off the Linux driver, NOT measured: no TV here can pair a
+            // DS4 over Bluetooth.
+            ctm_gyro_calib::fetch(session->device.get(), backendPtr, session->ordinal,
+                                  ctm_gyro_calib::kDs4BtCalibration);
         }
     }
 
@@ -435,8 +481,12 @@ static void bridge_session_worker(AgentBridgeSession *session)
     // ready. Idempotent -- later sessions are no-ops. Always-present by design:
     // the gyro gate decides whether it MOVES, not whether it exists, so
     // enabling gyro mid-session through live config works without a reseat.
+    // ⛔ A DS4 AS WELL, now that its gyro is read. The gyro never starts the mouse
+    // itself -- the touchpad, stick and trigger hooks do when they emit -- so a
+    // DS4 left off this list would pile movement into a mailbox nothing drains.
     if (session->kind == "ds5" || session->kind == "ds5_usb" ||
-        session->kind == "ds5e_usb") {
+        session->kind == "ds5e_usb" || session->kind == "ds4" ||
+        session->kind == "ds4_usb") {
         ctm_gyro_mouse_ensure_mouse_started();   // defined in mouse_device.inl
     }
 
@@ -764,8 +814,8 @@ static void handle_agent_client(SOCKET client, const sockaddr_in &peer)
         unsigned long port = 0;
         std::string busIdAscii;
         input >> kind >> port >> busIdAscii;
-        if ((kind != "ds4" && kind != "ds5" && kind != "ds5_usb" && kind != "ds5e_usb" &&
-             kind != "hid" && kind != "puck" && kind != "xbox") ||
+        if ((kind != "ds4" && kind != "ds4_usb" && kind != "ds5" && kind != "ds5_usb" &&
+             kind != "ds5e_usb" && kind != "hid" && kind != "puck" && kind != "xbox") ||
             port < 1024 || port > 65535 ||
             busIdAscii.empty() || busIdAscii.size() > 31) {
             send_text(client, "ERR bad bridge args\n");

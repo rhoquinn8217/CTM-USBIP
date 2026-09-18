@@ -26,6 +26,8 @@ struct RestDeviceView {
     std::string serial;
     std::string linkedConfig;   // "" = shared [kind] section
     bool ready = false;         // false = still starting or tearing down
+    std::string product;        // the device's own name, from the TV at HELLO
+    std::string deviceType;     // "controller", "keyboard", "mouse" or ""
 };
 static std::vector<RestDeviceView> rest_collect_devices();
 static bool rest_link_device(const std::string &ordinal, const std::string &configName,
@@ -49,6 +51,11 @@ static std::string rest_device_json(const RestDeviceView &d)
            rest_json_escape(d.linkedConfig.empty() ? std::string(kSharedName) : d.linkedConfig) +
            "\"";
     out += ",\"ready\":" + std::string(d.ready ? "true" : "false");
+    // ⭐ What the page names a device by when its kind is not one it knows:
+    // the model name, then the type, and the raw kind only last
+    // (rhoquinn8217, 2026-09-13: never "hid" where anything better is known).
+    out += ",\"product\":\"" + rest_json_escape(d.product) + "\"";
+    out += ",\"device_type\":\"" + rest_json_escape(d.deviceType) + "\"";
     out += ",\"supports_config\":" +
            std::string(config_store::kind_supports_config(d.kind) ? "true" : "false") + "}";
     return out;
@@ -95,8 +102,9 @@ static std::string rest_devices_json()
 static std::string rest_config_json(const config_store::ConfigFile &cfg,
                                     const std::vector<RestDeviceView> &devices)
 {
+    // ⛔ No "kind" (2026-09-12). A config is not tied to a controller type, and
+    // a field saying which one it was for would invite a UI to filter on it.
     std::string out = "{\"name\":\"" + rest_json_escape(cfg.name) + "\"";
-    out += ",\"kind\":\"" + rest_json_escape(cfg.kind) + "\"";
     out += ",\"auto_link\":[";
     for (size_t i = 0; i < cfg.autoLink.size(); ++i) {
         if (i) out += ",";
@@ -217,7 +225,7 @@ static std::string rest_configs_json()
 // One config with its settings as currently loaded.
 static std::string rest_config_detail_json(const config_store::ConfigFile &cfg)
 {
-    const std::string section = config_store::section_for(cfg.name, cfg.kind);
+    const std::string section = config_store::config_section(cfg.name);
     std::string out = rest_config_json(cfg, rest_collect_devices());
     out.pop_back();                                   // drop the closing brace
     out += ",\"settings\":{";
@@ -329,7 +337,7 @@ static std::string rest_keys_json()
 {"key":"touchpad_to_mouse_gate","type":"choice","choices":["always","L2","R2","L1","R1","touchpad_click","PS"],"default":"always","help":"What must be held for the touchpad to move the cursor, scroll or tap. Blank means always -- the touchpad settings have their own switches, so an absent gate is not off."},
 {"key":"touchpad_to_mouse","type":"bool","default":false,"help":"One finger on the touchpad moves the cursor, laptop-trackpad style. Relative: lift and reposition without the cursor jumping. Feeds the same virtual mouse as gyro."},
 {"key":"touchpad_mouse_speed","type":"int","min":1,"max":400,"default":100,"help":"Touchpad cursor speed, percent. At 100 a full-pad swipe crosses roughly a full screen width."},
-{"key":"touchpad_scroll","type":"choice","choices":["0","1","2"],"default":"0","help":"How many fingers scroll. 0 is off. 1 is one finger, which is what controller makers do -- and on a DualSense a pointer finger reaches the pad without either thumb leaving a stick. 2 is two fingers, the laptop way, and the only option when one finger is already moving the cursor. An older config saying true means 2."},
+{"key":"touchpad_scroll","type":"choice","choices":["0","1","2"],"default":"0","help":"How many fingers scroll. 0 is off. 1 is one finger, which is what controller makers do -- and on a DualSense/DualShock4 a pointer finger reaches the pad without either thumb leaving a stick. 2 is two fingers, the laptop way, and the only option when one finger is already moving the cursor. An older config saying true means 2."},
 {"key":"touchpad_scroll_speed","type":"int","min":1,"max":400,"default":100,"help":"Scroll speed, percent."},
 {"key":"touchpad_scroll_natural","type":"bool","default":false,"help":"Scroll direction. Off: fingers down scrolls the page down, the classic wheel. On: content follows your fingers, the phone convention."},
 {"key":"touchpad_click_drag","type":"bool","default":false,"help":"Click the touchpad in with a finger on it to grab, move to drag, then LIFT THE FINGER to drop -- the click itself can be released straight away. Trackpads call this drag lock; three-finger drag is not possible here because the pad reports only two touches."},
@@ -411,26 +419,12 @@ static std::string rest_keys_json()
     return settings + pointers + pointers2 + names;
 }
 
-// Resolves a body that may name either a device or a raw value.
-static bool rest_kind_from_body(const RestJson &json, std::string *kind, std::string *error)
+// The refusal for a device that takes no config: a keyboard, a mouse, or
+// anything else that is not a controller kind. ⓘ One wording, used by every
+// route that links, so the page shows the same sentence wherever it lands.
+static std::string rest_no_config_error(const RestDeviceView &view)
 {
-    auto kindIt = json.strings.find("kind");
-    if (kindIt != json.strings.end() && !kindIt->second.empty()) {
-        *kind = kindIt->second;
-        return true;
-    }
-    auto deviceIt = json.strings.find("device");
-    if (deviceIt != json.strings.end()) {
-        RestDeviceView view;
-        if (!rest_find_device(deviceIt->second, &view)) {
-            *error = deviceIt->second + " is not connected";
-            return false;
-        }
-        *kind = view.kind;
-        return true;
-    }
-    *error = "kind or device is required";
-    return false;
+    return view.ordinal + " is a " + view.kind + ", which does not take a config";
 }
 
 // Returns true when this request was one of ours and `out` holds the response.
@@ -793,8 +787,20 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
             body += "]";
             body += ",\"kinds\":[";
             bool first = true;
-            if (p.ds5) { body += "\"ds5\""; first = false; }
-            if (p.ds5_edge) { body += first ? "\"ds5_edge\"" : ",\"ds5_edge\""; }
+            // ⓘ Every kind the preset suits, because the settings page filters its
+            // picker by this list: a kind missing here is a preset the page never
+            // offers, however well it would work.
+            auto addKind = [&](bool suits, const char *kind) {
+                if (!suits) return;
+                body += first ? "\"" : ",\"";
+                body += kind;
+                body += "\"";
+                first = false;
+            };
+            addKind(p.ds5, "ds5");
+            addKind(p.ds5_edge, "ds5_edge");
+            addKind(p.ds4, "ds4");
+            addKind(p.xbox, "xbox");
             body += "]}";
         }
         body += "]}";
@@ -819,10 +825,28 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
                 *out = rest_error_response(400, "name is required");
                 return true;
             }
-            std::string kind, error;
-            if (!rest_kind_from_body(json, &kind, &error)) {
-                *out = rest_error_response(400, error);
-                return true;
+            std::string error;
+            // ⭐ NO KIND (2026-09-12). A config is not tied to a controller
+            // type, so a name is all it takes. A "kind" in the body, from an
+            // older page, is ignored rather than refused.
+            //
+            // ⓘ A DEVICE may still be named. The new config is linked to it,
+            // so it must be a device that takes a config, and a preset is
+            // checked against it -- refused here, before anything is written,
+            // rather than leaving a config behind that the link then refuses.
+            std::string deviceKind;          // settings kind of the named device
+            auto deviceIt = json.strings.find("device");
+            if (deviceIt != json.strings.end()) {
+                RestDeviceView view;
+                if (!rest_find_device(deviceIt->second, &view)) {
+                    *out = rest_error_response(400, deviceIt->second + " is not connected");
+                    return true;
+                }
+                if (!config_store::kind_supports_config(view.kind)) {
+                    *out = rest_error_response(400, rest_no_config_error(view));
+                    return true;
+                }
+                deviceKind = config_store::settings_kind_for(view.kind);
             }
             // ⭐ An optional preset to start from. Absent means blank, which
             // is what create has always done -- so the plain path is
@@ -835,18 +859,20 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
                     *out = rest_error_response(400, "no preset named " + presetIt->second);
                     return true;
                 }
-                const std::string settingsKind = config_store::settings_kind_for(kind);
-                if (!ctm_presets::suits(*preset, settingsKind)) {
+                // ⓘ Only against a named device. With none, the config is for
+                // whatever links to it later, and each controller then uses
+                // what of the preset it can.
+                if (!deviceKind.empty() && !ctm_presets::suits(*preset, deviceKind)) {
                     // ⛔ Named rather than ignored: a preset that cannot act on
                     // this controller would be a config that silently does
                     // nothing, which is the worst shape a setting can take.
                     *out = rest_error_response(400,
-                        std::string(preset->name) + " is not for " + settingsKind);
+                        std::string(preset->name) + " is not for " + deviceKind);
                     return true;
                 }
             }
 
-            if (!config_store::create_config(nameIt->second, kind, &error)) {
+            if (!config_store::create_config(nameIt->second, &error)) {
                 *out = rest_error_response(409, error);
                 return true;
             }
@@ -873,7 +899,6 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
             }
             // Link the device that asked for it, if one was named -- creating a
             // config for a controller and not attaching it would surprise.
-            auto deviceIt = json.strings.find("device");
             if (deviceIt != json.strings.end()) {
                 std::string ignored;
                 rest_link_device(deviceIt->second, nameIt->second, &ignored);
@@ -1041,9 +1066,11 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
                     *out = rest_error_response(400, deviceIt->second + " is not connected");
                     return true;
                 }
-                if (config_store::settings_kind_for(view.kind) != cfg.kind) {
-                    *out = rest_error_response(400,
-                        "kind mismatch: device is " + view.kind + ", config is " + cfg.kind);
+                // ⓘ Any config may claim any controller that takes one -- the
+                // kind no longer has to match (2026-09-12). A device that takes
+                // no config has nothing for a claim to act on.
+                if (!config_store::kind_supports_config(view.kind)) {
+                    *out = rest_error_response(400, rest_no_config_error(view));
                     return true;
                 }
                 serial = view.serial;

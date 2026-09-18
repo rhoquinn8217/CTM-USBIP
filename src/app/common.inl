@@ -78,6 +78,30 @@ static bool ctm_verbose_logs()
     return enabled;
 }
 
+// ⭐ Set by --verbose-reports, which also turns on --verbose.
+//
+// ⛔ WHY A SWITCH OF ITS OWN (rhoquinn8217 took this default, 2026-09-16). Some
+// lines fire on every output report, about 250 a second while a game drives the
+// rumble and the triggers, and with --verbose alone they filled device.log by
+// tens of megabytes an hour. --verbose is what a test session wants for
+// everything else.
+inline bool g_verbose_reports_flag = false;
+
+static bool ctm_verbose_reports()
+{
+    return g_verbose_reports_flag;
+}
+
+// ⭐ Whether the n-th line of a per-report kind is logged. Every one with
+// --verbose-reports; with --verbose alone, the first fifty of a session, where a
+// device's start-up and handshake live, then one in five hundred, as "input
+// served" already does. ⓘ Counted per kind and per device by the caller.
+static bool ctm_log_report_line(uint64_t n)
+{
+    if (!ctm_verbose_logs()) return false;
+    return ctm_verbose_reports() || n <= 50 || (n % 500) == 0;
+}
+
 static BOOL WINAPI console_ctrl_handler(DWORD ctrlType)
 {
     if (ctrlType == CTRL_C_EVENT || ctrlType == CTRL_BREAK_EVENT ||

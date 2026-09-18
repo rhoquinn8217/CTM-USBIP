@@ -18,10 +18,11 @@
 // window, undoing the placing just made. (rhoquinn8217, 2026-09-02, when this
 // was still Triangle on the keyboard.)
 //
-// ⛔ The stick bytes are the DS5 USB layout: LX at data[1], LY at data[2],
-// 0x80 at centre -- the same bytes the stick mouse reads and the keyboard read
-// before this. A pad with another layout does not steer; it also does not
-// break anything, because a centred stick is a zero delta.
+// ⭐ The left stick is read through the pad's layout (input/button_layout.inl),
+// the same reader the stick mouse uses, with left and up negative on every pad.
+// ⛔ It used to read data[1] and data[2] outright: right on a DualSense and a
+// DS4, but on an Xbox report those are GIP header bytes, which is part of why
+// both windows took only a DualSense's reports.
 //
 // ⭐⭐ THE STICK MOVES THE WINDOW BY THE CLOCK, NOT BY THE REPORT
 // (rhoquinn8217, 2026-09-09, during the T-150 run: "sometimes it's very fast
@@ -40,12 +41,15 @@
 
 #include <windows.h>
 #include <atomic>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <mutex>
 #include <unordered_map>
 #include <vector>
+
+#include "input/button_layout.inl"
 
 namespace window_move {
 
@@ -84,7 +88,7 @@ struct Mover {
         accX = accY = 0.0;
     }
 
-    Step step(bool optionsDown, const uint8_t *data, size_t len)
+    Step step(bool optionsDown, const ctm_rebind::Layout &lay, const uint8_t *data, size_t len)
     {
         Step out;
         if (optionsDown && !held.load()) {
@@ -119,9 +123,16 @@ struct Mover {
         // ⓘ 1100 px/s at full deflection: a 1080p screen crossed in under two
         // seconds, and a gentle push still places a window by hand.
         bool steered = false;
-        if (len > 2 && dt > 0.0) {
-            const int lx = (int)data[1] - 128;
-            const int ly = (int)data[2] - 128;
+        float fx = 0.0f;
+        float fy = 0.0f;
+        if (dt > 0.0 &&
+            ctm_rebind::stick_axis(lay, data, len, ctm_rebind::kStickLX, &fx) &&
+            ctm_rebind::stick_axis(lay, data, len, ctm_rebind::kStickLY, &fy)) {
+            // ⓘ Back to the -128..127 steps the deadzone was tuned in. On a
+            // one-byte stick this is exactly raw - 128, as it always was; a
+            // 16-bit stick lands on the same scale.
+            const int lx = (int)std::lround(fx * 127.0f);
+            const int ly = (int)std::lround(fy * 127.0f);
             const int dead = 18;
             const double speed = 1100.0;
             if (lx > dead || lx < -dead) {

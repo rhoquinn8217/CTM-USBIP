@@ -94,6 +94,11 @@ if_unknown = log_and_ack
 # descriptor, then the device status packet.
 rule.1.match = usb.control setup_prefix=00:09
 rule.1.destination_endpoint = 0x82
+# ⭐ The six bytes at offset 4 are the DEVICE ID, and Windows keys the XInput
+# device it creates on them -- so they are this pad's, not the captured pad's.
+# Two bridged Xbox pads shared one identity until 2026-09-15 and only the first
+# was promoted.
+rule.1.packet.1.device_id_at = 4
 rule.1.packet.1 = 02 20 02 1c 7e ed 89 ba f0 45 00 00 5e 04 12 0b 05 00 17 00 06 00 00 00 08 04 01 00 01 00 01 00
 rule.1.packet.2 = 03 20 13 04 83 01 00 00
 

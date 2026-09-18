@@ -14,19 +14,17 @@
 // ⓘ Off unless asked for. An existing config keeps behaving as it did; the
 // mouse-mode presets turn it on, because for them it is obviously right.
 //
+// ⭐ AT EACH PAD'S OWN OFFSETS, from its layout (input/button_layout.inl). These
+// used to be a DualSense's -- gyro and accelerometer [16..27], touch points
+// [33..40] -- behind a check that the pad was a DualSense, so no switch here did
+// anything on a DS4 or an Xbox pad, not even hiding a stick, which every pad has.
+//
 // ⓘ Relies on its includer (main.cpp) for device_config_*, device_settings_section
-// and device_has_ds5_motion -- the same pattern as the files around it.
+// and device_input_pad_for -- the same pattern as the files around it.
 
 #pragma once
 
 namespace ctm_mouse_exclusive {
-
-// ⓘ Report offsets are documented at the top of gyro_mouse.inl and
-// touch_mouse.inl, both measured against the mapped report we receive here.
-inline const size_t kGyroFirst  = 16;   // pitch, yaw, roll, then accel x/y/z
-inline const size_t kGyroLast   = 27;
-inline const size_t kTouchFirst = 33;   // [33..36] point 1, [37..40] point 2
-inline const size_t kTouchLast  = 40;
 
 // ⭐⭐ THREE SETTINGS, NOT ONE (rhoquinn8217, 2026-09-03). A single switch meant
 // a preset could not say "hide the gyro but leave my sticks alone" -- it hid
@@ -55,16 +53,15 @@ inline void apply(const void *deviceKey,
                   const std::string &config, uint8_t *data, size_t len)
 {
     (void)deviceKey;
-    if (data == nullptr || len < 41) return;
-    if (!device_has_ds5_motion(descriptor)) return;
+    if (data == nullptr) return;
 
     // ⛔ THE SAME TWO STEPS EVERY OTHER HOOK USES: the descriptor names the
-    // KIND, and the kind plus the linked config name the settings section.
-    // ⓘ Copied from touch_mouse.inl rather than guessed -- guessing the
-    // signature is what broke the first two builds of this file.
-    const char *kind = device_section_for(descriptor);
-    if (kind == nullptr) return;
-    const std::string section = device_settings_section(kind, config);
+    // KIND and the LAYOUT, and the kind plus the linked config name the settings
+    // section. ⓘ Each part below is then blanked only on a pad that has it.
+    const InputPad pad = device_input_pad_for(descriptor);
+    if (pad.layout == nullptr) return;
+    const ctm_rebind::Layout &lay = *pad.layout;
+    const std::string section = device_settings_section(pad.kind, config);
     if (section.empty()) return;
 
     // ⭐ THE GYRO, when it is aiming the cursor.
@@ -76,8 +73,8 @@ inline void apply(const void *deviceKey,
     // a reason living in a different setting. "Hide the gyro from the game"
     // needs no permission from anything else, and it is useful on its own:
     // some games read motion you never asked them to read.
-    if (wants(section, "gyro_no_passthrough")) {
-        for (size_t i = kGyroFirst; i <= kGyroLast && i < len; ++i) data[i] = 0;
+    if (lay.motion.present && wants(section, "gyro_no_passthrough")) {
+        ctm_rebind::blank_motion(lay, data, len);
     }
 
     // ⭐ THE TOUCHPAD, when it is the trackpad.
@@ -87,15 +84,10 @@ inline void apply(const void *deviceKey,
     // ⭐ ALSO INDEPENDENT, and for the same reason. ⓘ It used to require a
     // touchpad mouse setting -- and worse, only the POINTING one, so a preset
     // that merely scrolled still handed the game every finger movement.
-    if (wants(section, "touchpad_no_passthrough")) {
-        for (size_t i = kTouchFirst; i <= kTouchLast && i < len; i += 4) {
-            data[i] = 0x80;
-            if (i + 1 < len) data[i + 1] = 0;
-            if (i + 2 < len) data[i + 2] = 0;
-            if (i + 3 < len) data[i + 3] = 0;
-        }
-        // ⓘ And the physical click, which is the mouse button now.
-        if (len > 10) data[10] = static_cast<uint8_t>(data[10] & ~0x02);
+    if (lay.touch.present && wants(section, "touchpad_no_passthrough")) {
+        // ⓘ Every touch point the pad reports -- a DS4 carries older packets
+        // too -- and the physical click, which is the mouse button now.
+        ctm_rebind::blank_touch(lay, data, len);
     }
 
     // ⭐ A STICK, when it points or scrolls.
@@ -111,12 +103,12 @@ inline void apply(const void *deviceKey,
     // ⓘ Independent of the modes, like the gyro and touchpad ones: hiding a
     // stick from the game is a thing you can want on its own.
     if (device_config_bool(section.c_str(), "right_stick_no_passthrough", false)) {
-        // ⓘ 0x80 is centre, not 0: a zeroed stick reads as fully left and up,
-        // and a game would spin.
-        if (len > 4) { data[3] = 0x80; data[4] = 0x80; }
+        // ⓘ Centre in the pad's own form: 0x80 for a byte, 0 for 16 bits. A
+        // zeroed one-byte stick reads as fully left and up, and a game would spin.
+        ctm_rebind::blank_stick(lay, data, len, false);
     }
     if (device_config_bool(section.c_str(), "left_stick_no_passthrough", false)) {
-        if (len > 2) { data[1] = 0x80; data[2] = 0x80; }
+        ctm_rebind::blank_stick(lay, data, len, true);
     }
 }
 

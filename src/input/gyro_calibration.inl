@@ -58,9 +58,36 @@ inline std::map<const void *, Scale> g_scales;
 //   [11..12] gyro yaw plus       [13..14] gyro yaw minus
 //   [15..16] gyro roll plus      [17..18] gyro roll minus
 //   [19..20] gyro speed plus     [21..22] gyro speed minus
-inline bool parse(const uint8_t *data, size_t len, Scale *out)
+//
+// ⭐⭐ A DUALSHOCK 4 SHIPS THE SAME CALIBRATION, UNDER A DIFFERENT REPORT, AND
+// OVER BLUETOOTH IN A DIFFERENT ORDER. Read off the Linux driver
+// (hid-playstation.c, dualshock4_get_calibration_data), which parses them so:
+//
+//   DualSense, either transport ... report 0x05, 41 bytes, plus and minus PAIRED
+//                                   per axis, as above
+//   DS4 on a cable ................ report 0x02, 37 bytes, PAIRED -- byte for byte
+//                                   the DualSense's order
+//   DS4 over Bluetooth ............ report 0x05, 41 bytes, the three PLUS values
+//                                   first ([7] [9] [11]) and then the three MINUS
+//                                   values ([13] [15] [17])
+//
+// ⓘ The bias and speed fields sit in the same places in all three, and the
+// driver turns them into a scale the same way for both pads.
+enum class CalibOrder { Paired, PlusThenMinus };
+
+struct CalibReport {
+    uint8_t    id;
+    uint16_t   length;       // the width a feature request carries
+    CalibOrder order;
+};
+
+inline const CalibReport kDs5Calibration    { 0x05, 41, CalibOrder::Paired };
+inline const CalibReport kDs4UsbCalibration { 0x02, 37, CalibOrder::Paired };
+inline const CalibReport kDs4BtCalibration  { 0x05, 41, CalibOrder::PlusThenMinus };
+
+inline bool parse(const uint8_t *data, size_t len, const CalibReport &report, Scale *out)
 {
-    if (data == nullptr || len < 23 || data[0] != 0x05) return false;
+    if (data == nullptr || out == nullptr || len < 23 || data[0] != report.id) return false;
 
     auto rd = [&](size_t off) -> int16_t {
         return static_cast<int16_t>(
@@ -71,9 +98,13 @@ inline bool parse(const uint8_t *data, size_t len, Scale *out)
     const int16_t pitchBias = rd(1);
     const int16_t yawBias   = rd(3);
     const int16_t rollBias  = rd(5);
-    const int16_t pitchPlus = rd(7),  pitchMinus = rd(9);
-    const int16_t yawPlus   = rd(11), yawMinus   = rd(13);
-    const int16_t rollPlus  = rd(15), rollMinus  = rd(17);
+    const bool paired = (report.order == CalibOrder::Paired);
+    const int16_t pitchPlus  = rd(7);
+    const int16_t pitchMinus = paired ? rd(9)  : rd(13);
+    const int16_t yawPlus    = paired ? rd(11) : rd(9);
+    const int16_t yawMinus   = paired ? rd(13) : rd(15);
+    const int16_t rollPlus   = paired ? rd(15) : rd(11);
+    const int16_t rollMinus  = rd(17);
     const int16_t speedPlus = rd(19), speedMinus = rd(21);
 
     const int speed2x = static_cast<int>(speedPlus) + static_cast<int>(speedMinus);
@@ -108,6 +139,12 @@ inline bool parse(const uint8_t *data, size_t len, Scale *out)
         return false;
     }
     return true;
+}
+
+// ⓘ The DualSense's report, as every caller had before a DS4 could be calibrated.
+inline bool parse(const uint8_t *data, size_t len, Scale *out)
+{
+    return parse(data, len, kDs5Calibration, out);
 }
 
 inline Scale scale_for(const void *deviceKey)

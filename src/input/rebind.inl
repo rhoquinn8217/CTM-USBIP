@@ -10,120 +10,11 @@
 
 #pragma once
 
+// ⓘ Outside the namespace: this file opens ctm_rebind itself, and including it
+// inside would nest a second one.
+#include "button_layout.inl"
+
 namespace ctm_rebind {
-
-// ⭐ W3C STANDARD GAMEPAD indices. Positions survive across controllers; names
-// do not. Index 0 is the bottom face button -- Cross on a DualSense, A on an
-// Xbox pad. Same button, same index, different label.
-//
-// ⓘ The W3C reached this the same way: "The Standard Gamepad buttons are
-// defined by their layout on the gamepad rather than their intended
-// functionality."
-enum : int {
-    kBtnFaceDown = 0, kBtnFaceRight = 1, kBtnFaceLeft = 2, kBtnFaceUp = 3,
-    kBtnL1 = 4, kBtnR1 = 5, kBtnL2 = 6, kBtnR2 = 7,
-    kBtnSelect = 8, kBtnStart = 9, kBtnL3 = 10, kBtnR3 = 11,
-    kBtnDpadUp = 12, kBtnDpadDown = 13, kBtnDpadLeft = 14, kBtnDpadRight = 15,
-    kBtnHome = 16,
-    kButtonCount = 17
-};
-
-// Where each standard index lives in a DUALSENSE report.
-//
-// ⚠️ OFFSETS ARE OURS -- report id at index 0, matching gyro_mouse.inl's note.
-// A reference that omits the report id has every offset one lower.
-//
-//   [8]  low nibble: d-pad as an 8-way HAT, not four bits
-//        high nibble: square 0x10, cross 0x20, circle 0x40, triangle 0x80
-//   [9]  L1 0x01, R1 0x02, L2 0x04, R2 0x08,
-//        create 0x10, options 0x20, L3 0x40, R3 0x80
-//   [10] PS 0x01, touchpad-click 0x02, mute 0x04
-//
-// ⛔ THE D-PAD IS A HAT. Values 0-7 are the eight directions and 8 is centred,
-// so "up" is not one bit -- it is three of the eight values. Treating it as a
-// bitmask would bind diagonals to nothing and up-left to up.
-struct BitSpot {
-    int byteIndex;
-    uint8_t mask;
-};
-
-// ⓘ A mask of 0 means "not a simple bit" -- the d-pad, handled separately.
-inline const BitSpot kDs5Spots[kButtonCount] = {
-    { 8, 0x20 },   // 0  cross
-    { 8, 0x40 },   // 1  circle
-    { 8, 0x10 },   // 2  square
-    { 8, 0x80 },   // 3  triangle
-    { 9, 0x01 },   // 4  L1
-    { 9, 0x02 },   // 5  R1
-    { 9, 0x04 },   // 6  L2 (digital bit; the analog value is at [6])
-    { 9, 0x08 },   // 7  R2
-    { 9, 0x10 },   // 8  create / select
-    { 9, 0x20 },   // 9  options / start
-    { 9, 0x40 },   // 10 L3
-    { 9, 0x80 },   // 11 R3
-    { 8, 0x00 },   // 12 d-pad up     -- hat, see below
-    { 8, 0x00 },   // 13 d-pad down
-    { 8, 0x00 },   // 14 d-pad left
-    { 8, 0x00 },   // 15 d-pad right
-    { 10, 0x01 },  // 16 PS / home
-};
-
-// Hat value -> which of the four d-pad directions are down.
-// 0=N 1=NE 2=E 3=SE 4=S 5=SW 6=W 7=NW 8=centred
-inline bool hat_has(uint8_t hat, int standardIndex)
-{
-    if (hat > 7) return false;
-    switch (standardIndex) {
-        case kBtnDpadUp:    return hat == 7 || hat == 0 || hat == 1;
-        case kBtnDpadRight: return hat == 1 || hat == 2 || hat == 3;
-        case kBtnDpadDown:  return hat == 3 || hat == 4 || hat == 5;
-        case kBtnDpadLeft:  return hat == 5 || hat == 6 || hat == 7;
-        default:            return false;
-    }
-}
-
-inline void hat_clear(uint8_t *data, int standardIndex)
-{
-    const uint8_t hat = static_cast<uint8_t>(data[8] & 0x0f);
-    if (!hat_has(hat, standardIndex)) return;
-    // ⚠️ A hat cannot express "up is released but right is still held" as a
-    // bitmask would. Clearing one direction of a diagonal means moving to the
-    // remaining single direction; clearing the only direction centres it.
-    static const uint8_t kCentre = 8;
-    uint8_t next = kCentre;
-    switch (hat) {
-        case 1: next = (standardIndex == kBtnDpadUp)    ? 2 : 0; break;  // NE
-        case 3: next = (standardIndex == kBtnDpadDown)  ? 2 : 4; break;  // SE
-        case 5: next = (standardIndex == kBtnDpadDown)  ? 6 : 4; break;  // SW
-        case 7: next = (standardIndex == kBtnDpadUp)    ? 6 : 0; break;  // NW
-        default: next = kCentre; break;
-    }
-    data[8] = static_cast<uint8_t>((data[8] & 0xf0) | next);
-}
-
-inline bool is_pressed(const uint8_t *data, size_t len, int standardIndex)
-{
-    if (standardIndex >= kBtnDpadUp && standardIndex <= kBtnDpadRight) {
-        return len > 8 && hat_has(static_cast<uint8_t>(data[8] & 0x0f), standardIndex);
-    }
-    const BitSpot &spot = kDs5Spots[standardIndex];
-    if (spot.mask == 0) return false;
-    return len > static_cast<size_t>(spot.byteIndex) &&
-           (data[spot.byteIndex] & spot.mask) != 0;
-}
-
-inline void clear_button(uint8_t *data, size_t len, int standardIndex)
-{
-    if (standardIndex >= kBtnDpadUp && standardIndex <= kBtnDpadRight) {
-        if (len > 8) hat_clear(data, standardIndex);
-        return;
-    }
-    const BitSpot &spot = kDs5Spots[standardIndex];
-    if (spot.mask == 0) return;
-    if (len > static_cast<size_t>(spot.byteIndex)) {
-        data[spot.byteIndex] = static_cast<uint8_t>(data[spot.byteIndex] & ~spot.mask);
-    }
-}
 
 // ---- Key names --------------------------------------------------------------
 //
@@ -285,9 +176,38 @@ inline std::atomic_bool g_configMode{false};
 // say so again.
 inline std::atomic_bool g_gateHold{false};
 
-// ⭐ Set while the chord's own Options press is still held, so the gate below
-// leaves that one button alone and the game can pause itself.
-inline bool g_passOptions = false;
+// ⭐ The chord's memory, PER PAD: its last Options state (for the edge),
+// whether its own chord press is still held -- so the gate below leaves that one
+// button alone and the game can pause itself -- and what chord_debug last said.
+//
+// ⛔⛔ THESE WERE THREE STATICS AND ONE GLOBAL, SHARED BY EVERY PAD (found in
+// review, 2026-09-15). With two pads bridged, the idle pad's report -- Options up
+// -- landed between the other pad's reports and cleared the pass-through, so the
+// gate ate the chord's Options and the game never paused; and it re-armed the
+// edge, so a held Options could look freshly pressed again. Two DualSenses always
+// shared it; a DualSense beside a DS4 started to once the chord read a DS4.
+// ⓘ Every relay thread runs the chord, so the map is locked.
+struct ChordPad {
+    bool lastOptions = false;
+    bool passOptions = false;
+    int  lastDebugState = -1;
+};
+
+inline std::mutex g_chordMutex;
+inline std::map<const void *, ChordPad> g_chordPads;
+
+inline bool pass_options_for(const void *deviceKey)
+{
+    std::lock_guard<std::mutex> lock(g_chordMutex);
+    const auto it = g_chordPads.find(deviceKey);
+    return it != g_chordPads.end() && it->second.passOptions;
+}
+
+inline void forget_chord_pad(const void *deviceKey)
+{
+    std::lock_guard<std::mutex> lock(g_chordMutex);
+    g_chordPads.erase(deviceKey);
+}
 
 inline bool gate_hold() { return g_gateHold.load(std::memory_order_relaxed); }
 
@@ -474,17 +394,36 @@ inline void apply(const void *deviceKey,
     // Three clean repetitions showed both fingers held steady for the whole
     // press with no flicker, landing 8-16ms apart. So an instant check is enough
     // and no memory window is needed.
-    if (len > 40) {
-        const bool f1 = (data[33] & 0x80) == 0;
-        const bool f2 = (data[37] & 0x80) == 0;
-        const bool options = (data[9] & 0x20) != 0;
+    //
+    // ⭐⭐ AT THE PAD'S OWN OFFSETS NOW, AND ONLY ON A PAD WITH A TOUCHPAD.
+    // Those numbers are a DualSense's. A DS4 keeps its newest two fingers at [35]
+    // and [39] and Options at [6] 0x20; its layout says so, and the chord asks it.
+    //
+    // ⛔ The first guard was "is it a DualSense", and it was there for a reason
+    // worth keeping: an Xbox GIP report -- 48 bytes, so it passed `len > 40` --
+    // was read here every report. Bytes 18..47 of that report are always zero,
+    // and "finger down" is bit 0x80 CLEAR, so BOTH fingers read as permanently
+    // resting; and [9] is the right trigger's high byte, so RT alone supplied
+    // the Options edge. The chord could fire on a pad with no touchpad at all.
+    // ➡️ The layout keeps that out -- an Xbox layout has no touchpad -- without
+    // also keeping out a DS4, which has one.
+    // ⛔ And merely dropping that guard would have been wrong in a different way:
+    // on a DS4 the DualSense reads are not absent but MISLEADING. Its [33] is the
+    // touch-packet count, whose high bit is always clear, so "finger 1 down"
+    // would have been true forever. ⓘ On hardware (2026-09-15) the chord simply
+    // did nothing on a DS4, because the guard kept it out.
+    const InputPad chordPad = device_input_pad_for(descriptor);
+    if (chordPad.layout != nullptr && chordPad.layout->touch.present &&
+        len >= ctm_rebind::touch_min_len(*chordPad.layout)) {
+        const ctm_rebind::Layout &chordLayout = *chordPad.layout;
+        const bool f1 = ctm_rebind::touch_finger_down(chordLayout, data, len, 0);
+        const bool f2 = ctm_rebind::touch_finger_down(chordLayout, data, len, 1);
+        const bool options = ctm_rebind::is_pressed(chordLayout, data, len, ctm_rebind::kBtnStart);
 
         // ⛔ EDGE, not level. Options is held for about 300ms and this runs at
         // 250Hz, so a level check would fire seventy times for one press.
-        static bool lastOptions = false;
-        const bool optionsPressedNow = options && !lastOptions;
-        lastOptions = options;
-
+        // ⓘ This pad's own edge -- see ChordPad for why it is not shared.
+        //
         // ⛔ LET OPTIONS THROUGH FOR THIS PRESS.
         //
         // Measured 2026-08-29: the chord fires, config mode turns on, and then
@@ -494,8 +433,14 @@ inline void apply(const void *deviceKey,
         //
         // ⓘ Held until Options is RELEASED, not for a fixed time: the game needs
         // the whole press, and its length is the person's to decide.
-        static bool passOptionsThrough = false;
-        if (!options) passOptionsThrough = false;
+        bool optionsPressedNow = false;
+        {
+            std::lock_guard<std::mutex> lock(g_chordMutex);
+            ChordPad &chordState = g_chordPads[deviceKey];
+            optionsPressedNow = options && !chordState.lastOptions;
+            chordState.lastOptions = options;
+            if (!options) chordState.passOptions = false;
+        }
 
         // ⛔ NOT WHILE THE GATE IS ALREADY ON. If the window is up and in front,
         // the chord has nothing to do -- and firing anyway closed and reopened
@@ -506,7 +451,10 @@ inline void apply(const void *deviceKey,
         if (f1 && f2 && optionsPressedNow && !config_mode()) {
             device_log::input(device_log::msg()
                 << "chord: two fingers + Options -- showing the settings window");
-            passOptionsThrough = true;
+            {
+                std::lock_guard<std::mutex> lock(g_chordMutex);
+                g_chordPads[deviceKey].passOptions = true;
+            }
             // ⓘ The chord belongs to a CONTROLLER, and this function has that
             // device in hand -- so the window can open on its tab rather than
             // on Overview.
@@ -516,7 +464,6 @@ inline void apply(const void *deviceKey,
             g_gateProvisionalUntil.store(chord_now_ms() + 4000);
             ctm_chord_show_ui(chordOrdinal);
         }
-        g_passOptions = passOptionsThrough;
 
         if (device_config_bool("global", "chord_debug", false)) {
             // ⚠️ TOUCH-ERA NARROWING (2026-08-31): fingers are a CURSOR now,
@@ -524,25 +471,42 @@ inline void apply(const void *deviceKey,
             // -- dozens of lines a minute of pure churn. Only chord-relevant
             // states speak: Options involved, or both fingers down -- entering
             // OR leaving them, so a chord attempt still traces end to end.
-            static int lastState = -1;
+            // ⓘ Per pad, so two pads' states do not read as changes of each other.
             const int state = (f1 ? 4 : 0) | (f2 ? 2 : 0) | (options ? 1 : 0);
-            const bool was = lastState >= 0 &&
-                ((lastState & 1) != 0 || (lastState & 6) == 6);
-            const bool is = (state & 1) != 0 || (state & 6) == 6;
-            if (state != lastState) {
-                if (was || is) {
-                    device_log::input(device_log::msg()
-                        << "chord: finger1=" << (f1 ? "down" : "up")
-                        << " finger2=" << (f2 ? "down" : "up")
-                        << " options=" << (options ? "down" : "up"));
+            bool speak = false;
+            {
+                std::lock_guard<std::mutex> lock(g_chordMutex);
+                int &lastState = g_chordPads[deviceKey].lastDebugState;
+                const bool was = lastState >= 0 &&
+                    ((lastState & 1) != 0 || (lastState & 6) == 6);
+                const bool is = (state & 1) != 0 || (state & 6) == 6;
+                if (state != lastState) {
+                    speak = was || is;
+                    lastState = state;
                 }
-                lastState = state;
+            }
+            if (speak) {
+                device_log::input(device_log::msg()
+                    << "chord: finger1=" << (f1 ? "down" : "up")
+                    << " finger2=" << (f2 ? "down" : "up")
+                    << " options=" << (options ? "down" : "up"));
             }
         }
     }
 
-    const char *kind = device_section_for(descriptor);
+    // ⭐ WHICH SECTION, AND WHICH LAYOUT -- two questions, asked separately.
+    //
+    // ⛔ device_section_for() used to answer both here, and it answers neither
+    // well: it says "ds4" for a pad whose bytes are not where it implies, and
+    // nullptr for every Xbox pad, which is what kept them out of the rebinder.
+    const char *kind = device_button_section_for(descriptor);
     if (kind == nullptr) return;
+    const Layout *layout = layout_for(kind);
+    if (layout == nullptr) return;
+    // ⓘ Each layout knows the shortest report its own spots can be read from,
+    // so a truncated report is refused per pad rather than against a DualSense
+    // constant that means nothing to the others.
+    if (len < layout->minLength) return;
 
     // ⭐ CONFIG MODE WINS over anything the user bound.
     //
@@ -649,8 +613,8 @@ inline void apply(const void *deviceKey,
         for (int i = 0; i < kButtonCount; ++i) {
             const uint32_t bit = 1u << i;
             if ((g_swallowUntilReleased & bit) == 0) continue;
-            if (is_pressed(data, len, i)) {
-                clear_button(data, len, i);
+            if (is_pressed(*layout, data, len, i)) {
+                clear_button(*layout, data, len, i);
             } else {
                 g_swallowUntilReleased &= ~bit;
             }
@@ -688,12 +652,12 @@ inline void apply(const void *deviceKey,
         // Square while it is up. One button, both directions.
         static std::map<std::pair<const void *, int>, bool> gateSquareHeld;
         {
-            const bool sq = is_pressed(data, len, kBtnFaceLeft);
+            const bool sq = is_pressed(*layout, data, len, kBtnFaceLeft);
             const bool fresh = sq && !gateSquareHeld[{deviceKey, kBtnFaceLeft}];
             gateSquareHeld[{deviceKey, kBtnFaceLeft}] = sq;
 
             if (ctm_rebind_editing_field()) {
-                clear_button(data, len, kBtnFaceLeft);
+                clear_button(*layout, data, len, kBtnFaceLeft);
                 if (fresh) ctm_osk_toggle(gateSection, kBtnFaceLeft, 2);   // 2 = ours
             } else if (fresh) {
                 // ⭐⭐ SAY WHY THE KEYBOARD DID NOT OPEN (rhoquinn8217,
@@ -729,10 +693,10 @@ inline void apply(const void *deviceKey,
             // ⛔ Square belongs to the keyboard while a text box has focus;
             // sending the toggle as well would do both.
             if (g.standardIndex == kBtnFaceLeft && ctm_rebind_editing_field()) continue;
-            const bool held = is_pressed(data, len, g.standardIndex);
+            const bool held = is_pressed(*layout, data, len, g.standardIndex);
             // ⛔ Cleared whether or not it is held, so a button released this
             // frame cannot leave a stale bit behind.
-            clear_button(data, len, g.standardIndex);
+            clear_button(*layout, data, len, g.standardIndex);
             if (!held) continue;
             const KeyName *k = key_for(g.code);
             if (k != nullptr && k->usage != 0 && gateCount < 6) {
@@ -756,11 +720,12 @@ inline void apply(const void *deviceKey,
         // ⚠️ AFTER the loop above, deliberately: wiping first would erase the
         // buttons before they were read, and nothing would ever register.
         //
-        // ⓘ Sticks go to CENTRE (0x80) -- zero is full deflection, not neutral.
+        // ⓘ Sticks go to CENTRE, not zero: 0x80 on a DualSense, where zero is
+        // full deflection, and 0 on an Xbox pad's signed axes. The layout knows.
         // ⛔⛔ READ THE BUTTONS BEFORE THE REPORT IS WIPED (2026-09-03).
         //
-        // ⚠️ The lines below blank byte 9, which carries L1, R1, L2, R2,
-        // Create, Options, L3 and R3. The keyboard-and-mouse exception below
+        // ⚠️ The blanking below clears a DualSense's byte 9, which carries L1,
+        // R1, L2, R2, Create, Options, L3 and R3. The keyboard-and-mouse exception below
         // ran AFTER that, so is_pressed always answered false and the triggers
         // appeared to do nothing at all -- with no log line, because the log
         // was inside the same `if (pressed)`.
@@ -768,15 +733,14 @@ inline void apply(const void *deviceKey,
         // ⓘ A snapshot rather than moving the exception: the blanking must
         // still happen, and it must happen before anything can forget to.
         bool gatePressed[kButtonCount] = {};
-        for (int i = 0; i < kButtonCount; ++i) gatePressed[i] = is_pressed(data, len, i);
+        for (int i = 0; i < kButtonCount; ++i) gatePressed[i] = is_pressed(*layout, data, len, i);
 
-        data[1] = data[2] = data[3] = data[4] = 0x80;   // LX LY RX RY
-        data[5] = data[6] = 0x00;                       // L2 R2 analog
-        // ⓘ Options (0x20) survives while the chord's own press is held --
-        // otherwise the button that triggered this would be eaten by it.
-        data[9] = g_passOptions ? static_cast<uint8_t>(data[9] & 0x20) : 0x00;
-        data[10] = static_cast<uint8_t>(data[10] & ~0x07);   // PS, touchpad, mute
-        data[8] = 0x08;                                 // faces clear, hat centred
+        // ⛔ AT THIS PAD'S OWN OFFSETS. These were five lines of DualSense
+        // positions, which broke an Xbox report's header -- blank_to_rest()
+        // says what that did and why a layout answers it.
+        // ⓘ Options survives while the chord's own press is held -- otherwise
+        // the button that triggered this would be eaten by it.
+        blank_to_rest(*layout, data, len, pass_options_for(deviceKey));
 
         if (gateCount > 0 && ctm_verbose_logs()) {
             device_log::input(device_log::msg()
@@ -825,10 +789,20 @@ inline void apply(const void *deviceKey,
             // the observation that cracked it, *"the clicks are only
             // registering on the config window and nothing else"*, which is
             // exactly the scope of this branch.
-            if ((i == kBtnL2 || i == kBtnR2) &&
-                !device_config_str(gateSection.c_str(),
-                                   trigger_effect::steady_key(i == kBtnR2 ? "right" : "left").c_str())
-                     .empty()) {
+            //
+            // ⚠️ ONLY TO A GESTURE THAT CAN TAKE IT (2026-09-15). An Xbox pad's
+            // triggers press by travel now, with no bit behind them, and the
+            // gesture never runs for that pad -- so giving one up here would
+            // leave its binding with nothing to fire it.
+            // ⛔ AND ONLY WHILE THE SWITCH IS ON (2026-09-15). This asked whether
+            // the key held any value, so "off" -- the page's default, saved like
+            // any other choice -- gave the trigger up to a gesture that would
+            // not take it, and nothing fired. steady_value_on is the gesture's
+            // own test.
+            if ((i == kBtnL2 || i == kBtnR2) && trigger_click_can_take(*layout) &&
+                trigger_effect::steady_value_on(device_config_str(
+                    gateSection.c_str(),
+                    trigger_effect::steady_key(i == kBtnR2 ? "right" : "left").c_str()))) {
                 gateGaveUpATrigger = true;
                 continue;
             }
@@ -848,7 +822,7 @@ inline void apply(const void *deviceKey,
                 static std::map<std::pair<const void *, int>, bool> gateOskHeld;
                 if (now && !gateOskHeld[{deviceKey, i}]) ctm_osk_toggle(gateSection, i, which);
                 gateOskHeld[{deviceKey, i}] = now;
-                clear_button(data, len, i);
+                clear_button(*layout, data, len, i);
                 continue;
             }
 
@@ -876,7 +850,7 @@ inline void apply(const void *deviceKey,
                         gateMouseButtons | (gma == kMouseLeft ? 0x01 :
                                             gma == kMouseRight ? 0x02 : 0x04));
                 }
-                clear_button(data, len, i);
+                clear_button(*layout, data, len, i);
             }
         }
 
@@ -891,8 +865,11 @@ inline void apply(const void *deviceKey,
         // ⭐ Publish when we have an opinion, giving a trigger up included --
         // the same rule as the main path, and for the same reason: going
         // silent leaves whatever was last published held forever.
+        // ⓘ PER DEVICE, like the keys above and for the same reason: every
+        // gated pad publishes here on every report, and one shared level let a
+        // pad at rest release another pad's click at report rate.
         if (gateAnyMouse || gateGaveUpATrigger) {
-            ctm_mouse_device::set_buttons(gateMouseButtons);
+            ctm_mouse_device::set_buttons_for(deviceKey, gateMouseButtons);
         }
         if (gateAnyMouse) {
             ctm_gyro_mouse_ensure_mouse_started();
@@ -930,16 +907,20 @@ inline void apply(const void *deviceKey,
         // equivalent, and hiding that would be worse than choosing.
         // ⚠️ The key name comes from trigger_effect.inl, which both files can
         // see, so a rename cannot leave the two disagreeing.
-        if ((i == kBtnL2 || i == kBtnR2) &&
-            !device_config_str(section.c_str(),
-                               trigger_effect::steady_key(i == kBtnR2 ? "right" : "left").c_str())
-                 .empty()) {
+        // ⚠️ And only where the gesture can take the trigger at all, asked the
+        // way the gesture asks it -- the same test as config mode's, above.
+        // ⛔ Including whether its switch is ON: a key set to "off" is still a
+        // key, and treating it as on left the trigger firing nothing.
+        if ((i == kBtnL2 || i == kBtnR2) && trigger_click_can_take(*layout) &&
+            trigger_effect::steady_value_on(device_config_str(
+                section.c_str(),
+                trigger_effect::steady_key(i == kBtnR2 ? "right" : "left").c_str()))) {
             // ⛔⛔ AND THE MASK STILL HAS TO BE PUBLISHED. Skipping the button
             // here also skips the publish below, which is what LATCHES it: if
             // this trigger was the only mouse binding, anyMouse stays false,
-            // set_buttons is never called again, and whatever g_buttons last
-            // held is held forever. rhoquinn8217, 2026-09-11: *"click with R2
-            // is still sticking and won't unstick."*
+            // set_buttons_for is never called again, and whatever this pad last
+            // published is held forever. rhoquinn8217, 2026-09-11: *"click with
+            // R2 is still sticking and won't unstick."*
             // ⓘ The comment on the gate path above had already worked out that
             // publishing only while something is HELD latches the release. This
             // is one step further out: publishing only while something is BOUND
@@ -973,14 +954,14 @@ inline void apply(const void *deviceKey,
                 lastBytes[0] = data[8]; lastBytes[1] = data[9]; lastBytes[2] = data[10];
                 device_log::input(device_log::msg()
                     << "rebind " << i << " -> '" << code << "' turbo=" << turboMs
-                    << " pressed=" << (is_pressed(data, len, i) ? "yes" : "no")
+                    << " pressed=" << (is_pressed(*layout, data, len, i) ? "yes" : "no")
                     << "  bytes[8]=0x" << std::hex << static_cast<int>(data[8])
                     << " [9]=0x" << static_cast<int>(data[9])
                     << " [10]=0x" << static_cast<int>(data[10]) << std::dec);
             }
         }
 
-        const bool held = is_pressed(data, len, i);
+        const bool held = is_pressed(*layout, data, len, i);
 
         // ⭐ Turbo alternates the button's own state when nothing is rebound,
         // and the KEY's state when something is. Independent settings, because
@@ -1000,14 +981,14 @@ inline void apply(const void *deviceKey,
 
         if (code.empty()) {
             // Turbo with no rebind: the button repeats itself.
-            if (held && !active) clear_button(data, len, i);
+            if (held && !active) clear_button(*layout, data, len, i);
             continue;
         }
 
         // ⛔ REPLACE. The button is cleared whether or not it is currently in
         // its turbo "down" phase -- the game must never see it at all, or a
         // rebind would double up with the original.
-        clear_button(data, len, i);
+        clear_button(*layout, data, len, i);
 
         // ⭐ The on-screen keyboard, before the mouse and key paths: it is
         // neither, and like a wheel click it fires ONCE per press -- a toggle
@@ -1062,14 +1043,20 @@ inline void apply(const void *deviceKey,
         ctm_keyboard_device::set_state_for(deviceKey, modifiers, keys, keyCount);
     }
     // ⓘ Only when something is bound to a mouse button, so a controller with no
-    // mouse bindings never touches the shared state.
+    // mouse bindings never touches the mouse's state.
     // ⭐ PUBLISH WHENEVER WE HAVE AN OPINION, which includes "this trigger is
     // not mine any more" -- that is precisely when the bit needs clearing.
     // ⓘ Starting the mouse is a separate question: a suppressed trigger may be
     // bound to a key, and trigger_click starts the mouse itself when it needs
     // one.
+    // ⛔⛔ UNDER THIS PAD'S OWN KEY (rhoquinn8217, 2026-09-15). This was one
+    // level every pad wrote whole, and every pad with a mouse binding publishes
+    // on every report: with a DS4 and an Xbox pad bridged, the DS4 at rest
+    // released the Xbox pad's held RT between its reports, and a drag became
+    // *"double or multi clicking"*. Each pad's mask is kept apart now and the
+    // mouse sends the union (mouse_held.inl).
     if (anyMouse || gaveUpATrigger) {
-        ctm_mouse_device::set_buttons(mouseButtons);
+        ctm_mouse_device::set_buttons_for(deviceKey, mouseButtons);
         if (device_config_bool(section.c_str(), "trigger_probe", false)) {
             static uint8_t lastPublished = 0xff;
             if (mouseButtons != lastPublished) {
@@ -1108,6 +1095,14 @@ void ctm_rebind_swallow_held()
 void ctm_keyboard_forget_device(const void *deviceKey)
 {
     ctm_keyboard_device::forget_device(deviceKey);
+}
+
+// ⓘ A pad going away takes its chord memory and its on-screen keyboard state with
+// it, so a later pad handed the same address starts clean.
+void rebind_forget_pad(const void *deviceKey)
+{
+    ctm_rebind::forget_chord_pad(deviceKey);
+    ctm_overlay::forget_device(deviceKey);
 }
 
 bool ctm_rebind_config_mode()
@@ -1208,16 +1203,30 @@ void ctm_rebind_apply(const void *deviceKey,
     // ⛔ When it consumes the input, the game must see NOTHING -- so the report
     // is blanked rather than merely left alone. A keyboard on screen that lets
     // stray presses through to what is behind it is worse than no keyboard.
-    if (ctm_overlay::handle_report(deviceKey, data, len)) {
-        ctm_overlay::blank_report(data, len);
-        return;
-    }
+    // ⛔ BOTH OF THESE READ, AND WRITE, THE REPORT -- and neither is handed the
+    // descriptor, so the layout is resolved here, at the one place that has both
+    // the descriptor and the calls, and handed to them.
+    //
+    // ⓘ They used to be DualSense-only behind a guard: overlay_window.inl kept
+    // its own copy of the DualSense bit table and blanked DualSense positions,
+    // which on an Xbox GIP report land on the header, the sequence counter and
+    // the length byte. ✅ Both read and write through the pad's layout now
+    // (2026-09-15), so a DS4 or an Xbox pad types on the keyboard and moves
+    // either window, and a pad with no layout is still left alone.
+    const InputPad overlayPad = device_input_pad_for(descriptor);
+    if (overlayPad.layout != nullptr) {
+        const ctm_rebind::Layout &overlayLayout = *overlayPad.layout;
+        if (ctm_overlay::handle_report(deviceKey, overlayLayout, data, len)) {
+            ctm_overlay::blank_report(overlayLayout, data, len);
+            return;
+        }
     // ⭐ Options moves the settings page while it is up and in front, the way
     // it moves the keyboard (2026-09-08). ⓘ After the keyboard on purpose: if
     // both are showing, the keyboard has the pad, as it always has.
-    if (config_move::handle_report(deviceKey, data, len)) {
-        ctm_overlay::blank_report(data, len);
-        return;
+        if (config_move::handle_report(deviceKey, overlayLayout, data, len)) {
+            ctm_overlay::blank_report(overlayLayout, data, len);
+            return;
+        }
     }
     ctm_rebind::apply(deviceKey, descriptor, linkedConfig, data, len);
 }

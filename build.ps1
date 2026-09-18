@@ -143,6 +143,7 @@ Copy-Item -Force -Path (Join-Path $Root 'maps\ds5_usb_over_ds5_bt.map') -Destina
 Copy-Item -Force -Path (Join-Path $Root 'maps\ds5_usb_over_ds5_usb.map') -Destination (Join-Path $out 'maps\ds5_usb_over_ds5_usb.map')
 Copy-Item -Force -Path (Join-Path $Root 'profiles\descriptors\ds4_composite.profile') -Destination (Join-Path $out 'profiles\descriptors\ds4_composite.profile')
 Copy-Item -Force -Path (Join-Path $Root 'maps\ds4_usb_over_ds4_bt.map') -Destination (Join-Path $out 'maps\ds4_usb_over_ds4_bt.map')
+Copy-Item -Force -Path (Join-Path $Root 'maps\ds4_usb_over_ds4_usb.map') -Destination (Join-Path $out 'maps\ds4_usb_over_ds4_usb.map')
 Copy-Item -Force -Path (Join-Path $Root 'profiles\descriptors\steam_puck.profile') -Destination (Join-Path $out 'profiles\descriptors\steam_puck.profile')
 Copy-Item -Force -Path (Join-Path $Root 'maps\steam_puck_identity.map') -Destination (Join-Path $out 'maps\steam_puck_identity.map')
 Copy-Item -Force -Path (Join-Path $Root 'maps\hid_identity.map') -Destination (Join-Path $out 'maps\hid_identity.map')
