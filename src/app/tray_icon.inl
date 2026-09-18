@@ -152,30 +152,45 @@ inline void thread_main()
     // icons into imageres.dll.mun entirely. Picking an index would be a guess
     // that silently becomes the wrong picture on some machine.
     //
-    // ⭐ joy.cpl is Windows' OWN Game Controllers panel. It is present on every
-    // Windows, it holds exactly one icon, and that icon is a gamepad -- checked
-    // by extracting it and looking at it, 2026-09-17, rather than assumed.
-    // ⓘ osk.exe stays as the fallback: it was the icon until today, its icon is
-    // a keyboard, and it is better than a blank application square.
+    // ⭐ ddores.dll is Windows' DEVICE icon library, and #108 is its gamepad:
+    // a white silhouette that stays crisp all the way down to 16px, which is
+    // the size the tray actually draws. Every candidate was extracted and looked
+    // at side by side at 80, 48, 32, 24 and 16 before this was chosen
+    // (rhoquinn8217, 2026-09-18) -- joy.cpl's pad, which this replaces, is
+    // prettier at 64px and collapses into a blob at 16.
+    //
+    // ⚠️ IT IS A WHITE SILHOUETTE, so on a LIGHT taskbar its body disappears
+    // and only the dark detail is left. Chosen with a dark taskbar in front of
+    // us; joy.cpl's coloured pad is the theme-safe one and is the first fallback
+    // below, so switching back is one line.
+    // ⓘ osk.exe stays as the last resort: it was the icon until 2026-09-17, its
+    // icon is a keyboard, and it beats a blank application square.
+    // ⛔ Index 108 is a POSITION in the file, which is what ExtractIcon takes.
+    // Windows' own Change Icon dialog orders by resource and can disagree, so
+    // check a number from there by extracting it, never by trusting it.
     // ⓘ Full paths rather than bare names, so nothing earlier on the PATH can
     // answer instead.
-    auto extract_system_icon = [&wc](const wchar_t *leaf) -> HICON {
+    auto extract_system_icon = [&wc](const wchar_t *leaf, int index) -> HICON {
         wchar_t path[MAX_PATH] = {};
         const UINT len = GetSystemDirectoryW(path, MAX_PATH);
         if (len == 0 || len >= MAX_PATH - 16) return nullptr;
         wcscat_s(path, L"\\");
         wcscat_s(path, leaf);
-        HICON icon = ExtractIconW(wc.hInstance, path, 0);
+        HICON icon = ExtractIconW(wc.hInstance, path, index);
         // ⓘ ExtractIcon answers 1 for "not an icon source" as well as null for
         // none, so both count as failure.
         return (icon != nullptr && icon != (HICON)1) ? icon : nullptr;
     };
 
-    const wchar_t *iconSource = L"joy.cpl (a controller)";
-    nid.hIcon = extract_system_icon(L"joy.cpl");
+    const wchar_t *iconSource = L"ddores.dll #108 (a controller)";
+    nid.hIcon = extract_system_icon(L"ddores.dll", 108);
     if (nid.hIcon == nullptr) {
-        nid.hIcon = extract_system_icon(L"osk.exe");
-        iconSource = L"osk.exe (a keyboard, the fallback)";
+        nid.hIcon = extract_system_icon(L"joy.cpl", 0);
+        iconSource = L"joy.cpl (a controller, the fallback)";
+    }
+    if (nid.hIcon == nullptr) {
+        nid.hIcon = extract_system_icon(L"osk.exe", 0);
+        iconSource = L"osk.exe (a keyboard, the last resort)";
     }
     bool extracted = (nid.hIcon != nullptr);
     if (!extracted) {
