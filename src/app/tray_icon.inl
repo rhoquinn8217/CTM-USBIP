@@ -46,9 +46,12 @@ inline void show_menu(HWND hwnd)
     HMENU menu = CreatePopupMenu();
     if (menu == nullptr) return;
 
+    // ⭐ Settings FIRST (T-163). With Circle closing that window rather than
+    // hiding it, this menu is the way back to it, and it is what a click is
+    // most often for now that a click opens a menu at all.
+    AppendMenuW(menu, MF_STRING, kIdSettings, L"Open settings");
     AppendMenuW(menu, MF_STRING, kIdToggle,
                 ctm_overlay::visible() ? L"Hide keyboard" : L"Show keyboard");
-    AppendMenuW(menu, MF_STRING, kIdSettings, L"Open settings");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, kIdExit, L"Exit");
 
@@ -89,10 +92,17 @@ inline void show_menu(HWND hwnd)
 inline LRESULT CALLBACK tray_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
     if (msg == WM_CTM_TRAY) {
-        // ⓘ A left click is the common case and should not need a menu: it is
-        // the one thing most people want from this icon.
+        // ⭐⭐ A LEFT CLICK OPENS THE MENU (T-163). It used to open the keyboard
+        // outright, which was the icon's whole meaning while the keyboard was
+        // all it offered.
+        //
+        // ⛔ That stopped being true at T-150: Circle now CLOSES the config
+        // window rather than hiding it, so this icon is one of only two ways
+        // back to that window, and the only one that needs no controller. A
+        // click that assumes the keyboard hides the thing most people are
+        // reaching for.
         if (LOWORD(lp) == WM_LBUTTONUP) {
-            toggle_keyboard();
+            show_menu(hwnd);
             return 0;
         }
         if (LOWORD(lp) == WM_RBUTTONUP) {
@@ -133,33 +143,49 @@ inline void thread_main()
     nid.uID = 1;
     nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
     nid.uCallbackMessage = WM_CTM_TRAY;
-    // ⭐⭐ THE KEYBOARD ICON IS BORROWED FROM osk.exe (rhoquinn8217 asked for a
-    // keyboard, 2026-09-03).
+    // ⭐⭐ THE ICON IS A CONTROLLER, BORROWED FROM joy.cpl (T-163,
+    // rhoquinn8217: the listener is a controller tool, and the keyboard is one
+    // of the things it offers).
     //
-    // ⛔ There is no stock keyboard icon to ask for: shell32's indices are
+    // ⛔ There is no stock icon to ask for by name: shell32's indices are
     // undocumented and shift between releases, and Windows 11 moved the shell
     // icons into imageres.dll.mun entirely. Picking an index would be a guess
     // that silently becomes the wrong picture on some machine.
     //
-    // ⭐ osk.exe is Windows' OWN on-screen keyboard. It is present on every
-    // Windows, its icon IS a keyboard, and it means exactly what we mean.
-    // ⓘ Full path rather than a bare name, so it cannot pick up something else
-    // that happens to be earlier on the PATH.
-    wchar_t oskPath[MAX_PATH] = {};
-    UINT n = GetSystemDirectoryW(oskPath, MAX_PATH);
-    if (n > 0 && n < MAX_PATH - 12) {
-        wcscat_s(oskPath, L"\\osk.exe");
-        nid.hIcon = ExtractIconW(wc.hInstance, oskPath, 0);
+    // ⭐ joy.cpl is Windows' OWN Game Controllers panel. It is present on every
+    // Windows, it holds exactly one icon, and that icon is a gamepad -- checked
+    // by extracting it and looking at it, 2026-09-17, rather than assumed.
+    // ⓘ osk.exe stays as the fallback: it was the icon until today, its icon is
+    // a keyboard, and it is better than a blank application square.
+    // ⓘ Full paths rather than bare names, so nothing earlier on the PATH can
+    // answer instead.
+    auto extract_system_icon = [&wc](const wchar_t *leaf) -> HICON {
+        wchar_t path[MAX_PATH] = {};
+        const UINT len = GetSystemDirectoryW(path, MAX_PATH);
+        if (len == 0 || len >= MAX_PATH - 16) return nullptr;
+        wcscat_s(path, L"\\");
+        wcscat_s(path, leaf);
+        HICON icon = ExtractIconW(wc.hInstance, path, 0);
+        // ⓘ ExtractIcon answers 1 for "not an icon source" as well as null for
+        // none, so both count as failure.
+        return (icon != nullptr && icon != (HICON)1) ? icon : nullptr;
+    };
+
+    const wchar_t *iconSource = L"joy.cpl (a controller)";
+    nid.hIcon = extract_system_icon(L"joy.cpl");
+    if (nid.hIcon == nullptr) {
+        nid.hIcon = extract_system_icon(L"osk.exe");
+        iconSource = L"osk.exe (a keyboard, the fallback)";
     }
-    // ⓘ ExtractIcon answers 1 for "not an icon source" as well as null for
-    // none, so both count as failure.
-    bool extracted = (nid.hIcon != nullptr && nid.hIcon != (HICON)1);
+    bool extracted = (nid.hIcon != nullptr);
     if (!extracted) {
         nid.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+        iconSource = L"the stock application icon";
     }
-    wcscpy_s(nid.szTip, L"DS5-USBIP — click for the keyboard");
+    // ⓘ The tip names what a click DOES now that a click opens the menu.
+    wcscpy_s(nid.szTip, L"DS5-USBIP — click for settings or the keyboard");
     Shell_NotifyIconW(NIM_ADD, &nid);
-    device_log::session_w() << L"tray: icon added";
+    device_log::session_w() << L"tray: icon added, from " << iconSource;
 
     MSG m;
     while (g_running.load() && GetMessageW(&m, nullptr, 0, 0) > 0) {
