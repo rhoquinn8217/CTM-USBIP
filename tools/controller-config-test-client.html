@@ -1340,6 +1340,22 @@ var KEY_NAMES = [];   // KeyboardEvent.code names a button can be bound to
 
 function base() { return document.getElementById('base').value.replace(/\/+$/, ''); }
 
+// ⭐⭐ THE PAGE TALKS TO WHEREVER IT WAS SERVED FROM (T-217). The field above is
+// only a fallback now.
+//
+// ⛔ The REST port is a command-line choice (`--rest 48100`), and the listener
+// opens this page ON that port -- but the address was hardcoded to 48055, so
+// the page sat saying "The listener is not answering" while the listener
+// answered perfectly one port over. Nothing in the page said which port it was
+// asking, so the message pointed at every cause except the real one.
+//
+// ⓘ file:// keeps the fallback: there is no origin worth adopting there.
+(function adoptServingOrigin() {
+  if (location.protocol !== 'http:' && location.protocol !== 'https:') return;
+  var el = document.getElementById('base');
+  if (el) el.value = location.origin;
+})();
+
 function headers() {
   var h = { 'Content-Type': 'application/json' };
   var t = document.getElementById('token').value.trim();
