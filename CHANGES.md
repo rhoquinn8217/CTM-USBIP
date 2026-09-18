@@ -75,6 +75,10 @@ carry it; upstream's own history is unchanged.
 | 2026-09-17 | `device.log` is capped at 20 MB with one older file kept, and the every-report lines move behind their own switch. An unattended run had written 227 MB | `757b51a`, `61b0ddd` |
 | 2026-09-17 | DS5-USBIP has a name and a version of its own, 0.1.0, shown from one place: the command line, the file properties, the status endpoint and the page | `827556c` |
 | 2026-09-17 | A device is named by its model, then its type, and "hid" only when nothing else is known | `f407995` |
+| 2026-09-17 | A serial of ALL ZEROS is no identity. One refusal in `normalise_serial`, so a config file's claim is dropped as it is read, nothing auto-links to it, and adding such a claim is refused. All zeros, not leading zeros: a Switch Pro Controller's `000000000001` is a real per-unit serial | `49084cc` |
+| 2026-09-18 | The pad's own charge, read off the report the listener already receives, and shown as a battery beside the controller's name in all three views and as a column in both device tables. Offsets measured on the pads, not taken from a header; a pad with no battery byte, or in a fault state, shows nothing at all rather than zero | `929760c`, `88bc398`, `4e17c9b`, `a69278f`, `01f8d67`, `2823912`, `73f298c` |
+| 2026-09-18 | The settings page talks to the port it was SERVED from instead of a hardcoded 48055, so a listener on any other REST port no longer looks dead while answering | `98046e8` |
+| 2026-09-18 | The tray icon is a controller rather than a keyboard, and a click opens a menu -- settings or the keyboard -- instead of opening the keyboard outright | `cfefe25`, `c211ae4` |
 
 ## Files changed
 
@@ -85,7 +89,7 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
 ```
  .gitattributes                                |   48 +
  .gitignore                                    |   30 +-
- CHANGES.md                                    |  163 ++
+ CHANGES.md                                    |  202 ++
  LINK                                          |    0
  README.md                                     |   18 +
  app/ctm-usbip-tests.vcxproj                   |  105 +
@@ -109,7 +113,7 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  profiles/descriptors/virtual_mouse.profile    |   59 +
  release.ps1                                   |  152 +
  src/app/agent.inl                             |  479 +++-
- src/app/agent_session_sweep.inl               |  313 +++
+ src/app/agent_session_sweep.inl               |  313 ++
  src/app/cli.inl                               |   24 +-
  src/app/common.inl                            |   32 +
  src/app/config_move.inl                       |  538 ++++
@@ -118,12 +122,12 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  src/app/open_ui.inl                           |  457 +++
  src/app/overlay_window.inl                    | 1937 +++++++++++++
  src/app/rest.inl                              |  760 +++++
- src/app/rest_config.inl                       | 1094 ++++++++
- src/app/rest_config_sessions.inl              |  129 +
+ src/app/rest_config.inl                       | 1105 ++++++++
+ src/app/rest_config_sessions.inl              |  137 +
  src/app/rest_sessions.inl                     |   33 +
  src/app/same_controller.inl                   |   38 +
  src/app/service.inl                           |   25 +-
- src/app/tray_icon.inl                         |  197 ++
+ src/app/tray_icon.inl                         |  238 ++
  src/app/ui_page.inl                           |   73 +
  src/app/window_move.inl                       |  245 ++
  src/audio/audio_gain.inl                      |  178 ++
@@ -138,10 +142,11 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  src/backend/bridge_enet.inl                   |   35 +-
  src/backend/bt.inl                            |   16 +-
  src/config/config_presets.inl                 |  387 +++
- src/config/config_store.inl                   |  801 ++++++
+ src/config/config_store.inl                   |  820 ++++++
  src/config/config_watcher.inl                 |  170 ++
  src/config/device_config.inl                  |  218 ++
- src/input/button_layout.inl                   |  770 ++++++
+ src/input/battery.inl                         |  105 +
+ src/input/button_layout.inl                   |  866 ++++++
  src/input/gyro_calibration.inl                |  168 ++
  src/input/gyro_calibration_fetch.inl          |   99 +
  src/input/gyro_hold.inl                       |   48 +
@@ -152,20 +157,20 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  src/input/mouse_exclusive.inl                 |  122 +
  src/input/mouse_held.inl                      |   99 +
  src/input/osk.inl                             |  200 ++
- src/input/rebind.inl                          | 1232 +++++++++
+ src/input/rebind.inl                          | 1232 ++++++++
  src/input/stick_mouse.inl                     |  471 ++++
  src/input/touch_mouse.inl                     |  409 +++
  src/input/trigger_click.inl                   |  801 ++++++
  src/input/trigger_effect.inl                  |  578 ++++
  src/log/capped_log.inl                        |  117 +
  src/log/device_log.inl                        |  233 ++
- src/main.cpp                                  |  408 ++-
+ src/main.cpp                                  |  416 ++-
  src/map/runtime.cpp                           |   68 +-
- src/usbip/device.inl                          |  604 +++-
+ src/usbip/device.inl                          |  611 +++-
  src/usbip/server.inl                          |   55 +-
- tests/button_layout_test.cpp                  |  817 ++++++
+ tests/button_layout_test.cpp                  |  901 ++++++
  tests/capped_log_test.cpp                     |  140 +
- tests/config_store_test.cpp                   |  759 +++++
+ tests/config_store_test.cpp                   |  777 +++++
  tests/device_config_test.cpp                  |  521 ++++
  tests/device_type_test.cpp                    |   89 +
  tests/gyro_mouse_test.cpp                     |  450 +++
@@ -187,12 +192,12 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  tests/trigger_click_test.cpp                  |  835 ++++++
  tests/trigger_effect_test.cpp                 |  402 +++
  tests/units.h                                 |   54 +
- tools/controller-config-test-client.html      | 6752 +++++++++++++++++++++++++++++++++++++++++++++
+ tools/controller-config-test-client.html      | 6887 +++++++++++++++++++++++++++++++++++++++++++++
  tools/device-config-panel-edge.bat            |    9 +
  tools/device-config-panel-edge.ps1            |  327 +++
  tools/device-config-panel.bat                 |    4 +
  tools/device-config-panel.ps1                 |  303 ++
  tools/osk-mockups.py                          |  103 +
  tools/start-ctm-usbip.bat                     |   67 +
- 111 files changed, 33938 insertions(+), 145 deletions(-)
+ 112 files changed, 34509 insertions(+), 145 deletions(-)
 ```
