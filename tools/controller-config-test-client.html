@@ -610,12 +610,22 @@
      caller decides the size, so the same markup reads at 11px on a tab and
      at a third of a 9vh name in the compact views. ⓘ Never shown at all when
      the pad reports nothing -- see batteryPct(). */
-  .batt { display:inline-flex; align-items:center; gap:0.35em; line-height:1;
+  .batt { display:inline-flex; align-items:center; gap:0; line-height:1;
           vertical-align:middle; font-variant-numeric:tabular-nums; }
   .battbar { position:relative; display:inline-block; width:4.1em; height:1.5em;
-             border-radius:0.34em; background:#20232a; border:1px solid #4d525c;
+             border-radius:0.28em; background:#20232a; border:1px solid #4d525c;
              overflow:hidden; }
-  .battfill { position:absolute; left:0; top:0; bottom:0; background:#2f9e4f; }
+  /* ⭐ THE TERMINAL, so it reads as a battery and not as a progress bar
+     (rhoquinn8217, 2026-09-18). It is part of the gauge rather than a second
+     element: .batt is already the flex row, so the nub centres with the body at
+     any size and cannot drift away from it. */
+  .batt::after { content:''; flex:0 0 auto; width:0.2em; height:0.55em;
+                 margin-left:0.1em; border-radius:0 0.14em 0.14em 0;
+                 background:#4d525c; }
+  /* ⓘ Inset by a pixel so the fill sits INSIDE the casing, the way a battery
+     icon's does, instead of painting over its wall. */
+  .battfill { position:absolute; left:1px; top:1px; bottom:1px;
+              border-radius:0.16em; background:#2f9e4f; }
   /* ⭐ rhoquinn8217's CSS, with ONE line changed and the reason recorded.
      ⛔ `mix-blend-mode: difference` on white text draws the INVERSE of what is
      behind it. Over the dark empty part that is near-white, which is what was
