@@ -603,10 +603,31 @@
      caller decides the size, so the same markup reads at 11px on a tab and
      at a third of a 9vh name in the compact views. ⓘ Never shown at all when
      the pad reports nothing -- see batteryPct(). */
-  .batt { color:#8fb8d8; white-space:nowrap; font-variant-numeric:tabular-nums; }
-  .tabs button .batt { font-size:11px; margin-left:6px; color:#71737c; }
-  #compactBox .cname .batt { font-size:0.34em; margin-left:0.4em;
-                             vertical-align:middle; opacity:0.85; }
+  .batt { display:inline-flex; align-items:center; gap:0.35em; line-height:1;
+          vertical-align:middle; font-variant-numeric:tabular-nums; }
+  .battbar { position:relative; display:inline-block; width:3.6em; height:1.5em;
+             border-radius:0.34em; background:#20232a; border:1px solid #4d525c;
+             overflow:hidden; }
+  .battfill { position:absolute; left:0; top:0; bottom:0; background:#2f9e4f; }
+  /* ⭐ rhoquinn8217's CSS, with ONE line changed and the reason recorded.
+     ⛔ `mix-blend-mode: difference` on white text draws the INVERSE of what is
+     behind it. Over the dark empty part that is near-white, which is what was
+     wanted -- but over a green fill the inverse is MAGENTA, and that is what it
+     rendered (seen at 3x, 2026-09-18). The picture it was meant to match shows
+     plain white over the green, which is what the blend looks like when it is
+     not taking effect at all.
+     ➡ So: white text, a deeper green behind it, and a shadow to hold the edge.
+     ⓘ To see the literal blend again, drop the shadow and add
+     `mix-blend-mode:difference`. */
+  .battery-text { position:absolute; top:0; left:0; width:100%; height:100%;
+                  display:flex; justify-content:center; align-items:center;
+                  color:#ffffff; font-weight:bold; font-size:0.8em; z-index:10;
+                  text-shadow:0 1px 1.5px rgba(0,0,0,0.5); }
+  .battbolt { color:#f2a63b; font-size:1.05em; }
+  /* Each caller sets the size and the gauge scales from it. */
+  .tabs button .batt { font-size:11px; margin-top:3px; }
+  #compactBox .ccur .batt { font-size:2.4vh; margin-top:0.8vh; }
+  td .batt { font-size:12px; }
   .pane { display:none; } .pane.on { display:block; }
   /* ⭐ COMPACT VIEW: hide the page, show the box. Everything hidden leaves the
      pad's focus list by itself -- gpCollect skips what has no offsetParent. */
@@ -2016,8 +2037,21 @@ function batteryTitle(d) {
 function batteryTag(d) {
   var n = batteryPct(d);
   if (n < 0) return '';
+  // ⭐ A GAUGE, NOT A NUMBER IN A CORNER (rhoquinn8217, 2026-09-18). A pill
+  // that fills to the level, the percent centred inside it, and the bolt beside
+  // it when a cable is attached.
+  //
+  // ⓘ The centred text is rhoquinn8217's own CSS, kept as given: white with
+  // mix-blend-mode difference, so it stays light over the dark empty part and
+  // inverts over the green fill. One colour reads on both, wherever the fill
+  // happens to end -- which is the point, since the fill moves.
+  var bolt = batteryMark(d) ? '<span class="battbolt">⚡</span>' : '';
   return '<span class="batt" title="' + esc(batteryTitle(d)) + '">' +
-         n + '%' + batteryMark(d) + '</span>';
+           '<span class="battbar">' +
+             '<span class="battfill" style="width:' + n + '%"></span>' +
+             '<span class="battery-text">' + n + '%</span>' +
+           '</span>' + bolt +
+         '</span>';
 }
 
 // The table cell: the same tag, and an EMPTY cell when there is no reading, so
@@ -2046,8 +2080,9 @@ function renderTabs(devices) {
             (ACTIVE === d.ordinal ? ' class="on"' : '') +
             ' title="' + (d.ready ? 'ready' : 'starting or tearing down') + '"' +
             ' onclick="showTab(\'' + esc(d.ordinal) + '\')">' +
-            dot + '<span class="tabname">' + esc(nameFor(d.ordinal)) + '</span>' + batteryTag(d) +
+            dot + '<span class="tabname">' + esc(nameFor(d.ordinal)) + '</span>' +
             '<em class="tabkind">' + esc(deviceLabelShort(d)) + '</em>' +
+            batteryTag(d) +
             '</button>';
   });
   // ⭐ THE EDITOR TAB (rhoquinn8217, 2026-09-01), last and pushed to the far
@@ -5882,8 +5917,9 @@ function paintCompact() {
     // under the name, and the L1 and R1 neighbours with theirs.
     html += '<div class="ccar' + slide + '">' +
             side(prev, 'l', '\u25c2 L1') +
-            '<div class="ccur"><div class="cname">' + esc(nameFor(d.ordinal)) + batteryTag(d) + '</div>' +
-            '<div class="ckind">' + esc(deviceLabelShort(d)) + '</div></div>' +
+            '<div class="ccur"><div class="cname">' + esc(nameFor(d.ordinal)) + '</div>' +
+            '<div class="ckind">' + esc(deviceLabelShort(d)) + '</div>' +
+            batteryTag(d) + '</div>' +
             side(next, 'r', 'R1 \u25b8') +
             '</div>';
     if (!d.supports_config) {
