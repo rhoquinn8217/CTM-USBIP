@@ -597,8 +597,60 @@
   /* Name on top, what it is underneath -- the name is for recognising the tab,
      the kind for confirming you are on the right one. */
   .tabs button .tabname { display:inline-block; }
+  /* ⭐ The dot, the name and the gauge on ONE centred row (2026-09-18).
+     ⛔ vertical-align:middle does not centre a badge beside text: it lines the
+     badge's middle up with the BASELINE PLUS HALF THE X-HEIGHT, which sits below
+     the visual middle of the line and grows more wrong the larger the text gets.
+     A flex row centres on the line box itself, at any size. */
+  .tabs button .tabtop { display:flex; align-items:center; justify-content:center;
+                         gap:0; }
   .tabs button .tabkind { display:block; font-size:11px; color:#71737c;
                           font-style:italic; margin-left:14px; margin-top:1px; }
+  /* ⭐ The pad's own charge (T-195). One class for all four places; each
+     caller decides the size, so the same markup reads at 11px on a tab and
+     at a third of a 9vh name in the compact views. ⓘ Never shown at all when
+     the pad reports nothing -- see batteryPct(). */
+  .batt { display:inline-flex; align-items:center; gap:0; line-height:1;
+          vertical-align:middle; font-variant-numeric:tabular-nums; }
+  .battbar { position:relative; display:inline-block; width:4.1em; height:1.5em;
+             border-radius:0.28em; background:#20232a; border:1px solid #4d525c;
+             overflow:hidden; }
+  /* ⭐ THE TERMINAL, so it reads as a battery and not as a progress bar
+     (rhoquinn8217, 2026-09-18). It is part of the gauge rather than a second
+     element: .batt is already the flex row, so the nub centres with the body at
+     any size and cannot drift away from it. */
+  .batt::after { content:''; flex:0 0 auto; width:0.2em; height:0.55em;
+                 margin-left:0.1em; border-radius:0 0.14em 0.14em 0;
+                 background:#4d525c; }
+  /* ⓘ Inset by a pixel so the fill sits INSIDE the casing, the way a battery
+     icon's does, instead of painting over its wall. */
+  .battfill { position:absolute; left:1px; top:1px; bottom:1px;
+              border-radius:0.16em; background:#2f9e4f; }
+  /* ⭐ rhoquinn8217's CSS, with ONE line changed and the reason recorded.
+     ⛔ `mix-blend-mode: difference` on white text draws the INVERSE of what is
+     behind it. Over the dark empty part that is near-white, which is what was
+     wanted -- but over a green fill the inverse is MAGENTA, and that is what it
+     rendered (seen at 3x, 2026-09-18). The picture it was meant to match shows
+     plain white over the green, which is what the blend looks like when it is
+     not taking effect at all.
+     ➡ So: white text, a deeper green behind it, and a shadow to hold the edge.
+     ⓘ To see the literal blend again, drop the shadow and add
+     `mix-blend-mode:difference`. */
+  .battery-text { position:absolute; top:0; left:0; width:100%; height:100%;
+                  display:flex; justify-content:center; align-items:center;
+                  color:#ffffff; font-weight:bold; font-size:0.8em; z-index:10;
+                  gap:0.1em; text-shadow:0 1px 1.5px rgba(0,0,0,0.5); }
+  /* ⓘ Inside the pill, beside the number rather than after it, so the pair
+     centres as one thing and the gauge stays the same width charging or not. */
+  .battbolt { color:#ffd166; font-size:1em; }
+  /* Each caller sets the size and the gauge scales from it. */
+  .tabs button .batt { font-size:10px; margin-left:6px; }
+  /* ⛔ NOT vh HERE. The quick window is about 150px tall, so 2.4vh came out
+     under four pixels and the gauge was a smudge (rhoquinn8217, 2026-09-18).
+     ➡ em, so it scales with the NAME it sits beside: the name is 9vh in simple
+     and 15vh in quick, and the gauge follows both without a second rule. */
+  #compactBox .cname .batt { font-size:0.6em; margin-left:0.4em; }
+  td .batt { font-size:12px; }
   .pane { display:none; } .pane.on { display:block; }
   /* ⭐ COMPACT VIEW: hide the page, show the box. Everything hidden leaves the
      pad's focus list by itself -- gpCollect skips what has no offsetParent. */
@@ -738,7 +790,9 @@
   /* The selector and its title travel with the ring (rhoquinn8217, 2026-09-09). */
   #compactBox .csel { display:flex; flex-direction:column; align-items:center; gap:1.2vh; }
   #compactBox .ctitle { font-size:3vh; color:#71737c; text-align:center; }
-  #compactBox .cname { font-size:9vh; font-weight:600; text-align:center; line-height:1.1; }
+  #compactBox .cname { font-size:9vh; font-weight:600; text-align:center; line-height:1.1;
+                       display:flex; align-items:center; justify-content:center;
+                       flex-wrap:wrap; }
   #compactBox .ckind { font-size:4.5vh; color:#71737c; text-align:center; margin-top:0.8vh; }
   /* ⓘ Two thirds of what it was (rhoquinn8217, 2026-09-09). */
   #compactBox select { font-size:4.2vh; padding:0.8vh 1.4vw; min-width:47vw; }
@@ -1970,6 +2024,65 @@ function clearBridgeWait() {
   if (box && box.parentNode) box.parentNode.removeChild(box);
 }
 
+// ⭐ WHAT THE PAD SAID ABOUT ITS OWN CHARGE (T-195), and nothing else.
+//
+// ⛔⛔ NO READING IS DRAWN AS NOTHING AT ALL -- not a dash, not a zero
+// (rhoquinn8217: "Every other kind shows nothing at all"). An Xbox pad reports
+// charge nowhere, over any transport, and a DualSense in a fault state reports
+// none either. A zero would say FLAT, which is a different and alarming claim.
+//
+// ⓘ The number moves in steps: a pad reading 85% is saying "eight of ten", not
+// measuring to the percent. The listener scales it the way the kernel drivers
+// do, and the page shows what it is given.
+function batteryPct(d) {
+  if (!d) return -1;
+  var n = d.battery_percent;
+  return (typeof n === 'number' && n >= 0 && n <= 100) ? n : -1;
+}
+
+// The bolt means A CABLE IS ATTACHED -- charging, or charged and still on it.
+// ⓘ That is the only charge state a pad distinguishes, so it is the only one
+// shown; "discharging" is simply the absence of the bolt.
+function batteryMark(d) {
+  return (d && (d.battery_state === 'charging' || d.battery_state === 'full'))
+    ? ' ⚡' : '';
+}
+
+function batteryTitle(d) {
+  var n = batteryPct(d);
+  if (n < 0) return '';
+  if (d.battery_state === 'full') return 'charged, and still on the cable';
+  if (d.battery_state === 'charging') return 'charging, ' + n + '%';
+  return 'on its own battery, ' + n + '%';
+}
+
+// One element for all four places. ⓘ The size is the CALLER'S: .batt inherits
+// in the tab and scales with the name in the compact views, so the same markup
+// reads right at 11px and at 9vh.
+function batteryTag(d) {
+  var n = batteryPct(d);
+  if (n < 0) return '';
+  // ⭐ A GAUGE, NOT A NUMBER IN A CORNER (rhoquinn8217, 2026-09-18). A pill
+  // that fills to the level, the percent centred inside it, and the bolt beside
+  // it when a cable is attached.
+  //
+  // ⓘ The centred text is rhoquinn8217's own CSS, kept as given: white with
+  // mix-blend-mode difference, so it stays light over the dark empty part and
+  // inverts over the green fill. One colour reads on both, wherever the fill
+  // happens to end -- which is the point, since the fill moves.
+  var bolt = batteryMark(d) ? '<span class="battbolt">⚡</span>' : '';
+  return '<span class="batt" title="' + esc(batteryTitle(d)) + '">' +
+           '<span class="battbar">' +
+             '<span class="battfill" style="width:' + n + '%"></span>' +
+             '<span class="battery-text">' + bolt + n + '%</span>' +
+           '</span>' +
+         '</span>';
+}
+
+// The table cell: the same tag, and an EMPTY cell when there is no reading, so
+// a column reads as "these two have batteries" rather than as missing data.
+function batteryCell(d) { return batteryTag(d); }
+
 function renderTabs(devices) {
   LAST_DEVICES = devices || [];
   // The event, not an expiry: a device in the list means bridging works now.
@@ -1992,7 +2105,10 @@ function renderTabs(devices) {
             (ACTIVE === d.ordinal ? ' class="on"' : '') +
             ' title="' + (d.ready ? 'ready' : 'starting or tearing down') + '"' +
             ' onclick="showTab(\'' + esc(d.ordinal) + '\')">' +
-            dot + '<span class="tabname">' + esc(nameFor(d.ordinal)) + '</span>' +
+            '<span class="tabtop">' + dot +
+              '<span class="tabname">' + esc(nameFor(d.ordinal)) + '</span>' +
+              batteryTag(d) +
+            '</span>' +
             '<em class="tabkind">' + esc(deviceLabelShort(d)) + '</em>' +
             '</button>';
   });
@@ -2713,7 +2829,7 @@ function buildDevicePane(d) {
       'Remove auto link</button>'
     : '';
 
-  var head = '<table class="devrow"><tr><th>nickname</th><th>controller</th><th>serial</th>' +
+  var head = '<table class="devrow"><tr><th>nickname</th><th>controller</th><th>battery</th><th>serial</th>' +
              '<th>auto linked config</th><th></th><th></th></tr>' +
              // ⭐ Same status tint as Overview. The two tables show the same
              // row, so a controller that reads green there and plain here
@@ -2725,6 +2841,7 @@ function buildDevicePane(d) {
              // in hand, for the same reason as Overview's copy.
              '<td>' + esc(d.nickname || nameFor(d.ordinal)) + '</td>' +
              '<td>' + esc(deviceLabelShort(d)) + '</td>' +
+             '<td>' + batteryCell(d) + '</td>' +
              '<td>' + serialCell + '</td>' +
              '<td>' + autoCell + '</td>' +
              '<td>' + autoBtn + '</td>' +
@@ -3382,7 +3499,7 @@ function loadDevices() {
     // ⭐ THE SAME COLUMNS AS THE CONTROLLER TAB. The two tables described the
     // same thing in different words -- 'linked' here, 'auto linked config'
     // there -- so reading one taught you nothing about the other.
-    var html = '<table><tr><th>nickname</th><th>controller</th><th>serial</th>' +
+    var html = '<table><tr><th>nickname</th><th>controller</th><th>battery</th><th>serial</th>' +
                '<th>auto linked config</th><th></th><th></th></tr>';
     list.forEach(function(dev) {
       // ⭐ The serial is the point of this whole screen. auto_link works only
@@ -3433,6 +3550,7 @@ function loadDevices() {
               '<td>' + esc(dev.nickname || dev.ordinal) + '</td>' +
               '<td>' + esc(deviceLabelShort(dev)) + (dev.supports_config ? '' :
                   ' <span class="muted">(no config support)</span>') + '</td>' +
+              '<td>' + batteryCell(dev) + '</td>' +
               '<td>' + serial + '</td>' +
               '<td>' + autoCell + '</td>' +
               '<td>' + autoBtn + '</td>' +
@@ -5826,7 +5944,8 @@ function paintCompact() {
     // under the name, and the L1 and R1 neighbours with theirs.
     html += '<div class="ccar' + slide + '">' +
             side(prev, 'l', '\u25c2 L1') +
-            '<div class="ccur"><div class="cname">' + esc(nameFor(d.ordinal)) + '</div>' +
+            '<div class="ccur"><div class="cname">' + esc(nameFor(d.ordinal)) +
+            batteryTag(d) + '</div>' +
             '<div class="ckind">' + esc(deviceLabelShort(d)) + '</div></div>' +
             side(next, 'r', 'R1 \u25b8') +
             '</div>';

@@ -146,6 +146,46 @@ struct TouchSpots {
     int     clickByte;                   // touchpad pressed in; -1 = none
     uint8_t clickMask;
 };
+// ⭐ Where a pad says how much charge it has left (T-195). One byte either way,
+// in the USB-shaped report both maps produce, so a pad reads the same over a
+// cable and over Bluetooth.
+//
+// ⛔ It comes from the pad and nowhere else. Windows does not expose it for a
+// bridged device, and the TV has no power_supply class at all (measured on
+// T-192), so anything that is not in the report is simply not known.
+enum BatteryFormat : uint8_t {
+    kBatteryAbsent = 0,
+    // A DualSense's status byte: low nibble the level in about ten steps, high
+    // nibble the charging state -- 0 discharging, 1 charging, 2 charge
+    // complete. ⚠️ 0xa, 0xb and 0xf are the fault states (voltage, temperature,
+    // charging error) and carry NO level, so they read as nothing rather than
+    // as zero.
+    kBatteryDs5Status,
+    // A DS4's battery byte: bit 0x10 says a cable is attached, the low nibble
+    // is the level, and 11 or more WITH a cable means full.
+    kBatteryDs4Status,
+};
+
+struct BatterySpot {
+    BatteryFormat format;
+    int           byteIndex;   // -1 when the pad has none
+};
+
+// What a pad said. ⛔ `known` false means show NOTHING -- not a dash, not a
+// zero (rhoquinn8217 on T-195: every other kind shows nothing at all).
+enum BatteryState : uint8_t {
+    kBatteryUnknown = 0,
+    kBatteryDischarging,
+    kBatteryCharging,
+    kBatteryFull,
+};
+
+struct BatteryReading {
+    bool         known;
+    int          percent;    // 0 to 100
+    BatteryState state;
+};
+
 
 // One pad's input report, as the hooks see it AFTER the map.
 //
@@ -171,6 +211,9 @@ struct Layout {
     TriggerSpots triggers;
     MotionSpots  motion;
     TouchSpots   touch;
+    // ⚠️ Appended 2026-09-17 (T-195), obeying the rule above: after touch, not
+    // beside the other one-byte things it reads like.
+    BatterySpot  battery;
 };
 
 inline const Layout kDs5Layout = {
@@ -206,6 +249,11 @@ inline const Layout kDs5Layout = {
     { true, 16, 18, 20, 22, 24, 26 },
     // One touch packet: fingers at [33] and [37], pressed in at [10] 0x02.
     { true, 33, 37, { -1, -1, -1, -1 }, 10, 0x02 },
+    // ⭐ The status byte, [53]: the low nibble is the level in ten steps, the
+    // high nibble the charging state. MEASURED on the DualSense (054c:0ce6) on
+    // a cable 2026-09-17: 0x28, so state 2 (charge complete) and level 8. It
+    // held that value across samples while its neighbours moved.
+    { kBatteryDs5Status, 53 },
 };
 
 // ⭐ THE DS4 USB REPORT 0x01, which is what both DS4 maps put on the wire: the
@@ -280,6 +328,10 @@ inline const Layout kDs4Layout = {
     // [53] [57]. Pressed in is [7] 0x02. The same live report read 0x01 at [33]
     // and 0xa4 and 0xa2 at the fingers: no finger down, as expected.
     { true, 35, 39, { 44, 48, 53, 57 }, 7, 0x02 },
+    // ⭐ The battery byte, [30]: bit 0x10 says a cable is attached and the low
+    // nibble is the level. MEASURED on the real Sony DS4 (054c:05c4) on a cable
+    // 2026-09-17: 0x1b, so cable attached and level 11, which is "full".
+    { kBatteryDs4Status, 30 },
 };
 
 // ⭐ THE XBOX GIP 0x20 REPORT, read off maps/xbox_gip_usb_over_xbox_bt.map.
@@ -340,6 +392,9 @@ inline const Layout kXboxLayout = {
     // No motion sensor and no touchpad.
     { false, -1, -1, -1, -1, -1, -1 },
     { false, -1, -1, { -1, -1, -1, -1 }, -1, 0x00 },
+    // ⛔ No battery byte either: an Xbox pad reports its charge nowhere, over
+    // any transport (measured on T-192).
+    { kBatteryAbsent, -1 },
 };
 
 // Which layout a pad reads. nullptr means "not one we can read", which is the
@@ -363,6 +418,47 @@ inline const Layout *layout_for(const char *kind)
     if (std::strcmp(kind, "ds4") == 0) return &kDs4Layout;
     if (std::strcmp(kind, "xbox") == 0) return &kXboxLayout;
     return nullptr;
+}
+
+// What the pad says about its own charge, or nothing.
+//
+// ⭐ The scaling is the kernel drivers': a level of N means N*10+5 percent,
+// capped at 100. That is why a full pad reads 95 or 100 and never 97 -- the
+// hardware works in steps, and inventing a finer number would be inventing it.
+//
+// ⛔ A fault state carries no level, so it returns not-known rather than zero.
+// Zero percent and "the pad did not say" look identical on a page and mean
+// opposite things.
+inline BatteryReading battery_reading(const Layout &lay, const uint8_t *data, size_t len)
+{
+    BatteryReading out = { false, 0, kBatteryUnknown };
+    if (data == nullptr) return out;
+    if (lay.battery.format == kBatteryAbsent || lay.battery.byteIndex < 0) return out;
+    if (len <= static_cast<size_t>(lay.battery.byteIndex)) return out;
+
+    const uint8_t raw = data[lay.battery.byteIndex];
+    const uint8_t level = static_cast<uint8_t>(raw & 0x0f);
+
+    if (lay.battery.format == kBatteryDs5Status) {
+        switch (static_cast<uint8_t>((raw >> 4) & 0x0f)) {
+        case 0x0: out.state = kBatteryDischarging; break;
+        case 0x1: out.state = kBatteryCharging; break;
+        case 0x2: return BatteryReading{ true, 100, kBatteryFull };
+        default:  return out;   // 0xa, 0xb, 0xf: a fault, which is not a reading
+        }
+        out.known = true;
+        out.percent = level >= 10 ? 100 : static_cast<int>(level) * 10 + 5;
+        return out;
+    }
+
+    // A DS4. ⚠️ The cable bit is 0x10 and nothing else in the high nibble is
+    // ours: the bits above it are a counter.
+    const bool cable = (raw & 0x10) != 0;
+    if (cable && level >= 11) return BatteryReading{ true, 100, kBatteryFull };
+    out.known = true;
+    out.percent = level >= 10 ? 100 : static_cast<int>(level) * 10 + 5;
+    out.state = cable ? kBatteryCharging : kBatteryDischarging;
+    return out;
 }
 
 // Hat value -> which of the four d-pad directions are down.
