@@ -605,7 +605,7 @@
      the pad reports nothing -- see batteryPct(). */
   .batt { display:inline-flex; align-items:center; gap:0.35em; line-height:1;
           vertical-align:middle; font-variant-numeric:tabular-nums; }
-  .battbar { position:relative; display:inline-block; width:3.6em; height:1.5em;
+  .battbar { position:relative; display:inline-block; width:4.1em; height:1.5em;
              border-radius:0.34em; background:#20232a; border:1px solid #4d525c;
              overflow:hidden; }
   .battfill { position:absolute; left:0; top:0; bottom:0; background:#2f9e4f; }
@@ -622,11 +622,14 @@
   .battery-text { position:absolute; top:0; left:0; width:100%; height:100%;
                   display:flex; justify-content:center; align-items:center;
                   color:#ffffff; font-weight:bold; font-size:0.8em; z-index:10;
-                  text-shadow:0 1px 1.5px rgba(0,0,0,0.5); }
-  .battbolt { color:#f2a63b; font-size:1.05em; }
+                  gap:0.1em; text-shadow:0 1px 1.5px rgba(0,0,0,0.5); }
+  /* ⓘ Inside the pill, beside the number rather than after it, so the pair
+     centres as one thing and the gauge stays the same width charging or not. */
+  .battbolt { color:#ffd166; font-size:1em; }
   /* Each caller sets the size and the gauge scales from it. */
-  .tabs button .batt { font-size:11px; margin-top:3px; }
-  #compactBox .ccur .batt { font-size:2.4vh; margin-top:0.8vh; }
+  .tabs button .batt { font-size:10px; margin-left:6px; }
+  #compactBox .cname .batt { font-size:2.4vh; margin-left:0.5em;
+                             vertical-align:middle; }
   td .batt { font-size:12px; }
   .pane { display:none; } .pane.on { display:block; }
   /* ⭐ COMPACT VIEW: hide the page, show the box. Everything hidden leaves the
@@ -2049,8 +2052,8 @@ function batteryTag(d) {
   return '<span class="batt" title="' + esc(batteryTitle(d)) + '">' +
            '<span class="battbar">' +
              '<span class="battfill" style="width:' + n + '%"></span>' +
-             '<span class="battery-text">' + n + '%</span>' +
-           '</span>' + bolt +
+             '<span class="battery-text">' + bolt + n + '%</span>' +
+           '</span>' +
          '</span>';
 }
 
@@ -2081,8 +2084,8 @@ function renderTabs(devices) {
             ' title="' + (d.ready ? 'ready' : 'starting or tearing down') + '"' +
             ' onclick="showTab(\'' + esc(d.ordinal) + '\')">' +
             dot + '<span class="tabname">' + esc(nameFor(d.ordinal)) + '</span>' +
-            '<em class="tabkind">' + esc(deviceLabelShort(d)) + '</em>' +
             batteryTag(d) +
+            '<em class="tabkind">' + esc(deviceLabelShort(d)) + '</em>' +
             '</button>';
   });
   // ⭐ THE EDITOR TAB (rhoquinn8217, 2026-09-01), last and pushed to the far
@@ -5917,9 +5920,9 @@ function paintCompact() {
     // under the name, and the L1 and R1 neighbours with theirs.
     html += '<div class="ccar' + slide + '">' +
             side(prev, 'l', '\u25c2 L1') +
-            '<div class="ccur"><div class="cname">' + esc(nameFor(d.ordinal)) + '</div>' +
-            '<div class="ckind">' + esc(deviceLabelShort(d)) + '</div>' +
+            '<div class="ccur"><div class="cname">' + esc(nameFor(d.ordinal)) +
             batteryTag(d) + '</div>' +
+            '<div class="ckind">' + esc(deviceLabelShort(d)) + '</div></div>' +
             side(next, 'r', 'R1 \u25b8') +
             '</div>';
     if (!d.supports_config) {
