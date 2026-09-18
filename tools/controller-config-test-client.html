@@ -597,6 +597,13 @@
   /* Name on top, what it is underneath -- the name is for recognising the tab,
      the kind for confirming you are on the right one. */
   .tabs button .tabname { display:inline-block; }
+  /* ⭐ The dot, the name and the gauge on ONE centred row (2026-09-18).
+     ⛔ vertical-align:middle does not centre a badge beside text: it lines the
+     badge's middle up with the BASELINE PLUS HALF THE X-HEIGHT, which sits below
+     the visual middle of the line and grows more wrong the larger the text gets.
+     A flex row centres on the line box itself, at any size. */
+  .tabs button .tabtop { display:flex; align-items:center; justify-content:center;
+                         gap:0; }
   .tabs button .tabkind { display:block; font-size:11px; color:#71737c;
                           font-style:italic; margin-left:14px; margin-top:1px; }
   /* ⭐ The pad's own charge (T-195). One class for all four places; each
@@ -632,8 +639,7 @@
      under four pixels and the gauge was a smudge (rhoquinn8217, 2026-09-18).
      ➡ em, so it scales with the NAME it sits beside: the name is 9vh in simple
      and 15vh in quick, and the gauge follows both without a second rule. */
-  #compactBox .cname .batt { font-size:0.5em; margin-left:0.45em;
-                             vertical-align:middle; }
+  #compactBox .cname .batt { font-size:0.5em; margin-left:0.45em; }
   td .batt { font-size:12px; }
   .pane { display:none; } .pane.on { display:block; }
   /* ⭐ COMPACT VIEW: hide the page, show the box. Everything hidden leaves the
@@ -774,7 +780,9 @@
   /* The selector and its title travel with the ring (rhoquinn8217, 2026-09-09). */
   #compactBox .csel { display:flex; flex-direction:column; align-items:center; gap:1.2vh; }
   #compactBox .ctitle { font-size:3vh; color:#71737c; text-align:center; }
-  #compactBox .cname { font-size:9vh; font-weight:600; text-align:center; line-height:1.1; }
+  #compactBox .cname { font-size:9vh; font-weight:600; text-align:center; line-height:1.1;
+                       display:flex; align-items:center; justify-content:center;
+                       flex-wrap:wrap; }
   #compactBox .ckind { font-size:4.5vh; color:#71737c; text-align:center; margin-top:0.8vh; }
   /* ⓘ Two thirds of what it was (rhoquinn8217, 2026-09-09). */
   #compactBox select { font-size:4.2vh; padding:0.8vh 1.4vw; min-width:47vw; }
@@ -2087,8 +2095,10 @@ function renderTabs(devices) {
             (ACTIVE === d.ordinal ? ' class="on"' : '') +
             ' title="' + (d.ready ? 'ready' : 'starting or tearing down') + '"' +
             ' onclick="showTab(\'' + esc(d.ordinal) + '\')">' +
-            dot + '<span class="tabname">' + esc(nameFor(d.ordinal)) + '</span>' +
-            batteryTag(d) +
+            '<span class="tabtop">' + dot +
+              '<span class="tabname">' + esc(nameFor(d.ordinal)) + '</span>' +
+              batteryTag(d) +
+            '</span>' +
             '<em class="tabkind">' + esc(deviceLabelShort(d)) + '</em>' +
             '</button>';
   });
