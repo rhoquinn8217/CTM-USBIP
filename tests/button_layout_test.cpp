@@ -813,5 +813,89 @@ int run_button_layout_tests()
         CTM_CHECK(!trigger_click_can_take(*xbox));
     }
 
+    section("button layout: the battery byte, on reports read off the real pads");
+    {
+        using namespace ctm_rebind;
+        const Layout *ds5 = layout_for("ds5");
+        const Layout *ds4 = layout_for("ds4");
+        const Layout *xbox = layout_for("xbox");
+
+        // ⭐⭐ CAPTURED 2026-09-17 from the pads on the rooted monitor, read
+        // straight off /dev/hidraw with both on a cable. These are the whole
+        // 64-byte reports, not a hand-built fixture, so the offset is proved
+        // against hardware rather than against a driver header.
+        const uint8_t realDs5[64] = {
+            0x01,0x82,0x85,0x83,0x84,0x00,0x00,0xe3,0x08,0x00,0x00,0x00,0x9a,0x08,0xf4,0x9e,
+            0xfd,0xff,0xfc,0xff,0x01,0x00,0x0c,0xff,0x4e,0x20,0xcf,0x06,0x38,0x88,0x65,0x05,
+            0x19,0xa2,0x22,0x17,0x3e,0x85,0x7c,0x90,0x18,0xc4,0x09,0x09,0x00,0x00,0x00,0x00,
+            0x00,0x10,0xa3,0x65,0x05,0x28,0x18,0x00,0x3f,0x81,0x69,0xaf,0x4a,0xd8,0xfe,0x6c,
+        };
+        const uint8_t realDs4[64] = {
+            0x01,0x78,0x7a,0x82,0x80,0x08,0x00,0x2c,0x00,0x00,0x17,0xb2,0x14,0x00,0x00,0x03,
+            0x00,0x02,0x00,0x49,0xfa,0x83,0x1e,0x09,0xf8,0x00,0x00,0x00,0x00,0x00,0x1b,0x00,
+            0x00,0x00,0x00,0x80,0x00,0x00,0x00,0x80,0x00,0x00,0x00,0x00,0x80,0x00,0x00,0x00,
+            0x80,0x00,0x00,0x00,0x00,0x80,0x00,0x00,0x00,0x80,0x00,0x00,0x00,0x00,0x80,0x00,
+        };
+
+        // The DualSense read 0x28 at [53]: state 2, charge complete.
+        BatteryReading r = battery_reading(*ds5, realDs5, sizeof(realDs5));
+        CTM_CHECK(r.known);
+        CTM_CHECK_EQ(r.percent, 100);
+        CTM_CHECK(r.state == kBatteryFull);
+
+        // The DS4 read 0x1b at [30]: cable attached, level 11, so full.
+        r = battery_reading(*ds4, realDs4, sizeof(realDs4));
+        CTM_CHECK(r.known);
+        CTM_CHECK_EQ(r.percent, 100);
+        CTM_CHECK(r.state == kBatteryFull);
+
+        // ⭐ The states neither pad could show while plugged in, built by
+        // changing ONLY that byte of the real report.
+        uint8_t pad[64];
+        std::memcpy(pad, realDs5, sizeof(pad));
+        pad[53] = 0x08;                       // discharging, level 8
+        r = battery_reading(*ds5, pad, sizeof(pad));
+        CTM_CHECK(r.known && r.state == kBatteryDischarging);
+        CTM_CHECK_EQ(r.percent, 85);
+        pad[53] = 0x18;                       // charging, level 8
+        r = battery_reading(*ds5, pad, sizeof(pad));
+        CTM_CHECK(r.known && r.state == kBatteryCharging);
+        CTM_CHECK_EQ(r.percent, 85);
+        pad[53] = 0x00;                       // discharging, flat
+        r = battery_reading(*ds5, pad, sizeof(pad));
+        CTM_CHECK(r.known && r.percent == 5);
+        pad[53] = 0x0a;                       // discharging, level 10: capped
+        r = battery_reading(*ds5, pad, sizeof(pad));
+        CTM_CHECK_EQ(r.percent, 100);
+
+        // ⛔ A fault state carries no level, so it is NOT a reading. Zero and
+        // "did not say" mean opposite things and must not share a value.
+        for (uint8_t fault : { 0xa0, 0xb0, 0xf0 }) {
+            pad[53] = static_cast<uint8_t>(fault | 0x07);
+            r = battery_reading(*ds5, pad, sizeof(pad));
+            CTM_CHECK(!r.known);
+        }
+
+        std::memcpy(pad, realDs4, sizeof(pad));
+        pad[30] = 0x05;                       // no cable, level 5
+        r = battery_reading(*ds4, pad, sizeof(pad));
+        CTM_CHECK(r.known && r.state == kBatteryDischarging);
+        CTM_CHECK_EQ(r.percent, 55);
+        pad[30] = 0x15;                       // cable, level 5: charging
+        r = battery_reading(*ds4, pad, sizeof(pad));
+        CTM_CHECK(r.known && r.state == kBatteryCharging);
+        CTM_CHECK_EQ(r.percent, 55);
+
+        // ⛔ An Xbox pad says nothing anywhere, whatever the bytes hold.
+        r = battery_reading(*xbox, realDs5, sizeof(realDs5));
+        CTM_CHECK(!r.known);
+
+        // ⛔ And a report too short to hold the byte is not a zero reading.
+        r = battery_reading(*ds5, realDs5, 20);
+        CTM_CHECK(!r.known);
+        r = battery_reading(*ds5, nullptr, 64);
+        CTM_CHECK(!r.known);
+    }
+
     return 0;
 }

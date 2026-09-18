@@ -28,6 +28,11 @@ struct RestDeviceView {
     bool ready = false;         // false = still starting or tearing down
     std::string product;        // the device's own name, from the TV at HELLO
     std::string deviceType;     // "controller", "keyboard", "mouse" or ""
+    // ⛔ -1 is "the pad did not say", which is NOT zero percent: a flat pad and
+    // a pad with no battery byte are opposite facts and must not share a value
+    // (T-195). A kind with nothing to report carries no field at all.
+    int         batteryPercent = -1;   // 0 to 100, or -1
+    std::string batteryState;          // "charging", "full", "discharging" or ""
 };
 static std::vector<RestDeviceView> rest_collect_devices();
 static bool rest_link_device(const std::string &ordinal, const std::string &configName,
@@ -56,6 +61,12 @@ static std::string rest_device_json(const RestDeviceView &d)
     // (rhoquinn8217, 2026-09-13: never "hid" where anything better is known).
     out += ",\"product\":\"" + rest_json_escape(d.product) + "\"";
     out += ",\"device_type\":\"" + rest_json_escape(d.deviceType) + "\"";
+    // ⭐ Only when the pad actually said. Absent means the page draws nothing;
+    // it must never be able to read a missing battery as an empty one.
+    if (d.batteryPercent >= 0) {
+        out += ",\"battery_percent\":" + std::to_string(d.batteryPercent);
+        out += ",\"battery_state\":\"" + rest_json_escape(d.batteryState) + "\"";
+    }
     out += ",\"supports_config\":" +
            std::string(config_store::kind_supports_config(d.kind) ? "true" : "false") + "}";
     return out;

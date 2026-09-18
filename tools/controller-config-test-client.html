@@ -599,6 +599,14 @@
   .tabs button .tabname { display:inline-block; }
   .tabs button .tabkind { display:block; font-size:11px; color:#71737c;
                           font-style:italic; margin-left:14px; margin-top:1px; }
+  /* ⭐ The pad's own charge (T-195). One class for all four places; each
+     caller decides the size, so the same markup reads at 11px on a tab and
+     at a third of a 9vh name in the compact views. ⓘ Never shown at all when
+     the pad reports nothing -- see batteryPct(). */
+  .batt { color:#8fb8d8; white-space:nowrap; font-variant-numeric:tabular-nums; }
+  .tabs button .batt { font-size:11px; margin-left:6px; color:#71737c; }
+  #compactBox .cname .batt { font-size:0.34em; margin-left:0.4em;
+                             vertical-align:middle; opacity:0.85; }
   .pane { display:none; } .pane.on { display:block; }
   /* ⭐ COMPACT VIEW: hide the page, show the box. Everything hidden leaves the
      pad's focus list by itself -- gpCollect skips what has no offsetParent. */
@@ -1954,6 +1962,52 @@ function clearBridgeWait() {
   if (box && box.parentNode) box.parentNode.removeChild(box);
 }
 
+// ⭐ WHAT THE PAD SAID ABOUT ITS OWN CHARGE (T-195), and nothing else.
+//
+// ⛔⛔ NO READING IS DRAWN AS NOTHING AT ALL -- not a dash, not a zero
+// (rhoquinn8217: "Every other kind shows nothing at all"). An Xbox pad reports
+// charge nowhere, over any transport, and a DualSense in a fault state reports
+// none either. A zero would say FLAT, which is a different and alarming claim.
+//
+// ⓘ The number moves in steps: a pad reading 85% is saying "eight of ten", not
+// measuring to the percent. The listener scales it the way the kernel drivers
+// do, and the page shows what it is given.
+function batteryPct(d) {
+  if (!d) return -1;
+  var n = d.battery_percent;
+  return (typeof n === 'number' && n >= 0 && n <= 100) ? n : -1;
+}
+
+// The bolt means A CABLE IS ATTACHED -- charging, or charged and still on it.
+// ⓘ That is the only charge state a pad distinguishes, so it is the only one
+// shown; "discharging" is simply the absence of the bolt.
+function batteryMark(d) {
+  return (d && (d.battery_state === 'charging' || d.battery_state === 'full'))
+    ? ' ⚡' : '';
+}
+
+function batteryTitle(d) {
+  var n = batteryPct(d);
+  if (n < 0) return '';
+  if (d.battery_state === 'full') return 'charged, and still on the cable';
+  if (d.battery_state === 'charging') return 'charging, ' + n + '%';
+  return 'on its own battery, ' + n + '%';
+}
+
+// One element for all four places. ⓘ The size is the CALLER'S: .batt inherits
+// in the tab and scales with the name in the compact views, so the same markup
+// reads right at 11px and at 9vh.
+function batteryTag(d) {
+  var n = batteryPct(d);
+  if (n < 0) return '';
+  return '<span class="batt" title="' + esc(batteryTitle(d)) + '">' +
+         n + '%' + batteryMark(d) + '</span>';
+}
+
+// The table cell: the same tag, and an EMPTY cell when there is no reading, so
+// a column reads as "these two have batteries" rather than as missing data.
+function batteryCell(d) { return batteryTag(d); }
+
 function renderTabs(devices) {
   LAST_DEVICES = devices || [];
   // The event, not an expiry: a device in the list means bridging works now.
@@ -1976,7 +2030,7 @@ function renderTabs(devices) {
             (ACTIVE === d.ordinal ? ' class="on"' : '') +
             ' title="' + (d.ready ? 'ready' : 'starting or tearing down') + '"' +
             ' onclick="showTab(\'' + esc(d.ordinal) + '\')">' +
-            dot + '<span class="tabname">' + esc(nameFor(d.ordinal)) + '</span>' +
+            dot + '<span class="tabname">' + esc(nameFor(d.ordinal)) + '</span>' + batteryTag(d) +
             '<em class="tabkind">' + esc(deviceLabelShort(d)) + '</em>' +
             '</button>';
   });
@@ -2697,7 +2751,7 @@ function buildDevicePane(d) {
       'Remove auto link</button>'
     : '';
 
-  var head = '<table class="devrow"><tr><th>nickname</th><th>controller</th><th>serial</th>' +
+  var head = '<table class="devrow"><tr><th>nickname</th><th>controller</th><th>battery</th><th>serial</th>' +
              '<th>auto linked config</th><th></th><th></th></tr>' +
              // ⭐ Same status tint as Overview. The two tables show the same
              // row, so a controller that reads green there and plain here
@@ -2709,6 +2763,7 @@ function buildDevicePane(d) {
              // in hand, for the same reason as Overview's copy.
              '<td>' + esc(d.nickname || nameFor(d.ordinal)) + '</td>' +
              '<td>' + esc(deviceLabelShort(d)) + '</td>' +
+             '<td>' + batteryCell(d) + '</td>' +
              '<td>' + serialCell + '</td>' +
              '<td>' + autoCell + '</td>' +
              '<td>' + autoBtn + '</td>' +
@@ -3366,7 +3421,7 @@ function loadDevices() {
     // ⭐ THE SAME COLUMNS AS THE CONTROLLER TAB. The two tables described the
     // same thing in different words -- 'linked' here, 'auto linked config'
     // there -- so reading one taught you nothing about the other.
-    var html = '<table><tr><th>nickname</th><th>controller</th><th>serial</th>' +
+    var html = '<table><tr><th>nickname</th><th>controller</th><th>battery</th><th>serial</th>' +
                '<th>auto linked config</th><th></th><th></th></tr>';
     list.forEach(function(dev) {
       // ⭐ The serial is the point of this whole screen. auto_link works only
@@ -3417,6 +3472,7 @@ function loadDevices() {
               '<td>' + esc(dev.nickname || dev.ordinal) + '</td>' +
               '<td>' + esc(deviceLabelShort(dev)) + (dev.supports_config ? '' :
                   ' <span class="muted">(no config support)</span>') + '</td>' +
+              '<td>' + batteryCell(dev) + '</td>' +
               '<td>' + serial + '</td>' +
               '<td>' + autoCell + '</td>' +
               '<td>' + autoBtn + '</td>' +
@@ -5810,7 +5866,7 @@ function paintCompact() {
     // under the name, and the L1 and R1 neighbours with theirs.
     html += '<div class="ccar' + slide + '">' +
             side(prev, 'l', '\u25c2 L1') +
-            '<div class="ccur"><div class="cname">' + esc(nameFor(d.ordinal)) + '</div>' +
+            '<div class="ccur"><div class="cname">' + esc(nameFor(d.ordinal)) + batteryTag(d) + '</div>' +
             '<div class="ckind">' + esc(deviceLabelShort(d)) + '</div></div>' +
             side(next, 'r', 'R1 \u25b8') +
             '</div>';

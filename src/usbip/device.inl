@@ -259,6 +259,7 @@ public:
         ctm_touch_mouse_forget(this);
         trigger_click_forget(this);
         ctm_stick_mouse_forget(this);
+        ctm_battery_forget(this);
         // ⛔ And this controller's held KEYS. They are kept per device now, so
         // leaving them behind would hold a key down forever with no controller
         // able to release it -- and clearing everyone's would release the other
@@ -520,6 +521,12 @@ public:
         // No-op unless stick_to_mouse names a stick.
         ctm_stick_mouse_apply(this, profile_.device_descriptor, linked_config(),
                               report.data, report.length);
+
+        // The pad's own charge, for the settings page. Read-only like the three
+        // above, and it stores only when the value changes, so a pad sitting at
+        // the same level costs one comparison per report.
+        ctm_battery_sample(this, profile_.device_descriptor,
+                           report.data, report.length);
 
         // ⭐ Button rebinding. ⚠️ Unlike the gyro hook above, this MODIFIES the
         // report -- a rebound button is cleared before Windows sees it, so the

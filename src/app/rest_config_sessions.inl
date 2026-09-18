@@ -36,6 +36,14 @@ static std::vector<RestDeviceView> rest_collect_devices()
         if (session->device) {
             view.product = session->device->product_name();
             view.deviceType = session->device->device_kind_by_descriptor();
+            // ⭐ What the pad last said about its own charge (T-195). Left at
+            // -1 for a pad with no battery byte, so the JSON omits it.
+            const ctm_rebind::BatteryReading battery =
+                ctm_battery::reading_for(session->device.get());
+            if (battery.known) {
+                view.batteryPercent = battery.percent;
+                view.batteryState = ctm_battery::state_word(battery.state);
+            }
         }
         out.push_back(std::move(view));
     }
