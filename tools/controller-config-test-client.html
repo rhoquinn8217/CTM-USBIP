@@ -628,7 +628,11 @@
   .battbolt { color:#ffd166; font-size:1em; }
   /* Each caller sets the size and the gauge scales from it. */
   .tabs button .batt { font-size:10px; margin-left:6px; }
-  #compactBox .cname .batt { font-size:2.4vh; margin-left:0.5em;
+  /* ⛔ NOT vh HERE. The quick window is about 150px tall, so 2.4vh came out
+     under four pixels and the gauge was a smudge (rhoquinn8217, 2026-09-18).
+     ➡ em, so it scales with the NAME it sits beside: the name is 9vh in simple
+     and 15vh in quick, and the gauge follows both without a second rule. */
+  #compactBox .cname .batt { font-size:0.38em; margin-left:0.5em;
                              vertical-align:middle; }
   td .batt { font-size:12px; }
   .pane { display:none; } .pane.on { display:block; }
