@@ -3100,7 +3100,33 @@ function renderConfigEditor(hostId, configName, prefix, ordinal) {
     // matches no family lands, and dropping it outright would make a future
     // key invisible instead of merely oddly placed. Emptiness is what hides
     // it, not a hardcoded exclusion.
+    // ⭐⭐ A DEVICE IS ONLY OFFERED WHAT IT CAN USE (T-227). The agent says what
+    // each pad has -- has_audio, has_rumble_gains, has_touchpad, has_gyro -- and
+    // a section it cannot use is dropped whole rather than greyed. A setting
+    // that does nothing reads as broken.
+    //
+    // ⚠️ ON OVERVIEW THERE IS NO DEVICE IN HAND (ordinal is null), so nothing is
+    // hidden there. A config is not tied to a pad, and a config linked to a
+    // DualSense and an Xbox pad must not lose its audio rows because the page
+    // happened to be opened from the wrong place.
+    //
+    // ⓘ Missing flags mean TRUE. An older agent sends none, and a page that
+    // hid everything against it would be unusable rather than merely dated.
+    var capDev = ordinal
+      ? (LAST_DEVICES || []).filter(function(x) { return x.ordinal === ordinal; })[0]
+      : null;
+    var can = function(flag) {
+      if (!capDev) return true;
+      return capDev[flag] === undefined ? true : !!capDev[flag];
+    };
+    var SECTION_NEEDS = {
+      'Audio': 'has_audio',
+      'Rumble': 'has_rumble_gains',
+      'Touchpad': 'has_touchpad',
+      'Gyro': 'has_gyro'
+    };
     var shows = function(g) {
+      if (SECTION_NEEDS[g] && !can(SECTION_NEEDS[g])) return false;
       return (groups[g] || []).some(function(meta) {
         return !/_debug(_|$)/.test(meta.key);
       });

@@ -229,6 +229,20 @@ public:
         return out;
     }
 
+    // ⭐ The USB vendor id the TV reported at HELLO, read live like the name
+    // above. 0 when nothing has arrived yet.
+    //
+    // ⭐⭐ WHY A CONFIG PAGE WANTS IT (T-227). Capability is read from the
+    // LAYOUT, and an Xbox pad's layout says no gyro and no touchpad. But a
+    // third-party pad emulating one uses that same layout while genuinely
+    // having a gyro -- and its reports cannot say so, because looking exactly
+    // like an Xbox pad is the point of emulating one. ➡️ The vendor is the
+    // only thing that separates them: 0x045e is Microsoft.
+    uint16_t vendor_id() const
+    {
+        return backend_ != nullptr ? backend_->caps().vendorId : 0;
+    }
+
     // ⭐ What the device is by its report descriptor: "controller", "keyboard",
     // "mouse", or empty (device_type.inl).
     std::string device_kind_by_descriptor() const

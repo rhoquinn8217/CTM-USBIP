@@ -12,6 +12,60 @@
 
 #pragma once
 
+// ⭐⭐ WHICH SECTIONS THIS DEVICE SHOULD BE OFFERED (T-227).
+//
+// A setting a pad has no hardware for is worse than a missing one: it reads as
+// broken when it does nothing. ⓘ Nothing is DETECTED here -- the layout
+// already carries the answer, and this only reads it.
+//
+// ⚠️ WHEN T-203 LANDS, AUDIO STOPS BEING DUALSENSE-ONLY. A DS4 has a speaker
+// and a headset jack too; its audio simply is not carried yet. ➡️ The audio
+// line below is the ONE place to change, and it is written as a kind test
+// rather than folded into the layout so it is easy to find.
+static void rest_fill_capabilities(RestDeviceView *view, uint16_t vendorId)
+{
+    if (view == nullptr) return;
+    const std::string k = config_store::settings_kind_for(view->kind);
+    const bool isDs5 = (k == "ds5" || k == "ds5_edge");
+
+    // Audio and the three rumble gains are patched by ds5_output_overrides.inl,
+    // and every override there begins `if (data[0] != 0x02) return;` -- the
+    // DualSense's wired report id. On any other pad they do nothing at all.
+    view->hasAudio = isDs5;
+    view->hasRumbleGains = isDs5;
+
+    // ⚠️ A WIRED XBOX PAD ARRIVES AS "xpad", WHICH settings_kind_for() DOES NOT
+    // MAP -- it lists only the kinds the TV sends for a config, and xpad is not
+    // among them. So fall back to the RAW kind for the layout, or a cabled Xbox
+    // pad would be offered gyro and a touchpad it has never had.
+    // ⓘ Harmless if xpad never reaches here: layout_for() simply answers the
+    // same nullptr it would have anyway.
+    const ctm_rebind::Layout *lay = ctm_rebind::layout_for(k.c_str());
+    if (lay == nullptr && (view->kind == "xpad" || view->kind == "xbox")) {
+        lay = ctm_rebind::layout_for("xbox");
+    }
+    if (lay == nullptr) {
+        // ⚠️ An unknown pad keeps everything. See the note on the defaults.
+        view->hasTouchpad = true;
+        view->hasGyro = true;
+        return;
+    }
+    view->hasTouchpad = lay->touch.present;
+
+    // ⛔⛔ THE ONE CAPABILITY THE REPORTS CANNOT ANSWER. A third-party pad
+    // emulating an Xbox pad uses the Xbox layout, which says no gyro -- and it
+    // may well have one. Looking exactly like an Xbox pad is the POINT of
+    // emulating one, so no bit in its reports can say otherwise.
+    // ➡️ So the layout's "no" is trusted only for a GENUINE Microsoft pad.
+    // Anyone else on that layout keeps the section: a false hide costs someone
+    // a feature they own, a false show costs one dead section.
+    // ᴵ A real answer would need a second interface carrying motion (T-182),
+    // or capability derived from a descriptor (T-196's Blocker C).
+    static const uint16_t kMicrosoft = 0x045e;
+    const bool xboxFamily = (k == "xbox" || view->kind == "xpad" || view->kind == "xbox");
+    view->hasGyro = lay->motion.present || (xboxFamily && vendorId != kMicrosoft);
+}
+
 static std::vector<RestDeviceView> rest_collect_devices()
 {
     std::vector<RestDeviceView> out;
@@ -44,6 +98,7 @@ static std::vector<RestDeviceView> rest_collect_devices()
                 view.batteryPercent = battery.percent;
                 view.batteryState = ctm_battery::state_word(battery.state);
             }
+            rest_fill_capabilities(&view, session->device->vendor_id());
         }
         out.push_back(std::move(view));
     }
