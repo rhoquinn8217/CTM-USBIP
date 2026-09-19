@@ -27,6 +27,12 @@
             kind, the Configs table has lost its kind column, and a new config
             is named my_config rather than after a kind. A device that takes
             no config, such as a keyboard, says so instead of offering New.
+    2.64.49 A window that opens in Simple or Quick is sized for that mode. It
+            was keeping the launcher's Advanced geometry whenever the listener
+            had nothing remembered about it: the page declines to resize on a
+            restore, on the grounds that the listener does it, and on that one
+            path the listener had never heard of the window. Also brings the
+            footer's version up to date, which had sat at 2.64.35.
     2.64.48 In compact and quick the config selector no longer opens a list at
             all. It shows the one config it is on, Cross steps it, Cross again
             confirms, Circle puts the old one back. 2.64.45 through 2.64.47
@@ -1233,7 +1239,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.64.35</span>
+  <span class="muted" style="font-size:12px">v2.64.49</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -5643,6 +5649,41 @@ function applySavedMode() {
   if (m === 'quick') setMode('quick', true);
   else if (m === 'advanced' || m === 'full') postView(true);   // the layout it opened in
   else setMode('simple', true);                                 // nothing saved: Simple
+
+  sizeOnOpen();
+}
+
+// ⭐⭐ SIZE A WINDOW FOR THE MODE IT OPENS IN (T-193, 2026-09-19). Once.
+//
+// ⛔ THE FAULT. `open_ui.inl` opens EVERY window at one geometry --
+// `waW * 0.68`, commented "Advanced's medium, its opening size" -- whatever
+// mode the page then comes up in. And the page declines to resize on a
+// restore, because setCompact says "the listener sizes and places it from what
+// it remembers".
+//
+// ⛔⛔ THAT COMMENT IS NOT TRUE OF THE SIZE. The listener remembers the VIEW
+// -- compact, quick, which controller -- and `/api/v1/ui/view` returns exactly
+// those three. It has no remembered width or height, and open_ui.inl reads
+// none. So on every path the window kept Advanced's geometry while showing
+// Simple or Quick.
+//
+// ⚠️ Seen as "two windows open in simple mode, one the correct size and the
+// other the advanced mode size" (rhoquinn8217, 2026-09-15). The second window
+// was a race and is fixed separately; this is why the survivor was wrong, and
+// it had nothing to do with the race.
+//
+// ⓘ fitWindowIfOversized cannot catch it: it compares against wantSize(),
+// which IS Advanced's size, so a window at exactly that is never "oversized".
+//
+// ⭐ ONCE, and only on the way in. A mode the person chooses later already
+// calls sizeForMode() through setMode, and a window they have since resized
+// themselves must not be yanked back.
+// ⭐ Advanced is skipped deliberately: its size is the launcher's already.
+var SIZED_ON_OPEN = false;
+function sizeOnOpen() {
+  if (SIZED_ON_OPEN) return;
+  SIZED_ON_OPEN = true;
+  if (COMPACT) sizeForMode();
 }
 
 // ⭐ ONE PLACE THAT SETS A LAYOUT. Advanced, Simple or Quick; the body carries
@@ -5734,11 +5775,16 @@ function restoreView() {
       if (!v || !v.known) { applySavedMode(); return; }
       if (v.ordinal) WANT_ORDINAL = v.ordinal;
       setMode(v.compact ? (v.quick ? 'quick' : 'simple') : 'advanced', true);
+      sizeOnOpen();          // the listener remembers the VIEW, never the size
     })
     .catch(function () { applySavedMode(); });
 }
-// ⓘ `restore` is the window coming back, not a switch: the listener sizes and
-// places it from what it remembers, so the page must not resize it here.
+// ⓘ `restore` is the window coming back, not a switch, so the page must not
+// resize it HERE -- a window someone has sized themselves should stay put.
+// ⚠️ This used to say "the listener sizes and places it from what it
+// remembers". It does not: it remembers the VIEW (compact, quick, which
+// controller) and has no width or height at all. Sizing on the way in is
+// sizeOnOpen()'s job, once.
 function setCompact(on, restore) {
   on = !!on;
   if (on === COMPACT) return;
