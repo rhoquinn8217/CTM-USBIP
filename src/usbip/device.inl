@@ -229,6 +229,23 @@ public:
         return out;
     }
 
+    // ⭐ The ids the TV sent at HELLO. Every interface of one device carries
+    // the same pair, which is what makes them the guard in "are these two
+    // sessions one device" (same_device.inl).
+    //
+    // ⚠️ BackendCaps DEFAULTS TO A DUALSENSE, so a backend with no hello yet
+    // answers 054c:0ce6 rather than zero. Anything comparing these must also
+    // require a non-empty product name, which no pre-hello session has.
+    uint16_t vendor_id() const
+    {
+        return backend_ != nullptr ? backend_->caps().vendorId : 0;
+    }
+
+    uint16_t product_id() const
+    {
+        return backend_ != nullptr ? backend_->caps().productId : 0;
+    }
+
     // ⭐ What the device is by its report descriptor: "controller", "keyboard",
     // "mouse", or empty (device_type.inl).
     std::string device_kind_by_descriptor() const
