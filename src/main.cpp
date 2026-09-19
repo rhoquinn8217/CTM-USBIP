@@ -56,6 +56,7 @@ namespace {
 #include "map/diagnostics.inl"
 #include "log/device_log.inl"
 #include "config/device_config.inl"
+#include "audio/rumble_floor.inl"        // the weakest motor value a game can feel
 #include "audio/ds5_output_overrides.inl"
 #include "input/gyro_calibration.inl"   // read before gyro_mouse.inl uses it
 // ⓘ gyro_mouse.inl gates on this, and it is defined in rebind.inl which comes

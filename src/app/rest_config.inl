@@ -426,7 +426,8 @@ static std::string rest_keys_json()
 {"key":"force_echo_cancel","type":"bool","default":false,"help":"Off makes the controller mute its own speaker as feedback protection."},
 {"key":"master_rumble_gain","type":"int","min":0,"max":500,"default":100,"help":"Scales all rumble. 100 is unchanged."},
 {"key":"rumble_gain_heavy","type":"int","min":0,"max":500,"default":100,"help":"Heavy weight only. Multiplies with master."},
-{"key":"rumble_gain_soft","type":"int","min":0,"max":500,"default":100,"help":"Soft weight only. Multiplies with master."}
+{"key":"rumble_gain_soft","type":"int","min":0,"max":500,"default":100,"help":"Soft weight only. Multiplies with master."},
+{"key":"rumble_floor","type":"int","min":0,"max":100,"default":12,"help":"Weakest motor value the game can actually feel, as a percentage. Below its start-up threshold a motor does not spin, so a faint cue becomes silence; this lifts it back. 0 turns the floor off. It never makes a resting pad buzz."}
 ])CTMKEYS";
     const std::string names = R"CTMKEYS(,
 "key_names":[

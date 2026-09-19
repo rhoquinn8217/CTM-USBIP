@@ -630,6 +630,13 @@ static void bridge_session_worker(AgentBridgeSession *session)
             // something itself. A report edited on this side alone would arrive
             // with a stale signature and be dropped by the controller.
             //
+            // ⚠️⚠️ ONLY THREE OF THE FOUR TRAVEL: speaker volume, headset
+            // volume and the routing mode. THE RUMBLE GAIN DOES NOT, here or
+            // in the sweep -- check the payload below rather than this
+            // sentence. ➡️ So plain-rumble scaling, and the floor with it, is
+            // WIRED-ONLY (T-145). Recorded 2026-09-19; the fix is a protocol
+            // field the TV would have to apply, which is the rest of T-145.
+            //
             // ⓘ Same place as the latency send, and for the same reason the
             // comment above gives: the handshake in bridge.inl runs before the
             // session exists, so no config is linked yet and only the shared
