@@ -575,4 +575,56 @@ inline bool wants_anything(const std::string &section)
     return false;
 }
 
+// ⭐⭐ A GAME'S TRIGGER EFFECT DOES NOT REPLACE THE CONFIG'S (rhoquinn8217,
+// 2026-09-14). Called on every output report the HOST sends, before it reaches
+// the pad. Returns the claim bits whose blocks it replaced, 0 for none.
+//
+// ⛔ WHY IT IS NEEDED. The config's effect is SENT once, when a config links,
+// and the pad keeps the last effect it was given. A game that speaks DualSense
+// sends its own trigger blocks with its own claim bits, and those simply
+// replaced ours: *"When Stellar Blade starts, the adaptive trigger feelings go
+// away."* Rumble, both volumes and audio routing were already defended in every
+// host report; the triggers were only observed.
+//
+// ⛔⛔ AND IT TOOK THE TRIGGER REMAP WITH IT, which is the part that hurt. A
+// trigger set to click presses when the pad reports it is past the break. With
+// the game's effect in place of ours -- or the game's "off" -- that report never
+// comes, so the remap looked disabled while every other remap still worked.
+//
+// ➡️ THE SAME RULE RUMBLE FOLLOWS: only touch what the host is claiming. A
+// report that does not claim a trigger leaves the pad holding ours already, and
+// is left alone. A config that sets no effect owns nothing, and the game's
+// effects stand -- so this changes nothing for a config that never asked.
+// ⓘ The blocks come from apply_to_report, so the ownership rule, the zones and
+// the press point are exactly what the settings report sent. One encoder.
+constexpr size_t kHostReportId  = 0;      // index of the report id
+constexpr uint8_t kHostOutputId = 0x02;   // the DualSense output report
+constexpr size_t kHostFlag0     = 1;      // index of the claim byte
+
+inline uint8_t defend_host_report(const std::string &section, uint8_t *report, size_t len)
+{
+    if (report == nullptr || len < kL2Offset + kBlockLen) return 0;
+    if (report[kHostReportId] != kHostOutputId) return 0;
+
+    const uint8_t hostClaims =
+        static_cast<uint8_t>(report[kHostFlag0] & (kClaimR2 | kClaimL2));
+    if (hostClaims == 0) return 0;          // not touching the triggers: not ours
+
+    uint8_t ours[kL2Offset + kBlockLen] = {};
+    const uint8_t owned = apply_to_report(section, ours, sizeof(ours));
+    if (owned == 0) return 0;               // the config asked for nothing
+
+    uint8_t replaced = 0;
+    const struct { uint8_t claim; size_t offset; } sides[] = {
+        { kClaimR2, kR2Offset }, { kClaimL2, kL2Offset },
+    };
+    for (const auto &side : sides) {
+        if ((hostClaims & side.claim) == 0 || (owned & side.claim) == 0) continue;
+        if (memcmp(report + side.offset, ours + side.offset, kBlockLen) == 0) continue;
+        memcpy(report + side.offset, ours + side.offset, kBlockLen);
+        replaced = static_cast<uint8_t>(replaced | side.claim);
+    }
+    return replaced;
+}
+
 }  // namespace trigger_effect

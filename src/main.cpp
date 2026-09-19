@@ -136,6 +136,11 @@ void trigger_click_apply(const void *deviceKey,
                          const std::string &linkedConfig,
                          const uint8_t *data, size_t len);
 void trigger_click_forget(const void *deviceKey);
+// ⓘ And for keeping a config's trigger effect in place over a game's own. It
+// is defined in ds5_apply_settings.inl, beside the encoder it calls.
+void trigger_defend_host_report(uint8_t *data, size_t length,
+                                const std::vector<unsigned char> &descriptor,
+                                const std::string &linkedConfig);
 // ⓘ Releases only THIS controller's held keys -- they are kept per device so
 // two gated pads cannot cancel each other.
 void ctm_keyboard_forget_device(const void *deviceKey);

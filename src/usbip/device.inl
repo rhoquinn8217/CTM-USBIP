@@ -1506,6 +1506,17 @@ private:
         if (event.length > offset) {
             memcpy(event.data + offset, payload.data(), event.length - offset);
         }
+        // ⛔⛔ THE SECOND WAY A HOST REPORT ARRIVES. A game that writes through
+        // HidD_SetOutputReport comes over the control pipe, here, rather than
+        // the interrupt endpoint -- and nothing overridden in handle_endpoint_out
+        // is overridden on this path. Guarding the triggers on only one of the
+        // two would have been half a guard that failed for some games and not
+        // others. ⚠️ Rumble and the volumes have the same gap here; not fixed in
+        // the same change, because nobody has asked for it and it is not this.
+        if (event.event_type == CTM_USB_EVENT_HID_OUTPUT) {
+            trigger_defend_host_report(event.data, event.length,
+                                       profile_.device_descriptor, linked_config());
+        }
         if (event.event_type == CTM_USB_EVENT_HID_OUTPUT) {
             // ⓘ Every set-output: sampled unless --verbose-reports.
             if (ctm_log_report_line(++setOutputLines_)) device_log::usb_s() << "usb hid set-output"
@@ -1747,6 +1758,9 @@ private:
             memcpy(event.data, data.data(), event.length);
         }
         ds5_apply_output_overrides(event.data, event.length, profile_.device_descriptor,
+                                   linked_config());
+        // ⭐ After the overrides, so [trigger-in] above logs what the HOST sent.
+        trigger_defend_host_report(event.data, event.length, profile_.device_descriptor,
                                    linked_config());
         // ⛔ EVERY OUTPUT REPORT, at roughly 250 a second. A game drives the
         // triggers and rumble continuously, so this buried the handful of lines

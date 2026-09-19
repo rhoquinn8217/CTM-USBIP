@@ -76,6 +76,33 @@ std::vector<uint8_t> blank_report()
     return std::vector<uint8_t>(kL2Offset + kBlockLen + 8, 0);
 }
 
+// What a GAME sends: the DualSense output report id, its claim byte, and a
+// mode byte in each trigger block. Everything else zero.
+std::vector<uint8_t> host_report(uint8_t claims, uint8_t r2Mode, uint8_t l2Mode)
+{
+    std::vector<uint8_t> r(kL2Offset + kBlockLen + 15, 0);   // 48, as on the wire
+    r[kHostReportId] = kHostOutputId;
+    r[kHostFlag0] = claims;
+    r[kR2Offset] = r2Mode;
+    r[kL2Offset] = l2Mode;
+    return r;
+}
+
+// The block the settings report would carry for this section, so a test can
+// say "the host's block became exactly ours" rather than re-deriving the bytes.
+std::vector<uint8_t> our_block(const std::string &section, size_t offset)
+{
+    std::vector<uint8_t> scratch = blank_report();
+    apply_to_report(section, scratch.data(), scratch.size());
+    return std::vector<uint8_t>(scratch.begin() + offset,
+                                scratch.begin() + offset + kBlockLen);
+}
+
+std::vector<uint8_t> block_of(const std::vector<uint8_t> &r, size_t offset)
+{
+    return std::vector<uint8_t>(r.begin() + offset, r.begin() + offset + kBlockLen);
+}
+
 }  // namespace
 
 int run_trigger_effect_tests()
@@ -395,6 +422,106 @@ int run_trigger_effect_tests()
         std::vector<uint8_t> other = blank_report();
         CTM_CHECK_EQ((int)apply_to_report("edge", other.data(), other.size()), 0);
         CTM_CHECK(!wants_anything("edge"));
+    }
+
+    section("trigger effect: a game turning the triggers OFF does not win");
+    // ⛔ THE CASE THAT WAS REPORTED. A DualSense-aware game claims both
+    // triggers and sends mode Off, which replaced the config's click -- and with
+    // no break left to report, the trigger's remap stopped pressing too.
+    reset_config();
+    g_strings["ds5.right_trigger_effect"] = "click";
+    g_strings["ds5.left_trigger_effect"] = "click";
+    {
+        std::vector<uint8_t> r = host_report(kClaimR2 | kClaimL2, kModeOff, kModeOff);
+        const uint8_t replaced = defend_host_report("ds5", r.data(), r.size());
+        CTM_CHECK_EQ((int)replaced, (int)(kClaimR2 | kClaimL2));
+        CTM_CHECK(block_of(r, kR2Offset) == our_block("ds5", kR2Offset));
+        CTM_CHECK(block_of(r, kL2Offset) == our_block("ds5", kL2Offset));
+        CTM_CHECK_EQ((int)r[kR2Offset], (int)kModeWeapon);   // a click, not off
+        // ⭐ The claim byte is left as the host sent it: it was already
+        // claiming, which is exactly why it had to be answered.
+        CTM_CHECK_EQ((int)r[kHostFlag0], (int)(kClaimR2 | kClaimL2));
+    }
+
+    section("trigger effect: a game's own effect on one trigger is replaced there only");
+    reset_config();
+    g_strings["ds5.right_trigger_effect"] = "click";
+    {
+        // The game sets a weapon effect on R2 and says nothing about L2.
+        std::vector<uint8_t> r = host_report(kClaimR2, kModeWeapon, 0);
+        r[kR2Offset + 1] = 0x0c;                               // its own zones
+        const std::vector<uint8_t> hostL2 = block_of(r, kL2Offset);
+        const uint8_t replaced = defend_host_report("ds5", r.data(), r.size());
+        CTM_CHECK_EQ((int)replaced, (int)kClaimR2);
+        CTM_CHECK(block_of(r, kR2Offset) == our_block("ds5", kR2Offset));
+        // ⛔ L2 was not claimed, so it is not ours to write -- the pad keeps
+        // whatever it holds, which is the config's from the settings report.
+        CTM_CHECK(block_of(r, kL2Offset) == hostL2);
+    }
+
+    section("trigger effect: a report that does not claim a trigger is left alone");
+    reset_config();
+    g_strings["ds5.right_trigger_effect"] = "click";
+    {
+        // Rumble only, say. The same rule the rumble override follows in reverse:
+        // if the host is not claiming the field, the field is not ours.
+        std::vector<uint8_t> r = host_report(0x03, 0, 0);
+        const std::vector<uint8_t> before = r;
+        CTM_CHECK_EQ((int)defend_host_report("ds5", r.data(), r.size()), 0);
+        CTM_CHECK(r == before);
+    }
+
+    section("trigger effect: a config that sets no effect lets the game's stand");
+    // ⭐ This is what keeps the guard from costing anyone who never asked for
+    // an effect: their games keep their adaptive triggers.
+    reset_config();
+    {
+        std::vector<uint8_t> r = host_report(kClaimR2 | kClaimL2, kModeWeapon, kModeWeapon);
+        const std::vector<uint8_t> before = r;
+        CTM_CHECK_EQ((int)defend_host_report("ds5", r.data(), r.size()), 0);
+        CTM_CHECK(r == before);
+    }
+
+    section("trigger effect: only a DualSense output report, and a whole one");
+    reset_config();
+    g_strings["ds5.right_trigger_effect"] = "click";
+    {
+        std::vector<uint8_t> notOutput = host_report(kClaimR2, kModeOff, 0);
+        notOutput[kHostReportId] = 0x31;                     // a Bluetooth report id
+        const std::vector<uint8_t> before = notOutput;
+        CTM_CHECK_EQ((int)defend_host_report("ds5", notOutput.data(), notOutput.size()), 0);
+        CTM_CHECK(notOutput == before);
+
+        std::vector<uint8_t> shortReport = host_report(kClaimR2, kModeOff, 0);
+        CTM_CHECK_EQ((int)defend_host_report("ds5", shortReport.data(),
+                                             kL2Offset + kBlockLen - 1), 0);
+        CTM_CHECK_EQ((int)shortReport[kR2Offset], (int)kModeOff);  // untouched
+        CTM_CHECK_EQ((int)defend_host_report("ds5", nullptr, 48), 0);
+    }
+
+    section("trigger effect: a report already carrying ours reports no change");
+    reset_config();
+    g_strings["ds5.right_trigger_effect"] = "click";
+    {
+        // A game echoing the effect back must not be counted as a fight.
+        std::vector<uint8_t> r = host_report(kClaimR2, 0, 0);
+        const std::vector<uint8_t> ours = our_block("ds5", kR2Offset);
+        std::copy(ours.begin(), ours.end(), r.begin() + kR2Offset);
+        CTM_CHECK_EQ((int)defend_host_report("ds5", r.data(), r.size()), 0);
+        CTM_CHECK(block_of(r, kR2Offset) == ours);
+    }
+
+    section("trigger effect: the ownership rule holds against a game too");
+    reset_config();
+    g_strings["ds5.right_trigger_effect"] = "click";
+    {
+        // The config sets R2 only, so by the ownership rule it put L2 into a
+        // known state -- off -- rather than inheriting one. A game turning L2's
+        // effect ON must not undo that either.
+        std::vector<uint8_t> r = host_report(kClaimL2, 0, kModeWeapon);
+        const uint8_t replaced = defend_host_report("ds5", r.data(), r.size());
+        CTM_CHECK_EQ((int)replaced, (int)kClaimL2);
+        CTM_CHECK_EQ((int)r[kL2Offset], (int)kModeOff);
     }
 
     reset_config();
