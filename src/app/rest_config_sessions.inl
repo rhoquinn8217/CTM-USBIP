@@ -22,7 +22,7 @@
 // and a headset jack too; its audio simply is not carried yet. ➡️ The audio
 // line below is the ONE place to change, and it is written as a kind test
 // rather than folded into the layout so it is easy to find.
-static void rest_fill_capabilities(RestDeviceView *view, uint16_t vendorId)
+static void rest_fill_capabilities(RestDeviceView *view)
 {
     if (view == nullptr) return;
     const std::string k = config_store::settings_kind_for(view->kind);
@@ -52,18 +52,27 @@ static void rest_fill_capabilities(RestDeviceView *view, uint16_t vendorId)
     }
     view->hasTouchpad = lay->touch.present;
 
-    // ⛔⛔ THE ONE CAPABILITY THE REPORTS CANNOT ANSWER. A third-party pad
-    // emulating an Xbox pad uses the Xbox layout, which says no gyro -- and it
-    // may well have one. Looking exactly like an Xbox pad is the POINT of
-    // emulating one, so no bit in its reports can say otherwise.
-    // ➡️ So the layout's "no" is trusted only for a GENUINE Microsoft pad.
-    // Anyone else on that layout keeps the section: a false hide costs someone
-    // a feature they own, a false show costs one dead section.
-    // ᴵ A real answer would need a second interface carrying motion (T-182),
-    // or capability derived from a descriptor (T-196's Blocker C).
-    static const uint16_t kMicrosoft = 0x045e;
-    const bool xboxFamily = (k == "xbox" || view->kind == "xpad" || view->kind == "xbox");
-    view->hasGyro = lay->motion.present || (xboxFamily && vendorId != kMicrosoft);
+    // ⛔⛔ THE XBOX LAYOUT NEVER GETS GYRO, WHOEVER MADE THE PAD.
+    //
+    // ⚠️ An earlier version trusted the layout's "no" only for vendor 0x045e
+    // and kept the section for anyone else, reasoning that a third-party pad
+    // emulating an Xbox pad might really have a gyro. ⛔ It might -- and we
+    // still could not carry it.
+    //
+    // ⭐ CHECKED AGAINST THE WIDER WORLD 2026-09-19, at rhoquinn8217's asking:
+    // **XInput has no slots for gyroscope data at all**, so a pad in Xbox mode
+    // strips it before anything downstream sees it. Where gyro does work on
+    // such pads, software reads the pad's RAW HID stream instead -- SDL carries
+    // per-device code for the GameSir G7 Pro 8K to do exactly that -- or the
+    // pad is switched out of Xbox mode entirely, into DirectInput over
+    // Bluetooth or a Switch Pro mode.
+    //
+    // ➡️ So on the reports WE relay there is no gyro to offer, and showing the
+    // section would promise a setting that cannot work -- the exact fault this
+    // file exists to remove. ⓘ The route for someone who wants that pad's gyro
+    // is its OTHER mode, where it arrives as a `hid` device with its own
+    // descriptor and then needs a button table: 🔗 T-196's Blocker C.
+    view->hasGyro = lay->motion.present;
 }
 
 static std::vector<RestDeviceView> rest_collect_devices()
@@ -98,7 +107,7 @@ static std::vector<RestDeviceView> rest_collect_devices()
                 view.batteryPercent = battery.percent;
                 view.batteryState = ctm_battery::state_word(battery.state);
             }
-            rest_fill_capabilities(&view, session->device->vendor_id());
+            rest_fill_capabilities(&view);
         }
         out.push_back(std::move(view));
     }
