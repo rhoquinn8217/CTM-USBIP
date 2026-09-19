@@ -165,6 +165,9 @@ static const char *device_button_section_for(const std::vector<unsigned char> &d
 }
 
 #include "input/button_layout.inl"
+// ⓘ Included here rather than left to main.cpp's order: a test that pulls
+// this file in gets the floor with it, so the shipped clamp is the tested one.
+#include "audio/rumble_floor.inl"
 
 // ⭐⭐ WHICH SETTINGS A PAD'S INPUT HOOKS USE, AND WHICH BYTES THEY READ, AS ONE
 // ANSWER. The gyro, touchpad, stick and trigger mouse, the settings-window chord
@@ -582,9 +585,14 @@ static void ds5_override_rumble(uint8_t *data, size_t length, const char *sectio
     const int master = device_config_int(section, "master_rumble_gain", -1);
     const int heavy  = device_config_int(section, "rumble_gain_heavy", -1);
     const int soft   = device_config_int(section, "rumble_gain_soft", -1);
-    if (master < 0 && heavy < 0 && soft < 0) {
+    const int floorPct = device_config_int(section, "rumble_floor", -1);
+    if (master < 0 && heavy < 0 && soft < 0 && floorPct < 0) {
         return;  // no keys means the game's rumble stands
     }
+    // ⓘ The floor acts alone: someone who wants only the floor should not have
+    // to set a gain to 100 to get it.
+    const int rumbleFloor = floorPct < 0 ? kRumbleFloorDefaultPercent
+        : (floorPct > 100 ? 100 : floorPct);
     const int masterGain = master < 0 ? 100
         : (master > kDs5RumbleGainMax ? kDs5RumbleGainMax : master);
     const int heavyGain = heavy < 0 ? 100
@@ -594,8 +602,15 @@ static void ds5_override_rumble(uint8_t *data, size_t length, const char *sectio
 
     const uint8_t beforeRight = data[kDs5IdxRumbleRight];
     const uint8_t beforeLeft  = data[kDs5IdxRumbleLeft];
-    data[kDs5IdxRumbleRight] = ds5_scale_rumble(beforeRight, (masterGain * softGain) / 100);
-    data[kDs5IdxRumbleLeft]  = ds5_scale_rumble(beforeLeft, (masterGain * heavyGain) / 100);
+    // ⓘ The per-motor gain is passed so the floor can tell OUR arithmetic
+    // erasing a cue from the PERSON asking for silence -- a motor gained to 0
+    // stays at 0, whatever the floor says.
+    const int softEffective = (masterGain * softGain) / 100;
+    const int heavyEffective = (masterGain * heavyGain) / 100;
+    data[kDs5IdxRumbleRight] = rumble_apply_floor(
+        ds5_scale_rumble(beforeRight, softEffective), beforeRight, rumbleFloor, softEffective);
+    data[kDs5IdxRumbleLeft] = rumble_apply_floor(
+        ds5_scale_rumble(beforeLeft, heavyEffective), beforeLeft, rumbleFloor, heavyEffective);
 
     if (beforeRight == data[kDs5IdxRumbleRight] && beforeLeft == data[kDs5IdxRumbleLeft]) {
         return;  // nothing changed -- usually both motors already at rest
@@ -607,7 +622,12 @@ static void ds5_override_rumble(uint8_t *data, size_t length, const char *sectio
         device_log::report(device_log::msg()
             << section << ": rumble: scaled heavy to " << (masterGain * heavyGain) / 100
             << "% soft to " << (masterGain * softGain) / 100
-            << "% (scale #" << count << ")");
+            << "% floor " << rumbleFloor << "%"
+            << " (heavy " << static_cast<int>(beforeLeft) << "->"
+            << static_cast<int>(data[kDs5IdxRumbleLeft])
+            << ", soft " << static_cast<int>(beforeRight) << "->"
+            << static_cast<int>(data[kDs5IdxRumbleRight])
+            << ", scale #" << count << ")");
     }
 }
 

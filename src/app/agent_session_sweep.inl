@@ -255,6 +255,13 @@ static void apply_pending_config_to_sessions()
         // signature and be dropped by the controller. The TV already walks that
         // block, already knows the offsets, and already re-signs.
         //
+        // ⚠️⚠️ ONLY THREE OF THE FOUR TRAVEL: speaker volume, headset volume
+        // and the routing mode, which is exactly what the payload below sends.
+        // THE RUMBLE GAIN DOES NOT TRAVEL. ➡️ So plain-rumble scaling, and the
+        // floor with it, is WIRED-ONLY (T-145). Recorded 2026-09-19; the fix is
+        // a protocol field the TV would have to apply, which is the rest of
+        // T-145.
+        //
         // ⚠️⚠️ AND THIS IS THE PATH THAT ACTUALLY RUNS. The first attempt put
         // this beside the bridge-time send in agent.inl and NOTHING HAPPENED --
         // not even a failure line. The log said why, once it was read rather
