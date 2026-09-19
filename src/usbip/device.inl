@@ -260,6 +260,7 @@ public:
         trigger_click_forget(this);
         ctm_stick_mouse_forget(this);
         ctm_battery_forget(this);
+        ctm_chord_gate_forget(this);
         // ⛔ And this controller's held KEYS. They are kept per device now, so
         // leaving them behind would hold a key down forever with no controller
         // able to release it -- and clearing everyone's would release the other
@@ -527,6 +528,13 @@ public:
         // the same level costs one comparison per report.
         ctm_battery_sample(this, profile_.device_descriptor,
                            report.data, report.length);
+
+        // The TV's overlay chord, taken out of the report before Windows sees
+        // it (T-216). MODIFIES the report, like the rebinder below, and for the
+        // same reason: what the host must not act on has to be gone before it
+        // is served, not corrected afterwards.
+        ctm_chord_gate_apply(this, profile_.device_descriptor,
+                             report.data, report.length);
 
         // ⭐ Button rebinding. ⚠️ Unlike the gyro hook above, this MODIFIES the
         // report -- a rebound button is cleared before Windows sees it, so the

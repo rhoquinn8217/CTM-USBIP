@@ -420,6 +420,59 @@ inline const Layout *layout_for(const char *kind)
     return nullptr;
 }
 
+// ⭐⭐ THE TV'S OVERLAY CHORD, TAKEN OUT OF THE BRIDGED REPORT (T-216).
+//
+// ⛔ THE FAULT. The TV's streaming overlay opens on Select + Start + both
+// bumpers. An xpad-driven pad is deliberately NOT grabbed by the TV, so while it
+// is bridged its reports go to BOTH places at once: to the TV's SDL, which
+// watches for the chord, and over USB/IP to Windows. So rolling through the
+// chord hands Select and Start to the host, and Steam opens its on-screen
+// keyboard and an app switcher behind the overlay -- every time.
+//
+// ⛔ And it cannot be fixed on the TV's Moonlight path: a bridged pad does not
+// use that path at all (measured 2026-09-18, build 367 changed nothing).
+//
+// ⭐ THE RULE (rhoquinn8217): while BOTH BUMPERS are held, Select and Start are
+// the chord's and are cleared from the report before Windows sees it. Nobody
+// holds LB and RB together and then reaches for Start in a game.
+// ⚠️ It does mean the chord is pressed BUMPERS FIRST. Press Select before the
+// bumpers are down and the host has already had it.
+//
+// ⚠️ XBOX ONLY, on purpose (rhoquinn8217, 2026-09-18: "only on xbox controller
+// it seems"). The DualSense and the DS4 reach the TV by hidraw and ARE grabbed,
+// so their reports do not go both ways -- and no one has seen this on them. To
+// extend it, give the layout the same treatment and test it, rather than
+// widening the name check on a hunch.
+inline bool chord_gate_apply(const Layout &lay, uint8_t *data, size_t len)
+{
+    if (data == nullptr || lay.name == nullptr) return false;
+    if (std::strcmp(lay.name, "xbox") != 0) return false;
+
+    const BitSpot &lb = lay.spots[kBtnL1];
+    const BitSpot &rb = lay.spots[kBtnR1];
+    const BitSpot &select = lay.spots[kBtnSelect];
+    const BitSpot &start = lay.spots[kBtnStart];
+    if (lb.how != kSpotBit || rb.how != kSpotBit ||
+        select.how != kSpotBit || start.how != kSpotBit) {
+        return false;
+    }
+    if (len <= static_cast<size_t>(lb.byteIndex) || len <= static_cast<size_t>(rb.byteIndex) ||
+        len <= static_cast<size_t>(select.byteIndex) || len <= static_cast<size_t>(start.byteIndex)) {
+        return false;
+    }
+    const bool bothBumpers = (data[lb.byteIndex] & lb.mask) != 0 &&
+                             (data[rb.byteIndex] & rb.mask) != 0;
+    if (!bothBumpers) return false;
+
+    const uint8_t hadSelect = static_cast<uint8_t>(data[select.byteIndex] & select.mask);
+    const uint8_t hadStart = static_cast<uint8_t>(data[start.byteIndex] & start.mask);
+    if (hadSelect == 0 && hadStart == 0) return false;
+
+    data[select.byteIndex] = static_cast<uint8_t>(data[select.byteIndex] & ~select.mask);
+    data[start.byteIndex] = static_cast<uint8_t>(data[start.byteIndex] & ~start.mask);
+    return true;
+}
+
 // What the pad says about its own charge, or nothing.
 //
 // ⭐ The scaling is the kernel drivers': a level of N means N*10+5 percent,

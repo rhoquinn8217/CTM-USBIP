@@ -897,5 +897,57 @@ int run_button_layout_tests()
         CTM_CHECK(!r.known);
     }
 
+    section("button layout: the overlay chord is taken out of a bridged Xbox report");
+    {
+        using namespace ctm_rebind;
+        const Layout *xbox = layout_for("xbox");
+        const Layout *ds5 = layout_for("ds5");
+
+        // A GIP 0x20 report: a 4-byte header, then buttons at [4] and [5].
+        uint8_t r[48] = {0x20, 0x00, 0x11, 0x2c, 0x00, 0x00};
+
+        // ⛔ Select and Start ALONE are not touched: that is an ordinary press.
+        r[4] = 0x08 | 0x04;            // View and Menu
+        r[5] = 0x00;                   // no bumpers
+        CTM_CHECK(!chord_gate_apply(*xbox, r, sizeof(r)));
+        CTM_CHECK_EQ(static_cast<int>(r[4]), 0x0c);
+
+        // ⭐ With BOTH bumpers held they belong to the chord, and they go.
+        r[4] = 0x08 | 0x04;
+        r[5] = 0x10 | 0x20;            // LB and RB
+        CTM_CHECK(chord_gate_apply(*xbox, r, sizeof(r)));
+        CTM_CHECK_EQ(static_cast<int>(r[4]), 0x00);
+        // ⚠️ The bumpers themselves are LEFT ALONE: the game still gets them.
+        CTM_CHECK_EQ(static_cast<int>(r[5]), 0x30);
+
+        // One bumper is not the chord.
+        r[4] = 0x08; r[5] = 0x10;
+        CTM_CHECK(!chord_gate_apply(*xbox, r, sizeof(r)));
+        CTM_CHECK_EQ(static_cast<int>(r[4]), 0x08);
+
+        // ⛔ Face buttons and the d-pad are never touched, even mid-chord.
+        r[4] = 0x10 | 0x08;            // A, and View
+        r[5] = 0x10 | 0x20 | 0x01;     // both bumpers, and d-pad up
+        CTM_CHECK(chord_gate_apply(*xbox, r, sizeof(r)));
+        CTM_CHECK_EQ(static_cast<int>(r[4]), 0x10);
+        CTM_CHECK_EQ(static_cast<int>(r[5]), 0x31);
+
+        // ⓘ Nothing is reported as gated when there was nothing to clear.
+        r[4] = 0x00; r[5] = 0x30;
+        CTM_CHECK(!chord_gate_apply(*xbox, r, sizeof(r)));
+
+        // ⛔ A DualSense is left alone. It reaches the TV by hidraw and IS
+        // grabbed, so its reports do not go both ways, and this has never been
+        // seen on one.
+        uint8_t ds[64] = {0x01};
+        ds[9] = 0x01 | 0x02 | 0x10 | 0x20;   // L1, R1, create, options
+        CTM_CHECK(!chord_gate_apply(*ds5, ds, sizeof(ds)));
+        CTM_CHECK_EQ(static_cast<int>(ds[9]), 0x33);
+
+        // ⛔ A report too short to hold those bytes is left alone.
+        CTM_CHECK(!chord_gate_apply(*xbox, r, 4));
+        CTM_CHECK(!chord_gate_apply(*xbox, nullptr, sizeof(r)));
+    }
+
     return 0;
 }

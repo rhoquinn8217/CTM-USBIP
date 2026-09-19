@@ -162,6 +162,14 @@ void ctm_battery_sample(const void *deviceKey,
                         const std::vector<unsigned char> &descriptor,
                         const uint8_t *data, size_t len);
 void ctm_battery_forget(const void *deviceKey);
+
+// ⭐ The TV's overlay chord: Select and Start are dropped from a bridged Xbox
+// pad's report while both bumpers are held, so the host never acts on a chord
+// meant for the TV (T-216).
+void ctm_chord_gate_apply(const void *deviceKey,
+                          const std::vector<unsigned char> &descriptor,
+                          uint8_t *data, size_t len);
+void ctm_chord_gate_forget(const void *deviceKey);
 // ⓘ rebind.inl fires the on-screen keyboard toggle, and osk.inl is included
 // after it because it reads config through the same accessors.
 // ⓘ `button` is the standard index that fired it, so an overlay keyboard can be
@@ -215,6 +223,7 @@ static bool ctm_window_steering(const void *deviceKey) { return window_move::ste
 #include "input/trigger_click.inl" // the trigger as a mouse click; needs the mouse device and the gyro gate
 #include "input/stick_mouse.inl"   // stick cursor; needs the gyro gate and mailbox
 #include "input/battery.inl"    // the pad's charge for the settings page; needs device_input_pad_for
+#include "input/chord_gate.inl"  // the TV's overlay chord, kept from the host; needs device_input_pad_for
 // ⛔ AFTER the three mouse hooks, whose sources it blanks -- see the note in
 // the file. It must not run before they have read the motion.
 #include "input/mouse_exclusive.inl"  // keep the game out of what drives the mouse
