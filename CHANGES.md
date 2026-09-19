@@ -79,6 +79,7 @@ carry it; upstream's own history is unchanged.
 | 2026-09-18 | The pad's own charge, read off the report the listener already receives, and shown as a battery beside the controller's name in all three views and as a column in both device tables. Offsets measured on the pads, not taken from a header; a pad with no battery byte, or in a fault state, shows nothing at all rather than zero | `929760c`, `88bc398`, `4e17c9b`, `a69278f`, `01f8d67`, `2823912`, `73f298c` |
 | 2026-09-18 | The settings page talks to the port it was SERVED from instead of a hardcoded 48055, so a listener on any other REST port no longer looks dead while answering | `98046e8` |
 | 2026-09-18 | The tray icon is a controller rather than a keyboard, and a click opens a menu -- settings or the keyboard -- instead of opening the keyboard outright | `cfefe25`, `c211ae4` |
+| 2026-09-18 | The TV's overlay chord is taken out of a bridged Xbox pad's report: while both bumpers are held, Select and Start are cleared before Windows is served them, so the chord opens the TV's overlay without Steam opening its keyboard behind it. The bumpers, the face buttons and the d-pad are untouched | `0063ce8` |
 
 ## Files changed
 
@@ -89,7 +90,7 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
 ```
  .gitattributes                                |   48 +
  .gitignore                                    |   30 +-
- CHANGES.md                                    |  202 ++
+ CHANGES.md                                    |  203 ++
  LINK                                          |    0
  README.md                                     |   18 +
  app/ctm-usbip-tests.vcxproj                   |  105 +
@@ -146,7 +147,8 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  src/config/config_watcher.inl                 |  170 ++
  src/config/device_config.inl                  |  218 ++
  src/input/battery.inl                         |  105 +
- src/input/button_layout.inl                   |  866 ++++++
+ src/input/button_layout.inl                   |  919 ++++++
+ src/input/chord_gate.inl                      |   66 +
  src/input/gyro_calibration.inl                |  168 ++
  src/input/gyro_calibration_fetch.inl          |   99 +
  src/input/gyro_hold.inl                       |   48 +
@@ -164,11 +166,11 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  src/input/trigger_effect.inl                  |  578 ++++
  src/log/capped_log.inl                        |  117 +
  src/log/device_log.inl                        |  233 ++
- src/main.cpp                                  |  416 ++-
+ src/main.cpp                                  |  425 ++-
  src/map/runtime.cpp                           |   68 +-
- src/usbip/device.inl                          |  611 +++-
+ src/usbip/device.inl                          |  619 +++-
  src/usbip/server.inl                          |   55 +-
- tests/button_layout_test.cpp                  |  901 ++++++
+ tests/button_layout_test.cpp                  |  953 +++++++
  tests/capped_log_test.cpp                     |  140 +
  tests/config_store_test.cpp                   |  777 +++++
  tests/device_config_test.cpp                  |  521 ++++
@@ -199,5 +201,5 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  tools/device-config-panel.ps1                 |  303 ++
  tools/osk-mockups.py                          |  103 +
  tools/start-ctm-usbip.bat                     |   67 +
- 112 files changed, 34509 insertions(+), 145 deletions(-)
+ 113 files changed, 34698 insertions(+), 145 deletions(-)
 ```
