@@ -140,15 +140,20 @@ enum Face { FACE_SUB = 0, FACE_COMPACT = 1, FACE_FULL = 2 };
 inline std::atomic_int g_face{FACE_COMPACT};
 
 // ⓘ How many columns each face is, which is what the size arithmetic needs.
+//
+// ⭐ NAMED, because the tab rows have to span exactly these and a static_assert
+// below checks that they do. Two copies of a width is how a row ends ragged.
+// ⓘ 16.5 for FULL since the navigation column was added (2026-09-04): home,
+// end, page up, page down and close down the right-hand side, which is what
+// makes FULL a different keyboard rather than COMPACT plus three keys.
+inline constexpr float kColsSub = 11.0f, kColsCompact = 14.0f, kColsFull = 16.5f;
+
 inline float face_cols()
 {
     switch (g_face.load()) {
-    case FACE_SUB:  return 11.0f;
-    // ⓘ 16.5 since the navigation column was added (2026-09-04): home, end,
-    // page up, page down and close down the right-hand side, which is what
-    // makes FULL a different keyboard rather than COMPACT plus three keys.
-    case FACE_FULL: return 16.5f;
-    default:        return 14.0f;
+    case FACE_SUB:  return kColsSub;
+    case FACE_FULL: return kColsFull;
+    default:        return kColsCompact;
     }
 }
 
@@ -249,7 +254,7 @@ enum KeyKind { KK_NORMAL, KK_MOD, KK_FN, KK_ACTION, KK_ESC, KK_SPACER,
 // them past every usage we use.
 inline const uint8_t ACT_MOVE = 200, ACT_CLOSE = 201, ACT_STEAM = 202,
                      ACT_PASTE = 203, ACT_COPY = 204, ACT_SIZE = 205,
-                     ACT_LAYOUT = 206;
+                     ACT_LAYOUT = 206, ACT_CONFIG = 207;
 
 struct Key {
     const wchar_t *label;
@@ -405,16 +410,24 @@ inline const Key kSub4[] = {
     { L"\u2192", nullptr, 0x4f, 0, KK_NORMAL, 1.0f },
     { L"\u2328\u2938", nullptr, ACT_CLOSE, 0, KK_ACTION, 1.0f },
 };
-inline const Key kTabSub[] = {
-    { L"", nullptr, 0, 0, KK_SPACER, 8.34f },
+inline constexpr Key kTabSub[] = {
+    { L"", nullptr, 0, 0, KK_SPACER, 7.67f },
+    // ⭐ THE WAY OUT TO THE SETTINGS (T-225, was T-164). Leftmost of the
+    // group on purpose: the three beside it reshape THIS keyboard and the x
+    // shuts it, while this one leaves for somewhere else.
+    { L"\u2699", nullptr, ACT_CONFIG, 0, KK_ACTION, 0.67f },
     { L"\u2328", nullptr, ACT_LAYOUT, 0, KK_ACTION, 0.67f },
     { L"\u21f3", nullptr, ACT_MOVE,   0, KK_ACTION, 0.67f },
     { L"\u2197", nullptr, ACT_SIZE,   0, KK_ACTION, 0.66f },
     { L"x", nullptr, ACT_CLOSE, 0, KK_ACTION, 0.66f },
 };
 
-inline const Key kTabCompact[] = {
-    { L"", nullptr, 0, 0, KK_SPACER, 11.34f },
+inline constexpr Key kTabCompact[] = {
+    { L"", nullptr, 0, 0, KK_SPACER, 10.67f },
+    // ⭐ THE WAY OUT TO THE SETTINGS (T-225, was T-164). Leftmost of the
+    // group on purpose: the three beside it reshape THIS keyboard and the x
+    // shuts it, while this one leaves for somewhere else.
+    { L"\u2699", nullptr, ACT_CONFIG, 0, KK_ACTION, 0.67f },
     { L"\u2328", nullptr, ACT_LAYOUT, 0, KK_ACTION, 0.67f },
     { L"\u21f3", nullptr, ACT_MOVE,   0, KK_ACTION, 0.67f },
     { L"\u2197", nullptr, ACT_SIZE,   0, KK_ACTION, 0.66f },
@@ -426,12 +439,19 @@ inline const Key kTabCompact[] = {
 };
 
 // ⓘ One per face, because the grab area has to fill whatever width that face
-// is -- 14 units for Compact, 15.5 for Full. Only the spacer differs.
-inline const Key kTabFull[] = {
+// is -- 11 units for Sub, 14 for Compact, 16.5 for Full (face_cols()). Only the
+// spacer differs, and it is what the five action keys' 3.33 is subtracted from.
+// ⚠️ This said 15.5 for Full until 2026-09-19, after the navigation column
+// widened that face. A stale number HERE is what makes a row end ragged.
+inline constexpr Key kTabFull[] = {
     // ⓘ 13.84 since the navigation column widened this face to 16.5 -- the tab
     // must span the same width as the keys or the row ends ragged. ⭐ The
     // extra column lands in the spacer, so the legend gains room too.
-    { L"", nullptr, 0, 0, KK_SPACER, 13.84f },
+    { L"", nullptr, 0, 0, KK_SPACER, 13.17f },
+    // ⭐ THE WAY OUT TO THE SETTINGS (T-225, was T-164). Leftmost of the
+    // group on purpose: the three beside it reshape THIS keyboard and the x
+    // shuts it, while this one leaves for somewhere else.
+    { L"\u2699", nullptr, ACT_CONFIG, 0, KK_ACTION, 0.67f },
     { L"\u2328", nullptr, ACT_LAYOUT, 0, KK_ACTION, 0.67f },
     { L"\u21f3", nullptr, ACT_MOVE,   0, KK_ACTION, 0.67f },
     { L"\u2197", nullptr, ACT_SIZE,   0, KK_ACTION, 0.66f },
@@ -441,6 +461,29 @@ inline const Key kTabFull[] = {
     // something is not redundancy worth removing.
     { L"x", nullptr, ACT_CLOSE, 0, KK_ACTION, 0.66f },
 };
+
+// ⛔⛔ A TAB THAT DOES NOT SPAN ITS FACE ENDS RAGGED, and the way that happens
+// is arithmetic in a comment going stale -- which it did, unnoticed, when the
+// navigation column widened FULL and the note beside these rows still said
+// 15.5. ➡️ So it is a BUILD ERROR now rather than something to notice on a
+// television. Add a key to a tab and the spacer must pay for it here.
+//
+// ⓘ A tolerance because these are floats: 7.67 + 0.67 + 0.67 + 0.66 + 0.66 is
+// 11.0 in arithmetic and a hair off it in binary.
+template <size_t N>
+constexpr float tab_span(const Key (&row)[N])
+{
+    float total = 0.0f;
+    for (size_t i = 0; i < N; ++i) total += row[i].wide;
+    return total;
+}
+constexpr bool spans(float total, float cols)
+{
+    return total > cols - 0.01f && total < cols + 0.01f;
+}
+static_assert(spans(tab_span(kTabSub), kColsSub), "the Sub tab does not span its face");
+static_assert(spans(tab_span(kTabCompact), kColsCompact), "the Compact tab does not span its face");
+static_assert(spans(tab_span(kTabFull), kColsFull), "the Full tab does not span its face");
 
 inline const Key kCompact0[] = {
     { L"`", L"~", 0x35, 0, KK_NORMAL, 1.0f },
@@ -869,6 +912,21 @@ inline void press_current(const void *who)
             if (g_hwnd != nullptr) PostMessageW(g_hwnd, WM_CTM_RESIZE, 0, 0);
         }
         if (k.usage == ACT_LAYOUT) switch_face();
+        if (k.usage == ACT_CONFIG) {
+            // ⛔⛔ ON ITS OWN THREAD, NEVER THIS ONE. press_current is called
+            // from the REPORT RELAY thread (the cross-presses-the-highlighted-
+            // key path below), and ctm_chord_show_ui closes any open window,
+            // POLLS UP TO A SECOND for it to go, then launches a browser. The
+            // pad's reports would queue behind all of that and flush in a
+            // burst, which reads as every button firing over and over --
+            // measured in 2026-09-01 and the reason agent.inl detaches too.
+            //
+            // ⓘ Hidden first: the config window is what the person now wants
+            // to look at, and this keyboard swallows the pad while it is up.
+            hide();
+            std::thread([]() { ctm_chord_show_ui(std::string()); }).detach();
+            return;
+        }
         return;
     }
 
