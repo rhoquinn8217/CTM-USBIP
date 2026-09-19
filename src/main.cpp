@@ -268,17 +268,22 @@ void ui_view_remember_pos()
 void ctm_chord_show_ui(const std::string &ordinal)
 {
     ctm_rebind_set_gate_hold(false);
-    // ⓘ Before any close: the target is read when the new URL is built.
-    if (!ordinal.empty()) ctm_open_ui::open_on_tab(ordinal);
     // ⛔ ONE AT A TIME. Whoever takes the claim does the open; anyone who
-    // cannot has ALREADY LEFT ITS TARGET above, and the open in flight will
-    // use it. Two of these running at once close each other's windows -- see
-    // the note beside claim_open.
-    if (!ctm_open_ui::claim_open()) {
+    // cannot has ALREADY LEFT ITS TARGET in the same step, and the open in
+    // flight will use it if its URL is not built yet. ⓘ Before any close: the
+    // target is read when the new URL is built. Two of these running at once
+    // close each other's windows -- see the note beside claim_open_on.
+    if (!ctm_open_ui::claim_open_on(ordinal)) {
         device_log::session_w() << L"window open already in flight -- retargeted";
         return;
     }
-    struct Release { ~Release() { ctm_open_ui::release_open(); } } release;
+    // ⓘ Released here on every early way out; once a window is launched the
+    // claim is handed to raise_when_ready, which releases it when the window
+    // exists (see there: bridges close together each opened a window).
+    struct Release {
+        bool armed = true;
+        ~Release() { if (armed) ctm_open_ui::release_open(); }
+    } release;
 
     // ⛔ WAIT FOR THE CLOSE. Measured 2026-08-29: with a window already open,
     // WM_CLOSE was posted and open_new ran immediately -- so the old window was
@@ -308,7 +313,9 @@ void ctm_chord_show_ui(const std::string &ordinal)
     ctm_open_ui::open_new(g_rest_port);
     // ⭐ Focus is not visibility. A borderless game paints over a focused
     // window, so it has to be lifted in the DRAWING order as well.
-    ctm_open_ui::raise_when_ready();
+    // ⭐ And the claim goes with it, to be released once the window exists.
+    release.armed = false;
+    ctm_open_ui::raise_when_ready(true);
 
 }
 } // namespace
