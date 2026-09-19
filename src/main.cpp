@@ -203,6 +203,7 @@ void ctm_rebind_ensure_keyboard_started();
 #include "input/gyro_calibration_fetch.inl"   // needs CtmBackend; agent.inl calls it
 #include "app/nickname.inl"      // controller nicknames; agent.inl assigns one per session
 #include "app/same_controller.inl"   // which older session a new bridge retires; agent.inl asks it
+#include "app/same_device.inl"       // which sessions are parts of ONE device; they share a nickname
 #include "app/agent.inl"
 #include "input/mouse_device.inl"      // needs g_agent_usbip_server, find_relative_asset, run_usbip_attach
 #include "input/keyboard_device.inl"   // same dependencies as the mouse above

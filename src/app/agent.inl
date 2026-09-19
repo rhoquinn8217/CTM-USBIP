@@ -380,6 +380,80 @@ static void bridge_session_worker(AgentBridgeSession *session)
         }
     }
 
+    // ⭐ ONE DEVICE, ONE NICKNAME (T-194). A dongle arrives as two or three
+    // separate bridges and each was named on its own: "Bean" and "Luna" for
+    // the two halves of one RONGYUAN dongle, measured 2026-09-19. The nickname
+    // is the word said out loud, so one device has to answer to one of them.
+    //
+    // ⓘ HERE, NOT AT SESSION CREATION, because this is the first moment the
+    // device has a name at all: the product string and the serial both arrive
+    // with the TV's HELLO, about a second after the session exists. So a
+    // session is born with a name of its own and adopts its siblings' name if
+    // it turns out to have siblings. ⚠️ The two disagree for that second, the
+    // same second in which the panel shows no serial and no product either.
+    //
+    // ⛔ OUTSIDE session->mutex, exactly like the retire block above: taking
+    // g_agent_sessions_mutex while holding a session mutex inverts the lock
+    // order the rest of this file uses.
+    {
+        const std::string myProduct = session->device ? session->device->product_name()
+                                                      : std::string();
+        std::string adopted;
+        if (!myProduct.empty()) {
+            const std::string mySerial = session->device ? session->device->physical_serial()
+                                                         : std::string();
+            const uint16_t myVendorId = session->device ? session->device->vendor_id() : 0;
+            const uint16_t myProductId = session->device ? session->device->product_id() : 0;
+            std::lock_guard<std::mutex> guard(g_agent_sessions_mutex);
+            for (const auto &other : g_agent_sessions) {
+                if (other->busId == session->busId) continue;
+                if (!other->device) continue;
+                std::lock_guard<std::mutex> otherLock(other->mutex);
+                if (other->nickname.empty()) continue;
+                // ⓘ Read live from the other device rather than from its
+                // session fields: physicalSerial is copied in a moment further
+                // down its own worker, so a sibling can have answered HELLO
+                // while its copy is still empty.
+                // ⭐ THE FIRST MATCH WINS, AND THAT IS WHY THE ANSWER IS
+                // STABLE. g_agent_sessions is in creation order, so the first
+                // sibling found is the OLDEST live part -- the one part that
+                // has nothing older to adopt from and therefore keeps the name
+                // it was minted with. Every other part reaches the same one,
+                // whatever order the parts happen to resolve in. ⛔ Taking the
+                // nearest match instead would let two parts resolving in the
+                // same millisecond adopt from each other and diverge.
+                if (same_device::matches(myVendorId, myProductId, mySerial, myProduct,
+                                         other->device->vendor_id(),
+                                         other->device->product_id(),
+                                         other->device->physical_serial(),
+                                         other->device->product_name())) {
+                    adopted = other->nickname;
+                    break;
+                }
+            }
+        }
+        if (!adopted.empty()) {
+            std::string ordinalNow;
+            std::string previous;
+            {
+                std::lock_guard<std::mutex> lock(session->mutex);
+                ordinalNow = session->ordinal;
+                previous = session->nickname;
+                session->nickname = adopted;
+            }
+            if (previous != adopted) {
+                // ⭐ Both names on the line: the one it was announced under at
+                // "agent bridge starting" a second ago, and the one everything
+                // after this says. Without the old one that first line looks
+                // like a session that never existed.
+                device_log::session(device_log::msg()
+                    << ordinalNow << " adopts the nickname " << adopted
+                    << " (was " << previous << ") -- another part of \""
+                    << myProduct << "\" is already bridged");
+            }
+        }
+    }
+
     // Per-controller config: pick up the physical serial, then auto-link if a
     // config claims it. A manual link made later overrides this for the life of
     // the session -- auto_link decides the starting point, not the whole story.
