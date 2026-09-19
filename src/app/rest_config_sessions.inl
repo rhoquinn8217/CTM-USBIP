@@ -12,6 +12,69 @@
 
 #pragma once
 
+// ⭐⭐ WHICH SECTIONS THIS DEVICE SHOULD BE OFFERED (T-227).
+//
+// A setting a pad has no hardware for is worse than a missing one: it reads as
+// broken when it does nothing. ⓘ Nothing is DETECTED here -- the layout
+// already carries the answer, and this only reads it.
+//
+// ⚠️ WHEN T-203 LANDS, AUDIO STOPS BEING DUALSENSE-ONLY. A DS4 has a speaker
+// and a headset jack too; its audio simply is not carried yet. ➡️ The audio
+// line below is the ONE place to change, and it is written as a kind test
+// rather than folded into the layout so it is easy to find.
+static void rest_fill_capabilities(RestDeviceView *view)
+{
+    if (view == nullptr) return;
+    const std::string k = config_store::settings_kind_for(view->kind);
+    const bool isDs5 = (k == "ds5" || k == "ds5_edge");
+
+    // Audio and the three rumble gains are patched by ds5_output_overrides.inl,
+    // and every override there begins `if (data[0] != 0x02) return;` -- the
+    // DualSense's wired report id. On any other pad they do nothing at all.
+    view->hasAudio = isDs5;
+    view->hasRumbleGains = isDs5;
+
+    // ⚠️ A WIRED XBOX PAD ARRIVES AS "xpad", WHICH settings_kind_for() DOES NOT
+    // MAP -- it lists only the kinds the TV sends for a config, and xpad is not
+    // among them. So fall back to the RAW kind for the layout, or a cabled Xbox
+    // pad would be offered gyro and a touchpad it has never had.
+    // ⓘ Harmless if xpad never reaches here: layout_for() simply answers the
+    // same nullptr it would have anyway.
+    const ctm_rebind::Layout *lay = ctm_rebind::layout_for(k.c_str());
+    if (lay == nullptr && (view->kind == "xpad" || view->kind == "xbox")) {
+        lay = ctm_rebind::layout_for("xbox");
+    }
+    if (lay == nullptr) {
+        // ⚠️ An unknown pad keeps everything. See the note on the defaults.
+        view->hasTouchpad = true;
+        view->hasGyro = true;
+        return;
+    }
+    view->hasTouchpad = lay->touch.present;
+
+    // ⛔⛔ THE XBOX LAYOUT NEVER GETS GYRO, WHOEVER MADE THE PAD.
+    //
+    // ⚠️ An earlier version trusted the layout's "no" only for vendor 0x045e
+    // and kept the section for anyone else, reasoning that a third-party pad
+    // emulating an Xbox pad might really have a gyro. ⛔ It might -- and we
+    // still could not carry it.
+    //
+    // ⭐ CHECKED AGAINST THE WIDER WORLD 2026-09-19, at rhoquinn8217's asking:
+    // **XInput has no slots for gyroscope data at all**, so a pad in Xbox mode
+    // strips it before anything downstream sees it. Where gyro does work on
+    // such pads, software reads the pad's RAW HID stream instead -- SDL carries
+    // per-device code for the GameSir G7 Pro 8K to do exactly that -- or the
+    // pad is switched out of Xbox mode entirely, into DirectInput over
+    // Bluetooth or a Switch Pro mode.
+    //
+    // ➡️ So on the reports WE relay there is no gyro to offer, and showing the
+    // section would promise a setting that cannot work -- the exact fault this
+    // file exists to remove. ⓘ The route for someone who wants that pad's gyro
+    // is its OTHER mode, where it arrives as a `hid` device with its own
+    // descriptor and then needs a button table: 🔗 T-196's Blocker C.
+    view->hasGyro = lay->motion.present;
+}
+
 static std::vector<RestDeviceView> rest_collect_devices()
 {
     std::vector<RestDeviceView> out;
@@ -44,6 +107,7 @@ static std::vector<RestDeviceView> rest_collect_devices()
                 view.batteryPercent = battery.percent;
                 view.batteryState = ctm_battery::state_word(battery.state);
             }
+            rest_fill_capabilities(&view);
         }
         out.push_back(std::move(view));
     }

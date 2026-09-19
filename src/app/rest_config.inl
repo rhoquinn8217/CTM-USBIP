@@ -33,6 +33,21 @@ struct RestDeviceView {
     // (T-195). A kind with nothing to report carries no field at all.
     int         batteryPercent = -1;   // 0 to 100, or -1
     std::string batteryState;          // "charging", "full", "discharging" or ""
+    // ⭐⭐ WHAT THIS DEVICE CAN ACTUALLY USE (T-227). A setting it has no
+    // hardware for is worse than absent: it reads as broken when it does
+    // nothing. The page drops the whole section rather than greying rows.
+    //
+    // ⓘ Read from the pad's LAYOUT, which already carries the answer --
+    // `motion.present` and `touch.present` in button_layout.inl -- so nothing
+    // new is being detected here.
+    //
+    // ⚠️ DEFAULTS ARE ALL TRUE, and deliberately: a device whose layout is
+    // unknown gets every section. A false hide costs someone a feature they
+    // own and cannot find; a false show costs one dead row.
+    bool hasAudio = true;      // the pad speaker, the headset jack, echo cancel
+    bool hasRumbleGains = true; // the three gains, patched only into a DualSense report
+    bool hasTouchpad = true;
+    bool hasGyro = true;
 };
 static std::vector<RestDeviceView> rest_collect_devices();
 static bool rest_link_device(const std::string &ordinal, const std::string &configName,
@@ -67,6 +82,13 @@ static std::string rest_device_json(const RestDeviceView &d)
         out += ",\"battery_percent\":" + std::to_string(d.batteryPercent);
         out += ",\"battery_state\":\"" + rest_json_escape(d.batteryState) + "\"";
     }
+    // ⭐ T-227: what this device can use, so the page can drop a section it has
+    // no hardware for. ⓘ Always written, never omitted -- a MISSING key would
+    // have to mean "true" for older pages and "unknown" for new ones at once.
+    out += ",\"has_audio\":" + std::string(d.hasAudio ? "true" : "false");
+    out += ",\"has_rumble_gains\":" + std::string(d.hasRumbleGains ? "true" : "false");
+    out += ",\"has_touchpad\":" + std::string(d.hasTouchpad ? "true" : "false");
+    out += ",\"has_gyro\":" + std::string(d.hasGyro ? "true" : "false");
     out += ",\"supports_config\":" +
            std::string(config_store::kind_supports_config(d.kind) ? "true" : "false") + "}";
     return out;
