@@ -4585,10 +4585,24 @@ function gpMove(delta) {
 // zoom or a different DPI gives a different number, and a hardcoded one would
 // silently size the box wrong rather than fail.
 function pickerExpand(el) {
-  // ⓘ Quick still STEPS in place: its window is 0.185 x 0.150 of the screen
-  // against Simple's 0.45 x 0.45, so there is no room to grow into.
-  if (QUICK) { el.size = 1; return; }
-
+  // ⛔⛔ QUICK EXPANDS TOO, AND `size = 1` WAS A BUG, NOT A COMPROMISE
+  // (rhoquinn8217, 2026-09-20). This used to return early for Quick and leave
+  // the box at one row, on the grounds that a 0.185 x 0.150 window has no room
+  // to grow into. Two things were wrong with that:
+  //
+  //   ⛔ A `<select size=1>` IS STILL A DROPDOWN. The second press is the one
+  //     deliberately left un-prevented so the mouse can pick a row -- and with
+  //     no listbox to pick from, the browser popped its own OS list instead.
+  //     Reproduced exactly as reported: click, yellow outline; click again,
+  //     "drop down opens and closes right away" (the popup opens on mousedown
+  //     and pickerClickEnd collapses on the click); click and hold, it "stays
+  //     open until I release". ✅ A listbox has no popup to open, so
+  //     expanding here is the fix for the bug as well as the feature.
+  //
+  //   ⛔ And there IS room: the rows are measured, not assumed, so a small
+  //     window simply gets fewer of them.
+  //
+  // ➡️ Hence the floor of 2 below. One row is a dropdown; two is a list.
   var rect = el.getBoundingClientRect();
 
   // Two sizes and one subtraction give the row height and the chrome around it.
@@ -4599,8 +4613,12 @@ function pickerExpand(el) {
 
   var margin = 10;                       // breathing room at both window edges
   var avail = window.innerHeight - 2 * margin;
-  var rows = Math.max(1, Math.min(el.options.length,
-                                  Math.floor((avail - chrome) / rowH)));
+  // ⚠️ FLOOR OF 2, CEILING OF THE OPTION COUNT. Never 1: that is a dropdown
+  // and brings the native popup back. A window too small for two rows gets two
+  // anyway and overflows slightly, which is still better than a popup the pad
+  // cannot drive.
+  var fits = Math.floor((avail - chrome) / rowH);
+  var rows = Math.min(el.options.length, Math.max(2, fits));
   el.size = rows;
 
   var h = rows * rowH + chrome;
@@ -4613,6 +4631,20 @@ function pickerExpand(el) {
   el.style.top = top + 'px';
   el.style.left = Math.round(rect.left) + 'px';
   el.style.width = Math.round(rect.width) + 'px';
+
+  // ⛔⛔ SHOW THE CONFIG YOU ARE ON. A listbox opens at scrollTop 0, so once
+  // the list is longer than the box the current config is simply not on
+  // screen -- and the first thing you see is a list that looks like it has
+  // forgotten what you picked. ⓘ It never showed in Simple, where all nine
+  // rows fitted; Quick fits four, which is what made it visible (2026-09-20).
+  // ➡️ Put it in the MIDDLE of what is shown, so there are neighbours above
+  // and below to move to, and clamp so the last page does not scroll past the
+  // end.
+  if (el.selectedIndex >= 0 && rows < el.options.length) {
+    var want = (el.selectedIndex - Math.floor((rows - 1) / 2)) * rowH;
+    var most = (el.options.length - rows) * rowH;
+    el.scrollTop = Math.max(0, Math.min(want, most));
+  }
   // ⚠️ Above the sticky header (z-index 40 there) and below the modal
   // overlays (99), which must still cover it.
   el.style.zIndex = '60';
@@ -4669,9 +4701,10 @@ function gpActivate() {
     // postcard reasoning was measured on Quick and never applied to Simple --
     // which makes this the correction it looks like, not a preference.
     //
-    // ⭐ As big as the window allows, growing up as well as down. ⓘ A row
-    // count used to live here -- 8, then 5 -- and both were a compromise with
-    // what the box would shove off the bottom. See pickerExpand.
+    // ⭐ As big as the window allows, growing up as well as down, in Quick as
+    // well as Simple. ⓘ A row count used to live here -- 8, then 5 -- and both
+    // were a compromise with what the box would shove off the bottom. See
+    // pickerExpand.
     pickerExpand(el);
     // ⛔ Nothing to scroll to once it is fixed-positioned: it is ON the window
     // by construction, and scrollIntoView would move the page beneath it for
@@ -6232,7 +6265,15 @@ function pickerActivate(ev, sel) {
   // holds the OLD index, so preventing it kills the selection, and committing
   // there commits the value that was already there. The box shut with nothing
   // chosen, every time.
-  if (GP_SELECTING === sel) return;
+  if (GP_SELECTING === sel) {
+    // ⚠️ BACKSTOP. Letting the browser have this press is only safe once the
+    // box is a LISTBOX; at one row it is still a dropdown and this is exactly
+    // where the native popup got in. pickerExpand's floor of 2 should make
+    // this unreachable -- one option in the list would do it -- and it is
+    // cheap insurance against the bug coming back by another route.
+    if (sel.size <= 1) ev.preventDefault();
+    return;
+  }
 
   ev.preventDefault();
   GP_SELECTING = sel;
