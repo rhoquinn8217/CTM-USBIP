@@ -5375,13 +5375,27 @@ function compactMove(dx, dy) {
     var from = cur.getBoundingClientRect();
     var wantX = from.left + from.width / 2;
     r = Math.max(0, Math.min(rows.length - 1, r + dy));
-    var best = 0, bestGap = Infinity;
-    rows[r].forEach(function (e, i) {
-      var b = e.getBoundingClientRect();
-      var gap = Math.abs(b.left + b.width / 2 - wantX);
-      if (gap < bestGap) { bestGap = gap; best = i; }
-    });
-    c = best;
+
+    // ARRIVING AT THE SELECTOR ROW MEANS THE CONFIG PICKER (rhoquinn8217,
+    // 2026-09-20: *"pressing up from the mode selector should land you on the
+    // config selector in quick mode"*). Nearest-centre alone did not do it:
+    // Quick has no New/Edit row, so up from the Mode picker goes straight to
+    // this row, and the Mode picker sits far right -- the nearest centre there
+    // is the auto-link button, not the picker.
+    // The row exists FOR the picker; unlink and auto are modifiers on it, so
+    // landing on either as you pass through is a stop nobody asked for.
+    // In Simple this also changes up-from-New, which used to reach unlink.
+    var pick = rows[r].filter(function (e) { return e.id === 'cpick'; })[0];
+    if (pick) { c = rows[r].indexOf(pick); }
+    else {
+      var best = 0, bestGap = Infinity;
+      rows[r].forEach(function (e, i) {
+        var b = e.getBoundingClientRect();
+        var gap = Math.abs(b.left + b.width / 2 - wantX);
+        if (gap < bestGap) { bestGap = gap; best = i; }
+      });
+      c = best;
+    }
   } else if (dx) {
     var nc = c + dx;
     // NEW, EDIT, MODE AND CLOSE ARE ONE HORIZONTAL CHAIN (rhoquinn8217,
