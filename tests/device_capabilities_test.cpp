@@ -18,20 +18,23 @@ using namespace ctmtest;
 
 int run_device_capabilities_tests()
 {
-    section("capabilities: audio follows the speaker, not the DualSense");
+    section("capabilities: audio is DualSense only, until T-229 says otherwise");
     {
-        // ⭐ T-229 item A. Three audio settings TRAVEL to the TV rather than
-        // being patched into the outbound report here, so they reach a DS4 --
-        // and hiding the section for the sake of the two that do not took the
-        // working ones with it.
         CTM_CHECK(ctm_caps::has_audio_hardware("ds5"));
         CTM_CHECK(ctm_caps::has_audio_hardware("ds5_edge"));
-        CTM_CHECK(ctm_caps::has_audio_hardware("ds4"));
 
-        // ⛔ AND IT IS A LIST, NOT "anything not an Xbox pad". An Xbox pad has
-        // neither speaker nor headset jack; a generic pad has told us nothing
-        // about either, and a volume it cannot act on is the fault this rule
-        // exists to remove.
+        // ⛔⛔ A DS4 IS REFUSED, AND THIS ASSERTION IS REVERSED FROM THE ONE
+        // WRITTEN HOURS EARLIER. T-229 item A opened audio to a DS4 on the
+        // reasoning that three of the settings TRAVEL to the TV rather than
+        // being patched here -- which is true, and they did arrive. They just
+        // did not WORK: tested on a bridged DS4 2026-09-20, neither volume
+        // moved anything and the routing mode neither silenced a headset nor
+        // started the speaker.
+        // ➡️ Arriving is not acting. The section is hidden again until T-229
+        // finds out what those settings actually do on a DS4.
+        CTM_CHECK(!ctm_caps::has_audio_hardware("ds4"));
+
+        // ⛔ And the pads that never had the hardware at all.
         CTM_CHECK(!ctm_caps::has_audio_hardware("xbox"));
         CTM_CHECK(!ctm_caps::has_audio_hardware("hid"));
         CTM_CHECK(!ctm_caps::has_audio_hardware("puck"));
@@ -40,7 +43,7 @@ int run_device_capabilities_tests()
         CTM_CHECK(!ctm_caps::has_audio_hardware(""));
     }
 
-    section("capabilities: the rumble gains did NOT come with it");
+    section("capabilities: the rumble gains are the DualSense's alone");
     {
         // ⛔ The three gains are patched by ds5_output_overrides.inl, behind
         // `if (data[0] != 0x02) return;` -- the DualSense's wired report id.
@@ -62,7 +65,7 @@ int run_device_capabilities_tests()
         // safe direction, but silently offers a DS4 nothing.
         // ⓘ Asserted so the contract is written down where the functions are,
         // rather than only in a comment on the caller.
-        CTM_CHECK(!ctm_caps::has_audio_hardware("ds4_usb"));
+        CTM_CHECK(!ctm_caps::has_audio_hardware("ds4_usb"));   // and not a DS4 at all now
         CTM_CHECK(!ctm_caps::has_audio_hardware("ds5_usb"));
         CTM_CHECK(!ctm_caps::has_audio_hardware("ds5e_usb"));
         CTM_CHECK(!ctm_caps::is_dualsense("ds5_usb"));

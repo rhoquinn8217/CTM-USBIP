@@ -3298,6 +3298,21 @@ function inertReason(key, sessionKind) {
   return '';
 }
 
+// ⭐ SETTINGS THE PAGE DOES NOT DRAW. Two kinds: anything named *_debug, and
+// the handful listed here by name.
+//
+// ⓘ `trigger_probe` is listed rather than renamed (rhoquinn8217, 2026-09-20).
+// Renaming it to `trigger_probe_debug` would have hidden it for free, but the
+// key is READ IN TWO PLACES in the listener -- rebind.inl and
+// trigger_click.inl -- and anyone who has it set in a config file would have
+// lost it silently. Hiding the row leaves the key working for whoever edits
+// the file by hand, which is what a diagnostic is for.
+var HIDDEN_SETTINGS = { trigger_probe: 1 };
+
+function hiddenSetting(key) {
+  return HIDDEN_SETTINGS[key] === 1 || /_debug(_|$)/.test(key);
+}
+
 // ⭐ The button index groups, from the table in rebind.inl. 34 button settings
 // in one list was a wall to scroll past; these are the three clusters a hand
 // actually reaches for.
@@ -3437,7 +3452,7 @@ function renderConfigEditor(hostId, configName, prefix, ordinal) {
     var shows = function(g) {
       if (SECTION_NEEDS[g] && !can(SECTION_NEEDS[g])) return false;
       return (groups[g] || []).some(function(meta) {
-        return !/_debug(_|$)/.test(meta.key);
+        return !hiddenSetting(meta.key);
       });
     };
     // ⭐ LEFT BEFORE RIGHT (rhoquinn8217, 2026-09-03). The tab strip is read as
@@ -3499,7 +3514,7 @@ function renderConfigEditor(hostId, configName, prefix, ordinal) {
         // ⛔ Debug keys are for someone reading the log, not for the person
         // adjusting a controller -- and every row is one more to scroll past.
         // Set them by hand in the config file when they are needed.
-        if (/_debug(_|$)/.test(meta.key)) return;
+        if (hiddenSetting(meta.key)) return;
         var val = current[meta.key];
         // ⚠️ Present-but-empty counts as UNMANAGED, not as a value. That is
         // what the agent does too: "" fails to parse and falls back, and an

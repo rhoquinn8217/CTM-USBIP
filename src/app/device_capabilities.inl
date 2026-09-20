@@ -26,11 +26,24 @@ inline bool is_dualsense(const std::string &settingsKind)
     return settingsKind == "ds5" || settingsKind == "ds5_edge";
 }
 
-// ⭐ A SPEAKER AND A HEADSET JACK. ⓘ Four of the six Audio settings reach a DS4
-// today: speaker volume, headset volume and the routing mode TRAVEL to the TV
-// rather than being patched into the outbound report here (agent.inl, the T-130
-// block), and audio_latency_ms travels the same way. None of those four is
-// gated on being a DualSense -- only on settings_kind_for() answering at all.
+// ⛔⛔ DUALSENSE ONLY AGAIN, AND DELIBERATELY SO (rhoquinn8217, 2026-09-20).
+// T-229 item A opened this to a DS4 on the reasoning below -- that four of the
+// six settings TRAVEL to the TV rather than being patched here, so they ought
+// to reach any pad. The reasoning is sound and the settings did arrive; they
+// just did not WORK. Tested on a bridged DS4 the same day:
+//   * speaker_volume and headset_volume changed neither the pad's speaker nor
+//     the headset
+//   * audio_output = speaker did not silence a connected headset, and did not
+//     start the speaker
+//   * whether "auto" is anything but default behaviour is still unknown
+// ➡️ So the section is hidden again until T-229 says what those three
+// actually do on a DS4. ⚠️ THIS LINE IS THE ONE TO CHANGE when it does --
+// the rest of the plumbing is already general.
+// ⓘ The original reasoning, kept because it is still true of the transport:
+// speaker volume, headset volume and the routing mode travel to the TV
+// (agent.inl, the T-130 block), and audio_latency_ms travels the same way.
+// None of those four is gated on being a DualSense -- only on
+// settings_kind_for() answering at all. Arriving is not the same as acting.
 //
 // ⛔ THE OTHER TWO ARE STILL DUALSENSE-ONLY, and the PAGE greys them rather
 // than this flag hiding the section: audio_gain rides the wired ISO path, whose
@@ -44,7 +57,7 @@ inline bool is_dualsense(const std::string &settingsKind)
 // nothing about either.
 inline bool has_audio_hardware(const std::string &settingsKind)
 {
-    return is_dualsense(settingsKind) || settingsKind == "ds4";
+    return is_dualsense(settingsKind);
 }
 
 // ⛔ The three gains are patched by ds5_output_overrides.inl, and every override
