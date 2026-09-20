@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.9 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.10 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,14 +21,29 @@
   tidy message about it.
 
   CHANGELOG
-    2.66.9  A DS4 is offered the Audio section. Four of its six settings
-            work on one -- the two volumes, the routing mode and the
-            latency -- because they travel to the TV rather than being
-            patched into a DualSense report here, and hiding the section
-            for the sake of the other two took all four with it. audio_gain
-            and force_echo_cancel are greyed with the reason beside them
-            (T-229 item A). Rumble is still DualSense-only: a DS4's motors
-            need their own patch path, which is item B.
+    2.66.10 A day of design work on the compact views, all of it
+            rhoquinn8217's asking and all of it tested on hardware.
+            The Mode picker is reachable by pad, sized like the Close
+            button beside it, and the two sit together in the bottom
+            right. It carries the mode identifier itself -- yellow, bold,
+            capitals, with the padlock -- so no legend names its mode any
+            more. It always opens UPWARD, by pad and by mouse, because it
+            lives in the footer and a native popup is not clipped by the
+            window. New, Edit, Mode and Close read as one sideways chain,
+            arriving at the selector row means the config picker, and
+            Circle in Simple goes TO the Close button rather than closing.
+            Compact opens at bottom centre, which is where reposition now
+            starts from. Create resizes the window and R3 is given back to
+            the gyro. Archiving the config you are editing closes it and
+            takes its section tabs with it. trigger_probe is hidden: it is
+            a diagnostic, and its own help says leave it off.
+            (T-233, T-232, T-229.)
+            ⛔ A DS4 is NOT offered the Audio section. It was, for a few
+            hours -- the settings travel to the TV rather than being
+            patched into a DualSense report, so they reach any pad -- and
+            then neither volume moved anything and the routing mode
+            neither silenced a headset nor started the speaker. Arriving
+            is not acting. Hidden again until T-229 says what they do.
     2.66.8  The preset list is renamed and gains one. gyro-to-mouse is
             gyro-to-mouse-always-on, L2-gyro-mouse-aiming is
             gyro-to-mouse-on-L2-aiming, and the new gyro-to-mouse-on-r3
