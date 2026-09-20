@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.4 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.5 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,18 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.5  Overview loses its config section, and the Editor tab gains
+            Archive beside Copy -- the only action there that belonged to a
+            config rather than a controller. The Editor's New button worked
+            at last: it returned on its second line whenever no controller
+            matched, so it offered no presets rather than too few. Two
+            things found while tracing it: the editor head was painted
+            below the empty-list check, so with no configs at all the one
+            tab that can create the first one had neither picker nor New
+            button; and the name suggestion read its box without a guard,
+            so it would have thrown on every config poll once the box left
+            with the section. Simple's config selector expands when chosen;
+            Quick's keeps stepping (T-232).
     2.66.4  RESET IS GONE, and Unlink is what replaces it (rhoquinn8217).
             The button and its column leave both device tables -- the
             controller tab's and Overview's -- and the question it asked
