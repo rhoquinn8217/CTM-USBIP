@@ -4420,7 +4420,16 @@ function gpCollect() {
   // ⭐ The footer zone, same trap as the dialog: only these buttons exist while
   // it is on, so ▲▼ cannot wander back into the page behind it.
   if (FOOTER_MODE) {
-    document.querySelectorAll('#gpbar button').forEach(function(e) { list.push(e); });
+    // SELECT AS WELL AS BUTTON. This gathered buttons only, so the Mode
+    // picker -- a <select> that T-233 put in this bar -- was not in the
+    // zone's focus list at all: Circle got you here and the d-pad could
+    // reach Close and nothing else (rhoquinn8217, 2026-09-20).
+    // THE THIRD PLACE WITH THIS EXACT SHAPE, and they were found one at a
+    // time: compactMove's '.cbar > button', this, and the selector row that
+    // had always said 'select, button' and was the clue for both. Anywhere a
+    // focus list is gathered by tag, a new control of a different tag is
+    // invisible to it and nothing errors.
+    document.querySelectorAll('#gpbar button, #gpbar select').forEach(function(e) { list.push(e); });
     GP_FOCUS = list;
     if (GP_INDEX >= list.length) GP_INDEX = 0;
     gpPaint();
@@ -4792,6 +4801,14 @@ function pickerExpand(el) {
   //     window simply gets fewer of them.
   //
   // ➡️ Hence the floor of 2 below. One row is a dropdown; two is a list.
+  // NOTHING TO OPEN. A list of one, or of none, has no choice in it -- and the
+  // floor of 2 below cannot save it, because Math.min against options.length
+  // pulls the row count straight back to 0. Caught 2026-09-20 on Advanced's
+  // picker, which the page declares EMPTY and paintModePickers fills later: it
+  // gave size 0 and left the box fixed-positioned 7 px past the window bottom.
+  // The size <= 1 backstop in pickerActivate stops the native popup here.
+  if (el.options.length < 2) { el.size = 1; return; }
+
   var rect = el.getBoundingClientRect();
 
   // Two sizes and one subtraction give the row height and the chrome around it.
