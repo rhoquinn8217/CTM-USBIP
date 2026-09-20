@@ -85,6 +85,12 @@ carry it; upstream's own history is unchanged.
 | 2026-09-19 | A game's own adaptive trigger effect no longer replaces the config's. The config's effect is sent once, when a config links, while a DualSense-aware game sends its own trigger blocks in every output report -- which took the trigger remaps with them, since a click remap fires on a break that was no longer there. Only a trigger the host is actually claiming is rewritten | `33bcede` |
 | 2026-09-19 | A gear on the on-screen keyboard's tab, on all three faces, opening the config window. The keyboard swallows the pad while it is up, so the window was unreachable without knowing a chord. Each tab row must now span its face exactly, checked at compile time rather than noticed on a television | `3b6383c` |
 | 2026-09-19 | An Unlink button wherever the config is shown, and Reset retired. Every view gets a button that sets the controller to no config: at the end of the row in the full view, left of the selector in the two compact ones, with the mark after its word. It asks nothing, because picking "(no config)" asks nothing either. The mark is U+1F6C7, a text-presentation glyph, so it takes the button's colour instead of being drawn as a red emoji. "Auto link no config" now means remove the auto link: the auto-link button used to be dead whenever no config was linked, which is exactly the state Unlink leaves behind, and with a claim standing it now offers to drop it. Reset and its column leave both device tables and its question goes with them | `b757c87`, `afe30dc`, `26d9545`, `03d3561`, `3f5c155` |
+| 2026-09-20 | The Editor tab owns every config action and Overview owns none. Its New button was dead rather than narrow -- it returned on its second line whenever no controller matched -- and Archive moved there because it was the only action in Overview's table belonging to a config rather than a controller. The config picker now opens as far as the window allows, upward as well as down, out of flow so nothing below it is pushed: a select with a size grows downward IN FLOW, which is why row counts of 8 and then 5 were both compromises with a layout rather than a size. The row under the mouse highlights, a mouse can pick -- preventDefault on mousedown had been killing the selection before it happened -- and in Quick it grows sideways too, measured against the longest name rather than guessed. Archiving the config you are editing closes it and takes its section tabs with it | `7e275b6`, `2265873`, `f2efa9c`, `6471aa8`, `e7999a8`, `cd1213e`, `b06930a`, `b1a0e18`, `db60748`, `f2a6c9a` |
+| 2026-09-20 | One Mode picker replaces the view buttons and locks the window to a layout, and a day of shaping it: reachable by pad, sized like the Close button beside it and paired with it in the bottom right, carrying the mode identifier itself in yellow capitals with a padlock so no legend names its mode any more. It always opens UPWARD, by pad and by mouse, because it sits in the footer and a native popup is not clipped by the window. New, Edit, Mode and Close read as one sideways chain and arriving at the selector row means the config picker. Circle in Simple goes TO the Close button rather than closing. A compact view opens at bottom centre, which is where reposition now starts from rather than stepping on from whichever place was nearest by x alone. Create resizes the window and R3 is given back to the gyro | `2730d5c`, `be236d8`, `532a2de`, `64a7129`, `28aa2b7`, `c5c0a97`, `113420d`, `0bad48f`, `c32d475`, `5dd1d94`, `281370c`, `d2ef3c6`, `f008327`, `d8ba7bb` |
+| 2026-09-20 | The adaptive trigger settings are greyed on a pad that has none, with the reason on the row. Eight keys rather than the Triggers section: press_at, the two timings and steady_cursor_pull all work on a DS4, because a trigger is an analogue axis whatever the pad | `de1710b`, `d4ad04a` |
+| 2026-09-20 | The preset set renamed into one shape and gained an R3-gated one, which meant adding R3 to the gyro gate -- four lines, because the button already had a spot in both tables. Both always-on gyro presets steady the cursor on either trigger, so a click lands where you were pointing. "Blank" is called "custom", a config made from it is named after the pad that asked -- ds5_config, ds4_config, xbox_config, pad_config -- and the list opens on the stick, the one preset every pad can use | `01c58bc`, `b393888`, `f2a6c9a` |
+| 2026-09-20 | trigger_probe is hidden on the settings page. It is a diagnostic whose own help says to leave it off, and it sat in Triggers for everyone. Listed by name rather than renamed to a _debug key, which would have hidden it for free: the key is read in two places in the listener, and anyone with it set in a config file would have lost it silently | `006290a` |
+| 2026-09-20 | A DS4 is still NOT offered the Audio section, after a day spent finding out why it cannot be. The three settings travel to the TV rather than being patched into a DualSense report, so they reach any pad and the section was opened up on that reasoning -- then neither volume moved anything on the pad, and the routing mode neither silenced a connected headset nor started the speaker. Arriving is not acting, so it is hidden again with the finding and an undo list against T-229 | `d68fc4d`, `006290a` |
 
 ## Files changed
 
@@ -95,18 +101,18 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
 ```
  .gitattributes                                |   48 +
  .gitignore                                    |   30 +-
- CHANGES.md                                    |  214 ++
+ CHANGES.md                                    |  214 +
  LINK                                          |    0
  README.md                                     |   18 +
- app/ctm-usbip-tests.vcxproj                   |  107 +
+ app/ctm-usbip-tests.vcxproj                   |  108 +
  app/ctm-usbip.rc                              |   11 +-
  app/ctm-usbip.vcxproj                         |    4 +-
  attic/flydigi_apex4_identity.map              |   58 +
  attic/flydigi_apex4_usb.profile               |   24 +
  build-tests.ps1                               |   86 +
  build.ps1                                     |   88 +-
- device-config.md                              |  195 ++
- docs/rest_api.md                              |  139 ++
+ device-config.md                              |  195 +
+ docs/rest_api.md                              |  139 +
  include/ctm/map/runtime.h                     |   30 +
  include/ctm/product.h                         |   32 +
  maps/ds4_usb_over_ds4_usb.map                 |   61 +
@@ -117,98 +123,100 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  profiles/descriptors/ds5e_composite.profile   |   30 +
  profiles/descriptors/virtual_keyboard.profile |   74 +
  profiles/descriptors/virtual_mouse.profile    |   59 +
- release.ps1                                   |  152 ++
- src/app/agent.inl                             |  566 +++++-
- src/app/agent_session_sweep.inl               |  320 +++
+ release.ps1                                   |  152 +
+ src/app/agent.inl                             |  566 +-
+ src/app/agent_session_sweep.inl               |  320 +
  src/app/cli.inl                               |   24 +-
  src/app/common.inl                            |   32 +
- src/app/config_move.inl                       |  538 +++++
+ src/app/config_move.inl                       |  569 ++
+ src/app/device_capabilities.inl               |   75 +
  src/app/device_type.inl                       |   70 +
  src/app/nickname.inl                          |   90 +
- src/app/open_ui.inl                           |  489 +++++
- src/app/overlay_window.inl                    | 1995 +++++++++++++++++++
- src/app/rest.inl                              |  760 +++++++
- src/app/rest_config.inl                       | 1128 +++++++++++
- src/app/rest_config_sessions.inl              |  201 ++
+ src/app/open_ui.inl                           |  489 ++
+ src/app/overlay_window.inl                    | 1995 +++++++
+ src/app/rest.inl                              |  760 +++
+ src/app/rest_config.inl                       | 1128 ++++
+ src/app/rest_config_sessions.inl              |  204 +
  src/app/rest_sessions.inl                     |   33 +
  src/app/same_controller.inl                   |   38 +
  src/app/same_device.inl                       |   79 +
  src/app/service.inl                           |   25 +-
- src/app/tray_icon.inl                         |  238 +++
+ src/app/tray_icon.inl                         |  238 +
  src/app/ui_page.inl                           |   73 +
- src/app/window_move.inl                       |  245 +++
- src/audio/audio_gain.inl                      |  178 ++
- src/audio/ds5_apply_settings.inl              |  310 +++
- src/audio/ds5_output_overrides.inl            |  699 +++++++
- src/audio/iso_in_pacing.inl                   |  221 ++
+ src/app/window_move.inl                       |  245 +
+ src/audio/audio_gain.inl                      |  178 +
+ src/audio/ds5_apply_settings.inl              |  310 +
+ src/audio/ds5_output_overrides.inl            |  699 +++
+ src/audio/iso_in_pacing.inl                   |  221 +
  src/audio/iso_in_test_tone.inl                |   95 +
- src/audio/mic_ring.inl                        |  202 ++
- src/audio/pcm_amplitude_log.inl               |  162 ++
+ src/audio/mic_ring.inl                        |  202 +
+ src/audio/pcm_amplitude_log.inl               |  162 +
  src/audio/rumble_floor.inl                    |   58 +
  src/backend/backend.inl                       |   29 +
- src/backend/bridge.inl                        |  256 ++-
+ src/backend/bridge.inl                        |  256 +-
  src/backend/bridge_enet.inl                   |   35 +-
  src/backend/bt.inl                            |   16 +-
- src/config/config_presets.inl                 |  387 ++++
- src/config/config_store.inl                   |  820 ++++++++
- src/config/config_watcher.inl                 |  170 ++
- src/config/device_config.inl                  |  218 ++
+ src/config/config_presets.inl                 |  439 ++
+ src/config/config_store.inl                   |  820 +++
+ src/config/config_watcher.inl                 |  170 +
+ src/config/device_config.inl                  |  218 +
  src/input/battery.inl                         |  105 +
- src/input/button_layout.inl                   |  919 +++++++++
+ src/input/button_layout.inl                   |  919 +++
  src/input/chord_gate.inl                      |   66 +
- src/input/gyro_calibration.inl                |  168 ++
+ src/input/gyro_calibration.inl                |  168 +
  src/input/gyro_calibration_fetch.inl          |   99 +
  src/input/gyro_hold.inl                       |   48 +
- src/input/gyro_mouse.inl                      |  787 ++++++++
- src/input/keyboard_device.inl                 |  301 +++
+ src/input/gyro_mouse.inl                      |  794 +++
+ src/input/keyboard_device.inl                 |  301 +
  src/input/mic_report.inl                      |   41 +
- src/input/mouse_device.inl                    |  304 +++
- src/input/mouse_exclusive.inl                 |  122 ++
+ src/input/mouse_device.inl                    |  304 +
+ src/input/mouse_exclusive.inl                 |  122 +
  src/input/mouse_held.inl                      |   99 +
- src/input/osk.inl                             |  200 ++
- src/input/rebind.inl                          | 1232 ++++++++++++
- src/input/stick_mouse.inl                     |  471 +++++
- src/input/touch_mouse.inl                     |  409 ++++
- src/input/trigger_click.inl                   |  801 ++++++++
- src/input/trigger_effect.inl                  |  630 ++++++
- src/log/capped_log.inl                        |  117 ++
- src/log/device_log.inl                        |  233 +++
- src/main.cpp                                  |  439 +++-
+ src/input/osk.inl                             |  200 +
+ src/input/rebind.inl                          | 1232 ++++
+ src/input/stick_mouse.inl                     |  471 ++
+ src/input/touch_mouse.inl                     |  409 ++
+ src/input/trigger_click.inl                   |  801 +++
+ src/input/trigger_effect.inl                  |  630 ++
+ src/log/capped_log.inl                        |  117 +
+ src/log/device_log.inl                        |  233 +
+ src/main.cpp                                  |  440 +-
  src/map/runtime.cpp                           |   68 +-
- src/usbip/device.inl                          |  650 +++++-
+ src/usbip/device.inl                          |  650 +-
  src/usbip/server.inl                          |   55 +-
- tests/button_layout_test.cpp                  |  953 +++++++++
- tests/capped_log_test.cpp                     |  140 ++
- tests/config_store_test.cpp                   |  777 ++++++++
- tests/device_config_test.cpp                  |  521 +++++
+ tests/button_layout_test.cpp                  |  953 +++
+ tests/capped_log_test.cpp                     |  140 +
+ tests/config_store_test.cpp                   |  862 +++
+ tests/device_capabilities_test.cpp            |   75 +
+ tests/device_config_test.cpp                  |  521 ++
  tests/device_type_test.cpp                    |   89 +
- tests/gyro_mouse_test.cpp                     |  450 +++++
+ tests/gyro_mouse_test.cpp                     |  470 ++
  tests/harness.h                               |   55 +
- tests/host_audio_settings_test.cpp            |  125 ++
- tests/iso_in_pacing_test.cpp                  |  118 ++
+ tests/host_audio_settings_test.cpp            |  125 +
+ tests/iso_in_pacing_test.cpp                  |  118 +
  tests/map_defaults_test.cpp                   |  100 +
  tests/mic_report_test.cpp                     |   64 +
- tests/mouse_held_test.cpp                     |  162 ++
+ tests/mouse_held_test.cpp                     |  162 +
  tests/nickname_test.cpp                       |   98 +
  tests/osk_test.cpp                            |   81 +
  tests/product_version_test.cpp                |   33 +
- tests/rest_parser_test.cpp                    |  195 ++
+ tests/rest_parser_test.cpp                    |  195 +
  tests/rumble_floor_test.cpp                   |   87 +
  tests/same_controller_test.cpp                |   49 +
  tests/same_device_test.cpp                    |   95 +
- tests/schema_json_test.cpp                    |  147 ++
- tests/stick_mouse_test.cpp                    |  710 +++++++
- tests/tests_main.cpp                          |  115 ++
- tests/touch_mouse_test.cpp                    |  664 +++++++
- tests/trigger_click_test.cpp                  |  835 ++++++++
- tests/trigger_effect_test.cpp                 |  529 +++++
+ tests/schema_json_test.cpp                    |  158 +
+ tests/stick_mouse_test.cpp                    |  710 +++
+ tests/tests_main.cpp                          |  117 +
+ tests/touch_mouse_test.cpp                    |  664 +++
+ tests/trigger_click_test.cpp                  |  835 +++
+ tests/trigger_effect_test.cpp                 |  529 ++
  tests/units.h                                 |   54 +
- tools/controller-config-test-client.html      | 7076 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ tools/controller-config-test-client.html      | 7846 +++++++++++++++++++++++++
  tools/device-config-panel-edge.bat            |    9 +
- tools/device-config-panel-edge.ps1            |  327 +++
+ tools/device-config-panel-edge.ps1            |  327 ++
  tools/device-config-panel.bat                 |    4 +
- tools/device-config-panel.ps1                 |  303 +++
+ tools/device-config-panel.ps1                 |  303 +
  tools/osk-mockups.py                          |  103 +
  tools/start-ctm-usbip.bat                     |   67 +
- 117 files changed, 35780 insertions(+), 145 deletions(-)
+ 119 files changed, 36913 insertions(+), 145 deletions(-)
 ```
