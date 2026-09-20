@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.0 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.1 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,17 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.1  Unlink, looked at on screen and moved. The mark is 🛇 U+1F6C7,
+            the PROHIBITED SIGN, which is monochrome and takes the button's
+            colour like 🗘 does -- 🚫 is an emoji and Chrome drew it in red
+            whatever the CSS asked for. Advanced draws it at the END of the
+            row, after Set auto link, rather than left of the selector. Simple
+            builds it like the auto-link button, in the selector row on the
+            right, where the footer had made it look like a third New. Quick
+            keeps its place, left of the selector, and both marks are now one
+            CSS rule so they cannot drift apart. The compact D-pad grid reads
+            the row in document order, since the two views put the button on
+            opposite sides.
     2.66.0  Unlink, beside the config. Every view gets a button that sets the
             controller to no config: left of the selector in Advanced, under
             the config beside New in Simple, and in Quick the no symbol alone
@@ -776,11 +787,10 @@
      next time it bridges; lit, it removes the claim. The claimed config
      carries a 🗘 after its name in the list. */
   #compactBox .cselrow { display:flex; align-items:center; gap:1.5vw; }
+  /* ⭐ Unlink is the same button as the auto-link one, in both views: one rule
+     for the pair so they cannot drift apart. */
   #compactBox .cauto-btn,
-  #compactBox .cselrow .cunlink-btn { font-size:4.2vh; padding:0.6vh 1.4vw; line-height:1; }
-  /* In Simple the button is a footer button beside New, so .cfoot's own sizing
-     wins there by being the more specific selector; only the selector-row copy
-     (Quick's) is sized here. */
+  #compactBox .cunlink-btn { font-size:4.2vh; padding:0.6vh 1.4vw; line-height:1; }
   #compactBox .cauto-btn.on { color:#7fd18c; border-color:#7fd18c; opacity:1; }
   /* ⛔ NO GREEN IN THE LIST (rhoquinn8217, 2026-09-09). A native option is
      one run of text in one colour, so the mark could never be green on its
@@ -1262,7 +1272,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.66.0</span>
+  <span class="muted" style="font-size:12px">v2.66.1</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -2955,20 +2965,21 @@ function buildDevicePane(d) {
                'Set auto link 🗘</button>';
   }
 
-  // ⭐ UNLINK SITS LEFT OF THE SELECTOR (rhoquinn8217, 2026-09-19), so the
-  // control that empties the picker is beside the picker rather than only in
-  // the row above it. ⓘ It asks nothing, deliberately: it does exactly what
+  // ⭐ UNLINK SITS AFTER THE AUTO-LINK BUTTON (rhoquinn8217, 2026-09-19, moved
+  // there from the left of the selector the same evening), so the row runs
+  // from what the config IS, through what to do with it, to the two claims at
+  // the end. ⓘ It asks nothing, deliberately: it does exactly what
   // choosing "(no config)" in the picker does, and a pick asks nothing. The
   // Reset button in the device row is the louder act and keeps its question.
   // ⛔ Greyed with the reason when there is nothing to unlink, per the rule a
   // few lines down: an absent button reads as a bug, a greyed one answers.
   var unlinkBtn = d.linked_config
     ? '<button onclick="unlinkConfirmed(\'' + esc(d.ordinal) + '\')" ' +
-      'title="set this controller to No config">Unlink 🚫</button>'
+      'title="set this controller to No config">Unlink \ud83d\udec7</button>'
     : '<button disabled title="this controller already reads no config">' +
-      'Unlink 🚫</button>';
+      'Unlink \ud83d\udec7</button>';
 
-  head += '<div class="f"><span>currently linked config</span>' + unlinkBtn +
+  head += '<div class="f"><span>currently linked config</span>' +
           // ⭐ Links on selection. Everything else on this page saves as you
           // change it, so an Apply here was inconsistent -- and one more D-pad
           // step between the picker and the buttons beside it.
@@ -2988,7 +2999,7 @@ function buildDevicePane(d) {
               'title="make your own copy of this config and link it to this ' +
               'controller">Copy</button>'
             : '') +
-          claimBtn +
+          claimBtn + unlinkBtn +
           (!d.supports_config
             ? ' <span class="muted">this device does not take a config</span>'
             : (usable.length ? '' : ' <span class="muted">no configs yet — press New</span>')) +
@@ -4843,14 +4854,15 @@ function compactMove(dx, dy) {
   if (!box) return false;
   var rows = [];
   var topRow = [];
-  // ⓘ Left to right, exactly as the row is drawn: Quick's Unlink, the selector,
-  // then 🗘. (Simple's Unlink is a footer button and arrives with New below.)
-  var un = box.querySelector('.cselrow .cunlink-btn:not([disabled])');
-  if (un) topRow.push(un);
-  var sel = box.querySelector('#cpick');
-  if (sel) topRow.push(sel);
-  var auto = box.querySelector('.cauto-btn:not([disabled])');
-  if (auto) topRow.push(auto);   // Right from the selector reaches 🗘 when it can act
+  // ⓘ READ IN DOCUMENT ORDER rather than named one by one: the two views put
+  // Unlink on opposite sides of the selector, so a fixed sequence would walk
+  // one of them backwards. Disabled controls are left out, as everywhere else.
+  var selRow = box.querySelector('.cselrow');
+  if (selRow) {
+    Array.prototype.slice.call(selRow.querySelectorAll('select, button')).forEach(function (e) {
+      if (!e.disabled) topRow.push(e);
+    });
+  }
   if (!topRow.length) {
     var big = box.querySelector('button.cbig');
     if (big) topRow.push(big);
@@ -6045,12 +6057,15 @@ function paintCompact() {
   // ⭐ Under the selector: New and Edit (rhoquinn8217, 2026-09-09). Edit is
   // the other page on THIS controller, its config's settings. Configurator,
   // the whole tool from the top, and Close are the footer's two corners.
-  // ⭐ ONE UNLINK BUTTON, TWO PLACES (rhoquinn8217, 2026-09-19). Simple puts it
-  // under the config, between it and New; Quick has no footer at all, so there
-  // it joins the selector row -- and drops the word, the way 🗘 does in Quick.
-  // ⓘ Same act as picking "(no config)", so it asks nothing.
+  // ⭐ UNLINK IS BUILT LIKE THE AUTO-LINK BUTTON (rhoquinn8217, 2026-09-19): the
+  // same small button in the selector row, the mark with its word in Simple and
+  // the mark alone in Quick. ⓘ It sat in Simple's footer beside New for an hour
+  // and looked like a third New; it belongs with the control it acts on.
+  // ⓘ Sides differ on purpose: Quick draws it LEFT of the selector, where its
+  // window has the room, and Simple right of 🗘, which is where Advanced ends
+  // its row too. ⓘ Same act as picking "(no config)", so it asks nothing.
   var unlinkBtn = function () {
-    var lbl = QUICK ? '🚫' : 'Unlink 🚫';
+    var lbl = '\ud83d\udec7' + (QUICK ? '' : 'unlink');
     return (d && d.linked_config)
       ? '<button class="cunlink-btn" onclick="compactUnlink()" ' +
         'title="set this controller to No config">' + lbl + '</button>'
@@ -6059,7 +6074,6 @@ function paintCompact() {
   };
   var foot = function (withNew, ordinal) {
     return '<div class="cfoot">' +
-      (withNew ? unlinkBtn() : '') +
       (withNew ? '<button onclick="newConfigFor(\'' + esc(ordinal) + '\')">New</button>' : '') +
       (ordinal ? '<button onclick="setCompact(false)">Edit</button>' : '') + '</div>';
   };
@@ -6179,7 +6193,8 @@ function paintCompact() {
               '<select id="cpick" data-ordinal="' + esc(d.ordinal) + '"' +
               ' onmousedown="pickerActivate(event,this)"' +
               ' onchange="compactPick()">' +
-              opts + '</select>' + autoBtn + '</div></div>' + (QUICK ? '' : foot(true, d.ordinal));
+              opts + '</select>' + autoBtn + (QUICK ? '' : unlinkBtn()) +
+              '</div></div>' + (QUICK ? '' : foot(true, d.ordinal));
     }
   }
   // ⭐ The footer area: the legend and the way back, as large as the rest.
