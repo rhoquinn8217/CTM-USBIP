@@ -747,7 +747,7 @@
   /* ⭐ SIZED IN VIEWPORT UNITS, ON PURPOSE (rhoquinn8217, 2026-09-09: too much
      empty space; and R3 must change the text too). R3 lives in the listener and
      never reaches the page, so the page cannot be told the size -- but it does
-     not need to be: vh follows the window, so when R3 resizes it, every line
+     not need to be: vh follows the window, so when Create resizes it, every line
      here grows or shrinks with it. */
   /* ⭐ COMPACT DOES NOT SCROLL (rhoquinn8217, 2026-09-09): a stick bound to
      the wheel still turns it in config mode, on purpose, and a page a pixel
@@ -5261,10 +5261,11 @@ var CONFIG_MODE_KEYS = {
   KeyE: function () { gpKeyCoarse(1); },
   Enter: function () { gpKeySelect(); },
   KeyZ: function () { gpKeyBack(); },
-  KeyX: function () { gpToggleManaged(); },
-  // ⭐ Create on the pad: compact / full view. The listener sends it as KeyC
-  // the way it sends the rest of these.
-  KeyC: function () { toggleCompact(); }
+  KeyX: function () { gpToggleManaged(); }
+  // ⛔ NO KeyC. Create resizes the window now (rhoquinn8217, 2026-09-20) and
+  // the listener reads it from the raw report, so it no longer sends a key --
+  // see rebind.inl. It used to cycle compact and full, then after T-233 only
+  // moved focus onto the Mode picker.
 };
 
 // ⭐ One place that steps the value being edited. It was inline in gpPoll; the
@@ -6469,20 +6470,10 @@ function openConfigurator() {
   setMode('advanced');
   showTab('overview');
 }
-// ⭐ CREATE IS QUICK (rhoquinn8217, 2026-09-09, replacing the cycle): from
-// Advanced or Simple it goes straight to Quick -- the view wanted mid-game
-// -- and in Quick it does nothing; the buttons and Circle lead out.
-function toggleCompact() {
-  if (PRESET_OPEN || PRESET_INFO_OPEN || CONFIRM_CB || RENAMING) return;
-  // T-233: Create no longer FORCES Quick. It puts the pad on the Mode picker
-  // and lets you choose, which is also what "locked" means here -- the window
-  // stops changing mode on its own.
-  //
-  // It was one press to the mid-game view (2026-09-09, replacing a cycle), so
-  // this costs a step. rhoquinn8217 asked for it knowing that.
-  var el = visibleModePicker();
-  if (el) { focusElement(el); }
-}
+// Create used to reach the page as KeyC and, since T-233, only moved focus
+// onto the Mode picker. It resizes the window now (rhoquinn8217,
+// 2026-09-20) and sends no key, so toggleCompact had no caller left and is
+// gone. The d-pad reaches the Mode picker on its own.
 
 // Compact shows a controller or nothing: never Overview or the Editor.
 function compactEnsureController() {
@@ -6908,7 +6899,7 @@ function paintCompact() {
     // to the right -- the order here IS the order on screen.
     html += '<div class="cbar">' +
             '<div class="cbarText"><div class="clegend">' +
-            '\u2630 position | R3 resize | ' +
+            '\u2630 position | Create resize | ' +
             '\u25cb close</div></div>' +
             modePickerHtml('cselMode') +
             '<button class="cclose" onclick="closeWindow()">Close</button></div>';
@@ -6917,7 +6908,7 @@ function paintCompact() {
             '<div class="cbarText">' +
             '<div class="clegend">' +
             'L1/R1 controller | \u2715 select | d-pad move | ' +
-            '\u2630 position | R3 resize | \\|/ quick mode | \u25cb close</div>' +
+            '\u2630 position | Create resize | \\|/ quick mode | \u25cb close</div>' +
             '<div class="cinfo">To bring this window back: <b>hold two fingers on the touchpad ' +
             'and press Options</b> (DS5/DS4 only), or right-click the tray icon and choose ' +
             '<b>Open settings</b>.</div>' +
@@ -7034,7 +7025,7 @@ function gpPoll() {
   // either. The `.cmode` rule itself stays; `#modePick` wears it.
   hint.innerHTML = '' +
                      (live.length > 1 ? live.length + ' controllers' : 'controller') +
-                     ' — L1/R1 controller | ✕ select | d-pad move | □ on/off | ☰ position | R3 resize | \\|/ quick mode | ○ footer/close';
+                     ' — L1/R1 controller | ✕ select | d-pad move | □ on/off | ☰ position | Create resize | \\|/ quick mode | ○ footer/close';
   bar.className = 'live';
   measureGpBar();
 

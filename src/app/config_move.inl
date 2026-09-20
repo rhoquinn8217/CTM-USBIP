@@ -259,8 +259,9 @@ inline void set_view(bool compact, bool quick, bool restore)
     else g_sizeCompact.store(0);
 }
 
-// ⓘ Own edge tracking for R3 rather than ctm_overlay::edge(): that table's
-// slots are the keyboard's, and slot 11 is already R3 there.
+// ⓘ Own edge tracking rather than ctm_overlay::edge(): that table's slots
+// are the keyboard's. ⚠️ Named for R3 because it was R3 until 2026-09-20 --
+// it watches Create now, and the mechanism is the same either way.
 inline std::mutex g_r3Mutex;
 inline std::unordered_map<const void *, bool> g_r3Down;
 
@@ -511,10 +512,21 @@ inline bool handle_report(const void *deviceKey, const ctm_rebind::Layout &lay,
         return false;
     }
 
-    // ⓘ R3 is free on the page as Options is: it never reads index 10 or 11.
-    if (r3_edge(deviceKey, ctm_overlay::button_down(lay, data, len, 11))) {
+    // ⭐⭐ CREATE RESIZES, NOT R3 (rhoquinn8217, 2026-09-20: *"don't use R3
+    // to change the window size. Use the create button instead since it's not
+    // used anymore."*). Index 8, kBtnSelect -- Create on a DualSense, Select
+    // or View elsewhere.
+    // ⚠️ CREATE WAS NOT QUITE FREE, and what it did has been given up
+    // knowingly. It sent KeyC, which since T-233 only moved the pad's focus
+    // onto the Mode picker -- a shortcut the d-pad now reaches on its own, so
+    // the cost is one convenience rather than a feature. Its key mapping and
+    // the page's handler for it go with this change, or Create would resize
+    // AND jump the focus on the same press.
+    // ⓘ R3 is given back. It is a gyro gate as of T-235, and a button that
+    // resizes a window while also aiming is a collision waiting to happen.
+    if (r3_edge(deviceKey, ctm_overlay::button_down(lay, data, len, 8))) {
         if (HWND h = page_window()) resize_next(h);
-        // The press goes through; the page ignores R3.
+        // The press goes through; the page no longer acts on Create.
     }
 
     // ⭐ THIS pad's mover, so another pad's reports -- Options up, as always on
