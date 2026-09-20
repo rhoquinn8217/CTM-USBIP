@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.65.0 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.4 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,43 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.4  RESET IS GONE, and Unlink is what replaces it (rhoquinn8217).
+            The button and its column leave both device tables -- the
+            controller tab's and Overview's -- and the question it asked
+            goes with it, since unlinking is the same act as picking
+            "(no config)" and a pick asks nothing. Simple's two labels get
+            a space before their marks.
+    2.66.3  Simple's two marks move to the END of their words -- "auto🗘"
+            and "unlink🛇" rather than the mark first (rhoquinn8217),
+            which is the order Advanced's own labels already read in. Quick
+            is unaffected: it shows the marks alone.
+    2.66.2  Simple puts Unlink on the LEFT of the selector, where Quick has
+            it, rather than on the right beside the auto-link mark
+            (rhoquinn8217). The two compact views now draw the same row.
+    2.66.1  Unlink, looked at on screen and moved. The mark is 🛇 U+1F6C7,
+            the PROHIBITED SIGN, which is monochrome and takes the button's
+            colour like 🗘 does -- 🚫 is an emoji and Chrome drew it in red
+            whatever the CSS asked for. Advanced draws it at the END of the
+            row, after Set auto link, rather than left of the selector. Simple
+            builds it like the auto-link button, in the selector row on the
+            right, where the footer had made it look like a third New. Quick
+            keeps its place, left of the selector, and both marks are now one
+            CSS rule so they cannot drift apart. The compact D-pad grid reads
+            the row in document order, since the two views put the button on
+            opposite sides.
+    2.66.0  Unlink, beside the config. Every view gets a button that sets the
+            controller to no config: left of the selector in Advanced, under
+            the config beside New in Simple, and in Quick the no symbol alone
+            in the selector row, the way 🗘 is the mark alone there. It asks
+            nothing, because picking "(no config)" asks nothing either.
+            AND "auto link no config" now MEANS "remove the auto link". The
+            🗘 button used to be dead whenever no config was linked; with a
+            claim standing it is now live and drops it -- lit in Simple and
+            Quick, where lit already means press-to-remove, and reading
+            "Remove auto link" in Advanced rather than "Set", since a button
+            should not say one thing and open a question about another. With
+            nothing claiming the controller it stays greyed: nothing to make,
+            nothing to remove.
     2.65.0  A config is not tied to a controller type any more. Every
             controller that takes a config is offered every config, so an Xbox
             pad can pick one made on a DualSense. Create no longer asks for a
@@ -737,11 +774,17 @@
   body.quick #compactBox .csel { gap:0; }
   body.quick #compactBox .cselrow { gap:2vw; width:100%; justify-content:center; }
   /* The selector may shrink below its longest name rather than push the
-     button off the edge; a long name is clipped inside it. */
+     button off the edge; a long name is clipped inside it.
+     ⛔ THE CAP IS WHAT KEEPS IT IN (2026-09-19): a flex item clamped by
+     max-width is FROZEN at that width and shrinks no further, so 80vw plus
+     two buttons and their gaps simply overflowed and both buttons were cut
+     off at the window edges. The row carries Unlink as well as 🗘 now, so the
+     cap has to leave room for both. */
   body.quick #compactBox select { font-size:12.6vh; padding:1.8vh 1.5vw; min-width:0;
-    max-width:80vw; flex:0 1 auto; }
+    max-width:58vw; flex:0 1 auto; }
   #compactBox .cselrow { position:relative; }
-  body.quick #compactBox .cauto-btn { font-size:12.6vh; padding:1.5vh 1.6vw; }
+  body.quick #compactBox .cauto-btn,
+  body.quick #compactBox .cselrow .cunlink-btn { font-size:12.6vh; padding:1.5vh 1.6vw; }
   body.quick #compactBox .cbar { padding-top:3.75vh; gap:3vw; }
   body.quick #compactBox .cbar > button { font-size:6.9vh; padding:1.5vh 2vw; }
   body.quick #compactBox .clegend { font-size:6.9vh; }
@@ -757,7 +800,10 @@
      next time it bridges; lit, it removes the claim. The claimed config
      carries a 🗘 after its name in the list. */
   #compactBox .cselrow { display:flex; align-items:center; gap:1.5vw; }
-  #compactBox .cauto-btn { font-size:4.2vh; padding:0.6vh 1.4vw; line-height:1; }
+  /* ⭐ Unlink is the same button as the auto-link one, in both views: one rule
+     for the pair so they cannot drift apart. */
+  #compactBox .cauto-btn,
+  #compactBox .cunlink-btn { font-size:4.2vh; padding:0.6vh 1.4vw; line-height:1; }
   #compactBox .cauto-btn.on { color:#7fd18c; border-color:#7fd18c; opacity:1; }
   /* ⛔ NO GREEN IN THE LIST (rhoquinn8217, 2026-09-09). A native option is
      one run of text in one colour, so the mark could never be green on its
@@ -989,7 +1035,7 @@
      bar reads as three unrelated things. */
   #gpbar #gphint { margin-left:auto; }
   #fitBtn, #quickBtn, #closeBtn { padding:2px 8px; font-size:11px; margin-left:8px; }
-  /* ⓘ Sized like the page's own buttons -- New, Rename, Reset -- not like the
+  /* ⓘ Sized like the page's own buttons -- New, Rename, Copy -- not like the
      small footer ones it briefly lived beside. */
   /* Locked: the page has the pads. Mirrored: the game still sees them. */
   #holdBtn { background:#1b2b21; border-color:#4f9d69; color:#8fd6a4;
@@ -1239,7 +1285,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.64.49</span>
+  <span class="muted" style="font-size:12px">v2.66.4</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -1759,9 +1805,10 @@ function configPicker() {
 // ⓘ Taken from GP_FOCUS rather than the DOM, so it is exactly the set that can
 // be focused: anything hidden or disabled is already gone.
 // ⚠️ THE HEADER IS TWO ROWS, not one (corrected 2026-08-31): the device table
-// -- serial, auto-linked config, Reset, Remove auto link -- sits ABOVE the
-// config row of picker, New, Rename, Copy and the claim button. Treating them
-// as one row sent ▼ from Reset straight past the picker to the sections.
+// -- serial, auto-linked config, Remove auto link -- sits ABOVE the config row
+// of picker, New, Rename, Copy, the claim button and Unlink. Treating them as
+// one row sent ▼ from the device row straight past the picker to the
+// sections. ⓘ Reset was the device row's other button until 2.66.4.
 //
 // ⓘ The table is the divider, and it is a real one in the markup rather than a
 // guess: `.devrow` is the header table's own class.
@@ -2826,8 +2873,9 @@ function buildDevicePane(d) {
     ? '<code>' + esc(claimedBy) + '</code>'
     : '<span class="muted">none</span>';
 
-  // ⭐ Its own column, beside Reset. Both are destructive and both act on this
-  // controller, so they belong together rather than one hiding inside a value.
+  // ⭐ Its own column rather than hiding inside the value beside it, because
+  // it is destructive. ⓘ It had Reset for company until 2.66.4, when Unlink
+  // took that job and moved to the config row where the selector is.
   var autoBtn = claimedBy
     ? '<button onclick="stopAutoLink(\'' + esc(claimedBy) + '\',\'' +
       esc(mySerial) + '\',\'' + esc(whoIs(d.ordinal)) + '\')" ' +
@@ -2836,7 +2884,7 @@ function buildDevicePane(d) {
     : '';
 
   var head = '<table class="devrow"><tr><th>nickname</th><th>controller</th><th>battery</th><th>serial</th>' +
-             '<th>auto linked config</th><th></th><th></th></tr>' +
+             '<th>auto linked config</th><th></th></tr>' +
              // ⭐ Same status tint as Overview. The two tables show the same
              // row, so a controller that reads green there and plain here
              // would suggest the two disagreed about something.
@@ -2850,10 +2898,7 @@ function buildDevicePane(d) {
              '<td>' + batteryCell(d) + '</td>' +
              '<td>' + serialCell + '</td>' +
              '<td>' + autoCell + '</td>' +
-             '<td>' + autoBtn + '</td>' +
-             '<td><button onclick="unlink(\'' + esc(d.ordinal) +
-                 '\')" title="stop reading this config NOW — falls back to the shared settings">Reset</button>' +
-             '</td></tr></table>';
+             '<td>' + autoBtn + '</td></tr></table>';
 
   // ⭐ Every config is offered to a controller that takes one, whatever kind of
   // controller it is -- and none to a device that takes no config, which the
@@ -2903,8 +2948,21 @@ function buildDevicePane(d) {
     claimBtn = '<button disabled title="this controller reports no serial, so ' +
                'there is nothing to remember it by">Set auto link 🗘</button>';
   } else if (!d.linked_config) {
-    claimBtn = '<button disabled title="pick a config first — there is nothing ' +
-               'to claim while it reads the shared settings">Set auto link 🗘</button>';
+    // ⭐ "AUTO LINK NO CONFIG" MEANS REMOVE THE AUTO LINK (rhoquinn8217,
+    // 2026-09-19). With nothing linked there is no claim to make, so the
+    // button does the only thing the state can mean -- and SAYS so, because a
+    // button reading "Set" that opens a "Remove auto link" question would be
+    // asking one thing and doing another.
+    // ⓘ Still disabled when nothing claims this controller: then there is
+    // neither a claim to make nor one to remove.
+    claimBtn = claimedBy
+      ? '<button onclick="stopAutoLink(\'' + esc(claimedBy) + '\',\'' +
+        esc(mySerial) + '\',\'' + esc(whoIs(d.ordinal)) + '\')" ' +
+        'title="no config is set, so this stops ' + esc(claimedBy) +
+        ' auto linking to this controller">Remove auto link 🗘</button>'
+      : '<button disabled title="pick a config first — there is nothing to ' +
+        'claim while it reads the shared settings, and nothing auto links ' +
+        'this controller">Set auto link 🗘</button>';
   } else if (alreadyMine) {
     claimBtn = '<button disabled title="already claimed by this config">' +
                'Set auto link 🗘</button>';
@@ -2918,6 +2976,20 @@ function buildDevicePane(d) {
                'title="give this controller this config whenever it bridges">' +
                'Set auto link 🗘</button>';
   }
+
+  // ⭐ UNLINK SITS AFTER THE AUTO-LINK BUTTON (rhoquinn8217, 2026-09-19, moved
+  // there from the left of the selector the same evening), so the row runs
+  // from what the config IS, through what to do with it, to the two claims at
+  // the end. ⓘ It asks nothing, deliberately: it does exactly what
+  // choosing "(no config)" in the picker does, and a pick asks nothing. The
+  // picker's blank option is the same act, and asks nothing either.
+  // ⛔ Greyed with the reason when there is nothing to unlink, per the rule a
+  // few lines down: an absent button reads as a bug, a greyed one answers.
+  var unlinkBtn = d.linked_config
+    ? '<button onclick="unlinkConfirmed(\'' + esc(d.ordinal) + '\')" ' +
+      'title="set this controller to No config">Unlink \ud83d\udec7</button>'
+    : '<button disabled title="this controller already reads no config">' +
+      'Unlink \ud83d\udec7</button>';
 
   head += '<div class="f"><span>currently linked config</span>' +
           // ⭐ Links on selection. Everything else on this page saves as you
@@ -2939,7 +3011,7 @@ function buildDevicePane(d) {
               'title="make your own copy of this config and link it to this ' +
               'controller">Copy</button>'
             : '') +
-          claimBtn +
+          claimBtn + unlinkBtn +
           (!d.supports_config
             ? ' <span class="muted">this device does not take a config</span>'
             : (usable.length ? '' : ' <span class="muted">no configs yet — press New</span>')) +
@@ -3532,7 +3604,7 @@ function loadDevices() {
     // same thing in different words -- 'linked' here, 'auto linked config'
     // there -- so reading one taught you nothing about the other.
     var html = '<table><tr><th>nickname</th><th>controller</th><th>battery</th><th>serial</th>' +
-               '<th>auto linked config</th><th></th><th></th></tr>';
+               '<th>auto linked config</th><th></th></tr>';
     list.forEach(function(dev) {
       // ⭐ The serial is the point of this whole screen. auto_link works only
       // if it is a real per-unit value, and that has never been observed.
@@ -3585,9 +3657,7 @@ function loadDevices() {
               '<td>' + batteryCell(dev) + '</td>' +
               '<td>' + serial + '</td>' +
               '<td>' + autoCell + '</td>' +
-              '<td>' + autoBtn + '</td>' +
-              '<td><button onclick="unlink(\'' + esc(dev.ordinal) +
-                  '\')" title="clear this controller\'s config">Reset</button></td></tr>';
+              '<td>' + autoBtn + '</td></tr>';
     });
     host.innerHTML = html + '</table>';
 
@@ -3727,15 +3797,10 @@ function loadConfigs(isRetry) {
   });
 }
 
-// Clears a controller's config. Reachable from the devices table (Reset) and
-// from a controller tab's picker (its blank option) -- both mean the same
-// thing: this controller no longer has a config of its own.
-function unlink(ordinal) {
-  askConfirm('Reset',
-             'Reset all custom configuration for ' + whoIs(ordinal) + '?',
-             function() { unlinkConfirmed(ordinal); });
-}
-
+// Clears a controller's config: the picker's blank option, and the Unlink
+// button in every view, both land here. ⓘ The asking wrapper that Reset used
+// went with Reset in 2.66.4 -- unlinking is the same act as picking
+// "(no config)", and a pick asks nothing.
 function unlinkConfirmed(ordinal) {
   call('POST', '/api/v1/devices/' + encodeURIComponent(ordinal) + '/link', {})
     .then(function() { loadDevices(); loadConfigs(); }).catch(function(){});
@@ -3900,9 +3965,9 @@ function commitRename(oldName) {
     }).catch(function(){ cancelRename(); });
 }
 
-// ⛔ ASK FIRST. Archive and Reset are one click each, sit next to controls you
-// press routinely, and there is nothing between the click and the loss. A
-// config takes real time to tune.
+// ⛔ ASK FIRST. Archive and Remove auto link are one click each, sit next to
+// controls you press routinely, and there is nothing between the click and the
+// loss. A config takes real time to tune.
 //
 // ⓘ confirm() is a native dialog and a controller cannot dismiss one -- see the
 // rename row, which had to become inline for that reason. These are keyboard
@@ -3955,8 +4020,8 @@ function restoreOpener(el) {
 }
 
 function askConfirm(title, message, onYes, html) {
-  // ⭐ Whatever had focus when this opened. Archive, Remove auto link and Reset
-  // all landed somewhere arbitrary on cancel, because gpCollect rebuilds the
+  // ⭐ Whatever had focus when this opened. Archive and Remove auto link
+  // both landed somewhere arbitrary on cancel, because gpCollect rebuilds the
   // list and the old index then points at whatever moved into that slot.
   //
   // ⓘ Captured here rather than in each caller, so anything that opens a
@@ -4048,8 +4113,7 @@ var GP_SELECT_WAS = 0;
 // gpCollect used to carry it across rebuilds. A config refresh renders
 // "loading settings…" in the pane before the controls arrive, so for a moment
 // the focus list is the sticky header ALONE -- the number falls out of range,
-// resets to zero, and lands on the device row where Reset and Remove auto link
-// are. Any rebuild with the halo deep in the list did it, not just a restore.
+// resets to zero, and lands on the device row, where Remove auto link is. Any rebuild with the halo deep in the list did it, not just a restore.
 //
 // ⓘ Settings controls have stable ids (dv-<ordinal>-<key>) and section buttons
 // carry data-sect, so most things can be named. Anything with neither keeps the
@@ -4069,7 +4133,7 @@ var GP_SELECT_WAS = 0;
 // The halo then landed wherever the stale index happened to point.
 //
 // ➡️ A keyless element now gets a key from its SHAPE: what it is, whose row it
-// is in, and what it says -- `k:BUTTON:stickyHead:Reset`. ⓘ Stable across a
+// is in, and what it says -- `k:BUTTON:stickyHead:Unlink`. ⓘ Stable across a
 // rebuild, because a rebuild recreates the same shape. That is what an id would
 // have given us, without adding ids to every button on the page.
 //
@@ -4413,9 +4477,9 @@ function gpBoundary(delta) {
   // ▼ moves DOWN ONE ROW, which is what the layout looks like:
   //   device row  ▼ →  the config picker
   //   config row  ▼ →  the section strip
-  // ⛔ Not straight to the sections from anywhere in the header: Reset sits in
-  // the row above the picker, and skipping a whole row of controls on the way
-  // past is how they become unreachable.
+  // ⛔ Not straight to the sections from anywhere in the header: Remove auto
+  // link sits in the row above the picker, and skipping a whole row of controls
+  // on the way past is how they become unreachable.
   var row = headerRowOf(el);
   if (row === 'tabs') {
     var below = headerControls('device');
@@ -4794,10 +4858,15 @@ function compactMove(dx, dy) {
   if (!box) return false;
   var rows = [];
   var topRow = [];
-  var sel = box.querySelector('#cpick');
-  if (sel) topRow.push(sel);
-  var auto = box.querySelector('.cauto-btn:not([disabled])');
-  if (auto) topRow.push(auto);   // Right from the selector reaches 🗘 when it can act
+  // ⓘ READ IN DOCUMENT ORDER rather than named one by one: the two views put
+  // Unlink on opposite sides of the selector, so a fixed sequence would walk
+  // one of them backwards. Disabled controls are left out, as everywhere else.
+  var selRow = box.querySelector('.cselrow');
+  if (selRow) {
+    Array.prototype.slice.call(selRow.querySelectorAll('select, button')).forEach(function (e) {
+      if (!e.disabled) topRow.push(e);
+    });
+  }
   if (!topRow.length) {
     var big = box.querySelector('button.cbig');
     if (big) topRow.push(big);
@@ -5917,12 +5986,31 @@ function compactAutoLink() {
 
 // 🗘 lit: remove the claim. The full page's stopAutoLink asks first, then
 // drops it; the repaint that follows puts the button out.
+// ⛔ NOT `d.linked_config` ANY MORE (2026-09-19). The claim is held by whatever
+// config claimed this serial, which is the same thing as the linked config
+// while the button is lit -- but NOT when no config is linked at all, which is
+// now a state this button can act in. Reading the claim itself is right in both.
 function compactAutoUnlink() {
   var d = (LAST_DEVICES || []).filter(function (x) { return x.ordinal === ACTIVE; })[0];
-  if (!d || !d.linked_config) return;
+  if (!d) return;
   var mySerial = normSerial(d.serial);
   if (!mySerial) return;
-  stopAutoLink(d.linked_config, mySerial, nameFor(d.ordinal));
+  var claimedBy = '';
+  CONFIGS.forEach(function (c) {
+    (c.auto_link || []).forEach(function (sn) {
+      if (normSerial(sn) === mySerial) claimedBy = c.name;
+    });
+  });
+  var name = claimedBy || d.linked_config;
+  if (!name) return;
+  stopAutoLink(name, mySerial, nameFor(d.ordinal));
+}
+
+// The compact views' Unlink: the same call the picker's "(no config)" makes.
+function compactUnlink() {
+  var d = (LAST_DEVICES || []).filter(function (x) { return x.ordinal === ACTIVE; })[0];
+  if (!d || !d.linked_config) return;
+  unlinkConfirmed(d.ordinal);
 }
 
 // ⭐ A CLICK ENTERS THE SAME MODE THE PAD USES, in compact only. Otherwise a
@@ -5973,6 +6061,23 @@ function paintCompact() {
   // ⭐ Under the selector: New and Edit (rhoquinn8217, 2026-09-09). Edit is
   // the other page on THIS controller, its config's settings. Configurator,
   // the whole tool from the top, and Close are the footer's two corners.
+  // ⭐ UNLINK IS BUILT LIKE THE AUTO-LINK BUTTON (rhoquinn8217, 2026-09-19): the
+  // same small button in the selector row, the mark with its word in Simple and
+  // the mark alone in Quick. ⓘ It sat in Simple's footer beside New for an hour
+  // and looked like a third New; it belongs with the control it acts on.
+  // ⓘ LEFT of the selector in both compact views (rhoquinn8217, 2026-09-19):
+  // it was tried on the right, beside 🗘, and the side was the thing that was
+  // wrong. ⓘ Advanced still ends its row with it, because there the row reads
+  // left to right as the config, what to do with it, then the two claims.
+  // ⓘ Same act as picking "(no config)", so it asks nothing.
+  var unlinkBtn = function () {
+    var lbl = (QUICK ? '' : 'unlink ') + '\ud83d\udec7';
+    return (d && d.linked_config)
+      ? '<button class="cunlink-btn" onclick="compactUnlink()" ' +
+        'title="set this controller to No config">' + lbl + '</button>'
+      : '<button class="cunlink-btn" disabled ' +
+        'title="this controller already reads no config">' + lbl + '</button>';
+  };
   var foot = function (withNew, ordinal) {
     return '<div class="cfoot">' +
       (withNew ? '<button onclick="newConfigFor(\'' + esc(ordinal) + '\')">New</button>' : '') +
@@ -6066,13 +6171,23 @@ function paintCompact() {
       // reason, when there is nothing to claim.
       // ⓘ The mark says what it is for in Simple, which has the width for it
       // (rhoquinn8217, 2026-09-09); Quick shows the mark alone.
-      var autoLbl = '\ud83d\uddd8' + (QUICK ? '' : 'auto');
+      // ⓘ The mark comes AFTER the word (rhoquinn8217, 2026-09-19), on this
+      // button and on Unlink, which is the order Advanced's labels already
+      // read in.
+      var autoLbl = (QUICK ? '' : 'auto ') + '\ud83d\uddd8';
       var autoBtn;
       if (!mySerial) {
         autoBtn = '<button class="cauto-btn" disabled title="this controller reports no serial, ' +
                   'so there is nothing to remember it by">' + autoLbl + '</button>';
       } else if (!d.linked_config) {
-        autoBtn = '<button class="cauto-btn" disabled title="pick a config first">' + autoLbl + '</button>';
+        // ⭐ "AUTO LINK NO CONFIG" MEANS REMOVE THE AUTO LINK (rhoquinn8217,
+        // 2026-09-19), and the lit button already means "press to remove"
+        // here, so this state simply lights it: there is a claim standing and
+        // no config linked, and the only thing 🗘 can now do is drop it.
+        autoBtn = claimedBy
+          ? '<button class="cauto-btn on" onclick="compactAutoUnlink()" title="no config ' +
+            'is set, so this stops ' + esc(claimedBy) + ' auto linking">' + autoLbl + '</button>'
+          : '<button class="cauto-btn" disabled title="pick a config first">' + autoLbl + '</button>';
       } else if (autoOn) {
         autoBtn = '<button class="cauto-btn on" onclick="compactAutoUnlink()" title="' +
                   esc(d.linked_config) + ' auto links to this controller: press to remove">' + autoLbl + '</button>';
@@ -6083,10 +6198,12 @@ function paintCompact() {
       // The selector under a title, sliding with the ring (rhoquinn8217, 2026-09-09).
       html += '<div class="csel' + slide + '">' +
               (QUICK ? '' : '<div class="ctitle">Controller Config</div>') +
-              '<div class="cselrow"><select id="cpick" data-ordinal="' + esc(d.ordinal) + '"' +
+              '<div class="cselrow">' + unlinkBtn() +
+              '<select id="cpick" data-ordinal="' + esc(d.ordinal) + '"' +
               ' onmousedown="pickerActivate(event,this)"' +
               ' onchange="compactPick()">' +
-              opts + '</select>' + autoBtn + '</div></div>' + (QUICK ? '' : foot(true, d.ordinal));
+              opts + '</select>' + autoBtn +
+              '</div></div>' + (QUICK ? '' : foot(true, d.ordinal));
     }
   }
   // ⭐ The footer area: the legend and the way back, as large as the rest.
