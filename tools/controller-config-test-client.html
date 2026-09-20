@@ -4717,6 +4717,9 @@ function gpSelectEnd(commit) {
   if (!commit) el.selectedIndex = GP_SELECT_WAS;
   el.classList.remove('gp-selecting');
   pickerCollapse(el);                           // collapse, and back into flow
+  // ⚠️ Opened by mouse and closed by pad would otherwise leave the opening
+  // press still matching, and the next click would be ignored.
+  PICKER_OPEN_PRESS = -1;
   // ⓘ The 'change' fires on a cancel too, to put the old value back; compact's
   // pick reads this flag so a cancel never links or parks.
   GP_SELECT_COMMIT = commit;
@@ -6149,6 +6152,56 @@ function compactUnlink() {
   unlinkConfirmed(d.ordinal);
 }
 
+// ⭐⭐ THE MEASURED EVENT ORDER ON A LISTBOX ROW CLICK (2026-09-20, this
+// machine's Chromium, on a throwaway <select size=5> rather than from memory):
+//
+//     mousedown : 0     ⚠️ the OLD index -- the selection has NOT changed yet
+//     mouseup   : 3     it changes HERE
+//     input     : 3
+//     change    : 3     ⭐ BEFORE click
+//     click     : 3     last
+//
+// ➡️ Two rules fall out of that, and both had been got wrong:
+//   ⛔ `preventDefault()` on MOUSEDOWN kills the pick outright, because the
+//      selection has not happened yet at that point.
+//   ⛔ `change` fires BEFORE `click`, so by the time the box can be closed
+//      compactPick() has ALREADY linked the config. Closing must therefore
+//      NOT dispatch a second `change`, or it links twice.
+// ⛔⛔ AND THE OPENING PRESS FIRES NO `click` AT ALL. Measured the same way:
+//
+//     mousedown : SELECT      the box is still collapsed
+//     mouseup   : OPTION      it expanded UNDER the cursor
+//     (no click)              ⭐ a click needs ONE shared target, and there
+//                                is none, so the event never happens
+//
+// ⚠️ A "swallow the next click" flag was written first and is WRONG for
+// exactly that reason: the click it waits for never arrives, the flag stays
+// set, and it eats the first real pick instead. ➡️ So presses are COUNTED,
+// and a click is ignored only when it belongs to the press that opened the
+// box -- which is true whether or not that press ever produces one.
+var PICKER_PRESS = 0;        // every mousedown that reaches the selector
+var PICKER_OPEN_PRESS = -1;  // the one that opened it
+
+// Close after a mouse pick. ⓘ Deliberately not gpSelectEnd(): that dispatches
+// a `change` to carry the pad's choice out, and here the native one has
+// already done it.
+function pickerClickEnd(sel) {
+  if (PICKER_OPEN_PRESS === PICKER_PRESS) return;   // the opening press
+  if (GP_SELECTING !== sel) return;
+  sel.classList.remove('gp-selecting');
+  pickerCollapse(sel);
+  GP_SELECTING = null;
+}
+
+// ⭐ Clicking AWAY cancels, which is what a mouse expects and what Circle
+// does for the pad. ⓘ Capture phase, so it runs before the selector's own
+// mousedown and can tell "outside" from "on it" without racing.
+document.addEventListener('mousedown', function (ev) {
+  if (!GP_SELECTING) return;
+  if (ev.target === GP_SELECTING || GP_SELECTING.contains(ev.target)) return;
+  gpSelectEnd(false);
+}, true);
+
 // ⭐ A CLICK ENTERS THE SAME MODE THE PAD USES, in compact only. Otherwise a
 // mouse gets the native popup -- the very thing that does not fit -- while the
 // pad gets a one-row stepper, and the two disagree about what the control is.
@@ -6156,8 +6209,22 @@ function compactUnlink() {
 // is faster with a mouse.
 function pickerActivate(ev, sel) {
   if (!COMPACT) return;
+  // ⓘ Counted for EVERY press, including the ones that land on an option
+  // while the box is open -- mousedown bubbles from the option to the select.
+  PICKER_PRESS++;
+  // ⛔⛔ ALREADY OPEN: LET THE BROWSER HAVE THIS PRESS, and close on the
+  // CLICK instead (rhoquinn8217, 2026-09-20: *"the mouse isn't able to select
+  // one of the config. Clicking anywhere on the expanded window just
+  // compresses it again without selecting anything."*).
+  //
+  // This used to `preventDefault()` and then commit, which is exactly why a
+  // mouse could not pick: see the measured order above -- mousedown still
+  // holds the OLD index, so preventing it kills the selection, and committing
+  // there commits the value that was already there. The box shut with nothing
+  // chosen, every time.
+  if (GP_SELECTING === sel) return;
+
   ev.preventDefault();
-  if (GP_SELECTING === sel) { gpSelectEnd(true); return; }
   GP_SELECTING = sel;
   GP_SELECT_WAS = sel.selectedIndex;
   sel.classList.add('gp-selecting');
@@ -6167,6 +6234,9 @@ function pickerActivate(ev, sel) {
   // mouse got the stepper the pad was given. The two agree now.
   pickerExpand(sel);
   sel.focus();
+  // ⚠️ If this press does produce a click, it is the second half of the one
+  // that OPENED the box and must not be read as a pick.
+  PICKER_OPEN_PRESS = PICKER_PRESS;
 }
 
 function compactPick() {
@@ -6341,6 +6411,7 @@ function paintCompact() {
               '<div class="cselrow">' + unlinkBtn() +
               '<select id="cpick" data-ordinal="' + esc(d.ordinal) + '"' +
               ' onmousedown="pickerActivate(event,this)"' +
+              ' onclick="pickerClickEnd(this)"' +
               ' onchange="compactPick()">' +
               opts + '</select>' + autoBtn +
               '</div></div>' + (QUICK ? '' : foot(true, d.ordinal));
