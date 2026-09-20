@@ -4627,10 +4627,49 @@ function pickerExpand(el) {
   var top = Math.round(rect.top + rect.height / 2 - h / 2);
   top = Math.max(margin, Math.min(top, window.innerHeight - h - margin));
 
+  // ⭐⭐ AND IN QUICK IT GROWS SIDEWAYS TOO (rhoquinn8217, 2026-09-20: *"in
+  // quick mode some of the config names are too long"*).
+  //
+  // ⓘ QUICK ONLY, ON PURPOSE. Simple's box is already 582 px and the names
+  // fit; Quick's is capped at 58vw by `body.quick #compactBox select` so that
+  // the row still has room for Unlink and 🗘 beside it -- which is right for
+  // the CLOSED box and wrong for the open one, where nothing is beside it.
+  //
+  // ➡️ The longest option is MEASURED in the box's own font rather than
+  // guessed at, so a list of short names does not get a silly wide box. Then
+  // it is centred on the collapsed box and clamped to the window, the same way
+  // the height is -- it grows left and right, not just right.
+  var w = Math.round(rect.width);
+  if (QUICK) {
+    var cs = getComputedStyle(el);
+    var canvas = pickerExpand._canvas ||
+                 (pickerExpand._canvas = document.createElement('canvas'));
+    var ctx = canvas.getContext('2d');
+    ctx.font = cs.fontStyle + ' ' + cs.fontWeight + ' ' + cs.fontSize + ' ' + cs.fontFamily;
+    var widest = 0;
+    for (var i = 0; i < el.options.length; i++) {
+      widest = Math.max(widest, ctx.measureText(el.options[i].text).width);
+    }
+    // ⚠️ The padding and border are the box's, and the scrollbar only appears
+    // when the list is longer than the box -- but reserving it always is a few
+    // pixels of slack, while missing it clips the longest name by exactly the
+    // amount that matters.
+    var padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight) +
+               parseFloat(cs.borderLeftWidth) + parseFloat(cs.borderRightWidth);
+    var want = Math.ceil(widest + padX + 18);
+    w = Math.min(window.innerWidth - 2 * margin, Math.max(w, want));
+  }
+
+  var left = Math.round(rect.left + rect.width / 2 - w / 2);
+  left = Math.max(margin, Math.min(left, window.innerWidth - w - margin));
+
   el.style.position = 'fixed';
   el.style.top = top + 'px';
-  el.style.left = Math.round(rect.left) + 'px';
-  el.style.width = Math.round(rect.width) + 'px';
+  el.style.left = left + 'px';
+  el.style.width = w + 'px';
+  // ⛔ Without this the 58vw cap wins and the width above does nothing. An
+  // inline style beats a stylesheet rule, and that rule carries no !important.
+  el.style.maxWidth = 'none';
 
   // ⛔⛔ SHOW THE CONFIG YOU ARE ON. A listbox opens at scrollTop 0, so once
   // the list is longer than the box the current config is simply not on
@@ -4641,9 +4680,20 @@ function pickerExpand(el) {
   // and below to move to, and clamp so the last page does not scroll past the
   // end.
   if (el.selectedIndex >= 0 && rows < el.options.length) {
-    var want = (el.selectedIndex - Math.floor((rows - 1) / 2)) * rowH;
-    var most = (el.options.length - rows) * rowH;
-    el.scrollTop = Math.max(0, Math.min(want, most));
+    // ⚠️ THE ROW PITCH, MEASURED OFF TWO REAL ROWS -- not rowH. rowH comes
+    // from the difference between two BOX heights, which is close but not
+    // exact, and scrolling by it left a sliver of the row above showing at the
+    // top of the list (seen 2026-09-20). Two option rects give the true pitch,
+    // and they are only meaningful now that the box is a listbox.
+    var pitch = rowH;
+    if (el.options.length >= 2) {
+      var a = el.options[0].getBoundingClientRect();
+      var b = el.options[1].getBoundingClientRect();
+      if (b.top > a.top) pitch = b.top - a.top;
+    }
+    var want = (el.selectedIndex - Math.floor((rows - 1) / 2)) * pitch;
+    var most = (el.options.length - rows) * pitch;
+    el.scrollTop = Math.round(Math.max(0, Math.min(want, most)));
   }
   // ⚠️ Above the sticky header (z-index 40 there) and below the modal
   // overlays (99), which must still cover it.
@@ -4658,6 +4708,7 @@ function pickerCollapse(el) {
   el.style.top = '';
   el.style.left = '';
   el.style.width = '';
+  el.style.maxWidth = '';
   el.style.zIndex = '';
 }
 
