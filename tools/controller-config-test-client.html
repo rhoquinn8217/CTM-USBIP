@@ -4564,7 +4564,16 @@ function gpActivate() {
     // ⓘ Nothing else is needed -- gpKeyMove already walks selectedIndex while
     // GP_SELECTING is set, gpKeySelect already commits, and gpKeyBack already
     // puts the old value back. The gold outline says which mode you are in.
-    el.size = COMPACT ? 1 : Math.min(el.options.length, 8);
+    // T-232 item 4: QUICK, not COMPACT. COMPACT is Quick AND Simple; the
+    // stepping behaviour was chosen for both on 2026-09-11, on the grounds
+    // that eight rows are taller than a postcard-sized window.
+    //
+    // rhoquinn8217 asked for Simple to expand and Quick to keep stepping
+    // (2026-09-19). Note the two views are the SAME SIZE -- both 0.45 of the
+    // screen each way, only Advanced differs -- so this is a preference,
+    // not something the geometry decided. If eight rows prove too tall
+    // here, the row count is the dial rather than this flag.
+    el.size = QUICK ? 1 : Math.min(el.options.length, 8);
     // ⛔ Nothing in the sticky block needs scrolling to: it is pinned on screen by
   // definition. Calling scrollIntoView on it moved the SETTINGS list beneath,
   // so navigating the header appeared to scroll the page for no reason.
