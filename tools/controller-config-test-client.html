@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.2 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.3 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,10 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.3  Simple's two marks move to the END of their words -- "auto🗘"
+            and "unlink🛇" rather than the mark first (rhoquinn8217),
+            which is the order Advanced's own labels already read in. Quick
+            is unaffected: it shows the marks alone.
     2.66.2  Simple puts Unlink on the LEFT of the selector, where Quick has
             it, rather than on the right beside the auto-link mark
             (rhoquinn8217). The two compact views now draw the same row.
@@ -1275,7 +1279,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.66.2</span>
+  <span class="muted" style="font-size:12px">v2.66.3</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -6070,7 +6074,7 @@ function paintCompact() {
   // left to right as the config, what to do with it, then the two claims.
   // ⓘ Same act as picking "(no config)", so it asks nothing.
   var unlinkBtn = function () {
-    var lbl = '\ud83d\udec7' + (QUICK ? '' : 'unlink');
+    var lbl = (QUICK ? '' : 'unlink') + '\ud83d\udec7';
     return (d && d.linked_config)
       ? '<button class="cunlink-btn" onclick="compactUnlink()" ' +
         'title="set this controller to No config">' + lbl + '</button>'
@@ -6170,7 +6174,10 @@ function paintCompact() {
       // reason, when there is nothing to claim.
       // ⓘ The mark says what it is for in Simple, which has the width for it
       // (rhoquinn8217, 2026-09-09); Quick shows the mark alone.
-      var autoLbl = '\ud83d\uddd8' + (QUICK ? '' : 'auto');
+      // ⓘ The mark comes AFTER the word (rhoquinn8217, 2026-09-19), on this
+      // button and on Unlink, which is the order Advanced's labels already
+      // read in.
+      var autoLbl = (QUICK ? '' : 'auto') + '\ud83d\uddd8';
       var autoBtn;
       if (!mySerial) {
         autoBtn = '<button class="cauto-btn" disabled title="this controller reports no serial, ' +
