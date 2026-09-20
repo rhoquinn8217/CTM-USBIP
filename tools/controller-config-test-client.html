@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.65.0 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.0 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,19 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.0  Unlink, beside the config. Every view gets a button that sets the
+            controller to no config: left of the selector in Advanced, under
+            the config beside New in Simple, and in Quick the no symbol alone
+            in the selector row, the way 🗘 is the mark alone there. It asks
+            nothing, because picking "(no config)" asks nothing either.
+            AND "auto link no config" now MEANS "remove the auto link". The
+            🗘 button used to be dead whenever no config was linked; with a
+            claim standing it is now live and drops it -- lit in Simple and
+            Quick, where lit already means press-to-remove, and reading
+            "Remove auto link" in Advanced rather than "Set", since a button
+            should not say one thing and open a question about another. With
+            nothing claiming the controller it stays greyed: nothing to make,
+            nothing to remove.
     2.65.0  A config is not tied to a controller type any more. Every
             controller that takes a config is offered every config, so an Xbox
             pad can pick one made on a DualSense. Create no longer asks for a
@@ -737,11 +750,17 @@
   body.quick #compactBox .csel { gap:0; }
   body.quick #compactBox .cselrow { gap:2vw; width:100%; justify-content:center; }
   /* The selector may shrink below its longest name rather than push the
-     button off the edge; a long name is clipped inside it. */
+     button off the edge; a long name is clipped inside it.
+     ⛔ THE CAP IS WHAT KEEPS IT IN (2026-09-19): a flex item clamped by
+     max-width is FROZEN at that width and shrinks no further, so 80vw plus
+     two buttons and their gaps simply overflowed and both buttons were cut
+     off at the window edges. The row carries Unlink as well as 🗘 now, so the
+     cap has to leave room for both. */
   body.quick #compactBox select { font-size:12.6vh; padding:1.8vh 1.5vw; min-width:0;
-    max-width:80vw; flex:0 1 auto; }
+    max-width:58vw; flex:0 1 auto; }
   #compactBox .cselrow { position:relative; }
-  body.quick #compactBox .cauto-btn { font-size:12.6vh; padding:1.5vh 1.6vw; }
+  body.quick #compactBox .cauto-btn,
+  body.quick #compactBox .cselrow .cunlink-btn { font-size:12.6vh; padding:1.5vh 1.6vw; }
   body.quick #compactBox .cbar { padding-top:3.75vh; gap:3vw; }
   body.quick #compactBox .cbar > button { font-size:6.9vh; padding:1.5vh 2vw; }
   body.quick #compactBox .clegend { font-size:6.9vh; }
@@ -757,7 +776,11 @@
      next time it bridges; lit, it removes the claim. The claimed config
      carries a 🗘 after its name in the list. */
   #compactBox .cselrow { display:flex; align-items:center; gap:1.5vw; }
-  #compactBox .cauto-btn { font-size:4.2vh; padding:0.6vh 1.4vw; line-height:1; }
+  #compactBox .cauto-btn,
+  #compactBox .cselrow .cunlink-btn { font-size:4.2vh; padding:0.6vh 1.4vw; line-height:1; }
+  /* In Simple the button is a footer button beside New, so .cfoot's own sizing
+     wins there by being the more specific selector; only the selector-row copy
+     (Quick's) is sized here. */
   #compactBox .cauto-btn.on { color:#7fd18c; border-color:#7fd18c; opacity:1; }
   /* ⛔ NO GREEN IN THE LIST (rhoquinn8217, 2026-09-09). A native option is
      one run of text in one colour, so the mark could never be green on its
@@ -1239,7 +1262,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.64.49</span>
+  <span class="muted" style="font-size:12px">v2.66.0</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -2903,8 +2926,21 @@ function buildDevicePane(d) {
     claimBtn = '<button disabled title="this controller reports no serial, so ' +
                'there is nothing to remember it by">Set auto link 🗘</button>';
   } else if (!d.linked_config) {
-    claimBtn = '<button disabled title="pick a config first — there is nothing ' +
-               'to claim while it reads the shared settings">Set auto link 🗘</button>';
+    // ⭐ "AUTO LINK NO CONFIG" MEANS REMOVE THE AUTO LINK (rhoquinn8217,
+    // 2026-09-19). With nothing linked there is no claim to make, so the
+    // button does the only thing the state can mean -- and SAYS so, because a
+    // button reading "Set" that opens a "Remove auto link" question would be
+    // asking one thing and doing another.
+    // ⓘ Still disabled when nothing claims this controller: then there is
+    // neither a claim to make nor one to remove.
+    claimBtn = claimedBy
+      ? '<button onclick="stopAutoLink(\'' + esc(claimedBy) + '\',\'' +
+        esc(mySerial) + '\',\'' + esc(whoIs(d.ordinal)) + '\')" ' +
+        'title="no config is set, so this stops ' + esc(claimedBy) +
+        ' auto linking to this controller">Remove auto link 🗘</button>'
+      : '<button disabled title="pick a config first — there is nothing to ' +
+        'claim while it reads the shared settings, and nothing auto links ' +
+        'this controller">Set auto link 🗘</button>';
   } else if (alreadyMine) {
     claimBtn = '<button disabled title="already claimed by this config">' +
                'Set auto link 🗘</button>';
@@ -2919,7 +2955,20 @@ function buildDevicePane(d) {
                'Set auto link 🗘</button>';
   }
 
-  head += '<div class="f"><span>currently linked config</span>' +
+  // ⭐ UNLINK SITS LEFT OF THE SELECTOR (rhoquinn8217, 2026-09-19), so the
+  // control that empties the picker is beside the picker rather than only in
+  // the row above it. ⓘ It asks nothing, deliberately: it does exactly what
+  // choosing "(no config)" in the picker does, and a pick asks nothing. The
+  // Reset button in the device row is the louder act and keeps its question.
+  // ⛔ Greyed with the reason when there is nothing to unlink, per the rule a
+  // few lines down: an absent button reads as a bug, a greyed one answers.
+  var unlinkBtn = d.linked_config
+    ? '<button onclick="unlinkConfirmed(\'' + esc(d.ordinal) + '\')" ' +
+      'title="set this controller to No config">Unlink 🚫</button>'
+    : '<button disabled title="this controller already reads no config">' +
+      'Unlink 🚫</button>';
+
+  head += '<div class="f"><span>currently linked config</span>' + unlinkBtn +
           // ⭐ Links on selection. Everything else on this page saves as you
           // change it, so an Apply here was inconsistent -- and one more D-pad
           // step between the picker and the buttons beside it.
@@ -4794,6 +4843,10 @@ function compactMove(dx, dy) {
   if (!box) return false;
   var rows = [];
   var topRow = [];
+  // ⓘ Left to right, exactly as the row is drawn: Quick's Unlink, the selector,
+  // then 🗘. (Simple's Unlink is a footer button and arrives with New below.)
+  var un = box.querySelector('.cselrow .cunlink-btn:not([disabled])');
+  if (un) topRow.push(un);
   var sel = box.querySelector('#cpick');
   if (sel) topRow.push(sel);
   var auto = box.querySelector('.cauto-btn:not([disabled])');
@@ -5917,12 +5970,31 @@ function compactAutoLink() {
 
 // 🗘 lit: remove the claim. The full page's stopAutoLink asks first, then
 // drops it; the repaint that follows puts the button out.
+// ⛔ NOT `d.linked_config` ANY MORE (2026-09-19). The claim is held by whatever
+// config claimed this serial, which is the same thing as the linked config
+// while the button is lit -- but NOT when no config is linked at all, which is
+// now a state this button can act in. Reading the claim itself is right in both.
 function compactAutoUnlink() {
   var d = (LAST_DEVICES || []).filter(function (x) { return x.ordinal === ACTIVE; })[0];
-  if (!d || !d.linked_config) return;
+  if (!d) return;
   var mySerial = normSerial(d.serial);
   if (!mySerial) return;
-  stopAutoLink(d.linked_config, mySerial, nameFor(d.ordinal));
+  var claimedBy = '';
+  CONFIGS.forEach(function (c) {
+    (c.auto_link || []).forEach(function (sn) {
+      if (normSerial(sn) === mySerial) claimedBy = c.name;
+    });
+  });
+  var name = claimedBy || d.linked_config;
+  if (!name) return;
+  stopAutoLink(name, mySerial, nameFor(d.ordinal));
+}
+
+// The compact views' Unlink: the same call the picker's "(no config)" makes.
+function compactUnlink() {
+  var d = (LAST_DEVICES || []).filter(function (x) { return x.ordinal === ACTIVE; })[0];
+  if (!d || !d.linked_config) return;
+  unlinkConfirmed(d.ordinal);
 }
 
 // ⭐ A CLICK ENTERS THE SAME MODE THE PAD USES, in compact only. Otherwise a
@@ -5973,8 +6045,21 @@ function paintCompact() {
   // ⭐ Under the selector: New and Edit (rhoquinn8217, 2026-09-09). Edit is
   // the other page on THIS controller, its config's settings. Configurator,
   // the whole tool from the top, and Close are the footer's two corners.
+  // ⭐ ONE UNLINK BUTTON, TWO PLACES (rhoquinn8217, 2026-09-19). Simple puts it
+  // under the config, between it and New; Quick has no footer at all, so there
+  // it joins the selector row -- and drops the word, the way 🗘 does in Quick.
+  // ⓘ Same act as picking "(no config)", so it asks nothing.
+  var unlinkBtn = function () {
+    var lbl = QUICK ? '🚫' : 'Unlink 🚫';
+    return (d && d.linked_config)
+      ? '<button class="cunlink-btn" onclick="compactUnlink()" ' +
+        'title="set this controller to No config">' + lbl + '</button>'
+      : '<button class="cunlink-btn" disabled ' +
+        'title="this controller already reads no config">' + lbl + '</button>';
+  };
   var foot = function (withNew, ordinal) {
     return '<div class="cfoot">' +
+      (withNew ? unlinkBtn() : '') +
       (withNew ? '<button onclick="newConfigFor(\'' + esc(ordinal) + '\')">New</button>' : '') +
       (ordinal ? '<button onclick="setCompact(false)">Edit</button>' : '') + '</div>';
   };
@@ -6072,7 +6157,14 @@ function paintCompact() {
         autoBtn = '<button class="cauto-btn" disabled title="this controller reports no serial, ' +
                   'so there is nothing to remember it by">' + autoLbl + '</button>';
       } else if (!d.linked_config) {
-        autoBtn = '<button class="cauto-btn" disabled title="pick a config first">' + autoLbl + '</button>';
+        // ⭐ "AUTO LINK NO CONFIG" MEANS REMOVE THE AUTO LINK (rhoquinn8217,
+        // 2026-09-19), and the lit button already means "press to remove"
+        // here, so this state simply lights it: there is a claim standing and
+        // no config linked, and the only thing 🗘 can now do is drop it.
+        autoBtn = claimedBy
+          ? '<button class="cauto-btn on" onclick="compactAutoUnlink()" title="no config ' +
+            'is set, so this stops ' + esc(claimedBy) + ' auto linking">' + autoLbl + '</button>'
+          : '<button class="cauto-btn" disabled title="pick a config first">' + autoLbl + '</button>';
       } else if (autoOn) {
         autoBtn = '<button class="cauto-btn on" onclick="compactAutoUnlink()" title="' +
                   esc(d.linked_config) + ' auto links to this controller: press to remove">' + autoLbl + '</button>';
@@ -6083,7 +6175,8 @@ function paintCompact() {
       // The selector under a title, sliding with the ring (rhoquinn8217, 2026-09-09).
       html += '<div class="csel' + slide + '">' +
               (QUICK ? '' : '<div class="ctitle">Controller Config</div>') +
-              '<div class="cselrow"><select id="cpick" data-ordinal="' + esc(d.ordinal) + '"' +
+              '<div class="cselrow">' + (QUICK ? unlinkBtn() : '') +
+              '<select id="cpick" data-ordinal="' + esc(d.ordinal) + '"' +
               ' onmousedown="pickerActivate(event,this)"' +
               ' onchange="compactPick()">' +
               opts + '</select>' + autoBtn + '</div></div>' + (QUICK ? '' : foot(true, d.ordinal));
