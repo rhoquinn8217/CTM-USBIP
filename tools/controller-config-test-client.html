@@ -3058,13 +3058,50 @@ var TRANSPORT_ONLY = {
   audio_latency_ms: 'Bluetooth'
 };
 
+// ⭐ Settings that need HARDWARE only some pads have (T-234).
+//
+// ⚠️ Not the same thing as TRANSPORT_ONLY above. That one is about the WIRE
+// -- the same pad, a different cable -- and can change while a session runs.
+// This is about the pad itself and never changes for a given controller.
+//
+// ⛔⛔ AND IT IS EIGHT KEYS, NOT THE TRIGGERS SECTION. Most trigger
+// settings work perfectly well on a DS4: a trigger is an analogue axis whatever
+// the pad, so press_at, the two timings and steady_cursor_pull all act. Only
+// the four per trigger that drive the DualSense's adaptive hardware are inert.
+// ⓘ That is why this is per-KEY and not T-227's per-section gating.
+//
+// ⓘ Both DS4 maps say so themselves -- `adaptive_triggers = false` in
+// ds4_usb_over_ds4_bt.map and ds4_usb_over_ds4_usb.map -- so this list is
+// restating a fact the data already carries, not inventing one.
+var NEEDS_ADAPTIVE_TRIGGERS = {
+  left_trigger_effect: 1, left_trigger_effect_at: 1,
+  left_trigger_effect_strength: 1, left_trigger_snap_force: 1,
+  right_trigger_effect: 1, right_trigger_effect_at: 1,
+  right_trigger_effect_strength: 1, right_trigger_snap_force: 1
+};
+
+// The settings kinds whose pads HAVE adaptive triggers.
+// ⓘ The Edge has them; a DS4, an Xbox pad and anything generic do not.
+var ADAPTIVE_TRIGGER_KINDS = ['ds5', 'ds5_edge'];
+
 // Returns a reason string when `key` cannot act on `kind`, or '' when it can.
+// ⓘ An empty kind means no controller is in hand -- Overview and the Editor
+// -- and nothing is greyed there, for the same reason T-227 hides no section:
+// a config is not tied to a pad, so nothing can be said about one.
 function inertReason(key, sessionKind) {
+  if (!sessionKind) return '';
   var only = TRANSPORT_ONLY[key];
-  if (!only) return '';
-  var how = transportOf(sessionKind);
-  if (!how || how === only) return '';
-  return 'no effect over ' + how + ' — ' + only + ' only';
+  if (only) {
+    var how = transportOf(sessionKind);
+    if (how && how !== only) {
+      return 'no effect over ' + how + ' — ' + only + ' only';
+    }
+  }
+  if (NEEDS_ADAPTIVE_TRIGGERS[key] &&
+      ADAPTIVE_TRIGGER_KINDS.indexOf(settingsKindOf(sessionKind)) < 0) {
+    return 'this controller has no adaptive triggers';
+  }
+  return '';
 }
 
 // ⭐ The button index groups, from the table in rebind.inl. 34 button settings
