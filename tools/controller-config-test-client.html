@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.4 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.5 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,18 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.5  Overview loses its config section, and the Editor tab gains
+            Archive beside Copy -- the only action there that belonged to a
+            config rather than a controller. The Editor's New button worked
+            at last: it returned on its second line whenever no controller
+            matched, so it offered no presets rather than too few. Two
+            things found while tracing it: the editor head was painted
+            below the empty-list check, so with no configs at all the one
+            tab that can create the first one had neither picker nor New
+            button; and the name suggestion read its box without a guard,
+            so it would have thrown on every config poll once the box left
+            with the section. Simple's config selector expands when chosen;
+            Quick's keeps stepping (T-232).
     2.66.4  RESET IS GONE, and Unlink is what replaces it (rhoquinn8217).
             The button and its column leave both device tables -- the
             controller tab's and Overview's -- and the question it asked
@@ -1234,6 +1246,16 @@
   .row.inert { opacity:.55; }
   .row.inert select, .row.inert input { cursor:not-allowed; }
   .gp-selecting { outline:3px solid #e0c07a !important; outline-offset:2px; }
+  /* ⭐ THE OPEN PICKER HIGHLIGHTS THE ROW UNDER THE MOUSE (rhoquinn8217,
+     2026-09-20). ⓘ A listbox does NOT do this on its own -- only the native
+     dropdown POPUP does, and that popup is drawn by the OS. The page never
+     needed the rule before, because the box only ever opened one row high.
+     ✅ Checked here before it was written: `option:hover` really is stylable
+     in this Chromium, on a throwaway <select size=6>.
+     ⚠️ Lighter than the selected row's own highlight on purpose -- hover is
+     "this is what you would get", not "this is what you have". */
+  select.gp-selecting option:hover { background:#3a3d49; color:#fff; }
+  select.gp-selecting { cursor:pointer; }
   .log-head { font-family:Consolas,monospace; font-size:12px; margin-bottom:4px; }
 </style>
 </head>
@@ -1311,13 +1333,15 @@
 <h2>Devices</h2>
 <div id="devices"><span class="muted">Refresh to load.</span></div>
 
-<h2>Configs</h2>
-<div class="bar">
-  <input id="newName" placeholder="new config name" size="20">
-  <!-- ⛔ The kind box is gone (2.65.0): a config is for any controller. -->
-  <button onclick="createConfig()">Create</button>
-</div>
-<div id="configs"><span class="muted">Refresh to load.</span></div>
+<!-- ⛔⛔ THE CONFIGS SECTION LEFT OVERVIEW (T-232, 2026-09-19).
+     rhoquinn8217: "It doesn't have a real purpose anymore. The Editor tab
+     covers most of it." It listed each config with Rename and Archive, and
+     carried a name box with Create.
+     ⛔ Archive had to move FIRST -- it was the only action there that
+     belonged to a config rather than a controller, and there was no other way
+     to archive one. It is on the Editor tab's head now, after Copy.
+     ⛔ Naming by hand is not lost: New makes one and Rename names it,
+     both on the Editor tab. -->
 
 
 <!-- ⛔ THE EDITOR LEFT OVERVIEW 2026-09-01. Its config row belongs in the
@@ -2421,8 +2445,13 @@ var PRESET_OPEN = false;
 var PRESETS = [];
 
 function newConfigFor(ordinal) {
-  var dev = LAST_DEVICES.filter(function(x) { return x.ordinal === ordinal; })[0];
-  if (!dev) return;
+  // T-232: an EMPTY ordinal is the Editor tab, which has no controller. It
+  // used to fall into the guard below and return, so New there did nothing at
+  // all -- it was not offering too few presets, it was offering none.
+  var dev = ordinal
+    ? (LAST_DEVICES.filter(function(x) { return x.ordinal === ordinal; })[0] || null)
+    : null;
+  if (ordinal && !dev) return;   // a named controller that has since gone
   // ⓘ The list comes from the agent, not from here: two places naming the same
   // presets is two places to disagree about them.
   call('GET', '/api/v1/presets').then(function(d) {
@@ -2478,7 +2507,8 @@ function buttonLabel(key) {
 
 function openPresetPicker(ordinal, dev) {
   OVERLAY_OPENER = GP_FOCUS[GP_INDEX] || null;
-  var kind = settingsKindOf(dev.kind);
+  // T-232: null when there is no controller in hand. Nothing is filtered then.
+  var kind = dev ? settingsKindOf(dev.kind) : null;
   // ⭐ TITLES ONLY, and choosing one OPENS ITS DETAILS rather than creating it
   // straight away (rhoquinn8217, 2026-08-31). An ⓘ button beside each row was
   // tried first and dropped: it needed its own navigation axis, and every
@@ -2492,7 +2522,10 @@ function openPresetPicker(ordinal, dev) {
   PRESETS.forEach(function(p) {
     // ⛔ Only presets that suit THIS controller. One that cannot act on it
     // would be a config that silently does nothing.
-    if ((p.kinds || []).indexOf(kind) < 0) return;
+    // T-232: with no controller there is no kind to narrow to, so every
+    // preset is offered. It also agrees with the 2026-09-12 decision that any
+    // config links to any controller.
+    if (kind && (p.kinds || []).indexOf(kind) < 0) return;
     html += '<div class="prow">' +
             '<button data-preset="' + esc(p.name) + '" ' +
             'onclick="openPresetInfo(\'' + esc(ordinal) + '\',\'' +
@@ -2714,16 +2747,25 @@ function presetCancel() {
 }
 
 function createFromPreset(ordinal, preset) {
-  var dev = LAST_DEVICES.filter(function(x) { return x.ordinal === ordinal; })[0];
-  if (!dev) { presetCancel(); return; }
-  var name = nextConfigName(dev.kind, preset);
-  var body = { name: name, device: ordinal };
+  // T-232: no ordinal means the Editor tab -- make the config, link it to
+  // nothing, and open it. The API reads a body with no "device" as exactly
+  // that, which is the same spelling unlink uses.
+  var dev = ordinal
+    ? (LAST_DEVICES.filter(function(x) { return x.ordinal === ordinal; })[0] || null)
+    : null;
+  if (ordinal && !dev) { presetCancel(); return; }
+  var name = nextConfigName(dev ? dev.kind : '', preset);
+  var body = { name: name };
+  if (ordinal) { body.device = ordinal; }
   if (preset) body.preset = preset;
   presetCancel();
   call('POST', '/api/v1/configs', body)
     .then(function() {
       setConn('created ' + name + (preset ? ' from ' + preset : ''), 'good');
       loadConfigs(); loadDevices();
+      // T-232: made from the Editor tab, so show it there. Pressing New and
+      // being left on an empty editor would be its own puzzle.
+      if (!ordinal) { openConfig(name); }
       // ⭐ The same ending as picking one, in a new config's words: try it in
       // the game, or stay and customise it (rhoquinn8217, 2026-09-09).
       // "Customize it" is the configurator on this controller, where the
@@ -3456,7 +3498,13 @@ function paintEditorHead() {
     }).join('');
   var acts = OV_CONFIG
     ? '<button onclick="renameConfig(\'' + esc(OV_CONFIG) + '\')">Rename</button>' +
-      '<button onclick="copyConfigNamed(\'' + esc(OV_CONFIG) + '\')">Copy</button>'
+      '<button onclick="copyConfigNamed(\'' + esc(OV_CONFIG) + '\')">Copy</button>' +
+      // T-232: Archive moved here from Overview's config table, which is
+      // gone. It was the only action there that belonged to a CONFIG rather
+      // than a controller, so it had to land somewhere before that table
+      // could go. No read-only guard is needed: this picker already filters
+      // read-only configs out, so one can never be open here.
+      '<button class="warn" onclick="archive(\'' + esc(OV_CONFIG) + '\')">Archive</button>'
     : '';
   setStickyHead('editor',
     '<div class="f"><span class="muted">config</span>' +
@@ -3704,6 +3752,10 @@ function suggest_name(existing) {
 
 function apply_suggested_name(existing) {
     var box = document.getElementById('newName');
+    // T-232: the box left with Overview's config section. Nothing suggests a
+    // name any more -- New makes one and Rename names it -- so this does
+    // nothing rather than throwing on every config poll.
+    if (!box) return;
     // Leave alone if the user typed something that is not one of our own
     // suggestions -- theirs wins.
     if (box.value && box.value !== box.dataset.suggested) return;
@@ -3746,15 +3798,21 @@ function loadConfigs(isRetry) {
         LAST_DEVICES.forEach(buildDevicePane);
       });
     }
+    // T-232: PAINT THE EDITOR HEAD BEFORE ANY EARLY RETURN.
+    //
+    // It used to sit below the empty-list check, so with NO configs the head
+    // was never painted -- no picker and no New button, on the one tab that
+    // can create the first config. The old message said "Create one above",
+    // meaning Overview's name box, which has now gone.
+    paintEditorHead();
+
     var host = document.getElementById('configs');
+    if (!host) return;      // T-232: Overview no longer lists configs
     if (!list.length) {
-      host.innerHTML = '<span class="muted">No configs yet. Create one above.</span>';
+      host.innerHTML = '<span class="muted">No configs yet.</span>';
       apply_suggested_name(list);
       return;
     }
-    // ⓘ The picker lives in the header now and is rebuilt with the row, so it
-    // cannot drift from the list.
-    paintEditorHead();
 
     // ⛔ No kind column (2.65.0): a config is not tied to a controller type.
     var html = '<table><tr><th>name</th><th>auto links</th>' +
@@ -4506,6 +4564,154 @@ function gpMove(delta) {
   gpPaint();
 }
 
+// ⭐⭐ OPEN THE PICKER AS BIG AS THE WINDOW ALLOWS, GROWING UP AS WELL AS
+// DOWN (rhoquinn8217, 2026-09-20): *"we should expand the list as big as it
+// can and it should also expand upward."*
+//
+// ⛔ A `<select>` with a `size` grows DOWNWARD IN FLOW, and that is the whole
+// problem it had: it shoved New, Edit, Advanced and Quick off the bottom, and
+// it could only ever use the room BELOW the box -- about half the window, with
+// the space above the box wasted. Row counts were tried against that (8, then
+// 5) and every one of them is a compromise with a layout, not a size.
+//
+// ➡️ So it comes OUT OF FLOW while it is open. Fixed-positioned, centred on
+// where the collapsed box sat, clamped to the window: it grows in both
+// directions, overlays the content instead of moving it, and nothing below it
+// is pushed anywhere. ⓘ Which also means the row count is no longer a
+// judgement -- it is whatever fits.
+//
+// ⚠️ THE ROW HEIGHT IS MEASURED, NOT ASSUMED. It was 29 px on the machine
+// this was written on, and it is a function of the page's font -- a different
+// zoom or a different DPI gives a different number, and a hardcoded one would
+// silently size the box wrong rather than fail.
+function pickerExpand(el) {
+  // ⛔⛔ QUICK EXPANDS TOO, AND `size = 1` WAS A BUG, NOT A COMPROMISE
+  // (rhoquinn8217, 2026-09-20). This used to return early for Quick and leave
+  // the box at one row, on the grounds that a 0.185 x 0.150 window has no room
+  // to grow into. Two things were wrong with that:
+  //
+  //   ⛔ A `<select size=1>` IS STILL A DROPDOWN. The second press is the one
+  //     deliberately left un-prevented so the mouse can pick a row -- and with
+  //     no listbox to pick from, the browser popped its own OS list instead.
+  //     Reproduced exactly as reported: click, yellow outline; click again,
+  //     "drop down opens and closes right away" (the popup opens on mousedown
+  //     and pickerClickEnd collapses on the click); click and hold, it "stays
+  //     open until I release". ✅ A listbox has no popup to open, so
+  //     expanding here is the fix for the bug as well as the feature.
+  //
+  //   ⛔ And there IS room: the rows are measured, not assumed, so a small
+  //     window simply gets fewer of them.
+  //
+  // ➡️ Hence the floor of 2 below. One row is a dropdown; two is a list.
+  var rect = el.getBoundingClientRect();
+
+  // Two sizes and one subtraction give the row height and the chrome around it.
+  el.size = 2; var h2 = el.getBoundingClientRect().height;
+  el.size = 3; var h3 = el.getBoundingClientRect().height;
+  var rowH = Math.max(1, h3 - h2);
+  var chrome = Math.max(0, h2 - 2 * rowH);
+
+  var margin = 10;                       // breathing room at both window edges
+  var avail = window.innerHeight - 2 * margin;
+  // ⚠️ FLOOR OF 2, CEILING OF THE OPTION COUNT. Never 1: that is a dropdown
+  // and brings the native popup back. A window too small for two rows gets two
+  // anyway and overflows slightly, which is still better than a popup the pad
+  // cannot drive.
+  var fits = Math.floor((avail - chrome) / rowH);
+  var rows = Math.min(el.options.length, Math.max(2, fits));
+  el.size = rows;
+
+  var h = rows * rowH + chrome;
+  // Centred on the collapsed box, so the list opens around where you were
+  // looking rather than jumping to the top of the window.
+  var top = Math.round(rect.top + rect.height / 2 - h / 2);
+  top = Math.max(margin, Math.min(top, window.innerHeight - h - margin));
+
+  // ⭐⭐ AND IN QUICK IT GROWS SIDEWAYS TOO (rhoquinn8217, 2026-09-20: *"in
+  // quick mode some of the config names are too long"*).
+  //
+  // ⓘ QUICK ONLY, ON PURPOSE. Simple's box is already 582 px and the names
+  // fit; Quick's is capped at 58vw by `body.quick #compactBox select` so that
+  // the row still has room for Unlink and 🗘 beside it -- which is right for
+  // the CLOSED box and wrong for the open one, where nothing is beside it.
+  //
+  // ➡️ The longest option is MEASURED in the box's own font rather than
+  // guessed at, so a list of short names does not get a silly wide box. Then
+  // it is centred on the collapsed box and clamped to the window, the same way
+  // the height is -- it grows left and right, not just right.
+  var w = Math.round(rect.width);
+  if (QUICK) {
+    var cs = getComputedStyle(el);
+    var canvas = pickerExpand._canvas ||
+                 (pickerExpand._canvas = document.createElement('canvas'));
+    var ctx = canvas.getContext('2d');
+    ctx.font = cs.fontStyle + ' ' + cs.fontWeight + ' ' + cs.fontSize + ' ' + cs.fontFamily;
+    var widest = 0;
+    for (var i = 0; i < el.options.length; i++) {
+      widest = Math.max(widest, ctx.measureText(el.options[i].text).width);
+    }
+    // ⚠️ The padding and border are the box's, and the scrollbar only appears
+    // when the list is longer than the box -- but reserving it always is a few
+    // pixels of slack, while missing it clips the longest name by exactly the
+    // amount that matters.
+    var padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight) +
+               parseFloat(cs.borderLeftWidth) + parseFloat(cs.borderRightWidth);
+    var want = Math.ceil(widest + padX + 18);
+    w = Math.min(window.innerWidth - 2 * margin, Math.max(w, want));
+  }
+
+  var left = Math.round(rect.left + rect.width / 2 - w / 2);
+  left = Math.max(margin, Math.min(left, window.innerWidth - w - margin));
+
+  el.style.position = 'fixed';
+  el.style.top = top + 'px';
+  el.style.left = left + 'px';
+  el.style.width = w + 'px';
+  // ⛔ Without this the 58vw cap wins and the width above does nothing. An
+  // inline style beats a stylesheet rule, and that rule carries no !important.
+  el.style.maxWidth = 'none';
+
+  // ⛔⛔ SHOW THE CONFIG YOU ARE ON. A listbox opens at scrollTop 0, so once
+  // the list is longer than the box the current config is simply not on
+  // screen -- and the first thing you see is a list that looks like it has
+  // forgotten what you picked. ⓘ It never showed in Simple, where all nine
+  // rows fitted; Quick fits four, which is what made it visible (2026-09-20).
+  // ➡️ Put it in the MIDDLE of what is shown, so there are neighbours above
+  // and below to move to, and clamp so the last page does not scroll past the
+  // end.
+  if (el.selectedIndex >= 0 && rows < el.options.length) {
+    // ⚠️ THE ROW PITCH, MEASURED OFF TWO REAL ROWS -- not rowH. rowH comes
+    // from the difference between two BOX heights, which is close but not
+    // exact, and scrolling by it left a sliver of the row above showing at the
+    // top of the list (seen 2026-09-20). Two option rects give the true pitch,
+    // and they are only meaningful now that the box is a listbox.
+    var pitch = rowH;
+    if (el.options.length >= 2) {
+      var a = el.options[0].getBoundingClientRect();
+      var b = el.options[1].getBoundingClientRect();
+      if (b.top > a.top) pitch = b.top - a.top;
+    }
+    var want = (el.selectedIndex - Math.floor((rows - 1) / 2)) * pitch;
+    var most = (el.options.length - rows) * pitch;
+    el.scrollTop = Math.round(Math.max(0, Math.min(want, most)));
+  }
+  // ⚠️ Above the sticky header (z-index 40 there) and below the modal
+  // overlays (99), which must still cover it.
+  el.style.zIndex = '60';
+}
+
+// Undo all of it. ⛔ Clearing `size` alone would leave a fixed-positioned box
+// floating over the page at one row high.
+function pickerCollapse(el) {
+  el.size = 0;
+  el.style.position = '';
+  el.style.top = '';
+  el.style.left = '';
+  el.style.width = '';
+  el.style.maxWidth = '';
+  el.style.zIndex = '';
+}
+
 function gpActivate() {
   var el = GP_FOCUS[GP_INDEX];
   if (!el) return;
@@ -4528,13 +4734,37 @@ function gpActivate() {
     // ⓘ Nothing else is needed -- gpKeyMove already walks selectedIndex while
     // GP_SELECTING is set, gpKeySelect already commits, and gpKeyBack already
     // puts the old value back. The gold outline says which mode you are in.
-    el.size = COMPACT ? 1 : Math.min(el.options.length, 8);
-    // ⛔ Nothing in the sticky block needs scrolling to: it is pinned on screen by
-  // definition. Calling scrollIntoView on it moved the SETTINGS list beneath,
-  // so navigating the header appeared to scroll the page for no reason.
-  if (!el.closest || !el.closest('#stickyTop')) {
-    el.scrollIntoView({ block: 'nearest' });
-  }
+    // T-232 item 4: QUICK, not COMPACT. COMPACT is Quick AND Simple; the
+    // stepping behaviour was chosen for both on 2026-09-11, on the grounds
+    // that eight rows are taller than a postcard-sized window.
+    //
+    // rhoquinn8217 asked for Simple to expand and Quick to keep stepping
+    // (2026-09-19).
+    //
+    // ⛔ A NOTE HERE SAID THE TWO VIEWS ARE THE SAME SIZE. THEY ARE NOT, and
+    // that was the whole of the argument for calling this a coin-flip
+    // preference. `config_move.inl` gives Quick a size table of ITS OWN:
+    //
+    //     Simple  kCompactSizes  0.45  x 0.45  of the screen
+    //     Quick   kQuickSizes    0.185 x 0.150
+    //
+    // ➡️ **Simple's window is THREE TIMES TALLER than Quick's.** So the
+    // postcard reasoning was measured on Quick and never applied to Simple --
+    // which makes this the correction it looks like, not a preference.
+    //
+    // ⭐ As big as the window allows, growing up as well as down, in Quick as
+    // well as Simple. ⓘ A row count used to live here -- 8, then 5 -- and both
+    // were a compromise with what the box would shove off the bottom. See
+    // pickerExpand.
+    pickerExpand(el);
+    // ⛔ Nothing to scroll to once it is fixed-positioned: it is ON the window
+    // by construction, and scrollIntoView would move the page beneath it for
+    // no reason. Same conclusion the sticky header reached, for the same
+    // reason -- so the test is now "is it out of flow", which covers both.
+    if (el.style.position !== 'fixed' &&
+        (!el.closest || !el.closest('#stickyTop'))) {
+      el.scrollIntoView({ block: 'nearest' });
+    }
     return;
   }
   if (el.type === 'checkbox') { el.checked = !el.checked; el.dispatchEvent(new Event('change')); return; }
@@ -4580,7 +4810,10 @@ function gpSelectEnd(commit) {
   if (!el) return;
   if (!commit) el.selectedIndex = GP_SELECT_WAS;
   el.classList.remove('gp-selecting');
-  el.size = 0;                                  // collapse
+  pickerCollapse(el);                           // collapse, and back into flow
+  // ⚠️ Opened by mouse and closed by pad would otherwise leave the opening
+  // press still matching, and the next click would be ignored.
+  PICKER_OPEN_PRESS = -1;
   // ⓘ The 'change' fires on a cancel too, to put the old value back; compact's
   // pick reads this flag so a cancel never links or parks.
   GP_SELECT_COMMIT = commit;
@@ -6013,6 +6246,56 @@ function compactUnlink() {
   unlinkConfirmed(d.ordinal);
 }
 
+// ⭐⭐ THE MEASURED EVENT ORDER ON A LISTBOX ROW CLICK (2026-09-20, this
+// machine's Chromium, on a throwaway <select size=5> rather than from memory):
+//
+//     mousedown : 0     ⚠️ the OLD index -- the selection has NOT changed yet
+//     mouseup   : 3     it changes HERE
+//     input     : 3
+//     change    : 3     ⭐ BEFORE click
+//     click     : 3     last
+//
+// ➡️ Two rules fall out of that, and both had been got wrong:
+//   ⛔ `preventDefault()` on MOUSEDOWN kills the pick outright, because the
+//      selection has not happened yet at that point.
+//   ⛔ `change` fires BEFORE `click`, so by the time the box can be closed
+//      compactPick() has ALREADY linked the config. Closing must therefore
+//      NOT dispatch a second `change`, or it links twice.
+// ⛔⛔ AND THE OPENING PRESS FIRES NO `click` AT ALL. Measured the same way:
+//
+//     mousedown : SELECT      the box is still collapsed
+//     mouseup   : OPTION      it expanded UNDER the cursor
+//     (no click)              ⭐ a click needs ONE shared target, and there
+//                                is none, so the event never happens
+//
+// ⚠️ A "swallow the next click" flag was written first and is WRONG for
+// exactly that reason: the click it waits for never arrives, the flag stays
+// set, and it eats the first real pick instead. ➡️ So presses are COUNTED,
+// and a click is ignored only when it belongs to the press that opened the
+// box -- which is true whether or not that press ever produces one.
+var PICKER_PRESS = 0;        // every mousedown that reaches the selector
+var PICKER_OPEN_PRESS = -1;  // the one that opened it
+
+// Close after a mouse pick. ⓘ Deliberately not gpSelectEnd(): that dispatches
+// a `change` to carry the pad's choice out, and here the native one has
+// already done it.
+function pickerClickEnd(sel) {
+  if (PICKER_OPEN_PRESS === PICKER_PRESS) return;   // the opening press
+  if (GP_SELECTING !== sel) return;
+  sel.classList.remove('gp-selecting');
+  pickerCollapse(sel);
+  GP_SELECTING = null;
+}
+
+// ⭐ Clicking AWAY cancels, which is what a mouse expects and what Circle
+// does for the pad. ⓘ Capture phase, so it runs before the selector's own
+// mousedown and can tell "outside" from "on it" without racing.
+document.addEventListener('mousedown', function (ev) {
+  if (!GP_SELECTING) return;
+  if (ev.target === GP_SELECTING || GP_SELECTING.contains(ev.target)) return;
+  gpSelectEnd(false);
+}, true);
+
 // ⭐ A CLICK ENTERS THE SAME MODE THE PAD USES, in compact only. Otherwise a
 // mouse gets the native popup -- the very thing that does not fit -- while the
 // pad gets a one-row stepper, and the two disagree about what the control is.
@@ -6020,13 +6303,42 @@ function compactUnlink() {
 // is faster with a mouse.
 function pickerActivate(ev, sel) {
   if (!COMPACT) return;
+  // ⓘ Counted for EVERY press, including the ones that land on an option
+  // while the box is open -- mousedown bubbles from the option to the select.
+  PICKER_PRESS++;
+  // ⛔⛔ ALREADY OPEN: LET THE BROWSER HAVE THIS PRESS, and close on the
+  // CLICK instead (rhoquinn8217, 2026-09-20: *"the mouse isn't able to select
+  // one of the config. Clicking anywhere on the expanded window just
+  // compresses it again without selecting anything."*).
+  //
+  // This used to `preventDefault()` and then commit, which is exactly why a
+  // mouse could not pick: see the measured order above -- mousedown still
+  // holds the OLD index, so preventing it kills the selection, and committing
+  // there commits the value that was already there. The box shut with nothing
+  // chosen, every time.
+  if (GP_SELECTING === sel) {
+    // ⚠️ BACKSTOP. Letting the browser have this press is only safe once the
+    // box is a LISTBOX; at one row it is still a dropdown and this is exactly
+    // where the native popup got in. pickerExpand's floor of 2 should make
+    // this unreachable -- one option in the list would do it -- and it is
+    // cheap insurance against the bug coming back by another route.
+    if (sel.size <= 1) ev.preventDefault();
+    return;
+  }
+
   ev.preventDefault();
-  if (GP_SELECTING === sel) { gpSelectEnd(true); return; }
   GP_SELECTING = sel;
   GP_SELECT_WAS = sel.selectedIndex;
   sel.classList.add('gp-selecting');
-  sel.size = 1;
+  // ⛔ THIS WAS `sel.size = 1` AND THAT IS WHY CLICKING "DID NOT EXPAND"
+  // (rhoquinn8217, 2026-09-20). The click already entered the pad's mode and
+  // already suppressed the native popup -- it just opened at one row, so a
+  // mouse got the stepper the pad was given. The two agree now.
+  pickerExpand(sel);
   sel.focus();
+  // ⚠️ If this press does produce a click, it is the second half of the one
+  // that OPENED the box and must not be read as a pick.
+  PICKER_OPEN_PRESS = PICKER_PRESS;
 }
 
 function compactPick() {
@@ -6201,6 +6513,7 @@ function paintCompact() {
               '<div class="cselrow">' + unlinkBtn() +
               '<select id="cpick" data-ordinal="' + esc(d.ordinal) + '"' +
               ' onmousedown="pickerActivate(event,this)"' +
+              ' onclick="pickerClickEnd(this)"' +
               ' onchange="compactPick()">' +
               opts + '</select>' + autoBtn +
               '</div></div>' + (QUICK ? '' : foot(true, d.ordinal));
