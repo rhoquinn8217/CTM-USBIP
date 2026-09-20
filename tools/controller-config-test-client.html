@@ -4554,6 +4554,71 @@ function gpMove(delta) {
   gpPaint();
 }
 
+// ⭐⭐ OPEN THE PICKER AS BIG AS THE WINDOW ALLOWS, GROWING UP AS WELL AS
+// DOWN (rhoquinn8217, 2026-09-20): *"we should expand the list as big as it
+// can and it should also expand upward."*
+//
+// ⛔ A `<select>` with a `size` grows DOWNWARD IN FLOW, and that is the whole
+// problem it had: it shoved New, Edit, Advanced and Quick off the bottom, and
+// it could only ever use the room BELOW the box -- about half the window, with
+// the space above the box wasted. Row counts were tried against that (8, then
+// 5) and every one of them is a compromise with a layout, not a size.
+//
+// ➡️ So it comes OUT OF FLOW while it is open. Fixed-positioned, centred on
+// where the collapsed box sat, clamped to the window: it grows in both
+// directions, overlays the content instead of moving it, and nothing below it
+// is pushed anywhere. ⓘ Which also means the row count is no longer a
+// judgement -- it is whatever fits.
+//
+// ⚠️ THE ROW HEIGHT IS MEASURED, NOT ASSUMED. It was 29 px on the machine
+// this was written on, and it is a function of the page's font -- a different
+// zoom or a different DPI gives a different number, and a hardcoded one would
+// silently size the box wrong rather than fail.
+function pickerExpand(el) {
+  // ⓘ Quick still STEPS in place: its window is 0.185 x 0.150 of the screen
+  // against Simple's 0.45 x 0.45, so there is no room to grow into.
+  if (QUICK) { el.size = 1; return; }
+
+  var rect = el.getBoundingClientRect();
+
+  // Two sizes and one subtraction give the row height and the chrome around it.
+  el.size = 2; var h2 = el.getBoundingClientRect().height;
+  el.size = 3; var h3 = el.getBoundingClientRect().height;
+  var rowH = Math.max(1, h3 - h2);
+  var chrome = Math.max(0, h2 - 2 * rowH);
+
+  var margin = 10;                       // breathing room at both window edges
+  var avail = window.innerHeight - 2 * margin;
+  var rows = Math.max(1, Math.min(el.options.length,
+                                  Math.floor((avail - chrome) / rowH)));
+  el.size = rows;
+
+  var h = rows * rowH + chrome;
+  // Centred on the collapsed box, so the list opens around where you were
+  // looking rather than jumping to the top of the window.
+  var top = Math.round(rect.top + rect.height / 2 - h / 2);
+  top = Math.max(margin, Math.min(top, window.innerHeight - h - margin));
+
+  el.style.position = 'fixed';
+  el.style.top = top + 'px';
+  el.style.left = Math.round(rect.left) + 'px';
+  el.style.width = Math.round(rect.width) + 'px';
+  // ⚠️ Above the sticky header (z-index 40 there) and below the modal
+  // overlays (99), which must still cover it.
+  el.style.zIndex = '60';
+}
+
+// Undo all of it. ⛔ Clearing `size` alone would leave a fixed-positioned box
+// floating over the page at one row high.
+function pickerCollapse(el) {
+  el.size = 0;
+  el.style.position = '';
+  el.style.top = '';
+  el.style.left = '';
+  el.style.width = '';
+  el.style.zIndex = '';
+}
+
 function gpActivate() {
   var el = GP_FOCUS[GP_INDEX];
   if (!el) return;
@@ -4594,38 +4659,18 @@ function gpActivate() {
     // postcard reasoning was measured on Quick and never applied to Simple --
     // which makes this the correction it looks like, not a preference.
     //
-    // ⭐⭐ FIVE ROWS, AND IT SCROLLS FOR THE REST (rhoquinn8217, 2026-09-20):
-    // *"I don't want to show everything I want the list to expand out to see
-    // 5 to 6 selection and let you move down to see the rest."*
-    //
-    // ⛔ IT WAS `Math.min(options.length, 8)` FOR A DAY, which showed the whole
-    // list whenever there were eight or fewer configs. A box that grows with
-    // the config list is a box whose size nobody can predict.
-    //
-    // ✅ MEASURED 2026-09-20, Simple at 0.45 on a 2752x1152 desktop, so a
-    // 1238 x 518 window. Row heights are fixed, so this is the whole dial:
-    //
-    //     rows   box     the Advanced / Quick buttons below it
-    //      0      40 px  bottom 499  on screen
-    //      4     126 px  bottom 499  on screen
-    //      5     155 px  bottom 518  FLUSH with the window's edge
-    //      6     184 px  bottom 547  29 px below the fold
-    //      8     242 px  bottom 605  87 px below the fold
-    //
-    // ➡️ **5 is the largest that does not push the mode buttons off**, and it
-    // is inside the 5-to-6 that was asked for, so it takes the top of the
-    // range rather than spending the buttons for one more row.
-    // ⓘ `Math.min` still applies, so three configs draw three rows rather than
-    // five and two empty ones.
-    // ⚠️ A much smaller screen shrinks the window without shrinking the rows,
-    // so this number is the dial if it ever stops fitting.
-    el.size = QUICK ? 1 : Math.min(el.options.length, 5);
-    // ⛔ Nothing in the sticky block needs scrolling to: it is pinned on screen by
-  // definition. Calling scrollIntoView on it moved the SETTINGS list beneath,
-  // so navigating the header appeared to scroll the page for no reason.
-  if (!el.closest || !el.closest('#stickyTop')) {
-    el.scrollIntoView({ block: 'nearest' });
-  }
+    // ⭐ As big as the window allows, growing up as well as down. ⓘ A row
+    // count used to live here -- 8, then 5 -- and both were a compromise with
+    // what the box would shove off the bottom. See pickerExpand.
+    pickerExpand(el);
+    // ⛔ Nothing to scroll to once it is fixed-positioned: it is ON the window
+    // by construction, and scrollIntoView would move the page beneath it for
+    // no reason. Same conclusion the sticky header reached, for the same
+    // reason -- so the test is now "is it out of flow", which covers both.
+    if (el.style.position !== 'fixed' &&
+        (!el.closest || !el.closest('#stickyTop'))) {
+      el.scrollIntoView({ block: 'nearest' });
+    }
     return;
   }
   if (el.type === 'checkbox') { el.checked = !el.checked; el.dispatchEvent(new Event('change')); return; }
@@ -4671,7 +4716,7 @@ function gpSelectEnd(commit) {
   if (!el) return;
   if (!commit) el.selectedIndex = GP_SELECT_WAS;
   el.classList.remove('gp-selecting');
-  el.size = 0;                                  // collapse
+  pickerCollapse(el);                           // collapse, and back into flow
   // ⓘ The 'change' fires on a cancel too, to put the old value back; compact's
   // pick reads this flag so a cancel never links or parks.
   GP_SELECT_COMMIT = commit;
@@ -6116,7 +6161,11 @@ function pickerActivate(ev, sel) {
   GP_SELECTING = sel;
   GP_SELECT_WAS = sel.selectedIndex;
   sel.classList.add('gp-selecting');
-  sel.size = 1;
+  // ⛔ THIS WAS `sel.size = 1` AND THAT IS WHY CLICKING "DID NOT EXPAND"
+  // (rhoquinn8217, 2026-09-20). The click already entered the pad's mode and
+  // already suppressed the native popup -- it just opened at one row, so a
+  // mouse got the stepper the pad was given. The two agree now.
+  pickerExpand(sel);
   sel.focus();
 }
 
