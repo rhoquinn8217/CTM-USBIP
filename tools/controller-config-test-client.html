@@ -3714,7 +3714,15 @@ function openConfig(name) {
   // with the editor far below.
   if (ACTIVE !== 'editor') showTab('editor');
   paintEditorHead();
-  if (!name) { document.getElementById('cfgEditor').innerHTML = ''; return; }
+  if (!name) {
+    document.getElementById('cfgEditor').innerHTML = '';
+    // The strip is cached per tab and only ever rewritten by a render, so
+    // without this it outlives the config it belongs to -- tabs on screen
+    // with nothing behind them (rhoquinn8217, 2026-09-20, after archiving).
+    SECT_BARS['editor'] = '';
+    paintSectBar();
+    return;
+  }
   renderConfigEditor('cfgEditor', name, 'ov', null);
 }
 
@@ -4317,7 +4325,14 @@ function archive(name) {
 
 function archiveConfirmed(name) {
   call('POST', '/api/v1/configs/' + encodeURIComponent(name) + '/archive', {})
-    .then(function() { loadConfigs(); loadDevices(); }).catch(function(){});
+    .then(function() {
+      // ARCHIVING THE ONE YOU ARE EDITING CLOSES IT. It used to leave
+      // OV_CONFIG naming a config that no longer existed, so the head went on
+      // offering Rename, Copy and Archive for it and the settings stayed on
+      // screen under a section strip belonging to nothing.
+      if (name === OV_CONFIG) openConfig('');
+      loadConfigs(); loadDevices();
+    }).catch(function(){});
 }
 
 // ---- Controller navigation --------------------------------------------------

@@ -337,7 +337,25 @@ inline const Setting kL2GyroAiming[] = {
 // ⭐ THE ORDER IS THE ORDER PEOPLE READ, and the ones that need a DualSense
 // sit at the BOTTOM (rhoquinn8217, 2026-09-10). A list that opens with a preset
 // half its readers cannot use asks them to skip past it every time.
+//
+// THE EXACT ORDER IS rhoquinn8217'S, GIVEN 2026-09-20 and listed in full:
+// stick-to-mouse, gyro-to-mouse-always-on, gyro-to-mouse-on-r3,
+// gyro-to-mouse-on-L2-aiming, DS5-gyro-to-mouse, DS5-DS4-touchpad-to-mouse.
+// It still honours the rule above -- the two DualSense-only shapes are last --
+// and it opens on the stick, which is the one every pad can use.
+// This array IS the order the picker draws, so moving an entry moves the row.
 inline const Preset kPresets[] = {
+    { "stick-to-mouse",
+      "Right stick moves the cursor, left stick scrolls -- both thumbs where "
+      "they already are. The least precise of the three for fine work, and "
+      "the one that needs no new habits. Square opens the on-screen keyboard.",
+      // ⭐ Every pad with a layout: a stick is the one pointer they all have
+      // (rhoquinn8217, 2026-09-15, "available to all controllers").
+      // ⓘ Its two trigger clicks reach an Xbox pad too. Those triggers have no
+      // bit, and until the same day nothing could press one, so the clicks
+      // were silent there; now a trigger past a threshold is a press
+      // (kSpotTriggerTravel, button_layout.inl).
+      true, true, true, true, kStickMouseMode, CTM_PRESET_COUNT_OF(kStickMouseMode) },
     { "gyro-to-mouse-always-on",
       "Tilt the controller to move the cursor, always on -- no trigger to "
       "hold. The most precise of the three for small movements, and the one "
@@ -354,23 +372,21 @@ inline const Preset kPresets[] = {
       // The same pads as always-on: a gyro is what this needs, and R3 is on
       // every one of them.
       true, true, true, false, kGyroMouseR3Mode, CTM_PRESET_COUNT_OF(kGyroMouseR3Mode) },
-    { "stick-to-mouse",
-      "Right stick moves the cursor, left stick scrolls -- both thumbs where "
-      "they already are. The least precise of the three for fine work, and "
-      "the one that needs no new habits. Square opens the on-screen keyboard.",
-      // ⭐ Every pad with a layout: a stick is the one pointer they all have
-      // (rhoquinn8217, 2026-09-15, "available to all controllers").
-      // ⓘ Its two trigger clicks reach an Xbox pad too. Those triggers have no
-      // bit, and until the same day nothing could press one, so the clicks
-      // were silent there; now a trigger past a threshold is a press
-      // (kSpotTriggerTravel, button_layout.inl).
-      true, true, true, true, kStickMouseMode, CTM_PRESET_COUNT_OF(kStickMouseMode) },
     { "gyro-to-mouse-on-L2-aiming",
       "For playing, not for the desktop. Gyro aims only while L2 is held, so "
       "the camera is steady while you move and precise when you aim. Nothing "
       "else is bound: every button stays with the game.",
       // A gyro and an analog L2: DualSense, Edge, DS4.
       true, true, true, false, kL2GyroAiming, CTM_PRESET_COUNT_OF(kL2GyroAiming) },
+    { "DS5-gyro-to-mouse",
+      "The gyro moves the cursor and a trigger holds it still. Start to pull "
+      "and the cursor stops; push past the break and it clicks. Keep holding "
+      "to drag. R2 is left click, L2 is right click, one finger scrolls.",
+      // ⛔ DualSense and Edge only. It is built around the adaptive trigger's
+      // BREAK -- "push past the break and it clicks" -- and a DS4 has no
+      // adaptive trigger. It would still click on travel there, but not as this
+      // describes, so it is not offered.
+      true, true, false, false, kSteadyGyroMouseMode, CTM_PRESET_COUNT_OF(kSteadyGyroMouseMode) },
     { "DS5-DS4-touchpad-to-mouse",
       "The touchpad behaves like a laptop trackpad: one finger moves the "
       "cursor, two fingers scroll the page with them, and a tap clicks. The "
@@ -385,15 +401,6 @@ inline const Preset kPresets[] = {
       // here would refuse every attempt to use the preset with a 409.
       // ⓘ The description needs no change: it names no controller.
       true, true, true, false, kTouchpadMouseMode, CTM_PRESET_COUNT_OF(kTouchpadMouseMode) },
-    { "DS5-gyro-to-mouse",
-      "The gyro moves the cursor and a trigger holds it still. Start to pull "
-      "and the cursor stops; push past the break and it clicks. Keep holding "
-      "to drag. R2 is left click, L2 is right click, one finger scrolls.",
-      // ⛔ DualSense and Edge only. It is built around the adaptive trigger's
-      // BREAK -- "push past the break and it clicks" -- and a DS4 has no
-      // adaptive trigger. It would still click on travel there, but not as this
-      // describes, so it is not offered.
-      true, true, false, false, kSteadyGyroMouseMode, CTM_PRESET_COUNT_OF(kSteadyGyroMouseMode) },
 };
 
 inline size_t preset_count()
