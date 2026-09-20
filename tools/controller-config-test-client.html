@@ -4581,10 +4581,27 @@ function gpActivate() {
     // that eight rows are taller than a postcard-sized window.
     //
     // rhoquinn8217 asked for Simple to expand and Quick to keep stepping
-    // (2026-09-19). Note the two views are the SAME SIZE -- both 0.45 of the
-    // screen each way, only Advanced differs -- so this is a preference,
-    // not something the geometry decided. If eight rows prove too tall
-    // here, the row count is the dial rather than this flag.
+    // (2026-09-19).
+    //
+    // ⛔ A NOTE HERE SAID THE TWO VIEWS ARE THE SAME SIZE. THEY ARE NOT, and
+    // that was the whole of the argument for calling this a coin-flip
+    // preference. `config_move.inl` gives Quick a size table of ITS OWN:
+    //
+    //     Simple  kCompactSizes  0.45  x 0.45  of the screen
+    //     Quick   kQuickSizes    0.185 x 0.150
+    //
+    // ➡️ **Simple's window is THREE TIMES TALLER than Quick's.** So the
+    // postcard reasoning was measured on Quick and never applied to Simple --
+    // which makes this the correction it looks like, not a preference.
+    //
+    // ✅ MEASURED 2026-09-20, Simple at 0.45 on a 2752x1152 desktop, so a
+    // 1238 x 518 window, with eight options in the box:
+    //     collapsed   40 px
+    //     expanded   248 px, bottom edge at 480 of 518 -- 38 px to spare
+    // ⓘ And `Math.min(..., 8)` CAPS it, so more configs cannot make it
+    // taller. 248 px is the worst case, not a sample of one.
+    // ⚠️ A far smaller screen would shrink the window without shrinking the
+    // rows, so the row count is the dial if it ever stops fitting.
     el.size = QUICK ? 1 : Math.min(el.options.length, 8);
     // ⛔ Nothing in the sticky block needs scrolling to: it is pinned on screen by
   // definition. Calling scrollIntoView on it moved the SETTINGS list beneath,
