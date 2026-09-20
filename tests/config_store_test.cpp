@@ -391,7 +391,7 @@ int run_config_store_tests()
 
     section("presets: every one is well formed and suits a real controller");
     {
-        CTM_CHECK(ctm_presets::preset_count() >= 4);
+        CTM_CHECK(ctm_presets::preset_count() >= 6);
         for (size_t i = 0; i < ctm_presets::preset_count(); ++i) {
             const ctm_presets::Preset &p = ctm_presets::kPresets[i];
             CTM_CHECK(p.name != nullptr && p.name[0] != '\0');
@@ -407,7 +407,7 @@ int run_config_store_tests()
         }
     }
 
-    section("presets: L2-gyro-mouse-aiming BINDS nothing, and hides the gyro");
+    section("presets: gyro-to-mouse-on-L2-aiming BINDS nothing, and hides the gyro");
     {
         // The one preset used WHILE PLAYING. Rebinding a face button here
         // would take it away from the game, which is why this preset binds
@@ -417,8 +417,14 @@ int run_config_store_tests()
         // FOR it: with the gyro aiming the cursor, a game still reading the
         // gyro gives double input -- the camera drifting as the cursor moves
         // (2026-09-03).
-        const ctm_presets::Preset *p = ctm_presets::find("L2-gyro-mouse-aiming");
+        const ctm_presets::Preset *p = ctm_presets::find("gyro-to-mouse-on-L2-aiming");
         CTM_CHECK(p != nullptr);
+        // GUARDED ON PURPOSE. CTM_CHECK records a failure and carries on, so
+        // the line below used to dereference a null pointer the moment a preset
+        // was renamed -- the binary died here and every test after it was lost,
+        // with nothing on screen to say why (2026-09-19, the rename in this
+        // very ticket). A find() that returns null is a normal test failure.
+        if (p == nullptr) return 0;
         CTM_CHECK_EQ(static_cast<int>(p->count), 2);
 
         bool gate = false, hidden = false, anyBinding = false;
@@ -439,9 +445,11 @@ int run_config_store_tests()
 
     section("presets: found by name, and only where they suit the controller");
     {
-        CTM_CHECK(ctm_presets::find("gyro-to-mouse") != nullptr);
-        CTM_CHECK(ctm_presets::find("GYRO-TO-MOUSE") != nullptr);
+        CTM_CHECK(ctm_presets::find("gyro-to-mouse-always-on") != nullptr);
+        CTM_CHECK(ctm_presets::find("GYRO-TO-MOUSE-ALWAYS-ON") != nullptr);
         CTM_CHECK(ctm_presets::find("stick-to-mouse") != nullptr);
+        CTM_CHECK(ctm_presets::find("gyro-to-mouse-on-r3") != nullptr);
+        CTM_CHECK(ctm_presets::find("gyro-to-mouse-on-L2-aiming") != nullptr);
         CTM_CHECK(ctm_presets::find("DS5-DS4-touchpad-to-mouse") != nullptr);
         CTM_CHECK(ctm_presets::find("DS5-gyro-to-mouse") != nullptr);
         // ⛔ The old names are gone, not aliased. A preset that needs a
@@ -449,10 +457,14 @@ int run_config_store_tests()
         // loudly rather than resolve to something similar.
         CTM_CHECK(ctm_presets::find("touchpad-mouse") == nullptr);
         CTM_CHECK(ctm_presets::find("steady-gyro-mouse") == nullptr);
+        // T-235 renamed these two. A config already made from either
+        // keeps its own name, but the preset behind it is gone.
+        CTM_CHECK(ctm_presets::find("gyro-to-mouse") == nullptr);
+        CTM_CHECK(ctm_presets::find("L2-gyro-mouse-aiming") == nullptr);
         CTM_CHECK(ctm_presets::find("DS5-touchpad-to-mouse") == nullptr);
         CTM_CHECK(ctm_presets::find("nonsense") == nullptr);
 
-        const ctm_presets::Preset *gyro = ctm_presets::find("gyro-to-mouse");
+        const ctm_presets::Preset *gyro = ctm_presets::find("gyro-to-mouse-always-on");
         CTM_CHECK(ctm_presets::suits(*gyro, "ds5"));
         CTM_CHECK(ctm_presets::suits(*gyro, "ds5_edge"));
         // ✅ A DS4 has a gyro, read at its own offsets since 2026-09-15. This line
@@ -511,7 +523,7 @@ int run_config_store_tests()
 
     section("presets: every mouse mode shares the desktop bindings");
     {
-        const char *const names[] = { "gyro-to-mouse", "DS5-DS4-touchpad-to-mouse",
+        const char *const names[] = { "gyro-to-mouse-always-on", "DS5-DS4-touchpad-to-mouse",
                                       "stick-to-mouse" };
         for (const char *name : names) {
             const ctm_presets::Preset *p = ctm_presets::find(name);
@@ -558,7 +570,7 @@ int run_config_store_tests()
             return false;
         };
 
-        CTM_CHECK(has("gyro-to-mouse", "gyro_to_mouse_gate", "always"));
+        CTM_CHECK(has("gyro-to-mouse-always-on", "gyro_to_mouse_gate", "always"));
         // ⭐⭐ SCROLL IS THE LEFT STICK, AND THIS ASSERTION IS REVERSED
         // (rhoquinn8217, 2026-09-10). It used to check the opposite, guarding a
         // decision from 2026-09-03 that scroll belonged on the touchpad so that
@@ -569,19 +581,19 @@ int run_config_store_tests()
         // controllers with no touchpad, and a preset that needs one cannot serve
         // them. The DualSense-only shapes now say so in their names, and this
         // one is deliberately not among them.
-        CTM_CHECK(has("gyro-to-mouse", "left_stick_mode", "scroll"));
-        CTM_CHECK(has("gyro-to-mouse", "left_stick_no_passthrough", "true"));
-        CTM_CHECK(!mentions("gyro-to-mouse", "right_stick_mode"));
+        CTM_CHECK(has("gyro-to-mouse-always-on", "left_stick_mode", "scroll"));
+        CTM_CHECK(has("gyro-to-mouse-always-on", "left_stick_no_passthrough", "true"));
+        CTM_CHECK(!mentions("gyro-to-mouse-always-on", "right_stick_mode"));
         // ⛔ And it must not reach for a touchpad at all, which is the whole
         // point of the change.
-        CTM_CHECK(!mentions("gyro-to-mouse", "touchpad_scroll"));
+        CTM_CHECK(!mentions("gyro-to-mouse-always-on", "touchpad_scroll"));
 
         // ⭐ EACH PRESET HIDES ITS OWN SOURCE AND NOBODY ELSE'S. A single
         // setting could not say "hide the gyro but leave my sticks alone",
         // which is why there are three (rhoquinn8217, 2026-09-03).
-        CTM_CHECK(has("gyro-to-mouse", "gyro_no_passthrough", "true"));
-        CTM_CHECK(!mentions("gyro-to-mouse", "right_stick_no_passthrough"));
-        CTM_CHECK(!mentions("gyro-to-mouse", "touchpad_no_passthrough"));
+        CTM_CHECK(has("gyro-to-mouse-always-on", "gyro_no_passthrough", "true"));
+        CTM_CHECK(!mentions("gyro-to-mouse-always-on", "right_stick_no_passthrough"));
+        CTM_CHECK(!mentions("gyro-to-mouse-always-on", "touchpad_no_passthrough"));
 
         CTM_CHECK(has("DS5-DS4-touchpad-to-mouse", "touchpad_no_passthrough", "true"));
         CTM_CHECK(!mentions("DS5-DS4-touchpad-to-mouse", "gyro_no_passthrough"));
@@ -596,7 +608,7 @@ int run_config_store_tests()
         CTM_CHECK(!mentions("stick-to-mouse", "gyro_no_passthrough"));
 
         // ⛔ And the superseded single key is gone from every preset.
-        CTM_CHECK(!mentions("gyro-to-mouse", "mouse_exclusive"));
+        CTM_CHECK(!mentions("gyro-to-mouse-always-on", "mouse_exclusive"));
         CTM_CHECK(!mentions("DS5-DS4-touchpad-to-mouse", "mouse_exclusive"));
         CTM_CHECK(!mentions("stick-to-mouse", "mouse_exclusive"));
 
@@ -614,6 +626,79 @@ int run_config_store_tests()
         // ⭐ Each stick says what IT does, rather than a job naming a stick.
         CTM_CHECK(has("stick-to-mouse", "right_stick_mode", "mouse"));
         CTM_CHECK(has("stick-to-mouse", "left_stick_mode", "scroll"));
+    }
+
+    section("presets: the two gyro modes differ ONLY in the gate (T-235)");
+    {
+        // gyro-to-mouse-on-r3 is a hand copy of gyro-to-mouse-always-on with
+        // one line changed, because a Preset points at one settings array and
+        // cannot say "that one, but gated". So the copy DRIFTS: a setting added
+        // to one and forgotten in the other is invisible until someone uses the
+        // preset. This compares them key by key and names the gate as the one
+        // allowed difference.
+        const ctm_presets::Preset *always = ctm_presets::find("gyro-to-mouse-always-on");
+        const ctm_presets::Preset *r3 = ctm_presets::find("gyro-to-mouse-on-r3");
+        CTM_CHECK(always != nullptr);
+        CTM_CHECK(r3 != nullptr);
+        if (always == nullptr || r3 == nullptr) return 0;
+
+        CTM_CHECK_EQ(static_cast<int>(r3->count), static_cast<int>(always->count));
+        if (r3->count == always->count) {
+            for (size_t k = 0; k < always->count; ++k) {
+                const std::string key = always->settings[k].key;
+                CTM_CHECK_EQ(std::string(r3->settings[k].key), key);
+                if (key == "gyro_to_mouse_gate") {
+                    CTM_CHECK_EQ(std::string(always->settings[k].value), std::string("always"));
+                    CTM_CHECK_EQ(std::string(r3->settings[k].value), std::string("R3"));
+                } else {
+                    CTM_CHECK_EQ(std::string(r3->settings[k].value),
+                                 std::string(always->settings[k].value));
+                }
+            }
+        }
+
+        // ⓘ That R3 is a gate the parser knows is gyro_mouse_test's job, and
+        // that the schema OFFERS it is schema_json_test's. Both would otherwise
+        // be checked here against a copy of the string.
+    }
+
+    section("presets: a trigger steadies the gyro cursor for the click (T-235)");
+    {
+        // ⭐ Why both gyro presets carry four trigger settings: a gyro cursor
+        // DRIFTS while a finger works a trigger, so the click lands somewhere
+        // other than where you were pointing. "immediate" freezes it from the
+        // first movement, and press_at 10 -- the schema's minimum -- registers
+        // the click as early in the travel as it can.
+        const char *const gyroPresets[] = { "gyro-to-mouse-always-on",
+                                            "gyro-to-mouse-on-r3" };
+        for (const char *name : gyroPresets) {
+            const ctm_presets::Preset *p = ctm_presets::find(name);
+            CTM_CHECK(p != nullptr);
+            if (p == nullptr) continue;
+            std::string lsteady, rsteady, lat, rat;
+            for (size_t k = 0; k < p->count; ++k) {
+                const std::string key = p->settings[k].key;
+                if (key == "left_trigger_steady_cursor_pull") lsteady = p->settings[k].value;
+                if (key == "right_trigger_steady_cursor_pull") rsteady = p->settings[k].value;
+                if (key == "left_trigger_press_at") lat = p->settings[k].value;
+                if (key == "right_trigger_press_at") rat = p->settings[k].value;
+            }
+            CTM_CHECK_EQ(lsteady, std::string("immediate"));
+            CTM_CHECK_EQ(rsteady, std::string("immediate"));
+            CTM_CHECK_EQ(lat, std::string("10"));
+            CTM_CHECK_EQ(rat, std::string("10"));
+        }
+        // ⛔ The L2 aiming preset is the exception and must stay one: it is used
+        // WHILE PLAYING, and steadying the cursor there would take the triggers
+        // from the game.
+        const ctm_presets::Preset *aim = ctm_presets::find("gyro-to-mouse-on-L2-aiming");
+        CTM_CHECK(aim != nullptr);
+        if (aim) {
+            for (size_t k = 0; k < aim->count; ++k) {
+                const std::string key = aim->settings[k].key;
+                CTM_CHECK(key.find("_trigger_") == std::string::npos);
+            }
+        }
     }
 
     section("presets: no tuning numbers, on purpose");

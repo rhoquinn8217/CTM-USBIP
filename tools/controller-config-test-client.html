@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.7 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.8 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,19 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.8  The preset list is renamed and gains one. gyro-to-mouse is
+            gyro-to-mouse-always-on, L2-gyro-mouse-aiming is
+            gyro-to-mouse-on-L2-aiming, and the new gyro-to-mouse-on-r3
+            moves the cursor only while the right stick is held in. Both
+            always-on presets now steady the cursor on either trigger, so
+            a click lands where you were pointing. "Blank" is called
+            "custom", and a config made from it is named after the pad --
+            ds5_config, ds4_config, xbox_config, or pad_config when there
+            is no controller. An Edge gets ds5_config: nothing uses its
+            extra buttons yet (rhoquinn8217, T-235).
+            ⓘ 2.66.5 through 2.66.7 are reserved for T-232, T-233 and
+            T-234, which were written first and are still on their own
+            branches waiting to be looked at.
     2.66.7  The four adaptive trigger settings per trigger are greyed on a
             pad that has none, with the reason on the row. Eight keys, not
             the Triggers section: press_at, the two timings and
@@ -2389,12 +2402,37 @@ function nextNameFrom(base) {
 //
 // ⓘ Hyphens become underscores because a config name is also a FILENAME and a
 // section name; the preset keeps the hyphens because it is only ever a label.
-// ⓘ A blank config is my_config, not ds5_config: naming it after the kind of
-// controller that happened to press New would suggest it only suits that kind.
+// ⭐⭐ AND A CONFIG WITH NO PRESET IS NAMED AFTER THE PAD (rhoquinn8217,
+// 2026-09-19): ds5_config, ds4_config, xbox_config, or pad_config.
+//
+// ⛔ THIS REVERSES THE RULE THAT STOOD HERE, and the old reasoning is worth
+// keeping: a blank config was my_config precisely so that naming it after the
+// controller that happened to press New would not suggest it only suits that
+// kind. ➡️ What changed is that the suggestion is no longer misleading -- since
+// 2026-09-12 any config links to any controller, so nothing in the system reads
+// the name as a restriction, and my_config told you nothing at all about a list
+// of them. ⓘ The name is still only a label; rename it and nothing cares.
+//
+// ⚠️ AN EDGE GETS ds5_config, NOT ds5e_config. Nothing yet uses the extra
+// buttons, so a separate name would promise a difference that is not there
+// (rhoquinn8217, 2026-09-19).
+function customConfigBase(sessionKind) {
+  var kind = settingsKindOf(String(sessionKind || ''));
+  if (kind === 'ds5' || kind === 'ds5_edge') return 'ds5_config';
+  if (kind === 'ds4') return 'ds4_config';
+  // ⚠️ A CABLED XBOX PAD ARRIVES AS "xpad", which settingsKindOf does not map:
+  // it carries only the kinds that take configs, and xpad is not one of them.
+  // The listener makes the same fallback in rest_fill_capabilities.
+  if (kind === 'xbox' || kind === 'xpad') return 'xbox_config';
+  // ⓘ Anything else, and the Editor tab's New -- which has no controller at
+  // all, so there is no kind to name it after.
+  return 'pad_config';
+}
+
 function nextConfigName(sessionKind, presetName) {
   var base = presetName
     ? presetName.replace(/-/g, '_') + '_config'
-    : 'my_config';
+    : customConfigBase(sessionKind);
   return nextNameFrom(base);
 }
 
@@ -2444,8 +2482,10 @@ function copyConfigNamed(source, ordinal) {
     .catch(function(){});
 }
 
-// ⭐ New asks what to start from. ⓘ Blank is first and is what New always did,
-// so the old behaviour is one press away and nothing is taken from anyone.
+// ⭐ New asks what to start from. ⓘ "custom" is first and is what New always
+// did, so the old behaviour is one press away and nothing is taken from anyone.
+// ⓘ It was labelled "Blank" until 2026-09-19 (rhoquinn8217). Same thing: the
+// absence of a preset, not a preset named custom.
 //
 // ⛔ MODAL, and it uses the same overlay shape as the confirm dialog on
 // purpose: gpCollect already treats PRESET_OPEN like the other overlays, so
@@ -2469,7 +2509,7 @@ function newConfigFor(ordinal) {
     openPresetPicker(ordinal, dev);
   }).catch(function() {
     PRESETS = [];
-    openPresetPicker(ordinal, dev);      // still offers Blank
+    openPresetPicker(ordinal, dev);      // still offers custom
   });
 }
 
@@ -2524,11 +2564,11 @@ function openPresetPicker(ordinal, dev) {
   // tried first and dropped: it needed its own navigation axis, and every
   // press that reached it was a press that could have shown the same thing.
   //
-  // ⓘ Blank gets a details page too, so "nothing is set" is confirmed rather
+  // ⓘ custom gets a details page too, so "nothing is set" is confirmed rather
   // than assumed from an empty row.
   var html = '<div class="prow">' +
              '<button onclick="openPresetInfo(\'' + esc(ordinal) + '\',\'\')">' +
-             'Blank</button></div>';
+             'custom</button></div>';
   PRESETS.forEach(function(p) {
     // ⛔ Only presets that suit THIS controller. One that cannot act on it
     // would be a config that silently does nothing.
@@ -2693,11 +2733,11 @@ function presetTable(title, rows) {
 }
 
 function openPresetInfo(ordinal, presetName) {
-  // ⓘ Blank is not in the list from the agent -- it is the absence of a
+  // ⓘ custom is not in the list from the agent -- it is the absence of a
   // preset -- so it is described here.
   var p = presetName
     ? PRESETS.filter(function(x) { return x.name === presetName; })[0]
-    : { name: 'Blank',
+    : { name: 'custom',
         help: 'Nothing is set. Every setting stays at its default, and the ' +
               'controller behaves exactly as it does now until you change ' +
               'something.',
@@ -2726,7 +2766,7 @@ function openPresetInfo(ordinal, presetName) {
     createFromPreset(ordinal, presetName);
   };
   document.getElementById('presetInfoBox').style.display = 'flex';
-  PRESET_INFO_OPEN = presetName || 'Blank';
+  PRESET_INFO_OPEN = presetName || 'custom';
   PRESET_LAST_INFO = presetName;
   gpCollect();
   GP_INDEX = 0;
@@ -2740,7 +2780,7 @@ function closePresetInfo() {
   // Back to the row that opened it, rather than the top of the list.
   var back = PRESET_LAST_INFO
     ? document.querySelector('#presetList button[data-preset="' + PRESET_LAST_INFO + '"]')
-    : document.querySelector('#presetList button');      // Blank is the first
+    : document.querySelector('#presetList button');      // custom is the first
   if (!focusElement(back)) { GP_INDEX = 0; gpPaint(); }
 }
 
