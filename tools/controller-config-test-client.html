@@ -1034,7 +1034,7 @@
      third child to a space-between row moves the hint to the centre and the
      bar reads as three unrelated things. */
   #gpbar #gphint { margin-left:auto; }
-  #fitBtn, #quickBtn, #closeBtn { padding:2px 8px; font-size:11px; margin-left:8px; }
+  #modePick, #closeBtn { padding:2px 8px; font-size:11px; margin-left:8px; }
   /* ⓘ Sized like the page's own buttons -- New, Rename, Copy -- not like the
      small footer ones it briefly lived beside. */
   /* Locked: the page has the pads. Mirrored: the game still sees them. */
@@ -1402,10 +1402,12 @@
        naming the mechanism: "gated" means nothing to someone who did not build
        it, and this is the one piece of state that changes under you. -->
   <span id="padDest" class="muted">controllers → game</span>
-  <button id="fitBtn" onclick="setMode('simple'); setFooterMode(false);"
-          title="Simple: one controller, one config, nothing else">Simple</button>
-  <button id="quickBtn" onclick="setMode('quick'); setFooterMode(false);"
-          title="Quick: the name and the selector, nothing else">Quick</button>
+  <!-- T-233: one Mode picker replaces the Simple and Quick buttons. It is
+       filled by paintModePickers(), which runs on every mode change, and it
+       carries the padlock beside whichever mode is current. -->
+  <select class="modepick" id="modePick" size="1"
+          title="which layout this window opens in"
+          onchange="pickMode(this.value)"></select>
   <!-- ⓘ Closing releases the gate on the way out, via the pagehide beacon, so
        this is a safe exit rather than a way to strand yourself. -->
   <button id="closeBtn" onclick="window.close()" title="close this window">Close</button>
@@ -5719,6 +5721,11 @@ function applySavedMode() {
   else if (m === 'advanced' || m === 'full') postView(true);   // the layout it opened in
   else setMode('simple', true);                                 // nothing saved: Simple
 
+  // T-233: the advanced branch above does NOT go through setMode -- it calls
+  // postView directly -- so without this the picker sits empty in the one mode
+  // that is the saved default.
+  schedulePaintModePickers();
+
   sizeOnOpen();
 }
 
@@ -5759,6 +5766,86 @@ function sizeOnOpen() {
 // a class for each of the two compact ones; setCompact does the window work
 // when the compact/advanced line is crossed, and a change within compact --
 // Simple to Quick -- only repaints.
+// ⭐ T-233: ONE "Mode" PICKER INSTEAD OF A BUTTON PER VIEW.
+//
+// The mode a window is in used to be changed by whichever buttons that view
+// happened to carry -- Simple and Quick in Advanced's footer, Advanced and the
+// other compact view in the compact one. One control now says what the mode is
+// and changes it, in both footers.
+//
+// ⭐ THE MARKER IS THE LOCK. "Locked" means the window stops changing mode on
+// its OWN -- which is the same thing as Create no longer forcing Quick. There
+// is no separate lock state to store: the absence of auto-switching IS the
+// lock, and the padlock beside the current mode says it is on.
+// ⓘ rhoquinn8217 chose a GLOBAL lock over a per-config one (2026-09-19), so
+// nothing here is stored per config and the listener is not involved.
+//
+// ⛔ SIZE 1, ALWAYS, AND THAT IS WHAT MAKES IT OPEN UPWARD. A select left at
+// size 1 is opened by the BROWSER, which positions the list itself and puts it
+// above a control sitting on the bottom edge. Expanding it inline with
+// el.size, the way the config picker does in Advanced, would grow it DOWNWARD
+// off the bottom of the window. ⓘ It also means the pad steps it in place,
+// which is the behaviour Quick's config selector already has.
+function modePickerHtml(id) {
+  // The padlock, by code point: no escape for any layer to mangle.
+  var LOCK = String.fromCodePoint(0x1F512);
+  var cur = modeName();
+  var opts = [['advanced', 'Advanced'], ['simple', 'Simple'], ['quick', 'Quick']]
+    .map(function (m) {
+      var label = m[1] + (m[0] === cur ? " " + LOCK : "");
+      return '<option value="' + m[0] + '"' + (m[0] === cur ? ' selected' : '') +
+             '>' + label + '</option>';
+    }).join('');
+  return '<select class="modepick" id="' + id + '" size="1" ' +
+         'title="which layout this window opens in" ' +
+         'onchange="pickMode(this.value)">' + opts + '</select>';
+}
+
+// Repaint every Mode picker on the page. ⓘ Called from paintTitle, which
+// already runs on every mode change for the same reason -- it is the other
+// place that says which mode this is.
+function paintModePickers() {
+  var list = document.querySelectorAll('select.modepick');
+  for (var i = 0; i < list.length; ++i) {
+    var el = list[i];
+    var id = el.id;
+    var tmp = document.createElement('div');
+    tmp.innerHTML = modePickerHtml(id);
+    el.innerHTML = tmp.firstChild.innerHTML;
+    el.value = modeName();
+    el.size = 1;
+  }
+}
+
+// ⛔⛔ DEFERRED ON PURPOSE. modeName() reads COMPACT and QUICK, and neither
+// is settled while a mode change is still running: setMode paints before it
+// calls setCompact, and setCompact sets COMPACT nine lines before it clears
+// QUICK. Painting inside either put the padlock on the mode being LEFT --
+// switching Simple to Advanced showed "Simple ὑ2" with the window already
+// advanced (caught 2026-09-19 on the first run).
+// ➡️ Letting the stack unwind first means one call site is right for every
+// path, including the ones that call setCompact directly.
+function schedulePaintModePickers() {
+  setTimeout(function () { try { paintModePickers(); } catch (e) {} }, 0);
+}
+
+// ⓘ Guarded against picking the mode it is already in: setMode would repaint
+// the compact box underneath the select that called it.
+function pickMode(v) {
+  if (!v || v === modeName()) return;
+  setMode(v);
+}
+
+// The visible Mode picker, for the pad to land on. ⓘ Both footers exist in
+// the DOM at once and CSS hides one, so offsetParent is what tells them apart.
+function visibleModePicker() {
+  var list = document.querySelectorAll('select.modepick');
+  for (var i = 0; i < list.length; ++i) {
+    if (list[i].offsetParent !== null) return list[i];
+  }
+  return null;
+}
+
 function setMode(m, restore) {
   var quick = (m === 'quick');
   var compact = (m !== 'advanced');
@@ -5766,6 +5853,8 @@ function setMode(m, restore) {
   QUICK = quick;
   document.body.classList.toggle('quick', quick);
   paintTitle();
+  // T-233: after the stack unwinds, so it reads a settled mode.
+  schedulePaintModePickers();
   if (compact !== COMPACT) { setCompact(compact, restore); return; }
   if (quickChanged || restore) {
     saveMode();
@@ -5860,6 +5949,8 @@ function setCompact(on, restore) {
   COMPACT = on;
   document.body.classList.toggle('compact', on);
   paintTitle();
+  // T-233: setCompact is also called DIRECTLY, not only through setMode.
+  schedulePaintModePickers();
   saveMode();
   postView(restore);
   if (on) {
@@ -5893,8 +5984,14 @@ function openConfigurator() {
 // -- and in Quick it does nothing; the buttons and Circle lead out.
 function toggleCompact() {
   if (PRESET_OPEN || PRESET_INFO_OPEN || CONFIRM_CB || RENAMING) return;
-  if (QUICK) return;
-  setMode('quick');
+  // T-233: Create no longer FORCES Quick. It puts the pad on the Mode picker
+  // and lets you choose, which is also what "locked" means here -- the window
+  // stops changing mode on its own.
+  //
+  // It was one press to the mid-game view (2026-09-09, replacing a cycle), so
+  // this costs a step. rhoquinn8217 asked for it knowing that.
+  var el = visibleModePicker();
+  if (el) { focusElement(el); }
 }
 
 // Compact shows a controller or nothing: never Overview or the Editor.
@@ -6217,13 +6314,13 @@ function paintCompact() {
     // Advanced bottom-left, the legend, and the OTHER view bottom-right. No
     // Close: Circle closes, as the legend says, and so does the question
     // after a pick.
-    html += '<div class="cbar"><button class="cconf" onclick="openConfigurator()">Advanced</button>' +
+    html += '<div class="cbar">' + modePickerHtml('cselMode') +
             '<div class="cbarText"><div class="clegend">' +
             '<span class="cmode">Quick Mode</span>\u2630 position | R3 resize | ' +
             '\u25cb close</div></div>' +
-            '<button class="cclose" onclick="setMode(\'simple\')">Simple</button></div>';
+            '<button class="cclose" onclick="closeWindow()">Close</button></div>';
   } else {
-    html += '<div class="cbar"><button class="cconf" onclick="openConfigurator()">Advanced</button>' +
+    html += '<div class="cbar">' + modePickerHtml('cselMode') +
             '<div class="cbarText">' +
             '<div class="clegend"><span class="cmode">Simple Mode</span>' +
             'L1/R1 controller | \u2715 select | d-pad move | ' +
@@ -6231,7 +6328,7 @@ function paintCompact() {
             '<div class="cinfo">To bring this window back: <b>hold two fingers on the touchpad ' +
             'and press Options</b> (DS5/DS4 only), or right-click the tray icon and choose ' +
             '<b>Open settings</b>.</div>' +
-            '</div><button class="cclose" onclick="setMode(\'quick\')">Quick</button></div>';
+            '</div><button class="cclose" onclick="closeWindow()">Close</button></div>';
   }
   box.innerHTML = html;
   gpCollect();
