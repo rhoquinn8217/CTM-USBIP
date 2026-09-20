@@ -5036,9 +5036,12 @@ function gpSelectEnd(commit) {
   // ⓘ The 'change' fires on a cancel too, to put the old value back; compact's
   // pick reads this flag so a cancel never links or parks.
   GP_SELECT_COMMIT = commit;
+  // CLEARED BEFORE THE DISPATCH. pickMode repaints the whole compact box, and
+  // with this still set that repaint was skipped -- the stale legend above.
+  // Nothing downstream reads it: compactPick reads GP_SELECT_COMMIT instead.
+  GP_SELECTING = null;
   el.dispatchEvent(new Event('change'));
   GP_SELECT_COMMIT = true;
-  GP_SELECTING = null;
 }
 
 // ⭐ CONFIG MODE keys.
@@ -5345,8 +5348,24 @@ function compactMove(dx, dy) {
   });
   if (r < 0) return false;
   if (dy) {
+    // DOWN LANDS ON WHAT IS ACTUALLY BELOW (rhoquinn8217, 2026-09-20:
+    // *"pressing down on the edit button should bring you to the mode selector
+    // in simple mode"*). This clamped the COLUMN INDEX instead, so Edit --
+    // column 1 of New/Edit -- landed on column 1 of the footer, which is Close,
+    // while the Mode picker sitting directly under it was skipped.
+    // Nearest horizontal centre instead. It agrees with the old behaviour
+    // everywhere it was already right: unlink still goes to New, the config
+    // picker and the auto button still go to Edit.
+    var from = cur.getBoundingClientRect();
+    var wantX = from.left + from.width / 2;
     r = Math.max(0, Math.min(rows.length - 1, r + dy));
-    c = Math.min(c, rows[r].length - 1);
+    var best = 0, bestGap = Infinity;
+    rows[r].forEach(function (e, i) {
+      var b = e.getBoundingClientRect();
+      var gap = Math.abs(b.left + b.width / 2 - wantX);
+      if (gap < bestGap) { bestGap = gap; best = i; }
+    });
+    c = best;
   } else if (dx) {
     var nc = c + dx;
     if (rows[r] === foot && bar.length && (nc < 0 || nc >= foot.length)) {
@@ -6620,6 +6639,12 @@ function pickerClickEnd(sel) {
   sel.classList.remove('gp-selecting');
   pickerCollapse(sel);
   GP_SELECTING = null;
+  // AND REPAINT. On this path `change` fired while the list was still open, so
+  // any repaint it asked for was skipped by the guard in paintCompact. Now
+  // that the list is shut there is nothing to protect and the footer needs to
+  // catch up -- a mode picked with the mouse otherwise left the old legend.
+  // paintCompact returns on its own when the view is not compact.
+  paintCompact();
 }
 
 // ⭐ Clicking AWAY cancels, which is what a mouse expects and what Circle
@@ -6704,7 +6729,13 @@ function paintCompact() {
   // ⛔ NOT WHILE THE SELECTOR IS OPEN. A repaint replaces it, and the open
   // list would be closed under the person's hand with its choice lost. The
   // next change repaints.
-  if (GP_SELECTING && box.contains(GP_SELECTING)) return;
+  // ONLY WHILE A LIST IS ACTUALLY EXPANDED. This used to skip on
+    // GP_SELECTING alone, and a mode change arrives from inside that state --
+    // so the repaint that rewrites the legend was dropped and the footer kept
+    // the mode it had just left (rhoquinn8217, 2026-09-20: *"sometimes the
+    // legend doesn't update with the correct text after switching to a
+    // different mode"*). A collapsed picker has nothing to protect.
+  if (GP_SELECTING && box.contains(GP_SELECTING) && GP_SELECTING.size > 1) return;
   var d = (LAST_DEVICES || []).filter(function (x) { return x.ordinal === ACTIVE; })[0];
   // The listener remembers which controller was on screen, for the next
   // window; L1/R1 change it without any layout changing, so it is told here.
