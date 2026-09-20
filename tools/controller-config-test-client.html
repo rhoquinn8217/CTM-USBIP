@@ -824,7 +824,12 @@
   body.quick #compactBox .cauto-btn,
   body.quick #compactBox .cselrow .cunlink-btn { font-size:12.6vh; padding:1.5vh 1.6vw; }
   body.quick #compactBox .cbar { padding-top:3.75vh; gap:3vw; }
-  body.quick #compactBox .cbar > button { font-size:6.9vh; padding:1.5vh 2vw; }
+  /* ⓘ Quick has the SAME fault and is fixed with it. Only Simple was
+     reported, but its picker fell to the 12.6vh config-selector rule in
+     exactly the same way, and leaving it would be the next report. */
+  body.quick #compactBox .cbar > button,
+  body.quick #compactBox .cbar > select.modepick { font-size:6.9vh;
+    padding:1.5vh 2vw; min-width:0; }
   body.quick #compactBox .clegend { font-size:6.9vh; }
   body.quick #compactBox .cempty { font-size:13.5vh; }
   body.quick #compactBox .csub, body.quick #compactBox .ccmd { font-size:9vh; }
@@ -914,7 +919,34 @@
   #compactBox .cinfo b { color:#e8e8ea; }
   /* ⭐ The footer's two corners: Configurator bottom-left, Close bottom-right,
      away from the actions under the selector (rhoquinn8217, 2026-09-09). */
-  #compactBox .cbar > button { flex:0 0 auto; font-size:3.4vh; padding:1.2vh 2.6vw; }
+  /* ⛔⛔ THE MODE PICKER IS SIZED WITH THE FOOTER'S BUTTONS, NOT WITH THE
+     CONFIG SELECTOR (rhoquinn8217, 2026-09-20: *"mode selector in simple mode
+     is too long it should match the size of the close button on the other side
+     of the window"* and *"also too large"*).
+     ⓘ `.modepick` carried NO styling of its own, so it fell to
+     `#compactBox select` -- which is the CONFIG selector's rule, 47vw wide and
+     4.2vh tall. Measured before the fix: 582 x 40 at 21.8px against Close's
+     111 x 35 at 17.6px, so more than five times the width.
+     ⚠️ `min-width:0` is load-bearing: without it the 47vw from that rule
+     still wins on width even though everything else here overrides. */
+  #compactBox .cbar > button,
+  #compactBox .cbar > select.modepick { flex:0 0 auto; font-size:3.4vh;
+    padding:1.2vh 2.6vw; min-width:0; }
+  /* ⚠⚠ THE PADLOCK IS WHY THIS IS HERE, and why the height is written out.
+     Font, padding, border and box-sizing all matched the button already and
+     the picker still came out 39.6 px against 34.8: an emoji renders TALLER
+     than text, and a <select> sizes to its tallest OPTION -- "Simple 🔒".
+     ⛔ `line-height` DOES NOT FIX IT. Tried and measured: 39.6 px before and
+     after, because Chrome sizes the box from the option's font metrics and
+     not from the line box. An explicit height is what works.
+     ⓘ On BOTH, so the pair match by construction rather than by coincidence,
+     and 6.8vh is simply what the button already computed to. ⚠️ If the font
+     or padding above changes, this number has to move with it. */
+  #compactBox .cbar > button,
+  #compactBox .cbar > select.modepick { height:6.8vh; }
+  /* ⓘ Quick's own pair, measured the same way: its button came to 12.22vh. */
+  body.quick #compactBox .cbar > button,
+  body.quick #compactBox .cbar > select.modepick { height:12.22vh; }
   body.compact #confirmBox .confirmCard { font-size:5.1vh; max-width:86vw; }
   body.compact #confirmBox .confirmCard h2 { font-size:6.3vh; }
   body.compact #confirmBox .confirmCard p { font-size:5.1vh; }
@@ -5234,7 +5266,15 @@ function compactMove(dx, dy) {
   if (topRow.length) rows.push(topRow);
   var foot = Array.prototype.slice.call(box.querySelectorAll('.cfoot button'));
   if (foot.length) rows.push(foot);
-  var bar = Array.prototype.slice.call(box.querySelectorAll('.cbar > button'));
+  // ⛔⛔ `select` AS WELL AS `button`, AND THAT IS THE WHOLE OF FAULT 1
+  // (rhoquinn8217, 2026-09-20: *"Unable to navigate to the mode selector box
+  // with controller"*). T-233 replaced the footer's left BUTTON with a
+  // SELECT, and this line still gathered buttons only -- so the Mode picker
+  // was invisible to the mover and the footer row held nothing but Close.
+  // ⓘ The selector row above got this right, and is the precedent:
+  // `selRow.querySelectorAll('select, button')`.
+  var bar = Array.prototype.slice.call(
+    box.querySelectorAll('.cbar > button, .cbar > select'));
   if (bar.length) rows.push(bar);
   if (!rows.length) return false;
   var cur = GP_FOCUS[GP_INDEX];
@@ -5251,8 +5291,9 @@ function compactMove(dx, dy) {
     var nc = c + dx;
     if (rows[r] === foot && bar.length && (nc < 0 || nc >= foot.length)) {
       // ⭐ Off either end of New/Edit lands on the corner that side: Left
-      // from New is Advanced, Right from Edit is the other view
-      // (rhoquinn8217, 2026-09-09).
+      // from New is the Mode picker, Right from Edit is Close
+      // (rhoquinn8217, 2026-09-09). ⓘ It was "Advanced" and "the other view"
+      // until T-233 turned both corners into one Mode picker and a Close.
       r = rows.indexOf(bar);
       c = nc < 0 ? 0 : bar.length - 1;
     } else {
