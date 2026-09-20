@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.4 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.9 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,16 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.9  A DS4 is offered the Audio section. Four of its six settings
+            work on one -- the two volumes, the routing mode and the
+            latency -- because they travel to the TV rather than being
+            patched into a DualSense report here, and hiding the section
+            for the sake of the other two took all four with it. audio_gain
+            and force_echo_cancel are greyed with the reason beside them
+            (T-229 item A). Rumble is still DualSense-only: a DS4's motors
+            need their own patch path, which is item B.
+            ⓘ 2.66.5 through 2.66.8 are T-232, T-233, T-234 and T-235,
+            each still on its own branch.
     2.66.4  RESET IS GONE, and Unlink is what replaces it (rhoquinn8217).
             The button and its column leave both device tables -- the
             controller tab's and Overview's -- and the question it asked
@@ -3084,6 +3094,37 @@ var NEEDS_ADAPTIVE_TRIGGERS = {
 // ⓘ The Edge has them; a DS4, an Xbox pad and anything generic do not.
 var ADAPTIVE_TRIGGER_KINDS = ['ds5', 'ds5_edge'];
 
+// ⭐ The two Audio rows that are still DualSense-only (T-229 item A).
+//
+// ⛔⛔ FOUR OF THE SIX WORK ON A DS4, WHICH IS WHY THIS IS PER-KEY. Speaker
+// volume, headset volume and the routing mode TRAVEL to the TV instead of
+// being patched into the outbound report, and audio_latency_ms travels too --
+// none of those four is gated on being a DualSense. Hiding the Audio section
+// from a DS4 took all four with it, which is what this fixes.
+//
+// These two do not travel:
+//   audio_gain        rides the WIRED ISO audio path (audio_gain.inl), four
+//                     channels in one buffer, which is a DualSense layout. A
+//                     DS4's audio is SBC frames on a different endpoint.
+//   force_echo_cancel is an output-report patch in ds5_output_overrides.inl
+//                     and ds5_apply_settings.inl, so the 0x02 gate stops it.
+//
+// ⚠️ audio_gain has a SECOND limit that is not about the pad at all: it reads
+// the literal "ds5" section, so it acts only from the shared [ds5] block and a
+// named config's copy is ignored. That is T-229 item C's to fix -- greying it
+// here for a DS4 is right either way.
+var NEEDS_DS5_AUDIO_PATH = {
+  audio_gain: 1,
+  force_echo_cancel: 1
+};
+
+// The settings kinds whose reports those two paths actually read.
+// ⓘ The same two kinds as ADAPTIVE_TRIGGER_KINDS, and deliberately its own
+// list: that one is about hardware a pad either has or has not, this one is
+// about a code path that only understands a DualSense report. One changing is
+// no reason for the other to.
+var DS5_AUDIO_PATH_KINDS = ['ds5', 'ds5_edge'];
+
 // Returns a reason string when `key` cannot act on `kind`, or '' when it can.
 // ⓘ An empty kind means no controller is in hand -- Overview and the Editor
 // -- and nothing is greyed there, for the same reason T-227 hides no section:
@@ -3100,6 +3141,10 @@ function inertReason(key, sessionKind) {
   if (NEEDS_ADAPTIVE_TRIGGERS[key] &&
       ADAPTIVE_TRIGGER_KINDS.indexOf(settingsKindOf(sessionKind)) < 0) {
     return 'this controller has no adaptive triggers';
+  }
+  if (NEEDS_DS5_AUDIO_PATH[key] &&
+      DS5_AUDIO_PATH_KINDS.indexOf(settingsKindOf(sessionKind)) < 0) {
+    return 'DualSense only — this setting is patched into a DualSense report';
   }
   return '';
 }

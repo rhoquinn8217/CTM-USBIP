@@ -26,13 +26,16 @@ static void rest_fill_capabilities(RestDeviceView *view)
 {
     if (view == nullptr) return;
     const std::string k = config_store::settings_kind_for(view->kind);
-    const bool isDs5 = (k == "ds5" || k == "ds5_edge");
 
-    // Audio and the three rumble gains are patched by ds5_output_overrides.inl,
-    // and every override there begins `if (data[0] != 0x02) return;` -- the
-    // DualSense's wired report id. On any other pad they do nothing at all.
-    view->hasAudio = isDs5;
-    view->hasRumbleGains = isDs5;
+    // ⭐⭐ AUDIO IS NO LONGER DUALSENSE-ONLY (T-229 item A, 2026-09-19).
+    // T-227 wrote these two as one kind test and said why: *"WHEN T-203 LANDS,
+    // AUDIO STOPS BEING DUALSENSE-ONLY. A DS4 has a speaker and a headset jack
+    // too."* T-203 landed for Bluetooth on 2026-09-19 -- sound heard from a
+    // bridged DS4's speaker and headset -- so this is that line coming due.
+    // ⓘ Both rules, and the reasoning for each, are in
+    // app/device_capabilities.inl, where they can be tested.
+    view->hasAudio = ctm_caps::has_audio_hardware(k);
+    view->hasRumbleGains = ctm_caps::has_rumble_gains(k);
 
     // ⚠️ A WIRED XBOX PAD ARRIVES AS "xpad", WHICH settings_kind_for() DOES NOT
     // MAP -- it lists only the kinds the TV sends for a config, and xpad is not
