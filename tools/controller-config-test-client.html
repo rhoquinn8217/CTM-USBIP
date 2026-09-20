@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.10 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.11 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,17 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.11 Copy asks for a name before it makes one, the way Rename does:
+            an expanding row, opened on the name it WOULD have chosen, with
+            Create and Cancel. Both Copy buttons, not only the Editor
+            tab's -- one expanding and one firing instantly would be two
+            buttons with the same word behaving differently. One row
+            serves both jobs rather than a second being added beside it,
+            because the flag that guards it is checked in a dozen
+            handlers. And the row now closes when you change tab: it used
+            to survive, still pointing at the config from the tab you
+            left, so Save renamed something off screen while the config
+            list silently stopped refreshing (T-236).
     2.66.10 A day of design work on the compact views, all of it
             rhoquinn8217's asking and all of it tested on hardware.
             The Mode picker is reachable by pad, sized like the Close
@@ -2537,15 +2548,33 @@ function nextCopyName(sourceName) {
 // ⓘ Two callers now: a controller tab copies what it has linked and links the
 // copy; Overview copies the config it is editing and OPENS the copy, since it
 // has no controller to link to. The copying itself is the same either way.
+// COPY ASKS FOR A NAME NOW, the way Rename does (rhoquinn8217, 2026-09-20:
+// *"Copy button in the Advance mode needs to look function like the rename
+// button. It expands out a section providing the name appended with a numbered
+// iteration but also allowing you to name the copy before it's created."*).
+//
+// BOTH Copy buttons, not only the Editor tab's. The ticket asked about that
+// one and left the controller tab's as an open question; doing one and not the
+// other leaves two buttons with the same word on them behaving differently,
+// which is worse than either answer.
+//
+// The name they open with is unchanged -- nextCopyName() strips a trailing
+// _N and hands it to nextNameFrom(), so copying gyro_to_mouse_config_2 still
+// offers gyro_to_mouse_config_3. This is a box around a decision the code
+// already made, not a new naming rule.
 function copyConfigFor(ordinal) {
   var dev = LAST_DEVICES.filter(function(x) { return x.ordinal === ordinal; })[0];
   if (!dev || !dev.linked_config) return;
-  copyConfigNamed(dev.linked_config, ordinal);
+  openNameRow('copy', dev.linked_config, ordinal);
 }
 
 function copyConfigNamed(source, ordinal) {
   if (!source) return;
-  var name = nextCopyName(source);
+  openNameRow('copy', source, ordinal || null);
+}
+
+// The copy itself, once a name has been settled on.
+function doCopy(source, name, ordinal) {
   call('POST', '/api/v1/configs/' + encodeURIComponent(source) + '/copy',
        { name: name })
     .then(function() {
@@ -2992,6 +3021,22 @@ function showTab(name) {
   // row belonging to the pad you just left. ⓘ Cleared on any tab change,
   // including to Overview.
   if (ACTIVE !== name) forgetSectionPlaces();
+  // AND CLOSE THE NAME ROW (T-236 Fold 1, rhoquinn8217, 2026-09-20: *"When the
+  // section opens with rename or copy, it stay open when moving to a different
+  // controller or the editor. It should cancel and close on tab changes."*).
+  //
+  // It survived a tab change and took three things with it. Save still targeted
+  // the config from the tab you LEFT -- the name is baked into the handler when
+  // the row is built -- so it renamed something that was not on screen. RENAMING
+  // guards the ten-second config poll, so the list silently stopped refreshing
+  // for as long as the row was stranded. And the button it would return focus to
+  // was on the old tab, so Circle had nowhere to go.
+  //
+  // CANCEL, not a bare close: cancelRename also puts #renameRow back into
+  // #stickyTop before removing its holder, and dropping the holder with the row
+  // still inside DELETES the element from the page -- after which every later
+  // Rename has nowhere to render. That trap is recorded in cancelRename itself.
+  if (ACTIVE !== name && RENAMING) cancelRename();
   ACTIVE = name;
   document.querySelectorAll('.pane').forEach(function(p) { p.classList.remove('on'); });
   var pane = document.getElementById('pane-' + name);
@@ -4115,9 +4160,26 @@ function createConfig() {
 //
 // ⚠️ Typing the new name still needs a keyboard. What this fixes is being able
 // to back out, which is the part that trapped people.
-function renameConfig(name) {
+// ONE ROW, TWO MODES. The ticket's own warning is why: RENAMING is a global
+// checked in about a dozen handlers -- the d-pad, the plain keys, Escape,
+// Space, the config poll -- so a second row would be a dozen more places to
+// keep in step. A second MODE inherits all of it for free.
+//
+// The flag keeps the name RENAMING rather than becoming NAMING: renaming it
+// would touch every one of those sites for no behaviour, and this comment is
+// cheaper than that risk. Read it as "a name row is open".
+var NAME_MODE = '';        // 'rename' or 'copy'
+var NAME_SOURCE = '';      // the config being renamed, or copied FROM
+var NAME_ORDINAL = null;   // copy only: the controller to link the copy to
+
+function renameConfig(name) { openNameRow('rename', name, null); }
+
+function openNameRow(mode, name, ordinal) {
   var host = document.getElementById('renameRow');
   if (!host) return;
+  NAME_MODE = mode;
+  NAME_SOURCE = name;
+  NAME_ORDINAL = ordinal || null;
 
   // ⭐ Open it WHERE IT WAS ASKED FOR. The row lives in the sticky block at the
   // top, so renaming a config halfway down the table opened an editor offscreen
@@ -4144,7 +4206,10 @@ function renameConfig(name) {
       if (RENAME_OPENER) return;
       if (b.offsetParent === null) return;                  // not on screen
       var h = b.getAttribute('onclick') || '';
-      if (h.indexOf('renameConfig(') === 0) RENAME_OPENER = b;
+      // Whichever button opened this row -- Rename, or either Copy.
+      if (h.indexOf(mode === 'copy' ? 'copyConfig' : 'renameConfig(') === 0) {
+        RENAME_OPENER = b;
+      }
     });
   }
 
@@ -4162,17 +4227,21 @@ function renameConfig(name) {
     var top = document.getElementById('stickyTop');
     if (top && host.parentNode !== top) top.appendChild(host);
   }
+  // Rename opens on the name it HAS; copy on the name it WOULD be given.
+  var start = (mode === 'copy') ? nextCopyName(name) : name;
   host.innerHTML =
-    '<div class="kv"><label>rename</label>' +
+    '<div class="kv"><label>' + (mode === 'copy' ? 'copy to' : 'rename') + '</label>' +
     // ⭐ ENTER SAVES, ESCAPE CANCELS, from inside the box (rhoquinn8217,
     // 2026-09-01). The plain-key handler deliberately keeps its hands off a
     // field being typed into, so these two have to live on the field itself --
     // which is also where every other dialog puts them.
-    '<input id="renameTo" value="' + esc(name) + '" size="22"' +
-    ' onkeydown="renameKey(event,\'' + esc(name) + '\')">' +
-    '<button onclick="commitRename(\'' + esc(name) + '\')">Save</button>' +
+    '<input id="renameTo" value="' + esc(start) + '" size="22"' +
+    ' onkeydown="renameKey(event)">' +
+    '<button onclick="commitNameRow()">' +
+    (mode === 'copy' ? 'Create' : 'Save') + '</button>' +
     '<button onclick="cancelRename()">Cancel</button>' +
-    '<span class="muted">Enter saves, Escape cancels, or press ○</span></div>';
+    '<span class="muted">Enter ' + (mode === 'copy' ? 'creates' : 'saves') +
+    ', Escape cancels, or press ○</span></div>';
   RENAMING = true;
   gpCollect();
   // ⭐ Put controller focus on Save. Opening a row and leaving focus elsewhere
@@ -4187,8 +4256,8 @@ function renameConfig(name) {
   if (box) { box.focus(); box.select(); }
 }
 
-function renameKey(ev, name) {
-  if (ev.key === 'Enter') { ev.preventDefault(); commitRename(name); return; }
+function renameKey(ev) {
+  if (ev.key === 'Enter') { ev.preventDefault(); commitNameRow(); return; }
   if (ev.key !== 'Escape') return;
   // ⭐ ESCAPE LEAVES THE BOX, IT DOES NOT CANCEL (rhoquinn8217, 2026-09-01).
   //
@@ -4223,6 +4292,9 @@ function cancelRename() {
   }
 
   RENAMING = false;
+  NAME_MODE = '';
+  NAME_SOURCE = '';
+  NAME_ORDINAL = null;
   gpCollect();
 
   // ⭐ Back to the button that opened it. gpCollect rebuilds the list, and the
@@ -4235,20 +4307,36 @@ function cancelRename() {
   }
 }
 
-function commitRename(oldName) {
+function commitNameRow() {
   var box = document.getElementById('renameTo');
   if (!box) return;
   var next = box.value.trim();
-  if (!next || next === oldName) { cancelRename(); return; }
-  call('POST', '/api/v1/configs/' + encodeURIComponent(oldName) + '/rename', { name: next })
+  var source = NAME_SOURCE, ordinal = NAME_ORDINAL, mode = NAME_MODE;
+  if (!next) { cancelRename(); return; }
+
+  if (mode === 'copy') {
+    // A copy onto its own source name is not a no-op, it is a name the store
+    // will refuse -- so it is stopped here rather than sent and rejected.
+    if (next === source) { cancelRename(); return; }
+    cancelRename();
+    doCopy(source, next, ordinal);
+    return;
+  }
+
+  if (next === source) { cancelRename(); return; }
+  call('POST', '/api/v1/configs/' + encodeURIComponent(source) + '/rename', { name: next })
     .then(function() {
       setConn('renamed to ' + next, 'good');
       cancelRename();
       loadConfigs();
       loadDevices();
-      if (OV_CONFIG === oldName) openConfig(next);
+      if (OV_CONFIG === source) openConfig(next);
     }).catch(function(){ cancelRename(); });
 }
+
+// The old name, kept because it reads better at a call site that only ever
+// renames, and because the gate keys and the docs both say "rename".
+function commitRename() { commitNameRow(); }
 
 // ⛔ ASK FIRST. Archive and Remove auto link are one click each, sit next to
 // controls you press routinely, and there is nothing between the click and the
