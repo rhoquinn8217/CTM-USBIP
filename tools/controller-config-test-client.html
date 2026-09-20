@@ -5308,10 +5308,13 @@ function compactMove(dx, dy) {
   } else if (dx) {
     var nc = c + dx;
     if (rows[r] === foot && bar.length && (nc < 0 || nc >= foot.length)) {
-      // ⭐ Off either end of New/Edit lands on the corner that side: Left
-      // from New is the Mode picker, Right from Edit is Close
-      // (rhoquinn8217, 2026-09-09). ⓘ It was "Advanced" and "the other view"
-      // until T-233 turned both corners into one Mode picker and a Close.
+      // ⭐ Off either end of New/Edit lands on the footer row
+      // (rhoquinn8217, 2026-09-09). ⓘ Both controls sit in the RIGHT corner
+      // now, so Left from New reaches Close and Right from Edit reaches the
+      // Mode picker -- the row is read in document order either way. It was
+      // "Advanced" on the left and "the other view" on the right until T-233
+      // replaced the pair with one Mode picker, and 2026-09-20 moved that
+      // picker over beside Close.
       r = rows.indexOf(bar);
       c = nc < 0 ? 0 : bar.length - 1;
     } else {
@@ -6811,13 +6814,19 @@ function paintCompact() {
     // Advanced bottom-left, the legend, and the OTHER view bottom-right. No
     // Close: Circle closes, as the legend says, and so does the question
     // after a pick.
-    html += '<div class="cbar">' + modePickerHtml('cselMode') +
+    // ⭐ BOTH CONTROLS IN THE BOTTOM-RIGHT CORNER (rhoquinn8217, 2026-09-20):
+    // *"move the mode selector at the right side of the close button in the
+    // simple and quick modes, just like the advance mode."* ⓘ `.cbarText` is
+    // `flex:1 1 auto`, so it takes the slack and whatever follows it is pushed
+    // to the right -- the order here IS the order on screen.
+    html += '<div class="cbar">' +
             '<div class="cbarText"><div class="clegend">' +
             '\u2630 position | R3 resize | ' +
             '\u25cb close</div></div>' +
-            '<button class="cclose" onclick="closeWindow()">Close</button></div>';
+            '<button class="cclose" onclick="closeWindow()">Close</button>' +
+            modePickerHtml('cselMode') + '</div>';
   } else {
-    html += '<div class="cbar">' + modePickerHtml('cselMode') +
+    html += '<div class="cbar">' +
             '<div class="cbarText">' +
             '<div class="clegend">' +
             'L1/R1 controller | \u2715 select | d-pad move | ' +
@@ -6825,7 +6834,8 @@ function paintCompact() {
             '<div class="cinfo">To bring this window back: <b>hold two fingers on the touchpad ' +
             'and press Options</b> (DS5/DS4 only), or right-click the tray icon and choose ' +
             '<b>Open settings</b>.</div>' +
-            '</div><button class="cclose" onclick="closeWindow()">Close</button></div>';
+            '</div><button class="cclose" onclick="closeWindow()">Close</button>' +
+            modePickerHtml('cselMode') + '</div>';
   }
   box.innerHTML = html;
   gpCollect();
