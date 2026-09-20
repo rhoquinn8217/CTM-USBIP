@@ -259,8 +259,9 @@ inline void set_view(bool compact, bool quick, bool restore)
     else g_sizeCompact.store(0);
 }
 
-// ⓘ Own edge tracking for R3 rather than ctm_overlay::edge(): that table's
-// slots are the keyboard's, and slot 11 is already R3 there.
+// ⓘ Own edge tracking rather than ctm_overlay::edge(): that table's slots
+// are the keyboard's. ⚠️ Named for R3 because it was R3 until 2026-09-20 --
+// it watches Create now, and the mechanism is the same either way.
 inline std::mutex g_r3Mutex;
 inline std::unordered_map<const void *, bool> g_r3Down;
 
@@ -395,10 +396,12 @@ inline void place_centre(HWND hwnd)
 }
 
 // A tap. In Advanced there is one place and this is "put it back in the
-// middle". In Simple and Quick it is the NEXT of bottom left, bottom centre,
-// bottom right -- judged from where the window IS, so one that was steered
-// somewhere still goes somewhere sensible rather than to whatever a stale
-// counter said. ⓘ The choice is kept, so the window comes back to it.
+// middle". In Simple and Quick it is bottom centre -- HOME, which is where
+// those views now open -- whenever the window is not already sitting on one of
+// the three, and the next of centre, right, left when it is.
+// Judged from where the window IS, so one that was steered somewhere goes
+// somewhere sensible rather than to whatever a stale counter said. The choice
+// is kept, so the window comes back to it.
 inline void snap_next(HWND hwnd)
 {
     // ⛔ ADVANCED CENTRES, always -- never "back to where it was remembered"
@@ -411,6 +414,7 @@ inline void snap_next(HWND hwnd)
     RECT rc;
     if (!GetWindowRect(hwnd, &rc)) return;
     const int w = rc.right - rc.left;
+    const int h = rc.bottom - rc.top;
     const RECT wa = work_area();
     const int margin = snap_margin(wa);
     const int targets[3] = {
@@ -418,13 +422,29 @@ inline void snap_next(HWND hwnd)
         wa.left + ((wa.right - wa.left) - w) / 2,
         wa.right - margin - w,
     };
-    int nearest = 0;
-    long best = LONG_MAX;
+
+    // IT STARTS AT HOME (rhoquinn8217, 2026-09-20: "Reposition should always
+    // start there", bottom centre being where a compact view now opens). A
+    // window that is not sitting on one of the three goes THERE first, and
+    // only one already on a place steps along.
+    //
+    // It used to take the NEAREST of the three and step on from that, which
+    // had two faults. The window was judged by x ALONE -- the y was never
+    // looked at -- so one parked at the top of the screen counted as being on
+    // a bottom place, and the first press sent it sideways instead of home.
+    // And from home itself there was no way to ask for home: the press always
+    // moved it on.
+    const int homeY = wa.bottom - bottom_gap(wa) - h;
+    const long span = (long)(wa.right - wa.left);
+    const long tol = span / 200 > 4 ? span / 200 : 4;
+
+    int at = -1;
     for (int i = 0; i < 3; ++i) {
-        const long d = labs((long)rc.left - (long)targets[i]);
-        if (d < best) { best = d; nearest = i; }
+        if (labs((long)rc.left - (long)targets[i]) <= tol &&
+            labs((long)rc.top - (long)homeY) <= tol) { at = i; break; }
     }
-    place_at(hwnd, (nearest + 1) % 3);
+    if (at < 0) { place_at(hwnd, 1); return; }   // home: bottom centre
+    place_at(hwnd, (at + 1) % 3);
 }
 
 // This layout's slot, and the table it indexes.
@@ -511,10 +531,21 @@ inline bool handle_report(const void *deviceKey, const ctm_rebind::Layout &lay,
         return false;
     }
 
-    // ⓘ R3 is free on the page as Options is: it never reads index 10 or 11.
-    if (r3_edge(deviceKey, ctm_overlay::button_down(lay, data, len, 11))) {
+    // ⭐⭐ CREATE RESIZES, NOT R3 (rhoquinn8217, 2026-09-20: *"don't use R3
+    // to change the window size. Use the create button instead since it's not
+    // used anymore."*). Index 8, kBtnSelect -- Create on a DualSense, Select
+    // or View elsewhere.
+    // ⚠️ CREATE WAS NOT QUITE FREE, and what it did has been given up
+    // knowingly. It sent KeyC, which since T-233 only moved the pad's focus
+    // onto the Mode picker -- a shortcut the d-pad now reaches on its own, so
+    // the cost is one convenience rather than a feature. Its key mapping and
+    // the page's handler for it go with this change, or Create would resize
+    // AND jump the focus on the same press.
+    // ⓘ R3 is given back. It is a gyro gate as of T-235, and a button that
+    // resizes a window while also aiming is a collision waiting to happen.
+    if (r3_edge(deviceKey, ctm_overlay::button_down(lay, data, len, 8))) {
         if (HWND h = page_window()) resize_next(h);
-        // The press goes through; the page ignores R3.
+        // The press goes through; the page no longer acts on Create.
     }
 
     // ⭐ THIS pad's mover, so another pad's reports -- Options up, as always on

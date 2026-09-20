@@ -169,6 +169,9 @@ int run_gyro_mouse_tests()
     CTM_CHECK(parse_gate("!touchpad") == Gate::NotTouchpad);
     CTM_CHECK(parse_gate("touchpad_click") == Gate::TouchpadClick);
     CTM_CHECK(parse_gate("PS") == Gate::PS);
+    // T-235: R3, the right stick pressed in.
+    CTM_CHECK(parse_gate("R3") == Gate::R3);
+    CTM_CHECK(parse_gate("r3") == Gate::R3);
     CTM_CHECK(parse_gate("garbage") == Gate::Off);   // unknown -> off, never error
     CTM_CHECK(parse_gate("") == Gate::Off);
 
@@ -180,6 +183,23 @@ int run_gyro_mouse_tests()
         CTM_CHECK(!gate_open(Gate::Off, r.data(), r.size()));
         r[5] = 10;                                    // below ~12% threshold
         CTM_CHECK(!gate_open(Gate::L2, r.data(), r.size()));
+    }
+
+    section("gyro-mouse: R3 gates the gyro (T-235)");
+    {
+        // The right stick pressed in, so the pad can be put down or played
+        // with normally without the cursor wandering.
+        auto r = make_report(0, 0, 0);
+        CTM_CHECK(!gate_open(Gate::R3, r.data(), r.size()));
+        r[9] |= 0x80;                       // R3's spot in the DualSense table
+        CTM_CHECK(gate_open(Gate::R3, r.data(), r.size()));
+        // And it is its own gate: releasing closes it again.
+        r[9] &= static_cast<uint8_t>(~0x80);
+        CTM_CHECK(!gate_open(Gate::R3, r.data(), r.size()));
+        // A different button must not open it -- L3 sits beside R3 in the same
+        // byte, which is exactly the mistake a wrong mask would make.
+        r[9] |= 0x40;                       // L3
+        CTM_CHECK(!gate_open(Gate::R3, r.data(), r.size()));
     }
 
     section("gyro-mouse: the steady is no longer a gate value");

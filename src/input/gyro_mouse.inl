@@ -79,6 +79,10 @@ enum class Gate {
     NotTouchpad,
     TouchpadClick,
     PS,
+    // T-235: the right stick pressed in. Nothing new was needed to read it --
+    // kBtnR3 already has a spot in BOTH button tables, the DualSense's and the
+    // generic one -- so this is the same shape as L1 and R1 below.
+    R3,
     // ⭐ TRIGGER: the gyro moves the cursor EXCEPT while a trigger is being
     // worked, so a click lands on a cursor that is already still. Unlike every
     // gate above, this one is not a function of the report bytes -- the trigger
@@ -112,6 +116,7 @@ inline Gate parse_gate(const std::string &raw)
     if (v == "touchpad_click" || v == "click") return Gate::TouchpadClick;
     if (v == "trigger") return Gate::TriggerHold;
     if (v == "ps") return Gate::PS;
+    if (v == "r3") return Gate::R3;
     // Unknown value is OFF, never an error -- a typo silently disables the
     // feature, it never breaks a session. Same rule as every config lookup.
     return Gate::Off;
@@ -166,6 +171,8 @@ inline bool gate_open(Gate gate, const ctm_rebind::Layout &lay, const uint8_t *d
             return ctm_rebind::is_pressed(lay, d, len, ctm_rebind::kBtnL1);
         case Gate::R1:
             return ctm_rebind::is_pressed(lay, d, len, ctm_rebind::kBtnR1);
+        case Gate::R3:
+            return ctm_rebind::is_pressed(lay, d, len, ctm_rebind::kBtnR3);
         case Gate::Touchpad:
             return ctm_rebind::touch_finger_down(lay, d, len, 0);   // finger 1 down
         case Gate::NotTouchpad:

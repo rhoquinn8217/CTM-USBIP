@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.4 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.10 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,59 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.10 A day of design work on the compact views, all of it
+            rhoquinn8217's asking and all of it tested on hardware.
+            The Mode picker is reachable by pad, sized like the Close
+            button beside it, and the two sit together in the bottom
+            right. It carries the mode identifier itself -- yellow, bold,
+            capitals, with the padlock -- so no legend names its mode any
+            more. It always opens UPWARD, by pad and by mouse, because it
+            lives in the footer and a native popup is not clipped by the
+            window. New, Edit, Mode and Close read as one sideways chain,
+            arriving at the selector row means the config picker, and
+            Circle in Simple goes TO the Close button rather than closing.
+            Compact opens at bottom centre, which is where reposition now
+            starts from. Create resizes the window and R3 is given back to
+            the gyro. Archiving the config you are editing closes it and
+            takes its section tabs with it. trigger_probe is hidden: it is
+            a diagnostic, and its own help says leave it off.
+            (T-233, T-232, T-229.)
+            ⛔ A DS4 is NOT offered the Audio section. It was, for a few
+            hours -- the settings travel to the TV rather than being
+            patched into a DualSense report, so they reach any pad -- and
+            then neither volume moved anything and the routing mode
+            neither silenced a headset nor started the speaker. Arriving
+            is not acting. Hidden again until T-229 says what they do.
+    2.66.8  The preset list is renamed and gains one. gyro-to-mouse is
+            gyro-to-mouse-always-on, L2-gyro-mouse-aiming is
+            gyro-to-mouse-on-L2-aiming, and the new gyro-to-mouse-on-r3
+            moves the cursor only while the right stick is held in. Both
+            always-on presets now steady the cursor on either trigger, so
+            a click lands where you were pointing. "Blank" is called
+            "custom", and a config made from it is named after the pad --
+            ds5_config, ds4_config, xbox_config, or pad_config when there
+            is no controller. An Edge gets ds5_config: nothing uses its
+            extra buttons yet (rhoquinn8217, T-235).
+    2.66.7  The four adaptive trigger settings per trigger are greyed on a
+            pad that has none, with the reason on the row. Eight keys, not
+            the Triggers section: press_at, the two timings and
+            steady_cursor_pull all work on a DS4, because a trigger is an
+            analogue axis whatever the pad (T-234).
+    2.66.6  A padlock beside the config selector locks the view mode, so
+            Advanced, Simple and Quick stay where you put them rather than
+            being chosen for you (T-233).
+    2.66.5  Overview loses its config section, and the Editor tab gains
+            Archive beside Copy -- the only action there that belonged to a
+            config rather than a controller. The Editor's New button worked
+            at last: it returned on its second line whenever no controller
+            matched, so it offered no presets rather than too few. Two
+            things found while tracing it: the editor head was painted
+            below the empty-list check, so with no configs at all the one
+            tab that can create the first one had neither picker nor New
+            button; and the name suggestion read its box without a guard,
+            so it would have thrown on every config poll once the box left
+            with the section. Simple's config selector expands when chosen;
+            Quick's keeps stepping (T-232).
     2.66.4  RESET IS GONE, and Unlink is what replaces it (rhoquinn8217).
             The button and its column leave both device tables -- the
             controller tab's and Overview's -- and the question it asked
@@ -709,7 +762,7 @@
   /* ⭐ SIZED IN VIEWPORT UNITS, ON PURPOSE (rhoquinn8217, 2026-09-09: too much
      empty space; and R3 must change the text too). R3 lives in the listener and
      never reaches the page, so the page cannot be told the size -- but it does
-     not need to be: vh follows the window, so when R3 resizes it, every line
+     not need to be: vh follows the window, so when Create resizes it, every line
      here grows or shrinks with it. */
   /* ⭐ COMPACT DOES NOT SCROLL (rhoquinn8217, 2026-09-09): a stick bound to
      the wheel still turns it in config mode, on purpose, and a page a pixel
@@ -786,7 +839,12 @@
   body.quick #compactBox .cauto-btn,
   body.quick #compactBox .cselrow .cunlink-btn { font-size:12.6vh; padding:1.5vh 1.6vw; }
   body.quick #compactBox .cbar { padding-top:3.75vh; gap:3vw; }
-  body.quick #compactBox .cbar > button { font-size:6.9vh; padding:1.5vh 2vw; }
+  /* ⓘ Quick has the SAME fault and is fixed with it. Only Simple was
+     reported, but its picker fell to the 12.6vh config-selector rule in
+     exactly the same way, and leaving it would be the next report. */
+  body.quick #compactBox .cbar > button,
+  body.quick #compactBox .cbar > select.modepick { font-size:6.9vh;
+    padding:1.5vh 2vw; min-width:0; }
   body.quick #compactBox .clegend { font-size:6.9vh; }
   body.quick #compactBox .cempty { font-size:13.5vh; }
   body.quick #compactBox .csub, body.quick #compactBox .ccmd { font-size:9vh; }
@@ -876,7 +934,54 @@
   #compactBox .cinfo b { color:#e8e8ea; }
   /* ⭐ The footer's two corners: Configurator bottom-left, Close bottom-right,
      away from the actions under the selector (rhoquinn8217, 2026-09-09). */
-  #compactBox .cbar > button { flex:0 0 auto; font-size:3.4vh; padding:1.2vh 2.6vw; }
+  /* ⛔⛔ THE MODE PICKER IS SIZED WITH THE FOOTER'S BUTTONS, NOT WITH THE
+     CONFIG SELECTOR (rhoquinn8217, 2026-09-20: *"mode selector in simple mode
+     is too long it should match the size of the close button on the other side
+     of the window"* and *"also too large"*).
+     ⓘ `.modepick` carried NO styling of its own, so it fell to
+     `#compactBox select` -- which is the CONFIG selector's rule, 47vw wide and
+     4.2vh tall. Measured before the fix: 582 x 40 at 21.8px against Close's
+     111 x 35 at 17.6px, so more than five times the width.
+     ⚠️ `min-width:0` is load-bearing: without it the 47vw from that rule
+     still wins on width even though everything else here overrides. */
+  #compactBox .cbar > button,
+  #compactBox .cbar > select.modepick { flex:0 0 auto; font-size:3.4vh;
+    padding:1.2vh 2.6vw; min-width:0; }
+  /* THE PICKER IS TRIMMED ON PADDING, NOT FORCED TO A HEIGHT, AND THAT IS
+     WHAT LETS ITS TEXT SIT CENTRED (rhoquinn8217, 2026-09-20: *"The text in
+     those buttons doesn't look vertically centered in the button"*).
+     AND THE PADLOCK IS NOT THE CAUSE, though it looked like it and was
+     written up here as if it were. Measured across six glyphs INCLUDING NONE
+     AT ALL: the natural height is 39.4 px every time. A <select> is simply
+     taller than a button at the same font and padding -- stripped of vertical
+     padding it still stands 27 px against the button's ~20.
+     So `height:6.8vh` made the two match by SQUEEZING the content, and that
+     is what pushed the text off centre. Trimming the vertical padding reaches
+     the same outer height with nothing compressed.
+     Solved, not guessed: bare select + 2 x padding = the button's height.
+     Simple 27 + 2 x 0.79vh = 35.2; Quick 20 + 2 x 0.31vh = 21.1.
+     Both move if the font or the button's padding above changes. */
+  #compactBox .cbar > select.modepick { padding-top:0.79vh; padding-bottom:0.79vh; }
+  /* ⭐⭐ THE MODE IDENTIFIER NOW LIVES ON THE PICKER ITSELF (rhoquinn8217,
+     2026-09-20): *"The Mode select clearly show what mode the window is in so
+     we don't need the Yellow Bolded mode title in the legend for each mode
+     anymore. However, I want to keep the the yellow bolded all caps text
+     applied to the currently selected mode in the mode selector with the lock
+     icon."* ⓘ Same values as `.cmode`, which the legends used to carry.
+     ⛔ AND THE OPTIONS ARE RESET, WHICH IS THE WHOLE TRICK. A closed selector
+     ignores option colour -- the note further up records that, found the hard
+     way -- so the yellow has to go on the SELECT to show when collapsed. But
+     the select's colour then bleeds into every row of the OPEN list, which is
+     the other half of that same note. Putting the normal palette back on
+     `option` leaves the list plain and the collapsed value yellow.
+     ⚠️ Uppercase plus letter-spacing makes the box WIDER -- 168 px to 194 in
+     Simple -- so the gap to the Close button beside it grows. */
+  #compactBox .cbar > select.modepick { color:#ffd166; font-weight:700;
+    letter-spacing:.08em; text-transform:uppercase; }
+  #compactBox .cbar > select.modepick option { color:#e8e8ea; font-weight:400;
+    letter-spacing:normal; text-transform:none; }
+  body.quick #compactBox .cbar > select.modepick { padding-top:0.31vh;
+    padding-bottom:0.31vh; }
   body.compact #confirmBox .confirmCard { font-size:5.1vh; max-width:86vw; }
   body.compact #confirmBox .confirmCard h2 { font-size:6.3vh; }
   body.compact #confirmBox .confirmCard p { font-size:5.1vh; }
@@ -1034,7 +1139,15 @@
      third child to a space-between row moves the hint to the centre and the
      bar reads as three unrelated things. */
   #gpbar #gphint { margin-left:auto; }
-  #fitBtn, #quickBtn, #closeBtn { padding:2px 8px; font-size:11px; margin-left:8px; }
+  #modePick, #closeBtn { padding:2px 8px; font-size:11px; margin-left:8px; }
+  /* The same treatment the compact pickers get, for the same reason: the mode
+     identifier is ON the picker now rather than in the legend beside it. The
+     options are reset or the yellow bleeds into the open list -- see the
+     longer note on the compact rule. */
+  #modePick { color:#ffd166; font-weight:700; letter-spacing:.08em;
+    text-transform:uppercase; }
+  #modePick option { color:#e8e8ea; font-weight:400; letter-spacing:normal;
+    text-transform:none; }
   /* ⓘ Sized like the page's own buttons -- New, Rename, Copy -- not like the
      small footer ones it briefly lived beside. */
   /* Locked: the page has the pads. Mirrored: the game still sees them. */
@@ -1234,6 +1347,16 @@
   .row.inert { opacity:.55; }
   .row.inert select, .row.inert input { cursor:not-allowed; }
   .gp-selecting { outline:3px solid #e0c07a !important; outline-offset:2px; }
+  /* ⭐ THE OPEN PICKER HIGHLIGHTS THE ROW UNDER THE MOUSE (rhoquinn8217,
+     2026-09-20). ⓘ A listbox does NOT do this on its own -- only the native
+     dropdown POPUP does, and that popup is drawn by the OS. The page never
+     needed the rule before, because the box only ever opened one row high.
+     ✅ Checked here before it was written: `option:hover` really is stylable
+     in this Chromium, on a throwaway <select size=6>.
+     ⚠️ Lighter than the selected row's own highlight on purpose -- hover is
+     "this is what you would get", not "this is what you have". */
+  select.gp-selecting option:hover { background:#3a3d49; color:#fff; }
+  select.gp-selecting { cursor:pointer; }
   .log-head { font-family:Consolas,monospace; font-size:12px; margin-bottom:4px; }
 </style>
 </head>
@@ -1311,13 +1434,15 @@
 <h2>Devices</h2>
 <div id="devices"><span class="muted">Refresh to load.</span></div>
 
-<h2>Configs</h2>
-<div class="bar">
-  <input id="newName" placeholder="new config name" size="20">
-  <!-- ⛔ The kind box is gone (2.65.0): a config is for any controller. -->
-  <button onclick="createConfig()">Create</button>
-</div>
-<div id="configs"><span class="muted">Refresh to load.</span></div>
+<!-- ⛔⛔ THE CONFIGS SECTION LEFT OVERVIEW (T-232, 2026-09-19).
+     rhoquinn8217: "It doesn't have a real purpose anymore. The Editor tab
+     covers most of it." It listed each config with Rename and Archive, and
+     carried a name box with Create.
+     ⛔ Archive had to move FIRST -- it was the only action there that
+     belonged to a config rather than a controller, and there was no other way
+     to archive one. It is on the Editor tab's head now, after Copy.
+     ⛔ Naming by hand is not lost: New makes one and Rename names it,
+     both on the Editor tab. -->
 
 
 <!-- ⛔ THE EDITOR LEFT OVERVIEW 2026-09-01. Its config row belongs in the
@@ -1402,10 +1527,14 @@
        naming the mechanism: "gated" means nothing to someone who did not build
        it, and this is the one piece of state that changes under you. -->
   <span id="padDest" class="muted">controllers → game</span>
-  <button id="fitBtn" onclick="setMode('simple'); setFooterMode(false);"
-          title="Simple: one controller, one config, nothing else">Simple</button>
-  <button id="quickBtn" onclick="setMode('quick'); setFooterMode(false);"
-          title="Quick: the name and the selector, nothing else">Quick</button>
+  <!-- T-233: one Mode picker replaces the Simple and Quick buttons. It is
+       filled by paintModePickers(), which runs on every mode change, and it
+       carries the padlock beside whichever mode is current. -->
+  <select class="modepick" id="modePick" size="1"
+          title="which layout this window opens in"
+          onmousedown="pickerActivate(event,this)"
+          onclick="pickerClickEnd(this)"
+          onchange="pickMode(this.value)"></select>
   <!-- ⓘ Closing releases the gate on the way out, via the pagehide beacon, so
        this is a safe exit rather than a way to strand yourself. -->
   <button id="closeBtn" onclick="window.close()" title="close this window">Close</button>
@@ -2355,12 +2484,37 @@ function nextNameFrom(base) {
 //
 // ⓘ Hyphens become underscores because a config name is also a FILENAME and a
 // section name; the preset keeps the hyphens because it is only ever a label.
-// ⓘ A blank config is my_config, not ds5_config: naming it after the kind of
-// controller that happened to press New would suggest it only suits that kind.
+// ⭐⭐ AND A CONFIG WITH NO PRESET IS NAMED AFTER THE PAD (rhoquinn8217,
+// 2026-09-19): ds5_config, ds4_config, xbox_config, or pad_config.
+//
+// ⛔ THIS REVERSES THE RULE THAT STOOD HERE, and the old reasoning is worth
+// keeping: a blank config was my_config precisely so that naming it after the
+// controller that happened to press New would not suggest it only suits that
+// kind. ➡️ What changed is that the suggestion is no longer misleading -- since
+// 2026-09-12 any config links to any controller, so nothing in the system reads
+// the name as a restriction, and my_config told you nothing at all about a list
+// of them. ⓘ The name is still only a label; rename it and nothing cares.
+//
+// ⚠️ AN EDGE GETS ds5_config, NOT ds5e_config. Nothing yet uses the extra
+// buttons, so a separate name would promise a difference that is not there
+// (rhoquinn8217, 2026-09-19).
+function customConfigBase(sessionKind) {
+  var kind = settingsKindOf(String(sessionKind || ''));
+  if (kind === 'ds5' || kind === 'ds5_edge') return 'ds5_config';
+  if (kind === 'ds4') return 'ds4_config';
+  // ⚠️ A CABLED XBOX PAD ARRIVES AS "xpad", which settingsKindOf does not map:
+  // it carries only the kinds that take configs, and xpad is not one of them.
+  // The listener makes the same fallback in rest_fill_capabilities.
+  if (kind === 'xbox' || kind === 'xpad') return 'xbox_config';
+  // ⓘ Anything else, and the Editor tab's New -- which has no controller at
+  // all, so there is no kind to name it after.
+  return 'pad_config';
+}
+
 function nextConfigName(sessionKind, presetName) {
   var base = presetName
     ? presetName.replace(/-/g, '_') + '_config'
-    : 'my_config';
+    : customConfigBase(sessionKind);
   return nextNameFrom(base);
 }
 
@@ -2410,8 +2564,10 @@ function copyConfigNamed(source, ordinal) {
     .catch(function(){});
 }
 
-// ⭐ New asks what to start from. ⓘ Blank is first and is what New always did,
-// so the old behaviour is one press away and nothing is taken from anyone.
+// ⭐ New asks what to start from. ⓘ "custom" is first and is what New always
+// did, so the old behaviour is one press away and nothing is taken from anyone.
+// ⓘ It was labelled "Blank" until 2026-09-19 (rhoquinn8217). Same thing: the
+// absence of a preset, not a preset named custom.
 //
 // ⛔ MODAL, and it uses the same overlay shape as the confirm dialog on
 // purpose: gpCollect already treats PRESET_OPEN like the other overlays, so
@@ -2421,8 +2577,13 @@ var PRESET_OPEN = false;
 var PRESETS = [];
 
 function newConfigFor(ordinal) {
-  var dev = LAST_DEVICES.filter(function(x) { return x.ordinal === ordinal; })[0];
-  if (!dev) return;
+  // T-232: an EMPTY ordinal is the Editor tab, which has no controller. It
+  // used to fall into the guard below and return, so New there did nothing at
+  // all -- it was not offering too few presets, it was offering none.
+  var dev = ordinal
+    ? (LAST_DEVICES.filter(function(x) { return x.ordinal === ordinal; })[0] || null)
+    : null;
+  if (ordinal && !dev) return;   // a named controller that has since gone
   // ⓘ The list comes from the agent, not from here: two places naming the same
   // presets is two places to disagree about them.
   call('GET', '/api/v1/presets').then(function(d) {
@@ -2430,7 +2591,7 @@ function newConfigFor(ordinal) {
     openPresetPicker(ordinal, dev);
   }).catch(function() {
     PRESETS = [];
-    openPresetPicker(ordinal, dev);      // still offers Blank
+    openPresetPicker(ordinal, dev);      // still offers custom
   });
 }
 
@@ -2478,21 +2639,25 @@ function buttonLabel(key) {
 
 function openPresetPicker(ordinal, dev) {
   OVERLAY_OPENER = GP_FOCUS[GP_INDEX] || null;
-  var kind = settingsKindOf(dev.kind);
+  // T-232: null when there is no controller in hand. Nothing is filtered then.
+  var kind = dev ? settingsKindOf(dev.kind) : null;
   // ⭐ TITLES ONLY, and choosing one OPENS ITS DETAILS rather than creating it
   // straight away (rhoquinn8217, 2026-08-31). An ⓘ button beside each row was
   // tried first and dropped: it needed its own navigation axis, and every
   // press that reached it was a press that could have shown the same thing.
   //
-  // ⓘ Blank gets a details page too, so "nothing is set" is confirmed rather
+  // ⓘ custom gets a details page too, so "nothing is set" is confirmed rather
   // than assumed from an empty row.
   var html = '<div class="prow">' +
              '<button onclick="openPresetInfo(\'' + esc(ordinal) + '\',\'\')">' +
-             'Blank</button></div>';
+             'custom</button></div>';
   PRESETS.forEach(function(p) {
     // ⛔ Only presets that suit THIS controller. One that cannot act on it
     // would be a config that silently does nothing.
-    if ((p.kinds || []).indexOf(kind) < 0) return;
+    // T-232: with no controller there is no kind to narrow to, so every
+    // preset is offered. It also agrees with the 2026-09-12 decision that any
+    // config links to any controller.
+    if (kind && (p.kinds || []).indexOf(kind) < 0) return;
     html += '<div class="prow">' +
             '<button data-preset="' + esc(p.name) + '" ' +
             'onclick="openPresetInfo(\'' + esc(ordinal) + '\',\'' +
@@ -2650,11 +2815,11 @@ function presetTable(title, rows) {
 }
 
 function openPresetInfo(ordinal, presetName) {
-  // ⓘ Blank is not in the list from the agent -- it is the absence of a
+  // ⓘ custom is not in the list from the agent -- it is the absence of a
   // preset -- so it is described here.
   var p = presetName
     ? PRESETS.filter(function(x) { return x.name === presetName; })[0]
-    : { name: 'Blank',
+    : { name: 'custom',
         help: 'Nothing is set. Every setting stays at its default, and the ' +
               'controller behaves exactly as it does now until you change ' +
               'something.',
@@ -2683,7 +2848,7 @@ function openPresetInfo(ordinal, presetName) {
     createFromPreset(ordinal, presetName);
   };
   document.getElementById('presetInfoBox').style.display = 'flex';
-  PRESET_INFO_OPEN = presetName || 'Blank';
+  PRESET_INFO_OPEN = presetName || 'custom';
   PRESET_LAST_INFO = presetName;
   gpCollect();
   GP_INDEX = 0;
@@ -2697,7 +2862,7 @@ function closePresetInfo() {
   // Back to the row that opened it, rather than the top of the list.
   var back = PRESET_LAST_INFO
     ? document.querySelector('#presetList button[data-preset="' + PRESET_LAST_INFO + '"]')
-    : document.querySelector('#presetList button');      // Blank is the first
+    : document.querySelector('#presetList button');      // custom is the first
   if (!focusElement(back)) { GP_INDEX = 0; gpPaint(); }
 }
 
@@ -2714,16 +2879,25 @@ function presetCancel() {
 }
 
 function createFromPreset(ordinal, preset) {
-  var dev = LAST_DEVICES.filter(function(x) { return x.ordinal === ordinal; })[0];
-  if (!dev) { presetCancel(); return; }
-  var name = nextConfigName(dev.kind, preset);
-  var body = { name: name, device: ordinal };
+  // T-232: no ordinal means the Editor tab -- make the config, link it to
+  // nothing, and open it. The API reads a body with no "device" as exactly
+  // that, which is the same spelling unlink uses.
+  var dev = ordinal
+    ? (LAST_DEVICES.filter(function(x) { return x.ordinal === ordinal; })[0] || null)
+    : null;
+  if (ordinal && !dev) { presetCancel(); return; }
+  var name = nextConfigName(dev ? dev.kind : '', preset);
+  var body = { name: name };
+  if (ordinal) { body.device = ordinal; }
   if (preset) body.preset = preset;
   presetCancel();
   call('POST', '/api/v1/configs', body)
     .then(function() {
       setConn('created ' + name + (preset ? ' from ' + preset : ''), 'good');
       loadConfigs(); loadDevices();
+      // T-232: made from the Editor tab, so show it there. Pressing New and
+      // being left on an empty editor would be its own puzzle.
+      if (!ordinal) { openConfig(name); }
       // ⭐ The same ending as picking one, in a new config's words: try it in
       // the game, or stay and customise it (rhoquinn8217, 2026-09-09).
       // "Customize it" is the configurator on this controller, where the
@@ -3058,13 +3232,100 @@ var TRANSPORT_ONLY = {
   audio_latency_ms: 'Bluetooth'
 };
 
+// ⭐ Settings that need HARDWARE only some pads have (T-234).
+//
+// ⚠️ Not the same thing as TRANSPORT_ONLY above. That one is about the WIRE
+// -- the same pad, a different cable -- and can change while a session runs.
+// This is about the pad itself and never changes for a given controller.
+//
+// ⛔⛔ AND IT IS EIGHT KEYS, NOT THE TRIGGERS SECTION. Most trigger
+// settings work perfectly well on a DS4: a trigger is an analogue axis whatever
+// the pad, so press_at, the two timings and steady_cursor_pull all act. Only
+// the four per trigger that drive the DualSense's adaptive hardware are inert.
+// ⓘ That is why this is per-KEY and not T-227's per-section gating.
+//
+// ⓘ Both DS4 maps say so themselves -- `adaptive_triggers = false` in
+// ds4_usb_over_ds4_bt.map and ds4_usb_over_ds4_usb.map -- so this list is
+// restating a fact the data already carries, not inventing one.
+var NEEDS_ADAPTIVE_TRIGGERS = {
+  left_trigger_effect: 1, left_trigger_effect_at: 1,
+  left_trigger_effect_strength: 1, left_trigger_snap_force: 1,
+  right_trigger_effect: 1, right_trigger_effect_at: 1,
+  right_trigger_effect_strength: 1, right_trigger_snap_force: 1
+};
+
+// The settings kinds whose pads HAVE adaptive triggers.
+// ⓘ The Edge has them; a DS4, an Xbox pad and anything generic do not.
+var ADAPTIVE_TRIGGER_KINDS = ['ds5', 'ds5_edge'];
+
+// ⭐ The two Audio rows that are still DualSense-only (T-229 item A).
+//
+// ⛔⛔ FOUR OF THE SIX WORK ON A DS4, WHICH IS WHY THIS IS PER-KEY. Speaker
+// volume, headset volume and the routing mode TRAVEL to the TV instead of
+// being patched into the outbound report, and audio_latency_ms travels too --
+// none of those four is gated on being a DualSense. Hiding the Audio section
+// from a DS4 took all four with it, which is what this fixes.
+//
+// These two do not travel:
+//   audio_gain        rides the WIRED ISO audio path (audio_gain.inl), four
+//                     channels in one buffer, which is a DualSense layout. A
+//                     DS4's audio is SBC frames on a different endpoint.
+//   force_echo_cancel is an output-report patch in ds5_output_overrides.inl
+//                     and ds5_apply_settings.inl, so the 0x02 gate stops it.
+//
+// ⚠️ audio_gain has a SECOND limit that is not about the pad at all: it reads
+// the literal "ds5" section, so it acts only from the shared [ds5] block and a
+// named config's copy is ignored. That is T-229 item C's to fix -- greying it
+// here for a DS4 is right either way.
+var NEEDS_DS5_AUDIO_PATH = {
+  audio_gain: 1,
+  force_echo_cancel: 1
+};
+
+// The settings kinds whose reports those two paths actually read.
+// ⓘ The same two kinds as ADAPTIVE_TRIGGER_KINDS, and deliberately its own
+// list: that one is about hardware a pad either has or has not, this one is
+// about a code path that only understands a DualSense report. One changing is
+// no reason for the other to.
+var DS5_AUDIO_PATH_KINDS = ['ds5', 'ds5_edge'];
+
 // Returns a reason string when `key` cannot act on `kind`, or '' when it can.
+// ⓘ An empty kind means no controller is in hand -- Overview and the Editor
+// -- and nothing is greyed there, for the same reason T-227 hides no section:
+// a config is not tied to a pad, so nothing can be said about one.
 function inertReason(key, sessionKind) {
+  if (!sessionKind) return '';
   var only = TRANSPORT_ONLY[key];
-  if (!only) return '';
-  var how = transportOf(sessionKind);
-  if (!how || how === only) return '';
-  return 'no effect over ' + how + ' — ' + only + ' only';
+  if (only) {
+    var how = transportOf(sessionKind);
+    if (how && how !== only) {
+      return 'no effect over ' + how + ' — ' + only + ' only';
+    }
+  }
+  if (NEEDS_ADAPTIVE_TRIGGERS[key] &&
+      ADAPTIVE_TRIGGER_KINDS.indexOf(settingsKindOf(sessionKind)) < 0) {
+    return 'this controller has no adaptive triggers';
+  }
+  if (NEEDS_DS5_AUDIO_PATH[key] &&
+      DS5_AUDIO_PATH_KINDS.indexOf(settingsKindOf(sessionKind)) < 0) {
+    return 'DualSense only — this setting is patched into a DualSense report';
+  }
+  return '';
+}
+
+// ⭐ SETTINGS THE PAGE DOES NOT DRAW. Two kinds: anything named *_debug, and
+// the handful listed here by name.
+//
+// ⓘ `trigger_probe` is listed rather than renamed (rhoquinn8217, 2026-09-20).
+// Renaming it to `trigger_probe_debug` would have hidden it for free, but the
+// key is READ IN TWO PLACES in the listener -- rebind.inl and
+// trigger_click.inl -- and anyone who has it set in a config file would have
+// lost it silently. Hiding the row leaves the key working for whoever edits
+// the file by hand, which is what a diagnostic is for.
+var HIDDEN_SETTINGS = { trigger_probe: 1 };
+
+function hiddenSetting(key) {
+  return HIDDEN_SETTINGS[key] === 1 || /_debug(_|$)/.test(key);
 }
 
 // ⭐ The button index groups, from the table in rebind.inl. 34 button settings
@@ -3206,7 +3467,7 @@ function renderConfigEditor(hostId, configName, prefix, ordinal) {
     var shows = function(g) {
       if (SECTION_NEEDS[g] && !can(SECTION_NEEDS[g])) return false;
       return (groups[g] || []).some(function(meta) {
-        return !/_debug(_|$)/.test(meta.key);
+        return !hiddenSetting(meta.key);
       });
     };
     // ⭐ LEFT BEFORE RIGHT (rhoquinn8217, 2026-09-03). The tab strip is read as
@@ -3268,7 +3529,7 @@ function renderConfigEditor(hostId, configName, prefix, ordinal) {
         // ⛔ Debug keys are for someone reading the log, not for the person
         // adjusting a controller -- and every row is one more to scroll past.
         // Set them by hand in the config file when they are needed.
-        if (/_debug(_|$)/.test(meta.key)) return;
+        if (hiddenSetting(meta.key)) return;
         var val = current[meta.key];
         // ⚠️ Present-but-empty counts as UNMANAGED, not as a value. That is
         // what the agent does too: "" fails to parse and falls back, and an
@@ -3456,7 +3717,13 @@ function paintEditorHead() {
     }).join('');
   var acts = OV_CONFIG
     ? '<button onclick="renameConfig(\'' + esc(OV_CONFIG) + '\')">Rename</button>' +
-      '<button onclick="copyConfigNamed(\'' + esc(OV_CONFIG) + '\')">Copy</button>'
+      '<button onclick="copyConfigNamed(\'' + esc(OV_CONFIG) + '\')">Copy</button>' +
+      // T-232: Archive moved here from Overview's config table, which is
+      // gone. It was the only action there that belonged to a CONFIG rather
+      // than a controller, so it had to land somewhere before that table
+      // could go. No read-only guard is needed: this picker already filters
+      // read-only configs out, so one can never be open here.
+      '<button class="warn" onclick="archive(\'' + esc(OV_CONFIG) + '\')">Archive</button>'
     : '';
   setStickyHead('editor',
     '<div class="f"><span class="muted">config</span>' +
@@ -3477,7 +3744,15 @@ function openConfig(name) {
   // with the editor far below.
   if (ACTIVE !== 'editor') showTab('editor');
   paintEditorHead();
-  if (!name) { document.getElementById('cfgEditor').innerHTML = ''; return; }
+  if (!name) {
+    document.getElementById('cfgEditor').innerHTML = '';
+    // The strip is cached per tab and only ever rewritten by a render, so
+    // without this it outlives the config it belongs to -- tabs on screen
+    // with nothing behind them (rhoquinn8217, 2026-09-20, after archiving).
+    SECT_BARS['editor'] = '';
+    paintSectBar();
+    return;
+  }
   renderConfigEditor('cfgEditor', name, 'ov', null);
 }
 
@@ -3704,6 +3979,10 @@ function suggest_name(existing) {
 
 function apply_suggested_name(existing) {
     var box = document.getElementById('newName');
+    // T-232: the box left with Overview's config section. Nothing suggests a
+    // name any more -- New makes one and Rename names it -- so this does
+    // nothing rather than throwing on every config poll.
+    if (!box) return;
     // Leave alone if the user typed something that is not one of our own
     // suggestions -- theirs wins.
     if (box.value && box.value !== box.dataset.suggested) return;
@@ -3746,15 +4025,21 @@ function loadConfigs(isRetry) {
         LAST_DEVICES.forEach(buildDevicePane);
       });
     }
+    // T-232: PAINT THE EDITOR HEAD BEFORE ANY EARLY RETURN.
+    //
+    // It used to sit below the empty-list check, so with NO configs the head
+    // was never painted -- no picker and no New button, on the one tab that
+    // can create the first config. The old message said "Create one above",
+    // meaning Overview's name box, which has now gone.
+    paintEditorHead();
+
     var host = document.getElementById('configs');
+    if (!host) return;      // T-232: Overview no longer lists configs
     if (!list.length) {
-      host.innerHTML = '<span class="muted">No configs yet. Create one above.</span>';
+      host.innerHTML = '<span class="muted">No configs yet.</span>';
       apply_suggested_name(list);
       return;
     }
-    // ⓘ The picker lives in the header now and is rebuilt with the row, so it
-    // cannot drift from the list.
-    paintEditorHead();
 
     // ⛔ No kind column (2.65.0): a config is not tied to a controller type.
     var html = '<table><tr><th>name</th><th>auto links</th>' +
@@ -4070,7 +4355,14 @@ function archive(name) {
 
 function archiveConfirmed(name) {
   call('POST', '/api/v1/configs/' + encodeURIComponent(name) + '/archive', {})
-    .then(function() { loadConfigs(); loadDevices(); }).catch(function(){});
+    .then(function() {
+      // ARCHIVING THE ONE YOU ARE EDITING CLOSES IT. It used to leave
+      // OV_CONFIG naming a config that no longer existed, so the head went on
+      // offering Rename, Copy and Archive for it and the settings stayed on
+      // screen under a section strip belonging to nothing.
+      if (name === OV_CONFIG) openConfig('');
+      loadConfigs(); loadDevices();
+    }).catch(function(){});
 }
 
 // ---- Controller navigation --------------------------------------------------
@@ -4173,7 +4465,16 @@ function gpCollect() {
   // ⭐ The footer zone, same trap as the dialog: only these buttons exist while
   // it is on, so ▲▼ cannot wander back into the page behind it.
   if (FOOTER_MODE) {
-    document.querySelectorAll('#gpbar button').forEach(function(e) { list.push(e); });
+    // SELECT AS WELL AS BUTTON. This gathered buttons only, so the Mode
+    // picker -- a <select> that T-233 put in this bar -- was not in the
+    // zone's focus list at all: Circle got you here and the d-pad could
+    // reach Close and nothing else (rhoquinn8217, 2026-09-20).
+    // THE THIRD PLACE WITH THIS EXACT SHAPE, and they were found one at a
+    // time: compactMove's '.cbar > button', this, and the selector row that
+    // had always said 'select, button' and was the clue for both. Anywhere a
+    // focus list is gathered by tag, a new control of a different tag is
+    // invisible to it and nothing errors.
+    document.querySelectorAll('#gpbar button, #gpbar select').forEach(function(e) { list.push(e); });
     GP_FOCUS = list;
     if (GP_INDEX >= list.length) GP_INDEX = 0;
     gpPaint();
@@ -4506,6 +4807,175 @@ function gpMove(delta) {
   gpPaint();
 }
 
+// ⭐⭐ OPEN THE PICKER AS BIG AS THE WINDOW ALLOWS, GROWING UP AS WELL AS
+// DOWN (rhoquinn8217, 2026-09-20): *"we should expand the list as big as it
+// can and it should also expand upward."*
+//
+// ⛔ A `<select>` with a `size` grows DOWNWARD IN FLOW, and that is the whole
+// problem it had: it shoved New, Edit, Advanced and Quick off the bottom, and
+// it could only ever use the room BELOW the box -- about half the window, with
+// the space above the box wasted. Row counts were tried against that (8, then
+// 5) and every one of them is a compromise with a layout, not a size.
+//
+// ➡️ So it comes OUT OF FLOW while it is open. Fixed-positioned, centred on
+// where the collapsed box sat, clamped to the window: it grows in both
+// directions, overlays the content instead of moving it, and nothing below it
+// is pushed anywhere. ⓘ Which also means the row count is no longer a
+// judgement -- it is whatever fits.
+//
+// ⚠️ THE ROW HEIGHT IS MEASURED, NOT ASSUMED. It was 29 px on the machine
+// this was written on, and it is a function of the page's font -- a different
+// zoom or a different DPI gives a different number, and a hardcoded one would
+// silently size the box wrong rather than fail.
+function pickerExpand(el) {
+  // ⛔⛔ QUICK EXPANDS TOO, AND `size = 1` WAS A BUG, NOT A COMPROMISE
+  // (rhoquinn8217, 2026-09-20). This used to return early for Quick and leave
+  // the box at one row, on the grounds that a 0.185 x 0.150 window has no room
+  // to grow into. Two things were wrong with that:
+  //
+  //   ⛔ A `<select size=1>` IS STILL A DROPDOWN. The second press is the one
+  //     deliberately left un-prevented so the mouse can pick a row -- and with
+  //     no listbox to pick from, the browser popped its own OS list instead.
+  //     Reproduced exactly as reported: click, yellow outline; click again,
+  //     "drop down opens and closes right away" (the popup opens on mousedown
+  //     and pickerClickEnd collapses on the click); click and hold, it "stays
+  //     open until I release". ✅ A listbox has no popup to open, so
+  //     expanding here is the fix for the bug as well as the feature.
+  //
+  //   ⛔ And there IS room: the rows are measured, not assumed, so a small
+  //     window simply gets fewer of them.
+  //
+  // ➡️ Hence the floor of 2 below. One row is a dropdown; two is a list.
+  // NOTHING TO OPEN. A list of one, or of none, has no choice in it -- and the
+  // floor of 2 below cannot save it, because Math.min against options.length
+  // pulls the row count straight back to 0. Caught 2026-09-20 on Advanced's
+  // picker, which the page declares EMPTY and paintModePickers fills later: it
+  // gave size 0 and left the box fixed-positioned 7 px past the window bottom.
+  // The size <= 1 backstop in pickerActivate stops the native popup here.
+  if (el.options.length < 2) { el.size = 1; return; }
+
+  var rect = el.getBoundingClientRect();
+
+  // Two sizes and one subtraction give the row height and the chrome around it.
+  el.size = 2; var h2 = el.getBoundingClientRect().height;
+  el.size = 3; var h3 = el.getBoundingClientRect().height;
+  var rowH = Math.max(1, h3 - h2);
+  var chrome = Math.max(0, h2 - 2 * rowH);
+
+  var margin = 10;                       // breathing room at both window edges
+  var avail = window.innerHeight - 2 * margin;
+  // ⚠️ FLOOR OF 2, CEILING OF THE OPTION COUNT. Never 1: that is a dropdown
+  // and brings the native popup back. A window too small for two rows gets two
+  // anyway and overflows slightly, which is still better than a popup the pad
+  // cannot drive.
+  var fits = Math.floor((avail - chrome) / rowH);
+  var rows = Math.min(el.options.length, Math.max(2, fits));
+  el.size = rows;
+
+  var h = rows * rowH + chrome;
+
+  // THE MODE PICKER ALWAYS OPENS UPWARD (rhoquinn8217, 2026-09-20: *"Since
+  // the mode selector is at the bottom of the page, the drop down needs to
+  // always expand up instead of down."*). It lives in the footer by design, in
+  // every view, so there is never room below it -- centring made it grow both
+  // ways and pushed its bottom edge past the footer.
+  // Anchored by its BOTTOM edge instead: the row you are on does not move, and
+  // the list unrolls above it.
+  var top;
+  if (el.classList && el.classList.contains('modepick')) {
+    top = Math.round(rect.bottom - h);
+  } else {
+    // Everything else is centred on the collapsed box, so the list opens
+    // around where you were looking rather than jumping to the window's top.
+    top = Math.round(rect.top + rect.height / 2 - h / 2);
+  }
+  top = Math.max(margin, Math.min(top, window.innerHeight - h - margin));
+
+  // ⭐⭐ AND IN QUICK IT GROWS SIDEWAYS TOO (rhoquinn8217, 2026-09-20: *"in
+  // quick mode some of the config names are too long"*).
+  //
+  // ⓘ QUICK ONLY, ON PURPOSE. Simple's box is already 582 px and the names
+  // fit; Quick's is capped at 58vw by `body.quick #compactBox select` so that
+  // the row still has room for Unlink and 🗘 beside it -- which is right for
+  // the CLOSED box and wrong for the open one, where nothing is beside it.
+  //
+  // ➡️ The longest option is MEASURED in the box's own font rather than
+  // guessed at, so a list of short names does not get a silly wide box. Then
+  // it is centred on the collapsed box and clamped to the window, the same way
+  // the height is -- it grows left and right, not just right.
+  var w = Math.round(rect.width);
+  if (QUICK) {
+    var cs = getComputedStyle(el);
+    var canvas = pickerExpand._canvas ||
+                 (pickerExpand._canvas = document.createElement('canvas'));
+    var ctx = canvas.getContext('2d');
+    ctx.font = cs.fontStyle + ' ' + cs.fontWeight + ' ' + cs.fontSize + ' ' + cs.fontFamily;
+    var widest = 0;
+    for (var i = 0; i < el.options.length; i++) {
+      widest = Math.max(widest, ctx.measureText(el.options[i].text).width);
+    }
+    // ⚠️ The padding and border are the box's, and the scrollbar only appears
+    // when the list is longer than the box -- but reserving it always is a few
+    // pixels of slack, while missing it clips the longest name by exactly the
+    // amount that matters.
+    var padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight) +
+               parseFloat(cs.borderLeftWidth) + parseFloat(cs.borderRightWidth);
+    var want = Math.ceil(widest + padX + 18);
+    w = Math.min(window.innerWidth - 2 * margin, Math.max(w, want));
+  }
+
+  var left = Math.round(rect.left + rect.width / 2 - w / 2);
+  left = Math.max(margin, Math.min(left, window.innerWidth - w - margin));
+
+  el.style.position = 'fixed';
+  el.style.top = top + 'px';
+  el.style.left = left + 'px';
+  el.style.width = w + 'px';
+  // ⛔ Without this the 58vw cap wins and the width above does nothing. An
+  // inline style beats a stylesheet rule, and that rule carries no !important.
+  el.style.maxWidth = 'none';
+
+  // ⛔⛔ SHOW THE CONFIG YOU ARE ON. A listbox opens at scrollTop 0, so once
+  // the list is longer than the box the current config is simply not on
+  // screen -- and the first thing you see is a list that looks like it has
+  // forgotten what you picked. ⓘ It never showed in Simple, where all nine
+  // rows fitted; Quick fits four, which is what made it visible (2026-09-20).
+  // ➡️ Put it in the MIDDLE of what is shown, so there are neighbours above
+  // and below to move to, and clamp so the last page does not scroll past the
+  // end.
+  if (el.selectedIndex >= 0 && rows < el.options.length) {
+    // ⚠️ THE ROW PITCH, MEASURED OFF TWO REAL ROWS -- not rowH. rowH comes
+    // from the difference between two BOX heights, which is close but not
+    // exact, and scrolling by it left a sliver of the row above showing at the
+    // top of the list (seen 2026-09-20). Two option rects give the true pitch,
+    // and they are only meaningful now that the box is a listbox.
+    var pitch = rowH;
+    if (el.options.length >= 2) {
+      var a = el.options[0].getBoundingClientRect();
+      var b = el.options[1].getBoundingClientRect();
+      if (b.top > a.top) pitch = b.top - a.top;
+    }
+    var want = (el.selectedIndex - Math.floor((rows - 1) / 2)) * pitch;
+    var most = (el.options.length - rows) * pitch;
+    el.scrollTop = Math.round(Math.max(0, Math.min(want, most)));
+  }
+  // ⚠️ Above the sticky header (z-index 40 there) and below the modal
+  // overlays (99), which must still cover it.
+  el.style.zIndex = '60';
+}
+
+// Undo all of it. ⛔ Clearing `size` alone would leave a fixed-positioned box
+// floating over the page at one row high.
+function pickerCollapse(el) {
+  el.size = 0;
+  el.style.position = '';
+  el.style.top = '';
+  el.style.left = '';
+  el.style.width = '';
+  el.style.maxWidth = '';
+  el.style.zIndex = '';
+}
+
 function gpActivate() {
   var el = GP_FOCUS[GP_INDEX];
   if (!el) return;
@@ -4528,13 +4998,37 @@ function gpActivate() {
     // ⓘ Nothing else is needed -- gpKeyMove already walks selectedIndex while
     // GP_SELECTING is set, gpKeySelect already commits, and gpKeyBack already
     // puts the old value back. The gold outline says which mode you are in.
-    el.size = COMPACT ? 1 : Math.min(el.options.length, 8);
-    // ⛔ Nothing in the sticky block needs scrolling to: it is pinned on screen by
-  // definition. Calling scrollIntoView on it moved the SETTINGS list beneath,
-  // so navigating the header appeared to scroll the page for no reason.
-  if (!el.closest || !el.closest('#stickyTop')) {
-    el.scrollIntoView({ block: 'nearest' });
-  }
+    // T-232 item 4: QUICK, not COMPACT. COMPACT is Quick AND Simple; the
+    // stepping behaviour was chosen for both on 2026-09-11, on the grounds
+    // that eight rows are taller than a postcard-sized window.
+    //
+    // rhoquinn8217 asked for Simple to expand and Quick to keep stepping
+    // (2026-09-19).
+    //
+    // ⛔ A NOTE HERE SAID THE TWO VIEWS ARE THE SAME SIZE. THEY ARE NOT, and
+    // that was the whole of the argument for calling this a coin-flip
+    // preference. `config_move.inl` gives Quick a size table of ITS OWN:
+    //
+    //     Simple  kCompactSizes  0.45  x 0.45  of the screen
+    //     Quick   kQuickSizes    0.185 x 0.150
+    //
+    // ➡️ **Simple's window is THREE TIMES TALLER than Quick's.** So the
+    // postcard reasoning was measured on Quick and never applied to Simple --
+    // which makes this the correction it looks like, not a preference.
+    //
+    // ⭐ As big as the window allows, growing up as well as down, in Quick as
+    // well as Simple. ⓘ A row count used to live here -- 8, then 5 -- and both
+    // were a compromise with what the box would shove off the bottom. See
+    // pickerExpand.
+    pickerExpand(el);
+    // ⛔ Nothing to scroll to once it is fixed-positioned: it is ON the window
+    // by construction, and scrollIntoView would move the page beneath it for
+    // no reason. Same conclusion the sticky header reached, for the same
+    // reason -- so the test is now "is it out of flow", which covers both.
+    if (el.style.position !== 'fixed' &&
+        (!el.closest || !el.closest('#stickyTop'))) {
+      el.scrollIntoView({ block: 'nearest' });
+    }
     return;
   }
   if (el.type === 'checkbox') { el.checked = !el.checked; el.dispatchEvent(new Event('change')); return; }
@@ -4580,13 +5074,19 @@ function gpSelectEnd(commit) {
   if (!el) return;
   if (!commit) el.selectedIndex = GP_SELECT_WAS;
   el.classList.remove('gp-selecting');
-  el.size = 0;                                  // collapse
+  pickerCollapse(el);                           // collapse, and back into flow
+  // ⚠️ Opened by mouse and closed by pad would otherwise leave the opening
+  // press still matching, and the next click would be ignored.
+  PICKER_OPEN_PRESS = -1;
   // ⓘ The 'change' fires on a cancel too, to put the old value back; compact's
   // pick reads this flag so a cancel never links or parks.
   GP_SELECT_COMMIT = commit;
+  // CLEARED BEFORE THE DISPATCH. pickMode repaints the whole compact box, and
+  // with this still set that repaint was skipped -- the stale legend above.
+  // Nothing downstream reads it: compactPick reads GP_SELECT_COMMIT instead.
+  GP_SELECTING = null;
   el.dispatchEvent(new Event('change'));
   GP_SELECT_COMMIT = true;
-  GP_SELECTING = null;
 }
 
 // ⭐ CONFIG MODE keys.
@@ -4806,10 +5306,11 @@ var CONFIG_MODE_KEYS = {
   KeyE: function () { gpKeyCoarse(1); },
   Enter: function () { gpKeySelect(); },
   KeyZ: function () { gpKeyBack(); },
-  KeyX: function () { gpToggleManaged(); },
-  // ⭐ Create on the pad: compact / full view. The listener sends it as KeyC
-  // the way it sends the rest of these.
-  KeyC: function () { toggleCompact(); }
+  KeyX: function () { gpToggleManaged(); }
+  // ⛔ NO KeyC. Create resizes the window now (rhoquinn8217, 2026-09-20) and
+  // the listener reads it from the raw report, so it no longer sends a key --
+  // see rebind.inl. It used to cycle compact and full, then after T-233 only
+  // moved focus onto the Mode picker.
 };
 
 // ⭐ One place that steps the value being edited. It was inline in gpPoll; the
@@ -4874,7 +5375,15 @@ function compactMove(dx, dy) {
   if (topRow.length) rows.push(topRow);
   var foot = Array.prototype.slice.call(box.querySelectorAll('.cfoot button'));
   if (foot.length) rows.push(foot);
-  var bar = Array.prototype.slice.call(box.querySelectorAll('.cbar > button'));
+  // ⛔⛔ `select` AS WELL AS `button`, AND THAT IS THE WHOLE OF FAULT 1
+  // (rhoquinn8217, 2026-09-20: *"Unable to navigate to the mode selector box
+  // with controller"*). T-233 replaced the footer's left BUTTON with a
+  // SELECT, and this line still gathered buttons only -- so the Mode picker
+  // was invisible to the mover and the footer row held nothing but Close.
+  // ⓘ The selector row above got this right, and is the precedent:
+  // `selRow.querySelectorAll('select, button')`.
+  var bar = Array.prototype.slice.call(
+    box.querySelectorAll('.cbar > button, .cbar > select'));
   if (bar.length) rows.push(bar);
   if (!rows.length) return false;
   var cur = GP_FOCUS[GP_INDEX];
@@ -4885,16 +5394,59 @@ function compactMove(dx, dy) {
   });
   if (r < 0) return false;
   if (dy) {
+    // DOWN LANDS ON WHAT IS ACTUALLY BELOW (rhoquinn8217, 2026-09-20:
+    // *"pressing down on the edit button should bring you to the mode selector
+    // in simple mode"*). This clamped the COLUMN INDEX instead, so Edit --
+    // column 1 of New/Edit -- landed on column 1 of the footer, which is Close,
+    // while the Mode picker sitting directly under it was skipped.
+    // Nearest horizontal centre instead. It agrees with the old behaviour
+    // everywhere it was already right: unlink still goes to New, the config
+    // picker and the auto button still go to Edit.
+    var from = cur.getBoundingClientRect();
+    var wantX = from.left + from.width / 2;
     r = Math.max(0, Math.min(rows.length - 1, r + dy));
-    c = Math.min(c, rows[r].length - 1);
+
+    // ARRIVING AT THE SELECTOR ROW MEANS THE CONFIG PICKER (rhoquinn8217,
+    // 2026-09-20: *"pressing up from the mode selector should land you on the
+    // config selector in quick mode"*). Nearest-centre alone did not do it:
+    // Quick has no New/Edit row, so up from the Mode picker goes straight to
+    // this row, and the Mode picker sits far right -- the nearest centre there
+    // is the auto-link button, not the picker.
+    // The row exists FOR the picker; unlink and auto are modifiers on it, so
+    // landing on either as you pass through is a stop nobody asked for.
+    // In Simple this also changes up-from-New, which used to reach unlink.
+    var pick = rows[r].filter(function (e) { return e.id === 'cpick'; })[0];
+    if (pick) { c = rows[r].indexOf(pick); }
+    else {
+      var best = 0, bestGap = Infinity;
+      rows[r].forEach(function (e, i) {
+        var b = e.getBoundingClientRect();
+        var gap = Math.abs(b.left + b.width / 2 - wantX);
+        if (gap < bestGap) { bestGap = gap; best = i; }
+      });
+      c = best;
+    }
   } else if (dx) {
     var nc = c + dx;
-    if (rows[r] === foot && bar.length && (nc < 0 || nc >= foot.length)) {
-      // ⭐ Off either end of New/Edit lands on the corner that side: Left
-      // from New is Advanced, Right from Edit is the other view
-      // (rhoquinn8217, 2026-09-09).
-      r = rows.indexOf(bar);
-      c = nc < 0 ? 0 : bar.length - 1;
+    // NEW, EDIT, MODE AND CLOSE ARE ONE HORIZONTAL CHAIN (rhoquinn8217,
+    // 2026-09-20: *"pressing right on the d-pad on the edit button moves to
+    // the mode selector and pressing left on the mode selector lands you on
+    // edit"*). Sorted by where they actually sit, so sideways means the next
+    // control to that side and nothing has to know which row it is in.
+    //
+    // It was a corner rule before -- off either end of New/Edit jumped to one
+    // END of the footer row -- which made Right from Edit land on Close and
+    // left no way back from the Mode picker at all.
+    if ((rows[r] === foot || rows[r] === bar) && foot.length && bar.length) {
+      var chain = foot.concat(bar).sort(function (a, b) {
+        return a.getBoundingClientRect().left - b.getBoundingClientRect().left;
+      });
+      var at2 = chain.indexOf(cur);
+      var want = chain[Math.max(0, Math.min(chain.length - 1, at2 + dx))];
+      rows.forEach(function (row, ri) {
+        var k = row.indexOf(want);
+        if (k >= 0) { r = ri; c = k; }
+      });
     } else {
       c = Math.max(0, Math.min(rows[r].length - 1, nc));
     }
@@ -5021,9 +5573,18 @@ function gpKeyBack() {
   }
   if (GP_SELECTING) { gpSelectEnd(false); return; }
   if (RENAMING) { cancelRename(); return; }
-  // ⭐ In compact, Circle CLOSES the window -- the word the legend uses, and
-  // what it now does. ⓘ Not the keyboard's Circle, which hides an overlay
-  // that has no other way back; this window has two.
+  // ⭐ IN SIMPLE, CIRCLE GOES TO THE CLOSE BUTTON RATHER THAN CLOSING
+  // (rhoquinn8217, 2026-09-20: *"circle button or esc on simple mode should
+  // not close the window anymore. It should now focus on the close button."*).
+  // One press no longer ends the session by itself -- the second press, on the
+  // button, does.
+  // ⚠️ QUICK STILL CLOSES OUTRIGHT. Only Simple was asked for, and Quick is
+  // the mid-game view where one press out is the point of it. The two legends
+  // say different things now, which is the honest reading of two behaviours.
+  if (COMPACT && !QUICK) {
+    var closeBtn = document.querySelector('#compactBox .cbar > button');
+    if (closeBtn && focusElement(closeBtn)) return;
+  }
   if (COMPACT) { closeWindow(); return; }
 
   // ⛔ CIRCLE LETS GO OF A TEXT BOX (rhoquinn8217, 2026-09-03: "circle should
@@ -5060,6 +5621,13 @@ function gpKeyBack() {
 //
 // ⓘ Same shape as the dialog trap: while it is on, gpCollect offers the footer
 // buttons and nothing else, so ▲▼ cannot wander back into the page.
+// CONFIRMED AND LEFT ALONE 2026-09-20. rhoquinn8217 hit this looking for the
+// Mode picker -- "I'm still not able to navigate to the mode selector in
+// advance mode. Pressing circle locks you into the footer section" -- and
+// chose to keep it after the alternatives were laid out. It is not a trap:
+// the toggle above means the same press comes straight back out, to where you
+// were rather than to an index. Adding the footer to the ordinary ring as
+// well was offered and declined, so the zone stays the only way in.
 var FOOTER_MODE = false;
 
 // ⭐ Where you were before ○, so leaving the footer puts you back rather than
@@ -5719,6 +6287,11 @@ function applySavedMode() {
   else if (m === 'advanced' || m === 'full') postView(true);   // the layout it opened in
   else setMode('simple', true);                                 // nothing saved: Simple
 
+  // T-233: the advanced branch above does NOT go through setMode -- it calls
+  // postView directly -- so without this the picker sits empty in the one mode
+  // that is the saved default.
+  schedulePaintModePickers();
+
   sizeOnOpen();
 }
 
@@ -5759,6 +6332,88 @@ function sizeOnOpen() {
 // a class for each of the two compact ones; setCompact does the window work
 // when the compact/advanced line is crossed, and a change within compact --
 // Simple to Quick -- only repaints.
+// ⭐ T-233: ONE "Mode" PICKER INSTEAD OF A BUTTON PER VIEW.
+//
+// The mode a window is in used to be changed by whichever buttons that view
+// happened to carry -- Simple and Quick in Advanced's footer, Advanced and the
+// other compact view in the compact one. One control now says what the mode is
+// and changes it, in both footers.
+//
+// ⭐ THE MARKER IS THE LOCK. "Locked" means the window stops changing mode on
+// its OWN -- which is the same thing as Create no longer forcing Quick. There
+// is no separate lock state to store: the absence of auto-switching IS the
+// lock, and the padlock beside the current mode says it is on.
+// ⓘ rhoquinn8217 chose a GLOBAL lock over a per-config one (2026-09-19), so
+// nothing here is stored per config and the listener is not involved.
+//
+// ⛔ SIZE 1, ALWAYS, AND THAT IS WHAT MAKES IT OPEN UPWARD. A select left at
+// size 1 is opened by the BROWSER, which positions the list itself and puts it
+// above a control sitting on the bottom edge. Expanding it inline with
+// el.size, the way the config picker does in Advanced, would grow it DOWNWARD
+// off the bottom of the window. ⓘ It also means the pad steps it in place,
+// which is the behaviour Quick's config selector already has.
+function modePickerHtml(id) {
+  // The padlock, by code point: no escape for any layer to mangle.
+  var LOCK = String.fromCodePoint(0x1F512);
+  var cur = modeName();
+  var opts = [['advanced', 'Advanced'], ['simple', 'Simple'], ['quick', 'Quick']]
+    .map(function (m) {
+      var label = m[1] + (m[0] === cur ? " " + LOCK : "");
+      return '<option value="' + m[0] + '"' + (m[0] === cur ? ' selected' : '') +
+             '>' + label + '</option>';
+    }).join('');
+  return '<select class="modepick" id="' + id + '" size="1" ' +
+         'title="which layout this window opens in" ' +
+         'onmousedown="pickerActivate(event,this)" ' +
+         'onclick="pickerClickEnd(this)" ' +
+         'onchange="pickMode(this.value)">' + opts + '</select>';
+}
+
+// Repaint every Mode picker on the page. ⓘ Called from paintTitle, which
+// already runs on every mode change for the same reason -- it is the other
+// place that says which mode this is.
+function paintModePickers() {
+  var list = document.querySelectorAll('select.modepick');
+  for (var i = 0; i < list.length; ++i) {
+    var el = list[i];
+    var id = el.id;
+    var tmp = document.createElement('div');
+    tmp.innerHTML = modePickerHtml(id);
+    el.innerHTML = tmp.firstChild.innerHTML;
+    el.value = modeName();
+    el.size = 1;
+  }
+}
+
+// ⛔⛔ DEFERRED ON PURPOSE. modeName() reads COMPACT and QUICK, and neither
+// is settled while a mode change is still running: setMode paints before it
+// calls setCompact, and setCompact sets COMPACT nine lines before it clears
+// QUICK. Painting inside either put the padlock on the mode being LEFT --
+// switching Simple to Advanced showed "Simple ὑ2" with the window already
+// advanced (caught 2026-09-19 on the first run).
+// ➡️ Letting the stack unwind first means one call site is right for every
+// path, including the ones that call setCompact directly.
+function schedulePaintModePickers() {
+  setTimeout(function () { try { paintModePickers(); } catch (e) {} }, 0);
+}
+
+// ⓘ Guarded against picking the mode it is already in: setMode would repaint
+// the compact box underneath the select that called it.
+function pickMode(v) {
+  if (!v || v === modeName()) return;
+  setMode(v);
+}
+
+// The visible Mode picker, for the pad to land on. ⓘ Both footers exist in
+// the DOM at once and CSS hides one, so offsetParent is what tells them apart.
+function visibleModePicker() {
+  var list = document.querySelectorAll('select.modepick');
+  for (var i = 0; i < list.length; ++i) {
+    if (list[i].offsetParent !== null) return list[i];
+  }
+  return null;
+}
+
 function setMode(m, restore) {
   var quick = (m === 'quick');
   var compact = (m !== 'advanced');
@@ -5766,6 +6421,8 @@ function setMode(m, restore) {
   QUICK = quick;
   document.body.classList.toggle('quick', quick);
   paintTitle();
+  // T-233: after the stack unwinds, so it reads a settled mode.
+  schedulePaintModePickers();
   if (compact !== COMPACT) { setCompact(compact, restore); return; }
   if (quickChanged || restore) {
     saveMode();
@@ -5780,23 +6437,31 @@ function setMode(m, restore) {
 // ⛔ The quarter off the width and the sixth off the height were both taken
 // back (rhoquinn8217, 2026-09-09): they broke the preset description, which
 // is the one thing in Simple sized by its content and not by the window.
-function compactSize() {
-  var w = Math.round(screen.availWidth * 0.45);
-  var h = Math.round(screen.availHeight * 0.45);
+// BOTTOM CENTRE, WHICH IS WHERE REPOSITION PUTS IT (rhoquinn8217,
+// 2026-09-20: *"When opening the simple or quick mode, the window should be
+// bottom center the same location as it is when you use the reposition
+// button."*). These two used to centre it on the screen, so entering a compact
+// view put the window somewhere reposition would never leave it.
+// The gap above the taskbar is a hundredth of the work area, which is the
+// listener's bottom_gap() -- the two have to agree or the window would jump
+// the first time reposition was pressed.
+function compactHome(w, h) {
   window.resizeTo(w, h);
   window.moveTo(Math.round((screen.availWidth - w) / 2),
-                Math.round((screen.availHeight - h) / 2));
+                Math.round(screen.availHeight - Math.round(screen.availHeight / 100) - h));
+}
+
+function compactSize() {
+  compactHome(Math.round(screen.availWidth * 0.45),
+              Math.round(screen.availHeight * 0.45));
 }
 
 // ⓘ Quick's window: the smaller of its two sizes, which rhoquinn8217 named
 // medium and large (2026-09-09) -- the half-of-Simple heights, an eighth
 // off the width; the listener's table agrees.
 function quickSize() {
-  var w = Math.round(screen.availWidth * 0.185);
-  var h = Math.round(screen.availHeight * 0.15);
-  window.resizeTo(w, h);
-  window.moveTo(Math.round((screen.availWidth - w) / 2),
-                Math.round((screen.availHeight - h) / 2));
+  compactHome(Math.round(screen.availWidth * 0.185),
+              Math.round(screen.availHeight * 0.15));
 }
 
 function sizeForMode() {
@@ -5860,6 +6525,8 @@ function setCompact(on, restore) {
   COMPACT = on;
   document.body.classList.toggle('compact', on);
   paintTitle();
+  // T-233: setCompact is also called DIRECTLY, not only through setMode.
+  schedulePaintModePickers();
   saveMode();
   postView(restore);
   if (on) {
@@ -5888,14 +6555,10 @@ function openConfigurator() {
   setMode('advanced');
   showTab('overview');
 }
-// ⭐ CREATE IS QUICK (rhoquinn8217, 2026-09-09, replacing the cycle): from
-// Advanced or Simple it goes straight to Quick -- the view wanted mid-game
-// -- and in Quick it does nothing; the buttons and Circle lead out.
-function toggleCompact() {
-  if (PRESET_OPEN || PRESET_INFO_OPEN || CONFIRM_CB || RENAMING) return;
-  if (QUICK) return;
-  setMode('quick');
-}
+// Create used to reach the page as KeyC and, since T-233, only moved focus
+// onto the Mode picker. It resizes the window now (rhoquinn8217,
+// 2026-09-20) and sends no key, so toggleCompact had no caller left and is
+// gone. The d-pad reaches the Mode picker on its own.
 
 // Compact shows a controller or nothing: never Overview or the Editor.
 function compactEnsureController() {
@@ -6013,20 +6676,110 @@ function compactUnlink() {
   unlinkConfirmed(d.ordinal);
 }
 
+// ⭐⭐ THE MEASURED EVENT ORDER ON A LISTBOX ROW CLICK (2026-09-20, this
+// machine's Chromium, on a throwaway <select size=5> rather than from memory):
+//
+//     mousedown : 0     ⚠️ the OLD index -- the selection has NOT changed yet
+//     mouseup   : 3     it changes HERE
+//     input     : 3
+//     change    : 3     ⭐ BEFORE click
+//     click     : 3     last
+//
+// ➡️ Two rules fall out of that, and both had been got wrong:
+//   ⛔ `preventDefault()` on MOUSEDOWN kills the pick outright, because the
+//      selection has not happened yet at that point.
+//   ⛔ `change` fires BEFORE `click`, so by the time the box can be closed
+//      compactPick() has ALREADY linked the config. Closing must therefore
+//      NOT dispatch a second `change`, or it links twice.
+// ⛔⛔ AND THE OPENING PRESS FIRES NO `click` AT ALL. Measured the same way:
+//
+//     mousedown : SELECT      the box is still collapsed
+//     mouseup   : OPTION      it expanded UNDER the cursor
+//     (no click)              ⭐ a click needs ONE shared target, and there
+//                                is none, so the event never happens
+//
+// ⚠️ A "swallow the next click" flag was written first and is WRONG for
+// exactly that reason: the click it waits for never arrives, the flag stays
+// set, and it eats the first real pick instead. ➡️ So presses are COUNTED,
+// and a click is ignored only when it belongs to the press that opened the
+// box -- which is true whether or not that press ever produces one.
+var PICKER_PRESS = 0;        // every mousedown that reaches the selector
+var PICKER_OPEN_PRESS = -1;  // the one that opened it
+
+// Close after a mouse pick. ⓘ Deliberately not gpSelectEnd(): that dispatches
+// a `change` to carry the pad's choice out, and here the native one has
+// already done it.
+function pickerClickEnd(sel) {
+  if (PICKER_OPEN_PRESS === PICKER_PRESS) return;   // the opening press
+  if (GP_SELECTING !== sel) return;
+  sel.classList.remove('gp-selecting');
+  pickerCollapse(sel);
+  GP_SELECTING = null;
+  // AND REPAINT. On this path `change` fired while the list was still open, so
+  // any repaint it asked for was skipped by the guard in paintCompact. Now
+  // that the list is shut there is nothing to protect and the footer needs to
+  // catch up -- a mode picked with the mouse otherwise left the old legend.
+  // paintCompact returns on its own when the view is not compact.
+  paintCompact();
+}
+
+// ⭐ Clicking AWAY cancels, which is what a mouse expects and what Circle
+// does for the pad. ⓘ Capture phase, so it runs before the selector's own
+// mousedown and can tell "outside" from "on it" without racing.
+document.addEventListener('mousedown', function (ev) {
+  if (!GP_SELECTING) return;
+  if (ev.target === GP_SELECTING || GP_SELECTING.contains(ev.target)) return;
+  gpSelectEnd(false);
+}, true);
+
 // ⭐ A CLICK ENTERS THE SAME MODE THE PAD USES, in compact only. Otherwise a
 // mouse gets the native popup -- the very thing that does not fit -- while the
 // pad gets a one-row stepper, and the two disagree about what the control is.
 // ⓘ The full page keeps its native dropdown: there is room for it there, and it
 // is faster with a mouse.
 function pickerActivate(ev, sel) {
-  if (!COMPACT) return;
+  // The full page keeps its native dropdown for ordinary settings -- there is
+  // room for one there and it is faster with a mouse. THE MODE PICKER IS THE
+  // EXCEPTION IN EVERY VIEW: it sits in the footer, hard against the bottom of
+  // the window, and a native popup is not clipped by the window -- it unrolls
+  // downward onto the desktop, outside the thing it belongs to.
+  if (!COMPACT && !(sel.classList && sel.classList.contains('modepick'))) return;
+  // ⓘ Counted for EVERY press, including the ones that land on an option
+  // while the box is open -- mousedown bubbles from the option to the select.
+  PICKER_PRESS++;
+  // ⛔⛔ ALREADY OPEN: LET THE BROWSER HAVE THIS PRESS, and close on the
+  // CLICK instead (rhoquinn8217, 2026-09-20: *"the mouse isn't able to select
+  // one of the config. Clicking anywhere on the expanded window just
+  // compresses it again without selecting anything."*).
+  //
+  // This used to `preventDefault()` and then commit, which is exactly why a
+  // mouse could not pick: see the measured order above -- mousedown still
+  // holds the OLD index, so preventing it kills the selection, and committing
+  // there commits the value that was already there. The box shut with nothing
+  // chosen, every time.
+  if (GP_SELECTING === sel) {
+    // ⚠️ BACKSTOP. Letting the browser have this press is only safe once the
+    // box is a LISTBOX; at one row it is still a dropdown and this is exactly
+    // where the native popup got in. pickerExpand's floor of 2 should make
+    // this unreachable -- one option in the list would do it -- and it is
+    // cheap insurance against the bug coming back by another route.
+    if (sel.size <= 1) ev.preventDefault();
+    return;
+  }
+
   ev.preventDefault();
-  if (GP_SELECTING === sel) { gpSelectEnd(true); return; }
   GP_SELECTING = sel;
   GP_SELECT_WAS = sel.selectedIndex;
   sel.classList.add('gp-selecting');
-  sel.size = 1;
+  // ⛔ THIS WAS `sel.size = 1` AND THAT IS WHY CLICKING "DID NOT EXPAND"
+  // (rhoquinn8217, 2026-09-20). The click already entered the pad's mode and
+  // already suppressed the native popup -- it just opened at one row, so a
+  // mouse got the stepper the pad was given. The two agree now.
+  pickerExpand(sel);
   sel.focus();
+  // ⚠️ If this press does produce a click, it is the second half of the one
+  // that OPENED the box and must not be read as a pick.
+  PICKER_OPEN_PRESS = PICKER_PRESS;
 }
 
 function compactPick() {
@@ -6052,7 +6805,13 @@ function paintCompact() {
   // ⛔ NOT WHILE THE SELECTOR IS OPEN. A repaint replaces it, and the open
   // list would be closed under the person's hand with its choice lost. The
   // next change repaints.
-  if (GP_SELECTING && box.contains(GP_SELECTING)) return;
+  // ONLY WHILE A LIST IS ACTUALLY EXPANDED. This used to skip on
+    // GP_SELECTING alone, and a mode change arrives from inside that state --
+    // so the repaint that rewrites the legend was dropped and the footer kept
+    // the mode it had just left (rhoquinn8217, 2026-09-20: *"sometimes the
+    // legend doesn't update with the correct text after switching to a
+    // different mode"*). A collapsed picker has nothing to protect.
+  if (GP_SELECTING && box.contains(GP_SELECTING) && GP_SELECTING.size > 1) return;
   var d = (LAST_DEVICES || []).filter(function (x) { return x.ordinal === ACTIVE; })[0];
   // The listener remembers which controller was on screen, for the next
   // window; L1/R1 change it without any layout changing, so it is told here.
@@ -6201,6 +6960,7 @@ function paintCompact() {
               '<div class="cselrow">' + unlinkBtn() +
               '<select id="cpick" data-ordinal="' + esc(d.ordinal) + '"' +
               ' onmousedown="pickerActivate(event,this)"' +
+              ' onclick="pickerClickEnd(this)"' +
               ' onchange="compactPick()">' +
               opts + '</select>' + autoBtn +
               '</div></div>' + (QUICK ? '' : foot(true, d.ordinal));
@@ -6217,21 +6977,28 @@ function paintCompact() {
     // Advanced bottom-left, the legend, and the OTHER view bottom-right. No
     // Close: Circle closes, as the legend says, and so does the question
     // after a pick.
-    html += '<div class="cbar"><button class="cconf" onclick="openConfigurator()">Advanced</button>' +
+    // ⭐ BOTH CONTROLS IN THE BOTTOM-RIGHT CORNER (rhoquinn8217, 2026-09-20):
+    // *"move the mode selector at the right side of the close button in the
+    // simple and quick modes, just like the advance mode."* ⓘ `.cbarText` is
+    // `flex:1 1 auto`, so it takes the slack and whatever follows it is pushed
+    // to the right -- the order here IS the order on screen.
+    html += '<div class="cbar">' +
             '<div class="cbarText"><div class="clegend">' +
-            '<span class="cmode">Quick Mode</span>\u2630 position | R3 resize | ' +
+            '\u2630 position | \\|/ resize | ' +
             '\u25cb close</div></div>' +
-            '<button class="cclose" onclick="setMode(\'simple\')">Simple</button></div>';
+            modePickerHtml('cselMode') +
+            '<button class="cclose" onclick="closeWindow()">Close</button></div>';
   } else {
-    html += '<div class="cbar"><button class="cconf" onclick="openConfigurator()">Advanced</button>' +
+    html += '<div class="cbar">' +
             '<div class="cbarText">' +
-            '<div class="clegend"><span class="cmode">Simple Mode</span>' +
+            '<div class="clegend">' +
             'L1/R1 controller | \u2715 select | d-pad move | ' +
-            '\u2630 position | R3 resize | \\|/ quick mode | \u25cb close</div>' +
+            '\u2630 position | \\|/ resize | \u25cb to close</div>' +
             '<div class="cinfo">To bring this window back: <b>hold two fingers on the touchpad ' +
             'and press Options</b> (DS5/DS4 only), or right-click the tray icon and choose ' +
             '<b>Open settings</b>.</div>' +
-            '</div><button class="cclose" onclick="setMode(\'quick\')">Quick</button></div>';
+            '</div>' + modePickerHtml('cselMode') +
+            '<button class="cclose" onclick="closeWindow()">Close</button></div>';
   }
   box.innerHTML = html;
   gpCollect();
@@ -6338,9 +7105,12 @@ function gpPoll() {
   // ⓘ innerHTML, for the one span: the bar is green while the pad is live
   // and the identifier must not be. Nothing here is user text -- the count is
   // a number and the rest is a constant -- so there is nothing to escape.
-  hint.innerHTML = '<span class="cmode">Advanced Mode</span>' +
+  // The mode identifier lives ON the Mode picker in every view now
+  // (rhoquinn8217, 2026-09-20), so the legend no longer names the mode here
+  // either. The `.cmode` rule itself stays; `#modePick` wears it.
+  hint.innerHTML = '' +
                      (live.length > 1 ? live.length + ' controllers' : 'controller') +
-                     ' — L1/R1 controller | ✕ select | d-pad move | □ on/off | ☰ position | R3 resize | \\|/ quick mode | ○ footer/close';
+                     ' — L1/R1 controller | ✕ select | d-pad move | □ on/off | ☰ position | \\|/ resize | ○ footer/close';
   bar.className = 'live';
   measureGpBar();
 
