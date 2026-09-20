@@ -1246,6 +1246,16 @@
   .row.inert { opacity:.55; }
   .row.inert select, .row.inert input { cursor:not-allowed; }
   .gp-selecting { outline:3px solid #e0c07a !important; outline-offset:2px; }
+  /* ⭐ THE OPEN PICKER HIGHLIGHTS THE ROW UNDER THE MOUSE (rhoquinn8217,
+     2026-09-20). ⓘ A listbox does NOT do this on its own -- only the native
+     dropdown POPUP does, and that popup is drawn by the OS. The page never
+     needed the rule before, because the box only ever opened one row high.
+     ✅ Checked here before it was written: `option:hover` really is stylable
+     in this Chromium, on a throwaway <select size=6>.
+     ⚠️ Lighter than the selected row's own highlight on purpose -- hover is
+     "this is what you would get", not "this is what you have". */
+  select.gp-selecting option:hover { background:#3a3d49; color:#fff; }
+  select.gp-selecting { cursor:pointer; }
   .log-head { font-family:Consolas,monospace; font-size:12px; margin-bottom:4px; }
 </style>
 </head>
