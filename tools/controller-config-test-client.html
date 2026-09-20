@@ -944,6 +944,24 @@
      or padding above changes, this number has to move with it. */
   #compactBox .cbar > button,
   #compactBox .cbar > select.modepick { height:6.8vh; }
+  /* ⭐⭐ THE MODE IDENTIFIER NOW LIVES ON THE PICKER ITSELF (rhoquinn8217,
+     2026-09-20): *"The Mode select clearly show what mode the window is in so
+     we don't need the Yellow Bolded mode title in the legend for each mode
+     anymore. However, I want to keep the the yellow bolded all caps text
+     applied to the currently selected mode in the mode selector with the lock
+     icon."* ⓘ Same values as `.cmode`, which the legends used to carry.
+     ⛔ AND THE OPTIONS ARE RESET, WHICH IS THE WHOLE TRICK. A closed selector
+     ignores option colour -- the note further up records that, found the hard
+     way -- so the yellow has to go on the SELECT to show when collapsed. But
+     the select's colour then bleeds into every row of the OPEN list, which is
+     the other half of that same note. Putting the normal palette back on
+     `option` leaves the list plain and the collapsed value yellow.
+     ⚠️ Uppercase plus letter-spacing makes the box WIDER -- 168 px to 194 in
+     Simple -- so the gap to the Close button beside it grows. */
+  #compactBox .cbar > select.modepick { color:#ffd166; font-weight:700;
+    letter-spacing:.08em; text-transform:uppercase; }
+  #compactBox .cbar > select.modepick option { color:#e8e8ea; font-weight:400;
+    letter-spacing:normal; text-transform:none; }
   /* ⓘ Quick's own pair, measured the same way: its button came to 12.22vh. */
   body.quick #compactBox .cbar > button,
   body.quick #compactBox .cbar > select.modepick { height:12.22vh; }
@@ -6795,13 +6813,13 @@ function paintCompact() {
     // after a pick.
     html += '<div class="cbar">' + modePickerHtml('cselMode') +
             '<div class="cbarText"><div class="clegend">' +
-            '<span class="cmode">Quick Mode</span>\u2630 position | R3 resize | ' +
+            '\u2630 position | R3 resize | ' +
             '\u25cb close</div></div>' +
             '<button class="cclose" onclick="closeWindow()">Close</button></div>';
   } else {
     html += '<div class="cbar">' + modePickerHtml('cselMode') +
             '<div class="cbarText">' +
-            '<div class="clegend"><span class="cmode">Simple Mode</span>' +
+            '<div class="clegend">' +
             'L1/R1 controller | \u2715 select | d-pad move | ' +
             '\u2630 position | R3 resize | \\|/ quick mode | \u25cb close</div>' +
             '<div class="cinfo">To bring this window back: <b>hold two fingers on the touchpad ' +
