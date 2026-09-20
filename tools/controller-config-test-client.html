@@ -6360,23 +6360,31 @@ function setMode(m, restore) {
 // ⛔ The quarter off the width and the sixth off the height were both taken
 // back (rhoquinn8217, 2026-09-09): they broke the preset description, which
 // is the one thing in Simple sized by its content and not by the window.
-function compactSize() {
-  var w = Math.round(screen.availWidth * 0.45);
-  var h = Math.round(screen.availHeight * 0.45);
+// BOTTOM CENTRE, WHICH IS WHERE REPOSITION PUTS IT (rhoquinn8217,
+// 2026-09-20: *"When opening the simple or quick mode, the window should be
+// bottom center the same location as it is when you use the reposition
+// button."*). These two used to centre it on the screen, so entering a compact
+// view put the window somewhere reposition would never leave it.
+// The gap above the taskbar is a hundredth of the work area, which is the
+// listener's bottom_gap() -- the two have to agree or the window would jump
+// the first time reposition was pressed.
+function compactHome(w, h) {
   window.resizeTo(w, h);
   window.moveTo(Math.round((screen.availWidth - w) / 2),
-                Math.round((screen.availHeight - h) / 2));
+                Math.round(screen.availHeight - Math.round(screen.availHeight / 100) - h));
+}
+
+function compactSize() {
+  compactHome(Math.round(screen.availWidth * 0.45),
+              Math.round(screen.availHeight * 0.45));
 }
 
 // ⓘ Quick's window: the smaller of its two sizes, which rhoquinn8217 named
 // medium and large (2026-09-09) -- the half-of-Simple heights, an eighth
 // off the width; the listener's table agrees.
 function quickSize() {
-  var w = Math.round(screen.availWidth * 0.185);
-  var h = Math.round(screen.availHeight * 0.15);
-  window.resizeTo(w, h);
-  window.moveTo(Math.round((screen.availWidth - w) / 2),
-                Math.round((screen.availHeight - h) / 2));
+  compactHome(Math.round(screen.availWidth * 0.185),
+              Math.round(screen.availHeight * 0.15));
 }
 
 function sizeForMode() {

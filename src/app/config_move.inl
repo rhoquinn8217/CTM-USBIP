@@ -396,10 +396,12 @@ inline void place_centre(HWND hwnd)
 }
 
 // A tap. In Advanced there is one place and this is "put it back in the
-// middle". In Simple and Quick it is the NEXT of bottom left, bottom centre,
-// bottom right -- judged from where the window IS, so one that was steered
-// somewhere still goes somewhere sensible rather than to whatever a stale
-// counter said. ⓘ The choice is kept, so the window comes back to it.
+// middle". In Simple and Quick it is bottom centre -- HOME, which is where
+// those views now open -- whenever the window is not already sitting on one of
+// the three, and the next of centre, right, left when it is.
+// Judged from where the window IS, so one that was steered somewhere goes
+// somewhere sensible rather than to whatever a stale counter said. The choice
+// is kept, so the window comes back to it.
 inline void snap_next(HWND hwnd)
 {
     // ⛔ ADVANCED CENTRES, always -- never "back to where it was remembered"
@@ -412,6 +414,7 @@ inline void snap_next(HWND hwnd)
     RECT rc;
     if (!GetWindowRect(hwnd, &rc)) return;
     const int w = rc.right - rc.left;
+    const int h = rc.bottom - rc.top;
     const RECT wa = work_area();
     const int margin = snap_margin(wa);
     const int targets[3] = {
@@ -419,13 +422,29 @@ inline void snap_next(HWND hwnd)
         wa.left + ((wa.right - wa.left) - w) / 2,
         wa.right - margin - w,
     };
-    int nearest = 0;
-    long best = LONG_MAX;
+
+    // IT STARTS AT HOME (rhoquinn8217, 2026-09-20: "Reposition should always
+    // start there", bottom centre being where a compact view now opens). A
+    // window that is not sitting on one of the three goes THERE first, and
+    // only one already on a place steps along.
+    //
+    // It used to take the NEAREST of the three and step on from that, which
+    // had two faults. The window was judged by x ALONE -- the y was never
+    // looked at -- so one parked at the top of the screen counted as being on
+    // a bottom place, and the first press sent it sideways instead of home.
+    // And from home itself there was no way to ask for home: the press always
+    // moved it on.
+    const int homeY = wa.bottom - bottom_gap(wa) - h;
+    const long span = (long)(wa.right - wa.left);
+    const long tol = span / 200 > 4 ? span / 200 : 4;
+
+    int at = -1;
     for (int i = 0; i < 3; ++i) {
-        const long d = labs((long)rc.left - (long)targets[i]);
-        if (d < best) { best = d; nearest = i; }
+        if (labs((long)rc.left - (long)targets[i]) <= tol &&
+            labs((long)rc.top - (long)homeY) <= tol) { at = i; break; }
     }
-    place_at(hwnd, (nearest + 1) % 3);
+    if (at < 0) { place_at(hwnd, 1); return; }   // home: bottom centre
+    place_at(hwnd, (at + 1) % 3);
 }
 
 // This layout's slot, and the table it indexes.
