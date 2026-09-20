@@ -5507,6 +5507,13 @@ function gpKeyBack() {
 //
 // ⓘ Same shape as the dialog trap: while it is on, gpCollect offers the footer
 // buttons and nothing else, so ▲▼ cannot wander back into the page.
+// CONFIRMED AND LEFT ALONE 2026-09-20. rhoquinn8217 hit this looking for the
+// Mode picker -- "I'm still not able to navigate to the mode selector in
+// advance mode. Pressing circle locks you into the footer section" -- and
+// chose to keep it after the alternatives were laid out. It is not a trap:
+// the toggle above means the same press comes straight back out, to where you
+// were rather than to an index. Adding the footer to the ordinary ring as
+// well was offered and declined, so the zone stays the only way in.
 var FOOTER_MODE = false;
 
 // ⭐ Where you were before ○, so leaving the footer puts you back rather than
