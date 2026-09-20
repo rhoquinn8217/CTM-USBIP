@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.1 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.2 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,9 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.2  Simple puts Unlink on the LEFT of the selector, where Quick has
+            it, rather than on the right beside the auto-link mark
+            (rhoquinn8217). The two compact views now draw the same row.
     2.66.1  Unlink, looked at on screen and moved. The mark is 🛇 U+1F6C7,
             the PROHIBITED SIGN, which is monochrome and takes the button's
             colour like 🗘 does -- 🚫 is an emoji and Chrome drew it in red
@@ -1272,7 +1275,7 @@
 <div class="pane on" id="pane-overview">
 
 <div class="bar">
-  <span class="muted" style="font-size:12px">v2.66.1</span>
+  <span class="muted" style="font-size:12px">v2.66.2</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -6061,9 +6064,11 @@ function paintCompact() {
   // same small button in the selector row, the mark with its word in Simple and
   // the mark alone in Quick. ⓘ It sat in Simple's footer beside New for an hour
   // and looked like a third New; it belongs with the control it acts on.
-  // ⓘ Sides differ on purpose: Quick draws it LEFT of the selector, where its
-  // window has the room, and Simple right of 🗘, which is where Advanced ends
-  // its row too. ⓘ Same act as picking "(no config)", so it asks nothing.
+  // ⓘ LEFT of the selector in both compact views (rhoquinn8217, 2026-09-19):
+  // it was tried on the right, beside 🗘, and the side was the thing that was
+  // wrong. ⓘ Advanced still ends its row with it, because there the row reads
+  // left to right as the config, what to do with it, then the two claims.
+  // ⓘ Same act as picking "(no config)", so it asks nothing.
   var unlinkBtn = function () {
     var lbl = '\ud83d\udec7' + (QUICK ? '' : 'unlink');
     return (d && d.linked_config)
@@ -6189,11 +6194,11 @@ function paintCompact() {
       // The selector under a title, sliding with the ring (rhoquinn8217, 2026-09-09).
       html += '<div class="csel' + slide + '">' +
               (QUICK ? '' : '<div class="ctitle">Controller Config</div>') +
-              '<div class="cselrow">' + (QUICK ? unlinkBtn() : '') +
+              '<div class="cselrow">' + unlinkBtn() +
               '<select id="cpick" data-ordinal="' + esc(d.ordinal) + '"' +
               ' onmousedown="pickerActivate(event,this)"' +
               ' onchange="compactPick()">' +
-              opts + '</select>' + autoBtn + (QUICK ? '' : unlinkBtn()) +
+              opts + '</select>' + autoBtn +
               '</div></div>' + (QUICK ? '' : foot(true, d.ordinal));
     }
   }
