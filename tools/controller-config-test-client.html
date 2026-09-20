@@ -932,18 +932,21 @@
   #compactBox .cbar > button,
   #compactBox .cbar > select.modepick { flex:0 0 auto; font-size:3.4vh;
     padding:1.2vh 2.6vw; min-width:0; }
-  /* ⚠⚠ THE PADLOCK IS WHY THIS IS HERE, and why the height is written out.
-     Font, padding, border and box-sizing all matched the button already and
-     the picker still came out 39.6 px against 34.8: an emoji renders TALLER
-     than text, and a <select> sizes to its tallest OPTION -- "Simple 🔒".
-     ⛔ `line-height` DOES NOT FIX IT. Tried and measured: 39.6 px before and
-     after, because Chrome sizes the box from the option's font metrics and
-     not from the line box. An explicit height is what works.
-     ⓘ On BOTH, so the pair match by construction rather than by coincidence,
-     and 6.8vh is simply what the button already computed to. ⚠️ If the font
-     or padding above changes, this number has to move with it. */
-  #compactBox .cbar > button,
-  #compactBox .cbar > select.modepick { height:6.8vh; }
+  /* THE PICKER IS TRIMMED ON PADDING, NOT FORCED TO A HEIGHT, AND THAT IS
+     WHAT LETS ITS TEXT SIT CENTRED (rhoquinn8217, 2026-09-20: *"The text in
+     those buttons doesn't look vertically centered in the button"*).
+     AND THE PADLOCK IS NOT THE CAUSE, though it looked like it and was
+     written up here as if it were. Measured across six glyphs INCLUDING NONE
+     AT ALL: the natural height is 39.4 px every time. A <select> is simply
+     taller than a button at the same font and padding -- stripped of vertical
+     padding it still stands 27 px against the button's ~20.
+     So `height:6.8vh` made the two match by SQUEEZING the content, and that
+     is what pushed the text off centre. Trimming the vertical padding reaches
+     the same outer height with nothing compressed.
+     Solved, not guessed: bare select + 2 x padding = the button's height.
+     Simple 27 + 2 x 0.79vh = 35.2; Quick 20 + 2 x 0.31vh = 21.1.
+     Both move if the font or the button's padding above changes. */
+  #compactBox .cbar > select.modepick { padding-top:0.79vh; padding-bottom:0.79vh; }
   /* ⭐⭐ THE MODE IDENTIFIER NOW LIVES ON THE PICKER ITSELF (rhoquinn8217,
      2026-09-20): *"The Mode select clearly show what mode the window is in so
      we don't need the Yellow Bolded mode title in the legend for each mode
@@ -962,9 +965,8 @@
     letter-spacing:.08em; text-transform:uppercase; }
   #compactBox .cbar > select.modepick option { color:#e8e8ea; font-weight:400;
     letter-spacing:normal; text-transform:none; }
-  /* ⓘ Quick's own pair, measured the same way: its button came to 12.22vh. */
-  body.quick #compactBox .cbar > button,
-  body.quick #compactBox .cbar > select.modepick { height:12.22vh; }
+  body.quick #compactBox .cbar > select.modepick { padding-top:0.31vh;
+    padding-bottom:0.31vh; }
   body.compact #confirmBox .confirmCard { font-size:5.1vh; max-width:86vw; }
   body.compact #confirmBox .confirmCard h2 { font-size:6.3vh; }
   body.compact #confirmBox .confirmCard p { font-size:5.1vh; }
@@ -1123,6 +1125,14 @@
      bar reads as three unrelated things. */
   #gpbar #gphint { margin-left:auto; }
   #modePick, #closeBtn { padding:2px 8px; font-size:11px; margin-left:8px; }
+  /* The same treatment the compact pickers get, for the same reason: the mode
+     identifier is ON the picker now rather than in the legend beside it. The
+     options are reset or the yellow bleeds into the open list -- see the
+     longer note on the compact rule. */
+  #modePick { color:#ffd166; font-weight:700; letter-spacing:.08em;
+    text-transform:uppercase; }
+  #modePick option { color:#e8e8ea; font-weight:400; letter-spacing:normal;
+    text-transform:none; }
   /* ⓘ Sized like the page's own buttons -- New, Rename, Copy -- not like the
      small footer ones it briefly lived beside. */
   /* Locked: the page has the pads. Mirrored: the game still sees them. */
@@ -6823,8 +6833,8 @@ function paintCompact() {
             '<div class="cbarText"><div class="clegend">' +
             '\u2630 position | R3 resize | ' +
             '\u25cb close</div></div>' +
-            '<button class="cclose" onclick="closeWindow()">Close</button>' +
-            modePickerHtml('cselMode') + '</div>';
+            modePickerHtml('cselMode') +
+            '<button class="cclose" onclick="closeWindow()">Close</button></div>';
   } else {
     html += '<div class="cbar">' +
             '<div class="cbarText">' +
@@ -6834,8 +6844,8 @@ function paintCompact() {
             '<div class="cinfo">To bring this window back: <b>hold two fingers on the touchpad ' +
             'and press Options</b> (DS5/DS4 only), or right-click the tray icon and choose ' +
             '<b>Open settings</b>.</div>' +
-            '</div><button class="cclose" onclick="closeWindow()">Close</button>' +
-            modePickerHtml('cselMode') + '</div>';
+            '</div>' + modePickerHtml('cselMode') +
+            '<button class="cclose" onclick="closeWindow()">Close</button></div>';
   }
   box.innerHTML = html;
   gpCollect();
@@ -6942,7 +6952,10 @@ function gpPoll() {
   // ⓘ innerHTML, for the one span: the bar is green while the pad is live
   // and the identifier must not be. Nothing here is user text -- the count is
   // a number and the rest is a constant -- so there is nothing to escape.
-  hint.innerHTML = '<span class="cmode">Advanced Mode</span>' +
+  // The mode identifier lives ON the Mode picker in every view now
+  // (rhoquinn8217, 2026-09-20), so the legend no longer names the mode here
+  // either. The `.cmode` rule itself stays; `#modePick` wears it.
+  hint.innerHTML = '' +
                      (live.length > 1 ? live.length + ' controllers' : 'controller') +
                      ' — L1/R1 controller | ✕ select | d-pad move | □ on/off | ☰ position | R3 resize | \\|/ quick mode | ○ footer/close';
   bar.className = 'live';
