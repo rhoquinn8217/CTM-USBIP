@@ -4594,15 +4594,32 @@ function gpActivate() {
     // postcard reasoning was measured on Quick and never applied to Simple --
     // which makes this the correction it looks like, not a preference.
     //
+    // ⭐⭐ FIVE ROWS, AND IT SCROLLS FOR THE REST (rhoquinn8217, 2026-09-20):
+    // *"I don't want to show everything I want the list to expand out to see
+    // 5 to 6 selection and let you move down to see the rest."*
+    //
+    // ⛔ IT WAS `Math.min(options.length, 8)` FOR A DAY, which showed the whole
+    // list whenever there were eight or fewer configs. A box that grows with
+    // the config list is a box whose size nobody can predict.
+    //
     // ✅ MEASURED 2026-09-20, Simple at 0.45 on a 2752x1152 desktop, so a
-    // 1238 x 518 window, with eight options in the box:
-    //     collapsed   40 px
-    //     expanded   248 px, bottom edge at 480 of 518 -- 38 px to spare
-    // ⓘ And `Math.min(..., 8)` CAPS it, so more configs cannot make it
-    // taller. 248 px is the worst case, not a sample of one.
-    // ⚠️ A far smaller screen would shrink the window without shrinking the
-    // rows, so the row count is the dial if it ever stops fitting.
-    el.size = QUICK ? 1 : Math.min(el.options.length, 8);
+    // 1238 x 518 window. Row heights are fixed, so this is the whole dial:
+    //
+    //     rows   box     the Advanced / Quick buttons below it
+    //      0      40 px  bottom 499  on screen
+    //      4     126 px  bottom 499  on screen
+    //      5     155 px  bottom 518  FLUSH with the window's edge
+    //      6     184 px  bottom 547  29 px below the fold
+    //      8     242 px  bottom 605  87 px below the fold
+    //
+    // ➡️ **5 is the largest that does not push the mode buttons off**, and it
+    // is inside the 5-to-6 that was asked for, so it takes the top of the
+    // range rather than spending the buttons for one more row.
+    // ⓘ `Math.min` still applies, so three configs draw three rows rather than
+    // five and two empty ones.
+    // ⚠️ A much smaller screen shrinks the window without shrinking the rows,
+    // so this number is the dial if it ever stops fitting.
+    el.size = QUICK ? 1 : Math.min(el.options.length, 5);
     // ⛔ Nothing in the sticky block needs scrolling to: it is pinned on screen by
   // definition. Calling scrollIntoView on it moved the SETTINGS list beneath,
   // so navigating the header appeared to scroll the page for no reason.
