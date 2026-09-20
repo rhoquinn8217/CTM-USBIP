@@ -5369,16 +5369,25 @@ function compactMove(dx, dy) {
     c = best;
   } else if (dx) {
     var nc = c + dx;
-    if (rows[r] === foot && bar.length && (nc < 0 || nc >= foot.length)) {
-      // ⭐ Off either end of New/Edit lands on the footer row
-      // (rhoquinn8217, 2026-09-09). ⓘ Both controls sit in the RIGHT corner
-      // now, so Left from New reaches Close and Right from Edit reaches the
-      // Mode picker -- the row is read in document order either way. It was
-      // "Advanced" on the left and "the other view" on the right until T-233
-      // replaced the pair with one Mode picker, and 2026-09-20 moved that
-      // picker over beside Close.
-      r = rows.indexOf(bar);
-      c = nc < 0 ? 0 : bar.length - 1;
+    // NEW, EDIT, MODE AND CLOSE ARE ONE HORIZONTAL CHAIN (rhoquinn8217,
+    // 2026-09-20: *"pressing right on the d-pad on the edit button moves to
+    // the mode selector and pressing left on the mode selector lands you on
+    // edit"*). Sorted by where they actually sit, so sideways means the next
+    // control to that side and nothing has to know which row it is in.
+    //
+    // It was a corner rule before -- off either end of New/Edit jumped to one
+    // END of the footer row -- which made Right from Edit land on Close and
+    // left no way back from the Mode picker at all.
+    if ((rows[r] === foot || rows[r] === bar) && foot.length && bar.length) {
+      var chain = foot.concat(bar).sort(function (a, b) {
+        return a.getBoundingClientRect().left - b.getBoundingClientRect().left;
+      });
+      var at2 = chain.indexOf(cur);
+      var want = chain[Math.max(0, Math.min(chain.length - 1, at2 + dx))];
+      rows.forEach(function (row, ri) {
+        var k = row.indexOf(want);
+        if (k >= 0) { r = ri; c = k; }
+      });
     } else {
       c = Math.max(0, Math.min(rows[r].length - 1, nc));
     }
@@ -5505,9 +5514,18 @@ function gpKeyBack() {
   }
   if (GP_SELECTING) { gpSelectEnd(false); return; }
   if (RENAMING) { cancelRename(); return; }
-  // ⭐ In compact, Circle CLOSES the window -- the word the legend uses, and
-  // what it now does. ⓘ Not the keyboard's Circle, which hides an overlay
-  // that has no other way back; this window has two.
+  // ⭐ IN SIMPLE, CIRCLE GOES TO THE CLOSE BUTTON RATHER THAN CLOSING
+  // (rhoquinn8217, 2026-09-20: *"circle button or esc on simple mode should
+  // not close the window anymore. It should now focus on the close button."*).
+  // One press no longer ends the session by itself -- the second press, on the
+  // button, does.
+  // ⚠️ QUICK STILL CLOSES OUTRIGHT. Only Simple was asked for, and Quick is
+  // the mid-game view where one press out is the point of it. The two legends
+  // say different things now, which is the honest reading of two behaviours.
+  if (COMPACT && !QUICK) {
+    var closeBtn = document.querySelector('#compactBox .cbar > button');
+    if (closeBtn && focusElement(closeBtn)) return;
+  }
   if (COMPACT) { closeWindow(); return; }
 
   // ⛔ CIRCLE LETS GO OF A TEXT BOX (rhoquinn8217, 2026-09-03: "circle should
@@ -6907,7 +6925,7 @@ function paintCompact() {
     // to the right -- the order here IS the order on screen.
     html += '<div class="cbar">' +
             '<div class="cbarText"><div class="clegend">' +
-            '\u2630 position | Create resize | ' +
+            '\u2630 position | \\|/ resize | ' +
             '\u25cb close</div></div>' +
             modePickerHtml('cselMode') +
             '<button class="cclose" onclick="closeWindow()">Close</button></div>';
@@ -6916,7 +6934,7 @@ function paintCompact() {
             '<div class="cbarText">' +
             '<div class="clegend">' +
             'L1/R1 controller | \u2715 select | d-pad move | ' +
-            '\u2630 position | Create resize | \\|/ quick mode | \u25cb close</div>' +
+            '\u2630 position | \\|/ resize | \u25cb to close</div>' +
             '<div class="cinfo">To bring this window back: <b>hold two fingers on the touchpad ' +
             'and press Options</b> (DS5/DS4 only), or right-click the tray icon and choose ' +
             '<b>Open settings</b>.</div>' +
@@ -7033,7 +7051,7 @@ function gpPoll() {
   // either. The `.cmode` rule itself stays; `#modePick` wears it.
   hint.innerHTML = '' +
                      (live.length > 1 ? live.length + ' controllers' : 'controller') +
-                     ' — L1/R1 controller | ✕ select | d-pad move | □ on/off | ☰ position | Create resize | \\|/ quick mode | ○ footer/close';
+                     ' — L1/R1 controller | ✕ select | d-pad move | □ on/off | ☰ position | \\|/ resize | ○ footer/close';
   bar.className = 'live';
   measureGpBar();
 
