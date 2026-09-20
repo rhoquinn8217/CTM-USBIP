@@ -1517,6 +1517,8 @@
        carries the padlock beside whichever mode is current. -->
   <select class="modepick" id="modePick" size="1"
           title="which layout this window opens in"
+          onmousedown="pickerActivate(event,this)"
+          onclick="pickerClickEnd(this)"
           onchange="pickMode(this.value)"></select>
   <!-- ⓘ Closing releases the gate on the way out, via the pagehide beacon, so
        this is a safe exit rather than a way to strand yourself. -->
@@ -4809,9 +4811,22 @@ function pickerExpand(el) {
   el.size = rows;
 
   var h = rows * rowH + chrome;
-  // Centred on the collapsed box, so the list opens around where you were
-  // looking rather than jumping to the top of the window.
-  var top = Math.round(rect.top + rect.height / 2 - h / 2);
+
+  // THE MODE PICKER ALWAYS OPENS UPWARD (rhoquinn8217, 2026-09-20: *"Since
+  // the mode selector is at the bottom of the page, the drop down needs to
+  // always expand up instead of down."*). It lives in the footer by design, in
+  // every view, so there is never room below it -- centring made it grow both
+  // ways and pushed its bottom edge past the footer.
+  // Anchored by its BOTTOM edge instead: the row you are on does not move, and
+  // the list unrolls above it.
+  var top;
+  if (el.classList && el.classList.contains('modepick')) {
+    top = Math.round(rect.bottom - h);
+  } else {
+    // Everything else is centred on the collapsed box, so the list opens
+    // around where you were looking rather than jumping to the window's top.
+    top = Math.round(rect.top + rect.height / 2 - h / 2);
+  }
   top = Math.max(margin, Math.min(top, window.innerHeight - h - margin));
 
   // ⭐⭐ AND IN QUICK IT GROWS SIDEWAYS TOO (rhoquinn8217, 2026-09-20: *"in
@@ -6228,6 +6243,8 @@ function modePickerHtml(id) {
     }).join('');
   return '<select class="modepick" id="' + id + '" size="1" ' +
          'title="which layout this window opens in" ' +
+         'onmousedown="pickerActivate(event,this)" ' +
+         'onclick="pickerClickEnd(this)" ' +
          'onchange="pickMode(this.value)">' + opts + '</select>';
 }
 
@@ -6596,7 +6613,12 @@ document.addEventListener('mousedown', function (ev) {
 // ⓘ The full page keeps its native dropdown: there is room for it there, and it
 // is faster with a mouse.
 function pickerActivate(ev, sel) {
-  if (!COMPACT) return;
+  // The full page keeps its native dropdown for ordinary settings -- there is
+  // room for one there and it is faster with a mouse. THE MODE PICKER IS THE
+  // EXCEPTION IN EVERY VIEW: it sits in the footer, hard against the bottom of
+  // the window, and a native popup is not clipped by the window -- it unrolls
+  // downward onto the desktop, outside the thing it belongs to.
+  if (!COMPACT && !(sel.classList && sel.classList.contains('modepick'))) return;
   // ⓘ Counted for EVERY press, including the ones that land on an option
   // while the box is open -- mousedown bubbles from the option to the select.
   PICKER_PRESS++;
