@@ -91,6 +91,7 @@ carry it; upstream's own history is unchanged.
 | 2026-09-20 | The preset set renamed into one shape and gained an R3-gated one, which meant adding R3 to the gyro gate -- four lines, because the button already had a spot in both tables. Both always-on gyro presets steady the cursor on either trigger, so a click lands where you were pointing. "Blank" is called "custom", a config made from it is named after the pad that asked -- ds5_config, ds4_config, xbox_config, pad_config -- and the list opens on the stick, the one preset every pad can use | `01c58bc`, `b393888`, `f2a6c9a` |
 | 2026-09-20 | trigger_probe is hidden on the settings page. It is a diagnostic whose own help says to leave it off, and it sat in Triggers for everyone. Listed by name rather than renamed to a _debug key, which would have hidden it for free: the key is read in two places in the listener, and anyone with it set in a config file would have lost it silently | `006290a` |
 | 2026-09-20 | A DS4 is still NOT offered the Audio section, after a day spent finding out why it cannot be. The three settings travel to the TV rather than being patched into a DualSense report, so they reach any pad and the section was opened up on that reasoning -- then neither volume moved anything on the pad, and the routing mode neither silenced a connected headset nor started the speaker. Arriving is not acting, so it is hidden again with the finding and an undo list against T-229 | `d68fc4d`, `006290a` |
+| 2026-09-20 | Copy asks for a name before it makes one, the way Rename does: an expanding row opened on the name it would have chosen, editable, with Create and Cancel. Both Copy buttons, because one expanding and one firing instantly is two buttons with the same word behaving differently. ONE row serves both jobs -- a second would have been a dozen more places to keep the guard flag in step, since it gates the d-pad, the plain keys, Escape, Space and the config poll. And the row now closes on a tab change: it used to survive, still pointing at the config from the tab you left, so Save renamed something off screen while the ten-second config poll stayed suppressed | `6f5daa4` |
 
 ## Files changed
 
@@ -101,7 +102,7 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
 ```
  .gitattributes                                |   48 +
  .gitignore                                    |   30 +-
- CHANGES.md                                    |  214 +
+ CHANGES.md                                    |  222 +
  LINK                                          |    0
  README.md                                     |   18 +
  app/ctm-usbip-tests.vcxproj                   |  108 +
@@ -211,12 +212,12 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  tests/trigger_click_test.cpp                  |  835 +++
  tests/trigger_effect_test.cpp                 |  529 ++
  tests/units.h                                 |   54 +
- tools/controller-config-test-client.html      | 7846 +++++++++++++++++++++++++
+ tools/controller-config-test-client.html      | 7934 +++++++++++++++++++++++++
  tools/device-config-panel-edge.bat            |    9 +
- tools/device-config-panel-edge.ps1            |  327 ++
+ tools/device-config-panel-edge.ps1            |  327 +
  tools/device-config-panel.bat                 |    4 +
  tools/device-config-panel.ps1                 |  303 +
  tools/osk-mockups.py                          |  103 +
  tools/start-ctm-usbip.bat                     |   67 +
- 119 files changed, 36913 insertions(+), 145 deletions(-)
+ 119 files changed, 37009 insertions(+), 145 deletions(-)
 ```
