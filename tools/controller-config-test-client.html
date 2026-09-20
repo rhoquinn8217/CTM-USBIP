@@ -1311,13 +1311,15 @@
 <h2>Devices</h2>
 <div id="devices"><span class="muted">Refresh to load.</span></div>
 
-<h2>Configs</h2>
-<div class="bar">
-  <input id="newName" placeholder="new config name" size="20">
-  <!-- ⛔ The kind box is gone (2.65.0): a config is for any controller. -->
-  <button onclick="createConfig()">Create</button>
-</div>
-<div id="configs"><span class="muted">Refresh to load.</span></div>
+<!-- ⛔⛔ THE CONFIGS SECTION LEFT OVERVIEW (T-232, 2026-09-19).
+     rhoquinn8217: "It doesn't have a real purpose anymore. The Editor tab
+     covers most of it." It listed each config with Rename and Archive, and
+     carried a name box with Create.
+     ⛔ Archive had to move FIRST -- it was the only action there that
+     belonged to a config rather than a controller, and there was no other way
+     to archive one. It is on the Editor tab's head now, after Copy.
+     ⛔ Naming by hand is not lost: New makes one and Rename names it,
+     both on the Editor tab. -->
 
 
 <!-- ⛔ THE EDITOR LEFT OVERVIEW 2026-09-01. Its config row belongs in the
@@ -2421,8 +2423,13 @@ var PRESET_OPEN = false;
 var PRESETS = [];
 
 function newConfigFor(ordinal) {
-  var dev = LAST_DEVICES.filter(function(x) { return x.ordinal === ordinal; })[0];
-  if (!dev) return;
+  // T-232: an EMPTY ordinal is the Editor tab, which has no controller. It
+  // used to fall into the guard below and return, so New there did nothing at
+  // all -- it was not offering too few presets, it was offering none.
+  var dev = ordinal
+    ? (LAST_DEVICES.filter(function(x) { return x.ordinal === ordinal; })[0] || null)
+    : null;
+  if (ordinal && !dev) return;   // a named controller that has since gone
   // ⓘ The list comes from the agent, not from here: two places naming the same
   // presets is two places to disagree about them.
   call('GET', '/api/v1/presets').then(function(d) {
@@ -2478,7 +2485,8 @@ function buttonLabel(key) {
 
 function openPresetPicker(ordinal, dev) {
   OVERLAY_OPENER = GP_FOCUS[GP_INDEX] || null;
-  var kind = settingsKindOf(dev.kind);
+  // T-232: null when there is no controller in hand. Nothing is filtered then.
+  var kind = dev ? settingsKindOf(dev.kind) : null;
   // ⭐ TITLES ONLY, and choosing one OPENS ITS DETAILS rather than creating it
   // straight away (rhoquinn8217, 2026-08-31). An ⓘ button beside each row was
   // tried first and dropped: it needed its own navigation axis, and every
@@ -2492,7 +2500,10 @@ function openPresetPicker(ordinal, dev) {
   PRESETS.forEach(function(p) {
     // ⛔ Only presets that suit THIS controller. One that cannot act on it
     // would be a config that silently does nothing.
-    if ((p.kinds || []).indexOf(kind) < 0) return;
+    // T-232: with no controller there is no kind to narrow to, so every
+    // preset is offered. It also agrees with the 2026-09-12 decision that any
+    // config links to any controller.
+    if (kind && (p.kinds || []).indexOf(kind) < 0) return;
     html += '<div class="prow">' +
             '<button data-preset="' + esc(p.name) + '" ' +
             'onclick="openPresetInfo(\'' + esc(ordinal) + '\',\'' +
@@ -2714,16 +2725,25 @@ function presetCancel() {
 }
 
 function createFromPreset(ordinal, preset) {
-  var dev = LAST_DEVICES.filter(function(x) { return x.ordinal === ordinal; })[0];
-  if (!dev) { presetCancel(); return; }
-  var name = nextConfigName(dev.kind, preset);
-  var body = { name: name, device: ordinal };
+  // T-232: no ordinal means the Editor tab -- make the config, link it to
+  // nothing, and open it. The API reads a body with no "device" as exactly
+  // that, which is the same spelling unlink uses.
+  var dev = ordinal
+    ? (LAST_DEVICES.filter(function(x) { return x.ordinal === ordinal; })[0] || null)
+    : null;
+  if (ordinal && !dev) { presetCancel(); return; }
+  var name = nextConfigName(dev ? dev.kind : '', preset);
+  var body = { name: name };
+  if (ordinal) { body.device = ordinal; }
   if (preset) body.preset = preset;
   presetCancel();
   call('POST', '/api/v1/configs', body)
     .then(function() {
       setConn('created ' + name + (preset ? ' from ' + preset : ''), 'good');
       loadConfigs(); loadDevices();
+      // T-232: made from the Editor tab, so show it there. Pressing New and
+      // being left on an empty editor would be its own puzzle.
+      if (!ordinal) { openConfig(name); }
       // ⭐ The same ending as picking one, in a new config's words: try it in
       // the game, or stay and customise it (rhoquinn8217, 2026-09-09).
       // "Customize it" is the configurator on this controller, where the
@@ -3456,7 +3476,13 @@ function paintEditorHead() {
     }).join('');
   var acts = OV_CONFIG
     ? '<button onclick="renameConfig(\'' + esc(OV_CONFIG) + '\')">Rename</button>' +
-      '<button onclick="copyConfigNamed(\'' + esc(OV_CONFIG) + '\')">Copy</button>'
+      '<button onclick="copyConfigNamed(\'' + esc(OV_CONFIG) + '\')">Copy</button>' +
+      // T-232: Archive moved here from Overview's config table, which is
+      // gone. It was the only action there that belonged to a CONFIG rather
+      // than a controller, so it had to land somewhere before that table
+      // could go. No read-only guard is needed: this picker already filters
+      // read-only configs out, so one can never be open here.
+      '<button class="warn" onclick="archive(\'' + esc(OV_CONFIG) + '\')">Archive</button>'
     : '';
   setStickyHead('editor',
     '<div class="f"><span class="muted">config</span>' +
@@ -3704,6 +3730,10 @@ function suggest_name(existing) {
 
 function apply_suggested_name(existing) {
     var box = document.getElementById('newName');
+    // T-232: the box left with Overview's config section. Nothing suggests a
+    // name any more -- New makes one and Rename names it -- so this does
+    // nothing rather than throwing on every config poll.
+    if (!box) return;
     // Leave alone if the user typed something that is not one of our own
     // suggestions -- theirs wins.
     if (box.value && box.value !== box.dataset.suggested) return;
@@ -3746,15 +3776,21 @@ function loadConfigs(isRetry) {
         LAST_DEVICES.forEach(buildDevicePane);
       });
     }
+    // T-232: PAINT THE EDITOR HEAD BEFORE ANY EARLY RETURN.
+    //
+    // It used to sit below the empty-list check, so with NO configs the head
+    // was never painted -- no picker and no New button, on the one tab that
+    // can create the first config. The old message said "Create one above",
+    // meaning Overview's name box, which has now gone.
+    paintEditorHead();
+
     var host = document.getElementById('configs');
+    if (!host) return;      // T-232: Overview no longer lists configs
     if (!list.length) {
-      host.innerHTML = '<span class="muted">No configs yet. Create one above.</span>';
+      host.innerHTML = '<span class="muted">No configs yet.</span>';
       apply_suggested_name(list);
       return;
     }
-    // ⓘ The picker lives in the header now and is rebuilt with the row, so it
-    // cannot drift from the list.
-    paintEditorHead();
 
     // ⛔ No kind column (2.65.0): a config is not tied to a controller type.
     var html = '<table><tr><th>name</th><th>auto links</th>' +
