@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.16 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.17 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,16 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.17 The touchpad's tap and press are remappable (T-242):
+            touchpad_one_finger_tap, touchpad_two_finger_tap and
+            touchpad_press_touch_drag, each choosing a mouse action or
+            nothing. The one bool they replace hard-coded TWO actions --
+            one finger left, two fingers right -- so a single remap
+            target could not carry it. The drag is the interesting one:
+            the press puts the action DOWN and it comes up when no finger
+            is left on the pad, not when the click is released. The old
+            bools are hidden and still read, so a config written before
+            the split keeps its gestures.
     2.66.16 Six touchpad choices, not four (rhoquinn8217): a finger on
             the pad at all, ONLY one finger, or ONLY two -- each either
             resting or with the pad pressed in. The four skipped the plain
@@ -2735,6 +2745,18 @@ var GATE_BUTTON_EXTRA = {
 // the gyro is on all the time and the button is what stops it. The hint used to
 // sit on the button row's blank as "(no button — always)"; rhoquinn8217 moved
 // it here, where it explains the type rather than the absence of a button.
+// ⓘ T-242: the touchpad gestures take a mouse action, and "(blank)" on one
+// of those rows means that gesture does nothing -- not "off by default".
+var TOUCH_ACTION_KEYS = {
+  touchpad_one_finger_tap: 1, touchpad_two_finger_tap: 1, touchpad_press_touch_drag: 1
+};
+var TOUCH_ACTION_LABELS = {
+  '': 'does nothing',
+  MouseLeft: 'left click',
+  MouseRight: 'right click',
+  MouseMiddle: 'middle click'
+};
+
 var GATE_TYPE_LABELS = {
   '': 'off',
   until_held: 'on button release — always on',
@@ -2749,6 +2771,9 @@ function choiceLabel(key, value) {
   // would put "(blank — off)" back on it.
   if (key === 'gyro_to_mouse_gate_type') {
     return GATE_TYPE_LABELS[value] !== undefined ? GATE_TYPE_LABELS[value] : value;
+  }
+  if (TOUCH_ACTION_KEYS[key]) {
+    return TOUCH_ACTION_LABELS[value] !== undefined ? TOUCH_ACTION_LABELS[value] : value;
   }
   if (value === '') {
     // ⓘ A blank BUTTON is not "off" -- it means no button at all, which is a
@@ -3486,7 +3511,12 @@ function inertReason(key, sessionKind) {
 // reads it, so a config written before the split keeps its gate -- but showing
 // it beside the pair that replaced it would be two controls for one feature,
 // and whichever you touched last would look like the one that lost.
-var HIDDEN_SETTINGS = { trigger_probe: 1, gyro_to_mouse_gate: 1 };
+// ⓘ touchpad_tap_click and touchpad_click_drag are SUPERSEDED by the three
+// touchpad_*_tap / _drag keys (T-242) and still read, so a config written
+// before the split keeps its gestures. Hidden for the same reason the gate
+// is: two controls for one thing, and whichever you touched last wins.
+var HIDDEN_SETTINGS = { trigger_probe: 1, gyro_to_mouse_gate: 1,
+                        touchpad_tap_click: 1, touchpad_click_drag: 1 };
 
 function hiddenSetting(key) {
   return HIDDEN_SETTINGS[key] === 1 || /_debug(_|$)/.test(key);

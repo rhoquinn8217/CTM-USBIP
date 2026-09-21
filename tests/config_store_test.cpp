@@ -629,7 +629,18 @@ int run_config_store_tests()
         CTM_CHECK(has("DS5-DS4-touchpad-to-mouse", "touchpad_scroll", "2"));
         // ⓘ The borrow rule -- gyro does not suppress the touchpad -- is
         // asserted with the other suppression checks above.
-        CTM_CHECK(has("DS5-DS4-touchpad-to-mouse", "touchpad_tap_click", "true"));
+        // ⭐ T-242: the one bool became two keys, because it hard-coded TWO
+        // actions and a single remap target cannot carry both.
+        CTM_CHECK(has("DS5-DS4-touchpad-to-mouse", "touchpad_one_finger_tap", "MouseLeft"));
+        // ⛔ RIGHT, not left. The bool meant one finger left and TWO FINGERS
+        // RIGHT; setting this to MouseLeft as well would keep the key and
+        // quietly lose the right click the preset has always had.
+        CTM_CHECK(has("DS5-DS4-touchpad-to-mouse", "touchpad_two_finger_tap", "MouseRight"));
+        CTM_CHECK(has("DS5-DS4-touchpad-to-mouse", "touchpad_press_touch_drag", "MouseLeft"));
+        // ⓘ And the superseded bools are gone from the preset, though the
+        // listener still READS them so an older config keeps its behaviour.
+        CTM_CHECK(!mentions("DS5-DS4-touchpad-to-mouse", "touchpad_tap_click"));
+        CTM_CHECK(!mentions("DS5-DS4-touchpad-to-mouse", "touchpad_click_drag"));
         // The hand is on the pad here, so the sticks are left alone.
         CTM_CHECK(!mentions("DS5-DS4-touchpad-to-mouse", "left_stick_mode"));
         CTM_CHECK(!mentions("DS5-DS4-touchpad-to-mouse", "right_stick_mode"));
