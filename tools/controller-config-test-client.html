@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.13 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.14 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,10 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.14 The gate type reads "on button release -- always on", and the
+            button row's blank is plain "no button set" (rhoquinn8217).
+            The hint about what no button MEANS moved off the button row
+            and onto the type, which is the half that decides it.
     2.66.13 The gyro gate's type reads "off", "on button release" and "on
             button hold" (rhoquinn8217). Both are the same sentence with
             one word changed, where the pair they replace -- "moves,
@@ -2706,9 +2710,13 @@ var GATE_BUTTON_EXTRA = {
 // which are a comma apart and have to be read to the end to tell apart.
 // ⓘ Blank is listed here so this row says "off" flatly rather than taking the
 // "(blank — off)" every other choice row falls back to.
+// ⓘ "always on" is the BASELINE the type describes: with "on button release"
+// the gyro is on all the time and the button is what stops it. The hint used to
+// sit on the button row's blank as "(no button — always)"; rhoquinn8217 moved
+// it here, where it explains the type rather than the absence of a button.
 var GATE_TYPE_LABELS = {
   '': 'off',
-  until_held: 'on button release',
+  until_held: 'on button release — always on',
   while_held: 'on button hold'
 };
 
@@ -2724,7 +2732,9 @@ function choiceLabel(key, value) {
   if (value === '') {
     // ⓘ A blank BUTTON is not "off" -- it means no button at all, which is a
     // real setting: with until_held it is always on, with while_held it is off.
-    return key === 'gyro_to_mouse_gate_button' ? '(no button — always)'
+    // ⭐ It says only that now. What the absence MEANS moved onto the type,
+    // which is where the two halves are read together anyway.
+    return key === 'gyro_to_mouse_gate_button' ? 'no button set'
                                                : '(blank — off)';
   }
   if (key === 'gyro_to_mouse_gate_button') {
