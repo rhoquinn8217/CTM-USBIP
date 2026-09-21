@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.17 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.18 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,15 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.18 Two legends, one per pad family (T-240, rhoquinn8217). An
+            Xbox pad was being told to press four buttons it does not
+            have, by shapes it does not carry: Cross, Circle, Square,
+            Create and Options in DualSense glyphs whatever was driving.
+            It now reads A, B, X, View, Menu and LB/RB. The set follows
+            the controller the WINDOW IS SHOWING, so it changes under
+            L1/R1, and a generic "hid" pad takes the Xbox set because it
+            is most likely imitating one -- which it got by accident
+            before, not by decision.
     2.66.17 The touchpad's tap and press are remappable (T-242):
             touchpad_one_finger_tap, touchpad_two_finger_tap and
             touchpad_press_touch_drag, each choosing a mouse action or
@@ -2450,6 +2459,50 @@ function deviceLabel(d) {
             (d.kind === 'ds4' ? 'Bluetooth' : (d.kind === 'ds4_usb' ? 'USB' : ''));
   if (base && how) return base + ' (' + how + ')';
   return base || modelOrType(d) || d.kind || 'controller';
+}
+
+// ⭐⭐ TWO LEGENDS, ONE PER PAD FAMILY (T-240, rhoquinn8217: *"Legend based
+// on controller used. Two legends, one more xbox and one for playstation."*).
+//
+// ⛔ Every legend was written in DualSense glyphs whatever pad was driving,
+// so an Xbox pad was told to press four buttons it does not have, by shapes it
+// does not carry.
+//
+// ⓘ NOT the remap rows' both-names style. Those show "(✕) | (A)" and have
+// room; Quick's footer is one line in a 516px window and already holds three
+// items. So this is a choice by kind, not a second label.
+var PAD_LEGEND_PS = {
+  select: '\u2715', close: '\u25cb', toggle: '\u25a1',
+  resize: '\\|/', position: '\u2630', shoulder: 'L1/R1'
+};
+var PAD_LEGEND_XBOX = {
+  select: 'A', close: 'B', toggle: 'X',
+  // ⓘ View is the two-rectangles button and Menu the three-lines one, which
+  // is what Microsoft calls them now -- Back and Start on an older pad.
+  resize: 'View', position: 'Menu', shoulder: 'LB/RB'
+};
+
+// ⚠️ A GENERIC `hid` PAD GETS THE XBOX SET (rhoquinn8217, 2026-09-20:
+// *"most controller will be emulating Xbox or ds4, but if one in genuinely hid
+// then just show xbox as legend as it most likely to be mimicking xbox"*).
+// ⓘ Before this it got the PlayStation set by accident rather than by
+// decision, which is the thing being fixed.
+function padLegendForKind(kind) {
+  var k = settingsKindOf(kind || '');
+  if (k === 'ds5' || k === 'ds5_edge' || k === 'ds4') return PAD_LEGEND_PS;
+  return PAD_LEGEND_XBOX;
+}
+
+// ⭐ THE PAD THE WINDOW IS SHOWING, which is the one whose config is being
+// edited. ⚠️ It means the legend changes under L1/R1, and that is the point:
+// the shown pad is the one the person is thinking about.
+// ⓘ Advanced can sit on Overview or the Editor, where no pad is shown -- then
+// the first bridged controller answers, and a DualSense answers when nothing
+// is bridged at all, because that is this project's primary device.
+function padLegend() {
+  var d = (LAST_DEVICES || []).filter(function (x) { return x.ordinal === ACTIVE; })[0];
+  if (!d) d = (LAST_DEVICES || []).filter(function (x) { return x.supports_config; })[0];
+  return padLegendForKind(d ? d.kind : 'ds5');
 }
 
 function settingsKindOf(sessionKind) {
@@ -7050,6 +7103,8 @@ function paintCompact() {
     // different mode"*). A collapsed picker has nothing to protect.
   if (GP_SELECTING && box.contains(GP_SELECTING) && GP_SELECTING.size > 1) return;
   var d = (LAST_DEVICES || []).filter(function (x) { return x.ordinal === ACTIVE; })[0];
+  // T-240: the legend's glyphs, for the pad this window is showing.
+  var LG = padLegend();
   // The listener remembers which controller was on screen, for the next
   // window; L1/R1 change it without any layout changing, so it is told here.
   if (d && d.ordinal !== LAST_VIEW_ORDINAL) postView(false);
@@ -7221,16 +7276,17 @@ function paintCompact() {
     // to the right -- the order here IS the order on screen.
     html += '<div class="cbar">' +
             '<div class="cbarText"><div class="clegend">' +
-            '\u2630 position | \\|/ resize | ' +
-            '\u25cb close</div></div>' +
+            LG.position + ' position | ' + LG.resize + ' resize | ' +
+            LG.close + ' close</div></div>' +
             modePickerHtml('cselMode') +
             '<button class="cclose" onclick="closeWindow()">Close</button></div>';
   } else {
     html += '<div class="cbar">' +
             '<div class="cbarText">' +
             '<div class="clegend">' +
-            'L1/R1 controller | \u2715 select | d-pad move | ' +
-            '\u2630 position | \\|/ resize | \u25cb to close</div>' +
+            LG.shoulder + ' controller | ' + LG.select + ' select | d-pad move | ' +
+            LG.position + ' position | ' + LG.resize + ' resize | ' +
+            LG.close + ' to close</div>' +
             '<div class="cinfo">To bring this window back: <b>hold two fingers on the touchpad ' +
             'and press Options</b> (DS5/DS4 only), or right-click the tray icon and choose ' +
             '<b>Open settings</b>.</div>' +
@@ -7345,9 +7401,14 @@ function gpPoll() {
   // The mode identifier lives ON the Mode picker in every view now
   // (rhoquinn8217, 2026-09-20), so the legend no longer names the mode here
   // either. The `.cmode` rule itself stays; `#modePick` wears it.
-  hint.innerHTML = '' +
+  // T-240: the same two sets as the compact legends, for the shown pad.
+  var LGA = padLegend();
+  hint.innerHTML = '\u2014 ' +
                      (live.length > 1 ? live.length + ' controllers' : 'controller') +
-                     ' — L1/R1 controller | ✕ select | d-pad move | □ on/off | ☰ position | \\|/ resize | ○ footer/close';
+                     ' \u2014 ' + LGA.shoulder + ' controller | ' + LGA.select +
+                     ' select | d-pad move | ' + LGA.toggle + ' on/off | ' +
+                     LGA.position + ' position | ' + LGA.resize + ' resize | ' +
+                     LGA.close + ' footer/close';
   bar.className = 'live';
   measureGpBar();
 
