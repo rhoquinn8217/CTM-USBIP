@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.12 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.13 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,11 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.13 The gyro gate's type reads "off", "on button release" and "on
+            button hold" (rhoquinn8217). Both are the same sentence with
+            one word changed, where the pair they replace -- "moves,
+            until the button is held" and "moves only while the button is
+            held" -- were a comma apart and had to be read to the end.
     2.66.12 The gyro gate is two settings, not one. gyro_to_mouse_gate_type
             says WHEN -- it moves until the button is held, or only while
             it is held -- and gyro_to_mouse_gate_button says WHICH, from
@@ -2694,21 +2699,34 @@ var GATE_BUTTON_EXTRA = {
   touchpad_click: 'touchpad — pressed in'
 };
 
+// ⭐ rhoquinn8217's wording, 2026-09-20, replacing a longer pair of mine.
+// Both of these read as "the gyro is ON when ..." -- on release, on hold --
+// so the two options are the same sentence with one word changed. Mine were
+// "moves, until the button is held" and "moves only while the button is held",
+// which are a comma apart and have to be read to the end to tell apart.
+// ⓘ Blank is listed here so this row says "off" flatly rather than taking the
+// "(blank — off)" every other choice row falls back to.
 var GATE_TYPE_LABELS = {
-  until_held: 'moves, until the button is held',
-  while_held: 'moves only while the button is held'
+  '': 'off',
+  until_held: 'on button release',
+  while_held: 'on button hold'
 };
 
 // The label for one option of one choice row. Everything not named here reads
 // as its own value, which is what every other choice row has always done.
 function choiceLabel(key, value) {
+  // ⚠️ The type row is asked FIRST, blank included, because its blank has a
+  // word of its own -- "off" -- and falling through to the generic blank below
+  // would put "(blank — off)" back on it.
+  if (key === 'gyro_to_mouse_gate_type') {
+    return GATE_TYPE_LABELS[value] !== undefined ? GATE_TYPE_LABELS[value] : value;
+  }
   if (value === '') {
     // ⓘ A blank BUTTON is not "off" -- it means no button at all, which is a
     // real setting: with until_held it is always on, with while_held it is off.
     return key === 'gyro_to_mouse_gate_button' ? '(no button — always)'
                                                : '(blank — off)';
   }
-  if (key === 'gyro_to_mouse_gate_type') return GATE_TYPE_LABELS[value] || value;
   if (key === 'gyro_to_mouse_gate_button') {
     if (GATE_BUTTON_EXTRA[value]) return GATE_BUTTON_EXTRA[value];
     var index = GATE_BUTTON_INDEX[value];

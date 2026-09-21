@@ -211,6 +211,11 @@ int run_gyro_mouse_tests()
         // feature has. A third type would have been a second way to say it.
         CTM_CHECK(parse_gate_pair("", "r3")           == gate_off());
         CTM_CHECK(parse_gate_pair("garbage", "r3")    == gate_off());
+        // ⓘ The words the PAGE shows parse too, so a config typed by hand to
+        // match what is on screen is not silently off (rhoquinn8217's wording).
+        CTM_CHECK(parse_gate_pair("on button hold", "r3")    == gate_while(ctm_rebind::kBtnR3));
+        CTM_CHECK(parse_gate_pair("on button release", "r3") == gate_until(ctm_rebind::kBtnR3));
+        CTM_CHECK(parse_gate_pair("ON BUTTON HOLD", "r3")    == gate_while(ctm_rebind::kBtnR3));
         // ⓘ And while_held with no button is a gate nothing can open, which is
         // off in effect -- it needs no special case.
         auto r = make_report(0, 0, 0);

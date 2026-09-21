@@ -260,8 +260,17 @@ inline Gate parse_gate_pair(const std::string &type, const std::string &button)
     const std::string t = gate_lower(type);
     if (t.empty()) return gate_off();
     const int b = parse_gate_button(button);
-    if (t == "while_held" || t == "on_button" || t == "hold") return gate_while(b);
-    if (t == "until_held" || t == "always_until" || t == "always") return gate_until(b);
+    // ⓘ The stored tokens are until_held and while_held. The spellings beside
+    // them are what the PAGE says -- "on button hold", "on button release" --
+    // so a config typed by hand to match what is on screen still parses.
+    if (t == "while_held" || t == "on_button" || t == "hold" ||
+        t == "on_hold" || t == "on button hold") {
+        return gate_while(b);
+    }
+    if (t == "until_held" || t == "always_until" || t == "always" ||
+        t == "on_release" || t == "on button release") {
+        return gate_until(b);
+    }
     // Unknown type is OFF, never an error.
     return gate_off();
 }
