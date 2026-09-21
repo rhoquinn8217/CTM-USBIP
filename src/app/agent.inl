@@ -1040,6 +1040,10 @@ static int run_agent(uint16_t port)
         GetCurrentDirectoryW(MAX_PATH, cwd);
         device_log::session_w() << L"working directory: " << cwd
             << L" (configs/, logs and settings resolve here)";
+        // T-239: the window's place, size and layout, from the last run. Read
+        // HERE because the line above is the one that settles what a relative
+        // path means -- reading it earlier would resolve somewhere else.
+        config_move::state_load();
     }
 
     // ⭐ Open the page HERE, once the agent is actually listening.

@@ -207,6 +207,10 @@ void ctm_gyro_mouse_ensure_mouse_started();
 // ⓘ Same cycle, same shape: the keyboard device needs agent.inl's server and
 // asset helpers, while agent.inl needs only this one symbol from it.
 void ctm_rebind_ensure_keyboard_started();
+// ⓘ And the same shape again (T-239): agent.inl reads the window's remembered
+// place the moment it has settled what a relative path means, and
+// config_move.inl is included well below because rebind.inl needs it there.
+namespace config_move { inline void state_load(); }
 #include "input/gyro_calibration_fetch.inl"   // needs CtmBackend; agent.inl calls it
 #include "app/nickname.inl"      // controller nicknames; agent.inl assigns one per session
 #include "app/same_controller.inl"   // which older session a new bridge retires; agent.inl asks it
