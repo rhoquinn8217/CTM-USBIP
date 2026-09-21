@@ -99,9 +99,53 @@ enum class GateWhen {
 // click are read out of the touch report bytes, not off a spot -- so they
 // cannot be indices, and are numbered clear of the table rather than crammed
 // into it.
-constexpr int kGateNone       = -1;
-constexpr int kGateTouchTouch = 200;   // a finger resting on the touchpad
-constexpr int kGateTouchPress = 201;   // the touchpad pressed in
+constexpr int kGateNone = -1;
+
+// ⭐⭐ THE TOUCHPAD'S SIX (rhoquinn8217, 2026-09-20). Three questions, each
+// asked with and without the pad pressed in:
+//   - is a finger on it AT ALL
+//   - is there ONLY ONE finger on it
+//   - are there ONLY TWO
+// ⓘ "Touch" and "only one finger touch" are different gestures, and the first
+// draft of this had only the second, which cannot say "any finger".
+// ⓘ Both pads report two contacts, at their own offsets: a DualSense at 33 and
+// 37, a DS4 at 35 and 39. Two is the hardware maximum, so "only two" needs no
+// upper check -- but "only one" does need to know the other is UP.
+constexpr int kGateTouch           = 200;   // a finger on it, either one
+constexpr int kGateTouchPress      = 201;   // a finger on it, and pressed in
+constexpr int kGateTouch1Only      = 202;   // exactly one finger
+constexpr int kGateTouch1OnlyPress = 203;   // exactly one finger, and pressed in
+constexpr int kGateTouch2Only      = 204;   // exactly two fingers
+constexpr int kGateTouch2OnlyPress = 205;   // exactly two fingers, and pressed in
+
+// ⛔ NOT OFFERED, STILL PARSED: pressed in with NO finger requirement. That is
+// what `touchpad_click` has always meant, gyro_mouse_recenter_button still
+// offers that word, and configs carry it -- so folding it into kGateTouchPress
+// would quietly add a condition that was never there.
+constexpr int kGateClickOnly       = 206;
+
+// ⛔⛔ COUNTED, NOT NEGATED. A pad with no touchpad, and a report too short to
+// say, STATE NEITHER -- touch_finger_down and touch_finger_up both answer false
+// for them, on purpose, because "no finger" is something a report has to say
+// just as a finger is. ➡️ So every gesture below is decided from how many
+// contacts the report states are down and how many it states are up, and a
+// report that says nothing decides nothing: the gate stays where it was rather
+// than flapping on a truncated packet.
+struct TouchStated {
+    int down = 0;
+    int up = 0;
+    bool both() const { return down + up == 2; }   // the report answered for both
+};
+
+inline TouchStated touch_stated(const ctm_rebind::Layout &lay, const uint8_t *d, size_t len)
+{
+    TouchStated c;
+    for (int f = 0; f < 2; ++f) {
+        if (ctm_rebind::touch_finger_down(lay, d, len, f)) ++c.down;
+        else if (ctm_rebind::touch_finger_up(lay, d, len, f)) ++c.up;
+    }
+    return c;
+}
 
 struct Gate {
     GateWhen when   = GateWhen::Off;
@@ -136,9 +180,38 @@ inline bool gate_button_held(const ctm_rebind::Layout &lay, const uint8_t *d, si
                              int button)
 {
     switch (button) {
-        case kGateNone:       return false;   // nothing to hold: never open
-        case kGateTouchTouch: return ctm_rebind::touch_finger_down(lay, d, len, 0);
-        case kGateTouchPress: return ctm_rebind::touch_pressed(lay, d, len);
+        case kGateNone: return false;   // nothing to hold: never open
+        case kGateTouch:
+        case kGateTouchPress:
+        case kGateTouch1Only:
+        case kGateTouch1OnlyPress:
+        case kGateTouch2Only:
+        case kGateTouch2OnlyPress: {
+            const TouchStated c = touch_stated(lay, d, len);
+            bool fingers = false;
+            switch (button) {
+                case kGateTouch:
+                case kGateTouchPress:
+                    fingers = c.down >= 1;
+                    break;
+                case kGateTouch1Only:
+                case kGateTouch1OnlyPress:
+                    // ⓘ Exactly one: one down AND the other stated up, so a report
+                    // that only mentions one contact does not pass as "only one".
+                    fingers = (c.down == 1 && c.up == 1);
+                    break;
+                default:
+                    // Exactly two, which is also the hardware maximum.
+                    fingers = (c.down == 2);
+                    break;
+            }
+            const bool wantsPress = (button == kGateTouchPress ||
+                                     button == kGateTouch1OnlyPress ||
+                                     button == kGateTouch2OnlyPress);
+            if (!wantsPress) return fingers;
+            return fingers && ctm_rebind::touch_pressed(lay, d, len);
+        }
+        case kGateClickOnly: return ctm_rebind::touch_pressed(lay, d, len);
         default: break;
     }
     // ⛔⛔ THE TRIGGERS ARE NOT is_pressed(), AND THE DIFFERENCE ONLY SHOWS ON A
@@ -164,14 +237,32 @@ inline bool gate_button_released(const ctm_rebind::Layout &lay, const uint8_t *d
         case kGateNone:
             // Nothing to hold, so nothing is ever holding it. This IS "always".
             return true;
-        case kGateTouchTouch:
+        case kGateTouch:
+        case kGateTouch1Only:
+        case kGateTouch2Only: {
             // ⓘ A pad with no touchpad states nothing either way, so answer for
             // it: there is no finger on a touchpad it does not have.
             if (!lay.touch.present) return true;
-            return ctm_rebind::touch_finger_up(lay, d, len, 0);
+            const TouchStated c = touch_stated(lay, d, len);
+            // ⛔ The report has to have answered for BOTH contacts before the
+            // gesture can be called released. Otherwise a packet that mentions
+            // one finger would read as "not two fingers" and open a gate that
+            // should have stayed where it was.
+            if (!c.both()) return false;
+            if (button == kGateTouch) return c.down == 0;
+            if (button == kGateTouch1Only) return c.down != 1;
+            return c.down != 2;
+        }
         case kGateTouchPress:
+        case kGateTouch1OnlyPress:
+        case kGateTouch2OnlyPress:
+        case kGateClickOnly:
             if (!lay.touch.present) return true;
-            return !ctm_rebind::touch_pressed(lay, d, len);
+            // ⭐ The PRESS is a bit, stated either way by any report long enough
+            // to hold it, and it is the binding half of these three: with no
+            // press there is no gesture, whatever the fingers are doing. So the
+            // counting care above buys nothing here.
+            return !gate_button_held(lay, d, len, button);
         default: break;
     }
     if (button == ctm_rebind::kBtnL2 || button == ctm_rebind::kBtnR2) {
@@ -210,9 +301,17 @@ inline int parse_gate_button(const std::string &raw)
     const std::string v = gate_lower(raw);
     if (v.empty()) return kGateNone;
 
-    // The two that are not buttons at all.
-    if (v == "touchpad" || v == "touch") return kGateTouchTouch;
-    if (v == "touchpad_click" || v == "click" || v == "touchpad_press") return kGateTouchPress;
+    // The ones that are not buttons at all.
+    // ⓘ `touchpad` and `touch` are the older spellings of plain touch, which is
+    // what they have always meant, so they land on it rather than needing care.
+    if (v == "touchpad_touch" || v == "touchpad" || v == "touch") return kGateTouch;
+    if (v == "touchpad_touch_press") return kGateTouchPress;
+    if (v == "touchpad_only_1_touch") return kGateTouch1Only;
+    if (v == "touchpad_only_1_touch_press") return kGateTouch1OnlyPress;
+    if (v == "touchpad_only_2_touch") return kGateTouch2Only;
+    if (v == "touchpad_only_2_touch_press") return kGateTouch2OnlyPress;
+    // ⛔ A press with no finger requirement: not offered, still read.
+    if (v == "touchpad_click" || v == "click" || v == "touchpad_press") return kGateClickOnly;
 
     struct Named { const char *name; int index; };
     static const Named kNamed[] = {
@@ -292,7 +391,7 @@ inline Gate parse_gate(const std::string &raw)
     // ⓘ "trigger" is an old spelling of "always"; the steady stopped being a
     // gate on 2026-09-11 and became a check that runs for every gate.
     if (v == "always" || v == "trigger") return gate_always();
-    if (v == "!touchpad" || v == "not_touchpad") return gate_until(kGateTouchTouch);
+    if (v == "!touchpad" || v == "not_touchpad") return gate_until(kGateTouch);
     const int b = parse_gate_button(v);
     if (b == kGateNone) return gate_off();   // unknown value is off, never an error
     return gate_while(b);

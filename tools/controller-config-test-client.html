@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.14 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.16 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,19 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.16 Six touchpad choices, not four (rhoquinn8217): a finger on
+            the pad at all, ONLY one finger, or ONLY two -- each either
+            resting or with the pad pressed in. The four skipped the plain
+            "any finger" case, which is what the old "touchpad" value
+            meant, so the list could not say the thing it replaced.
+    2.66.15 The gyro gate's touchpad choices are four, not two
+            (rhoquinn8217): one or two fingers resting on the pad, and one
+            or two fingers with it pressed in. A finger resting and a
+            finger pressing are different gestures, and so are one finger
+            and two -- a DS4 and a DualSense both report two contacts. The
+            older "touchpad_click", a press with no finger requirement, is
+            no longer offered but is still read, so a config that names it
+            still means what it meant.
     2.66.14 The gate type reads "on button release -- always on", and the
             button row's blank is plain "no button set" (rhoquinn8217).
             The hint about what no button MEANS moved off the button row
@@ -2699,8 +2712,16 @@ var GATE_BUTTON_INDEX = {
 // out of the touch report bytes -- so these two have no rebind_<index> to
 // borrow a name from and carry their own.
 var GATE_BUTTON_EXTRA = {
-  touchpad: 'touchpad — a finger resting on it',
-  touchpad_click: 'touchpad — pressed in'
+  touchpad_touch: 'touchpad — touch',
+  touchpad_touch_press: 'touchpad — touch press',
+  touchpad_only_1_touch: 'touchpad — only 1 finger touch',
+  touchpad_only_1_touch_press: 'touchpad — only 1 finger touch press',
+  touchpad_only_2_touch: 'touchpad — only 2 finger touch',
+  touchpad_only_2_touch_press: 'touchpad — only 2 finger touch press',
+  // ⓘ Not offered by the schema any more, but a config written before the six
+  // still holds one of these, and a row showing a raw token reads like a fault.
+  touchpad: 'touchpad — touch',
+  touchpad_click: 'touchpad — pressed in (old)'
 };
 
 // ⭐ rhoquinn8217's wording, 2026-09-20, replacing a longer pair of mine.
