@@ -92,6 +92,7 @@ carry it; upstream's own history is unchanged.
 | 2026-09-20 | trigger_probe is hidden on the settings page. It is a diagnostic whose own help says to leave it off, and it sat in Triggers for everyone. Listed by name rather than renamed to a _debug key, which would have hidden it for free: the key is read in two places in the listener, and anyone with it set in a config file would have lost it silently | `006290a` |
 | 2026-09-20 | A DS4 is still NOT offered the Audio section, after a day spent finding out why it cannot be. The three settings travel to the TV rather than being patched into a DualSense report, so they reach any pad and the section was opened up on that reasoning -- then neither volume moved anything on the pad, and the routing mode neither silenced a connected headset nor started the speaker. Arriving is not acting, so it is hidden again with the finding and an undo list against T-229 | `d68fc4d`, `006290a` |
 | 2026-09-20 | Copy asks for a name before it makes one, the way Rename does: an expanding row opened on the name it would have chosen, editable, with Create and Cancel. Both Copy buttons, because one expanding and one firing instantly is two buttons with the same word behaving differently. ONE row serves both jobs -- a second would have been a dozen more places to keep the guard flag in step, since it gates the d-pad, the plain keys, Escape, Space and the config poll. And the row now closes on a tab change: it used to survive, still pointing at the config from the tab you left, so Save renamed something off screen while the ten-second config poll stayed suppressed | `6f5daa4` |
+| 2026-09-20 | The gyro gate is TWO settings: `gyro_to_mouse_gate_type` says when -- off, on button release, on button hold -- and `gyro_to_mouse_gate_button` says which, from any of the 17 button indices plus six touchpad gestures. The one key before it mixed both questions, so "off" and "always" hid among the buttons and the button list was hand-written: T-235 paid four edits to add R3. The invert IS the type, so "always on" is the type with no button and `!touchpad` becomes "on button release" on the touchpad, which is what "move unless a finger is down" says. Two traps, both pinned by tests: reading the triggers through `is_pressed()` would have passed on an Xbox pad while making a DualSense's L2 a hair trigger, and a draft with four touchpad gestures had no plain "any finger" case, which is what the old `touchpad` value meant. The old key is hidden and still read, proven on three legacy files covering `always`, `L2` and the dead `trigger` alias. `Gate::TriggerHold`, unreachable, is gone | `1d6267e`, `0854cb2`, `5c24bfb`, `a92775f`, merge `f510a3d` |
 
 ## Files changed
 
@@ -102,7 +103,7 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
 ```
  .gitattributes                                |   48 +
  .gitignore                                    |   30 +-
- CHANGES.md                                    |  222 +
+ CHANGES.md                                    |  223 +
  LINK                                          |    0
  README.md                                     |   18 +
  app/ctm-usbip-tests.vcxproj                   |  108 +
@@ -134,9 +135,9 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  src/app/device_type.inl                       |   70 +
  src/app/nickname.inl                          |   90 +
  src/app/open_ui.inl                           |  489 ++
- src/app/overlay_window.inl                    | 1995 +++++++
+ src/app/overlay_window.inl                    | 1995 ++++++
  src/app/rest.inl                              |  760 +++
- src/app/rest_config.inl                       | 1128 ++++
+ src/app/rest_config.inl                       | 1130 ++++
  src/app/rest_config_sessions.inl              |  204 +
  src/app/rest_sessions.inl                     |   33 +
  src/app/same_controller.inl                   |   38 +
@@ -157,7 +158,7 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  src/backend/bridge.inl                        |  256 +-
  src/backend/bridge_enet.inl                   |   35 +-
  src/backend/bt.inl                            |   16 +-
- src/config/config_presets.inl                 |  439 ++
+ src/config/config_presets.inl                 |  447 ++
  src/config/config_store.inl                   |  820 +++
  src/config/config_watcher.inl                 |  170 +
  src/config/device_config.inl                  |  218 +
@@ -167,7 +168,7 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  src/input/gyro_calibration.inl                |  168 +
  src/input/gyro_calibration_fetch.inl          |   99 +
  src/input/gyro_hold.inl                       |   48 +
- src/input/gyro_mouse.inl                      |  794 +++
+ src/input/gyro_mouse.inl                      | 1053 ++++
  src/input/keyboard_device.inl                 |  301 +
  src/input/mic_report.inl                      |   41 +
  src/input/mouse_device.inl                    |  304 +
@@ -187,11 +188,11 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  src/usbip/server.inl                          |   55 +-
  tests/button_layout_test.cpp                  |  953 +++
  tests/capped_log_test.cpp                     |  140 +
- tests/config_store_test.cpp                   |  862 +++
+ tests/config_store_test.cpp                   |  895 +++
  tests/device_capabilities_test.cpp            |   75 +
  tests/device_config_test.cpp                  |  521 ++
  tests/device_type_test.cpp                    |   89 +
- tests/gyro_mouse_test.cpp                     |  470 ++
+ tests/gyro_mouse_test.cpp                     |  688 +++
  tests/harness.h                               |   55 +
  tests/host_audio_settings_test.cpp            |  125 +
  tests/iso_in_pacing_test.cpp                  |  118 +
@@ -206,18 +207,18 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  tests/same_controller_test.cpp                |   49 +
  tests/same_device_test.cpp                    |   95 +
  tests/schema_json_test.cpp                    |  158 +
- tests/stick_mouse_test.cpp                    |  710 +++
+ tests/stick_mouse_test.cpp                    |  715 +++
  tests/tests_main.cpp                          |  117 +
- tests/touch_mouse_test.cpp                    |  664 +++
+ tests/touch_mouse_test.cpp                    |  669 ++
  tests/trigger_click_test.cpp                  |  835 +++
  tests/trigger_effect_test.cpp                 |  529 ++
  tests/units.h                                 |   54 +
- tools/controller-config-test-client.html      | 7934 +++++++++++++++++++++++++
+ tools/controller-config-test-client.html      | 8053 +++++++++++++++++++++++++
  tools/device-config-panel-edge.bat            |    9 +
  tools/device-config-panel-edge.ps1            |  327 +
  tools/device-config-panel.bat                 |    4 +
  tools/device-config-panel.ps1                 |  303 +
  tools/osk-mockups.py                          |  103 +
  tools/start-ctm-usbip.bat                     |   67 +
- 119 files changed, 37009 insertions(+), 145 deletions(-)
+ 119 files changed, 37659 insertions(+), 145 deletions(-)
 ```
