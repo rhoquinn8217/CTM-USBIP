@@ -106,6 +106,11 @@ namespace {
 
 enum class Gate { Off, Always, L2, R2, L1, R1, Touchpad, NotTouchpad, TouchpadClick, PS };
 
+// ⓘ T-241 renamed the real one's "always" to a call, because a gate is a pair
+// now. The double keeps its enum -- it is a stand-in, not the thing -- and
+// answers to the same name so the callers under test compile unchanged.
+inline Gate gate_always() { return Gate::Always; }
+
 inline Gate parse_gate(const std::string &raw)
 {
     if (raw == "always") return Gate::Always;
