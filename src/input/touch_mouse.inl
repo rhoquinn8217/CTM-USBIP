@@ -148,7 +148,7 @@ inline void step(const void *deviceKey, const std::string &section,
     // here means "no extra condition", never "disabled".
     const std::string gateRaw = device_config_str(section.c_str(), "touchpad_to_mouse_gate");
     const ctm_gyro_mouse::Gate gate =
-        gateRaw.empty() ? ctm_gyro_mouse::Gate::Always : ctm_gyro_mouse::parse_gate(gateRaw);
+        gateRaw.empty() ? ctm_gyro_mouse::gate_always() : ctm_gyro_mouse::parse_gate(gateRaw);
 
     const bool cursorOn = device_config_bool(section.c_str(), "touchpad_to_mouse", false);
     // ⭐⭐ HOW MANY FINGERS SCROLL: 0 off, 1 one finger, 2 two fingers

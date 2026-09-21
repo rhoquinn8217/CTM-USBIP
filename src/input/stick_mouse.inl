@@ -231,7 +231,7 @@ inline void step(const void *deviceKey, const std::string &section,
     const std::string gateRaw = device_config_str(
         section.c_str(), which == Which::Left ? "left_stick_gate" : "right_stick_gate");
     const ctm_gyro_mouse::Gate gate =
-        gateRaw.empty() ? ctm_gyro_mouse::Gate::Always : ctm_gyro_mouse::parse_gate(gateRaw);
+        gateRaw.empty() ? ctm_gyro_mouse::gate_always() : ctm_gyro_mouse::parse_gate(gateRaw);
 
     std::lock_guard<std::mutex> lock(g_stickMutex);
     StickState &st = g_sticks[deviceKey];
@@ -365,7 +365,7 @@ inline void scroll_step(const void *deviceKey, const std::string &section,
     const std::string gateRaw = device_config_str(
         section.c_str(), which == Which::Left ? "left_stick_gate" : "right_stick_gate");
     const ctm_gyro_mouse::Gate gate =
-        gateRaw.empty() ? ctm_gyro_mouse::Gate::Always : ctm_gyro_mouse::parse_gate(gateRaw);
+        gateRaw.empty() ? ctm_gyro_mouse::gate_always() : ctm_gyro_mouse::parse_gate(gateRaw);
 
     std::lock_guard<std::mutex> lock(g_stickMutex);
     StickState &st = g_sticks[deviceKey];

@@ -163,26 +163,231 @@ std::vector<uint8_t> make_report(int16_t yaw, int16_t pitch, uint8_t l2 = 0)
 int run_gyro_mouse_tests()
 {
     section("gyro-mouse: gate parsing");
-    CTM_CHECK(parse_gate("L2") == Gate::L2);
-    CTM_CHECK(parse_gate("l2") == Gate::L2);
-    CTM_CHECK(parse_gate("always") == Gate::Always);
-    CTM_CHECK(parse_gate("!touchpad") == Gate::NotTouchpad);
-    CTM_CHECK(parse_gate("touchpad_click") == Gate::TouchpadClick);
-    CTM_CHECK(parse_gate("PS") == Gate::PS);
+    CTM_CHECK(parse_gate("L2") == gate_while(ctm_rebind::kBtnL2));
+    CTM_CHECK(parse_gate("l2") == gate_while(ctm_rebind::kBtnL2));
+    CTM_CHECK(parse_gate("always") == gate_always());
+    CTM_CHECK(parse_gate("!touchpad") == gate_until(kGateTouch));
+    CTM_CHECK(parse_gate("touchpad_click") == gate_while(kGateClickOnly));
+    CTM_CHECK(parse_gate("PS") == gate_while(ctm_rebind::kBtnHome));
     // T-235: R3, the right stick pressed in.
-    CTM_CHECK(parse_gate("R3") == Gate::R3);
-    CTM_CHECK(parse_gate("r3") == Gate::R3);
-    CTM_CHECK(parse_gate("garbage") == Gate::Off);   // unknown -> off, never error
-    CTM_CHECK(parse_gate("") == Gate::Off);
+    CTM_CHECK(parse_gate("R3") == gate_while(ctm_rebind::kBtnR3));
+    CTM_CHECK(parse_gate("r3") == gate_while(ctm_rebind::kBtnR3));
+    CTM_CHECK(parse_gate("garbage") == gate_off());   // unknown -> off, never error
+    CTM_CHECK(parse_gate("") == gate_off());
+
+    section("gyro-mouse: T-241, every old gate value maps onto the pair");
+    {
+        // ⭐⭐ THIS IS THE MIGRATION, AND IT IS THE WHOLE RISK OF THE TICKET.
+        // Four presets write the old key and every config made from them carries
+        // it; the parser treats an unknown value as OFF, so a value that stopped
+        // mapping would not fail here -- it would silently disable someone's
+        // gyro. Each of the eleven is pinned.
+        CTM_CHECK(parse_gate("")               == gate_off());
+        CTM_CHECK(parse_gate("always")         == gate_always());
+        CTM_CHECK(parse_gate("trigger")        == gate_always());
+        CTM_CHECK(parse_gate("L2")             == gate_while(ctm_rebind::kBtnL2));
+        CTM_CHECK(parse_gate("R2")             == gate_while(ctm_rebind::kBtnR2));
+        CTM_CHECK(parse_gate("L1")             == gate_while(ctm_rebind::kBtnL1));
+        CTM_CHECK(parse_gate("R1")             == gate_while(ctm_rebind::kBtnR1));
+        CTM_CHECK(parse_gate("R3")             == gate_while(ctm_rebind::kBtnR3));
+        CTM_CHECK(parse_gate("PS")             == gate_while(ctm_rebind::kBtnHome));
+        CTM_CHECK(parse_gate("touchpad")       == gate_while(kGateTouch));
+        CTM_CHECK(parse_gate("touchpad_click") == gate_while(kGateClickOnly));
+        // ⭐ The one worth reading twice: "move unless a finger is down" IS
+        // "always on until you hold it", with the touchpad as the button. The
+        // value that fit nowhere in the old shape is the one that shows the new
+        // shape is right.
+        CTM_CHECK(parse_gate("!touchpad")      == gate_until(kGateTouch));
+        CTM_CHECK(parse_gate("not_touchpad")   == gate_until(kGateTouch));
+    }
+
+    section("gyro-mouse: T-241, the pair parses and blank still means off");
+    {
+        CTM_CHECK(parse_gate_pair("while_held", "r3") == gate_while(ctm_rebind::kBtnR3));
+        CTM_CHECK(parse_gate_pair("until_held", "l2") == gate_until(ctm_rebind::kBtnL2));
+        // ⭐ "Always on" is the type with no button: a gate nothing can close.
+        CTM_CHECK(parse_gate_pair("until_held", "")   == gate_always());
+        // ⚠️ A blank TYPE is off, because the gate is the only on/off this
+        // feature has. A third type would have been a second way to say it.
+        CTM_CHECK(parse_gate_pair("", "r3")           == gate_off());
+        CTM_CHECK(parse_gate_pair("garbage", "r3")    == gate_off());
+        // ⓘ The words the PAGE shows parse too, so a config typed by hand to
+        // match what is on screen is not silently off (rhoquinn8217's wording).
+        CTM_CHECK(parse_gate_pair("on button hold", "r3")    == gate_while(ctm_rebind::kBtnR3));
+        CTM_CHECK(parse_gate_pair("on button release", "r3") == gate_until(ctm_rebind::kBtnR3));
+        CTM_CHECK(parse_gate_pair("ON BUTTON HOLD", "r3")    == gate_while(ctm_rebind::kBtnR3));
+        // ⓘ And while_held with no button is a gate nothing can open, which is
+        // off in effect -- it needs no special case.
+        auto r = make_report(0, 0, 0);
+        CTM_CHECK(!gate_open(parse_gate_pair("while_held", ""), r.data(), r.size()));
+    }
+
+    section("gyro-mouse: T-241, ANY button gates it now, not a chosen few");
+    {
+        // ⛔ The point of the ticket. Every one of these was impossible before:
+        // the enum named eleven values and adding R3 to it cost four edits.
+        CTM_CHECK(parse_gate_button("face_down")  == ctm_rebind::kBtnFaceDown);
+        CTM_CHECK(parse_gate_button("cross")      == ctm_rebind::kBtnFaceDown);
+        CTM_CHECK(parse_gate_button("a")          == ctm_rebind::kBtnFaceDown);
+        CTM_CHECK(parse_gate_button("dpad_left")  == ctm_rebind::kBtnDpadLeft);
+        CTM_CHECK(parse_gate_button("select")     == ctm_rebind::kBtnSelect);
+        CTM_CHECK(parse_gate_button("l3")         == ctm_rebind::kBtnL3);
+        // ⓘ Both pads' names for one button, because both get typed.
+        CTM_CHECK(parse_gate_button("lb")         == parse_gate_button("l1"));
+        CTM_CHECK(parse_gate_button("guide")      == parse_gate_button("ps"));
+        // ⓘ A bare index, so the table can grow without this list growing too.
+        CTM_CHECK(parse_gate_button("11")         == ctm_rebind::kBtnR3);
+        // ⓘ Unrecognised is "no button", never an error.
+        CTM_CHECK(parse_gate_button("garbage")    == kGateNone);
+        CTM_CHECK(parse_gate_button("99")         == kGateNone);
+        CTM_CHECK(parse_gate_button("")           == kGateNone);
+        // ⓘ A face button gating it END TO END is checked further down, in the
+        // DS4 section, where a real DS4 report is in hand.
+    }
+
+    section("gyro-mouse: T-241, until_held is the inverse of while_held");
+    {
+        auto pulled = make_report(0, 0, /*l2*/ 40);
+        auto rest   = make_report(0, 0, /*l2*/ 0);
+        CTM_CHECK(gate_open(gate_while(ctm_rebind::kBtnL2), pulled.data(), pulled.size()));
+        CTM_CHECK(!gate_open(gate_until(ctm_rebind::kBtnL2), pulled.data(), pulled.size()));
+        CTM_CHECK(!gate_open(gate_while(ctm_rebind::kBtnL2), rest.data(), rest.size()));
+        CTM_CHECK(gate_open(gate_until(ctm_rebind::kBtnL2), rest.data(), rest.size()));
+    }
+
+    section("gyro-mouse: T-241, the triggers keep their 12% travel, not a bit");
+    {
+        // ⛔⛔ THE TRAP THIS TICKET COULD HAVE WALKED INTO. is_pressed() reads
+        // whatever the layout says a spot is: an Xbox pad has no trigger BIT so
+        // its spot IS the travel and the two agree exactly, while a DualSense
+        // reports a bit that sets far lighter than 12%. Routing the triggers
+        // through is_pressed() would have compiled, passed on an Xbox pad, and
+        // turned gyro-to-mouse-on-L2-aiming into a hair trigger on the pad it
+        // was written for.
+        auto light = make_report(0, 0, /*l2*/ 20);   // pulled, but under 12%
+        auto firm  = make_report(0, 0, /*l2*/ 40);   // past it
+        CTM_CHECK(!gate_open(gate_while(ctm_rebind::kBtnL2), light.data(), light.size()));
+        CTM_CHECK(gate_open(gate_while(ctm_rebind::kBtnL2), firm.data(), firm.size()));
+        // ⓘ And the threshold is one constant, so the gate and a binding agree.
+        CTM_CHECK(ctm_rebind::kTriggerPulledTravel > 20);
+        CTM_CHECK(ctm_rebind::kTriggerPulledTravel <= 40);
+    }
+
+    section("gyro-mouse: T-241, a pad with no touchpad is RELEASED, not unknown");
+    {
+        // ⛔ The 2026-09-15 rule, carried across intact: held and released are
+        // both things a report has to STATE, so until_held cannot be written as
+        // !held. A pad with no touchpad has no finger on it, so a gyro gated
+        // "until you touch the pad" has to MOVE there.
+        std::vector<uint8_t> xbox(48, 0);
+        xbox[0] = 0x20;
+        CTM_CHECK(gate_open(gate_until(kGateTouch),
+                            ctm_rebind::kXboxLayout, xbox.data(), xbox.size()));
+        CTM_CHECK(!gate_open(gate_while(kGateTouch),
+                             ctm_rebind::kXboxLayout, xbox.data(), xbox.size()));
+        // ⓘ The touchpad PRESS follows the same rule on a pad without one.
+        CTM_CHECK(gate_open(gate_until(kGateTouchPress),
+                            ctm_rebind::kXboxLayout, xbox.data(), xbox.size()));
+        CTM_CHECK(!gate_open(gate_while(kGateTouchPress),
+                             ctm_rebind::kXboxLayout, xbox.data(), xbox.size()));
+    }
+
+    section("gyro-mouse: T-241, the touchpad's six gestures");
+    {
+        // ⭐ A DualSense states each contact in one byte, bit 0x80 SET meaning
+        // NO finger. make_report zeroes the report, so both contacts read DOWN
+        // -- which makes "two fingers" the starting position here, not "none".
+        const int kF1 = 33, kF2 = 37, kClick = 10;
+        const uint8_t kClickBit = 0x02;
+
+        // ---- two fingers, not pressed --------------------------------------
+        {
+            auto r = make_report(0, 0, 0);
+            CTM_CHECK(gate_open(gate_while(kGateTouch), r.data(), r.size()));
+            CTM_CHECK(gate_open(gate_while(kGateTouch2Only), r.data(), r.size()));
+            // ⛔ "Only one" must REJECT two. This is the case the four-option
+            // draft could not express, and the reason there are six.
+            CTM_CHECK(!gate_open(gate_while(kGateTouch1Only), r.data(), r.size()));
+            // Nothing is pressed, so no press gesture fires.
+            CTM_CHECK(!gate_open(gate_while(kGateTouchPress), r.data(), r.size()));
+            CTM_CHECK(!gate_open(gate_while(kGateTouch2OnlyPress), r.data(), r.size()));
+        }
+
+        // ---- exactly one finger ------------------------------------------
+        {
+            auto r = make_report(0, 0, 0);
+            r[kF2] = 0x80;                       // second contact states NO finger
+            CTM_CHECK(gate_open(gate_while(kGateTouch), r.data(), r.size()));
+            CTM_CHECK(gate_open(gate_while(kGateTouch1Only), r.data(), r.size()));
+            CTM_CHECK(!gate_open(gate_while(kGateTouch2Only), r.data(), r.size()));
+        }
+
+        // ---- no fingers ---------------------------------------------------
+        {
+            auto r = make_report(0, 0, 0);
+            r[kF1] = 0x80;
+            r[kF2] = 0x80;
+            CTM_CHECK(!gate_open(gate_while(kGateTouch), r.data(), r.size()));
+            CTM_CHECK(!gate_open(gate_while(kGateTouch1Only), r.data(), r.size()));
+            CTM_CHECK(!gate_open(gate_while(kGateTouch2Only), r.data(), r.size()));
+            // ⭐ And "until held" is open exactly when "while held" is shut, once
+            // the report has answered for both contacts.
+            CTM_CHECK(gate_open(gate_until(kGateTouch), r.data(), r.size()));
+            CTM_CHECK(gate_open(gate_until(kGateTouch1Only), r.data(), r.size()));
+            CTM_CHECK(gate_open(gate_until(kGateTouch2Only), r.data(), r.size()));
+        }
+
+        // ---- the press half ------------------------------------------------
+        {
+            auto r = make_report(0, 0, 0);
+            r[kClick] = kClickBit;               // pad pressed in, two fingers on it
+            CTM_CHECK(gate_open(gate_while(kGateTouchPress), r.data(), r.size()));
+            CTM_CHECK(gate_open(gate_while(kGateTouch2OnlyPress), r.data(), r.size()));
+            CTM_CHECK(!gate_open(gate_while(kGateTouch1OnlyPress), r.data(), r.size()));
+            // ⓘ A press with one finger fires the one-finger press, not the two.
+            r[kF2] = 0x80;
+            CTM_CHECK(gate_open(gate_while(kGateTouch1OnlyPress), r.data(), r.size()));
+            CTM_CHECK(!gate_open(gate_while(kGateTouch2OnlyPress), r.data(), r.size()));
+            CTM_CHECK(gate_open(gate_while(kGateTouchPress), r.data(), r.size()));
+            // ⛔ A press with NO finger fires the legacy click and none of the
+            // six, which is why the legacy value could not be folded into them.
+            r[kF1] = 0x80;
+            CTM_CHECK(gate_open(gate_while(kGateClickOnly), r.data(), r.size()));
+            CTM_CHECK(!gate_open(gate_while(kGateTouchPress), r.data(), r.size()));
+            CTM_CHECK(!gate_open(gate_while(kGateTouch1OnlyPress), r.data(), r.size()));
+        }
+    }
+
+    section("gyro-mouse: T-241, the six parse, and the old spellings still land");
+    {
+        CTM_CHECK(parse_gate_button("touchpad_touch")              == kGateTouch);
+        CTM_CHECK(parse_gate_button("touchpad_touch_press")        == kGateTouchPress);
+        CTM_CHECK(parse_gate_button("touchpad_only_1_touch")       == kGateTouch1Only);
+        CTM_CHECK(parse_gate_button("touchpad_only_1_touch_press") == kGateTouch1OnlyPress);
+        CTM_CHECK(parse_gate_button("touchpad_only_2_touch")       == kGateTouch2Only);
+        CTM_CHECK(parse_gate_button("touchpad_only_2_touch_press") == kGateTouch2OnlyPress);
+        // ⛔ THE MIGRATION. `touchpad` meant "a finger on it", so it lands on
+        // plain touch and NOT on the one-finger gesture -- which would have
+        // quietly added "and not a second finger" to every config holding it.
+        CTM_CHECK(parse_gate_button("touchpad")       == kGateTouch);
+        CTM_CHECK(parse_gate_button("touch")          == kGateTouch);
+        // ⛔ And `touchpad_click` meant "pressed in", with no finger condition.
+        CTM_CHECK(parse_gate_button("touchpad_click") == kGateClickOnly);
+        CTM_CHECK(parse_gate_button("click")          == kGateClickOnly);
+        // ⓘ So the two old spellings stay distinguishable from the new pair
+        // that looks closest to them.
+        CTM_CHECK(parse_gate_button("touchpad_click") != parse_gate_button("touchpad_touch_press"));
+        CTM_CHECK(parse_gate_button("touchpad")       != parse_gate_button("touchpad_only_1_touch"));
+    }
 
     section("gyro-mouse: gate evaluation");
     {
         auto r = make_report(0, 0, /*l2*/ 40);
-        CTM_CHECK(gate_open(Gate::L2, r.data(), r.size()));
-        CTM_CHECK(gate_open(Gate::Always, r.data(), r.size()));
-        CTM_CHECK(!gate_open(Gate::Off, r.data(), r.size()));
+        CTM_CHECK(gate_open(gate_while(ctm_rebind::kBtnL2), r.data(), r.size()));
+        CTM_CHECK(gate_open(gate_always(), r.data(), r.size()));
+        CTM_CHECK(!gate_open(gate_off(), r.data(), r.size()));
         r[5] = 10;                                    // below ~12% threshold
-        CTM_CHECK(!gate_open(Gate::L2, r.data(), r.size()));
+        CTM_CHECK(!gate_open(gate_while(ctm_rebind::kBtnL2), r.data(), r.size()));
     }
 
     section("gyro-mouse: R3 gates the gyro (T-235)");
@@ -190,16 +395,16 @@ int run_gyro_mouse_tests()
         // The right stick pressed in, so the pad can be put down or played
         // with normally without the cursor wandering.
         auto r = make_report(0, 0, 0);
-        CTM_CHECK(!gate_open(Gate::R3, r.data(), r.size()));
+        CTM_CHECK(!gate_open(gate_while(ctm_rebind::kBtnR3), r.data(), r.size()));
         r[9] |= 0x80;                       // R3's spot in the DualSense table
-        CTM_CHECK(gate_open(Gate::R3, r.data(), r.size()));
+        CTM_CHECK(gate_open(gate_while(ctm_rebind::kBtnR3), r.data(), r.size()));
         // And it is its own gate: releasing closes it again.
         r[9] &= static_cast<uint8_t>(~0x80);
-        CTM_CHECK(!gate_open(Gate::R3, r.data(), r.size()));
+        CTM_CHECK(!gate_open(gate_while(ctm_rebind::kBtnR3), r.data(), r.size()));
         // A different button must not open it -- L3 sits beside R3 in the same
         // byte, which is exactly the mistake a wrong mask would make.
         r[9] |= 0x40;                       // L3
-        CTM_CHECK(!gate_open(Gate::R3, r.data(), r.size()));
+        CTM_CHECK(!gate_open(gate_while(ctm_rebind::kBtnR3), r.data(), r.size()));
     }
 
     section("gyro-mouse: the steady is no longer a gate value");
@@ -210,10 +415,13 @@ int run_gyro_mouse_tests()
         //
         auto r = make_report(0, 0, /*l2*/ 40);
         // No hold in play, so every gate answers on its own terms.
-        CTM_CHECK(gate_open(Gate::L2, r.data(), r.size()));
-        CTM_CHECK(gate_open(Gate::Always, r.data(), r.size()));
+        CTM_CHECK(gate_open(gate_while(ctm_rebind::kBtnL2), r.data(), r.size()));
+        CTM_CHECK(gate_open(gate_always(), r.data(), r.size()));
         // ⓘ And the old value is now exactly Always rather than a special case.
-        CTM_CHECK(gate_open(Gate::TriggerHold, r.data(), r.size()));
+        // ⓘ T-241: "trigger" was an old spelling of "always" and the enum
+        // value behind it was unreachable -- "trigger" is caught eight lines
+        // earlier in the parser. It parses, and it is open.
+        CTM_CHECK(gate_open(parse_gate("trigger"), r.data(), r.size()));
     }
 
     section("gyro-mouse: a trigger's hold closes every gate, for its own pad only");
@@ -226,20 +434,20 @@ int run_gyro_mouse_tests()
         auto r = make_report(0, 0, /*l2*/ 40);
         int padA = 0, padB = 0;
         set_gyro_hold(&padA, true);
-        CTM_CHECK(!gate_open(Gate::Always, r.data(), r.size(), &padA));
-        CTM_CHECK(!gate_open(Gate::L2, r.data(), r.size(), &padA));
+        CTM_CHECK(!gate_open(gate_always(), r.data(), r.size(), &padA));
+        CTM_CHECK(!gate_open(gate_while(ctm_rebind::kBtnL2), r.data(), r.size(), &padA));
         // ⚠️ Another pad's cursor is not held by A's trigger.
-        CTM_CHECK(gate_open(Gate::Always, r.data(), r.size(), &padB));
+        CTM_CHECK(gate_open(gate_always(), r.data(), r.size(), &padB));
         // ⓘ No pad in play (the recenter check) is never held.
-        CTM_CHECK(gate_open(Gate::Always, r.data(), r.size()));
+        CTM_CHECK(gate_open(gate_always(), r.data(), r.size()));
         set_gyro_hold(&padA, false);
-        CTM_CHECK(gate_open(Gate::Always, r.data(), r.size(), &padA));
+        CTM_CHECK(gate_open(gate_always(), r.data(), r.size(), &padA));
     }
 
     section("gyro-mouse: \"trigger\" still parses, as always");
     // ⓘ Configs written before 2026-09-11 carry it; it was never a gate, and
     // now it is spelled what it always meant.
-    CTM_CHECK(parse_gate("trigger") == Gate::Always);
+    CTM_CHECK(parse_gate("trigger") == gate_always());
 
     section("gyro-mouse: gate off is inert");
     {
@@ -356,23 +564,23 @@ int run_gyro_mouse_tests()
         // DualSense offsets PS is [10] 0x01, which on a DS4 is a timestamp that
         // changes on most reports -- so recenter fired over and over.
         auto r = ds4_report(0, 0);
-        CTM_CHECK(!gate_open(Gate::PS, ctm_rebind::kDs4Layout, r.data(), r.size()));
-        CTM_CHECK(gate_open(Gate::PS, ctm_rebind::kDs5Layout, r.data(), r.size()));
+        CTM_CHECK(!gate_open(gate_while(ctm_rebind::kBtnHome), ctm_rebind::kDs4Layout, r.data(), r.size()));
+        CTM_CHECK(gate_open(gate_while(ctm_rebind::kBtnHome), ctm_rebind::kDs5Layout, r.data(), r.size()));
         r[7] = static_cast<uint8_t>(r[7] | 0x01);
-        CTM_CHECK(gate_open(Gate::PS, ctm_rebind::kDs4Layout, r.data(), r.size()));
+        CTM_CHECK(gate_open(gate_while(ctm_rebind::kBtnHome), ctm_rebind::kDs4Layout, r.data(), r.size()));
     }
 
     section("gyro-mouse: a DS4's touchpad gates read its fingers, not the packet count");
     {
         auto r = ds4_report(0, 0);
-        CTM_CHECK(!gate_open(Gate::Touchpad, ctm_rebind::kDs4Layout, r.data(), r.size()));
-        CTM_CHECK(gate_open(Gate::NotTouchpad, ctm_rebind::kDs4Layout, r.data(), r.size()));
+        CTM_CHECK(!gate_open(gate_while(kGateTouch), ctm_rebind::kDs4Layout, r.data(), r.size()));
+        CTM_CHECK(gate_open(gate_until(kGateTouch), ctm_rebind::kDs4Layout, r.data(), r.size()));
         // At DualSense offsets the count 0x01 reads as a finger that never lifts.
-        CTM_CHECK(gate_open(Gate::Touchpad, ctm_rebind::kDs5Layout, r.data(), r.size()));
+        CTM_CHECK(gate_open(gate_while(kGateTouch), ctm_rebind::kDs5Layout, r.data(), r.size()));
         r[35] = 0x05;                                 // a real finger down
-        CTM_CHECK(gate_open(Gate::Touchpad, ctm_rebind::kDs4Layout, r.data(), r.size()));
+        CTM_CHECK(gate_open(gate_while(kGateTouch), ctm_rebind::kDs4Layout, r.data(), r.size()));
         r[7] = static_cast<uint8_t>(r[7] | 0x02);     // and the pad pressed in
-        CTM_CHECK(gate_open(Gate::TouchpadClick, ctm_rebind::kDs4Layout, r.data(), r.size()));
+        CTM_CHECK(gate_open(gate_while(kGateTouchPress), ctm_rebind::kDs4Layout, r.data(), r.size()));
     }
 
     section("gyro-mouse: \"move unless a finger is down\" is open on a pad with no touchpad");
@@ -383,26 +591,36 @@ int run_gyro_mouse_tests()
         // on a pad with no touchpad, so the gate is open there.
         std::vector<uint8_t> xbox(48, 0);
         xbox[0] = 0x20;
-        CTM_CHECK(gate_open(Gate::NotTouchpad, ctm_rebind::kXboxLayout, xbox.data(), xbox.size()));
+        CTM_CHECK(gate_open(gate_until(kGateTouch), ctm_rebind::kXboxLayout, xbox.data(), xbox.size()));
         // ⓘ The gates that need a touchpad to open stay shut on one without.
-        CTM_CHECK(!gate_open(Gate::Touchpad, ctm_rebind::kXboxLayout, xbox.data(), xbox.size()));
-        CTM_CHECK(!gate_open(Gate::TouchpadClick, ctm_rebind::kXboxLayout, xbox.data(), xbox.size()));
+        CTM_CHECK(!gate_open(gate_while(kGateTouch), ctm_rebind::kXboxLayout, xbox.data(), xbox.size()));
+        CTM_CHECK(!gate_open(gate_while(kGateTouchPress), ctm_rebind::kXboxLayout, xbox.data(), xbox.size()));
         // ⓘ And a pad WITH a touchpad still pauses for a finger.
         auto r = ds4_report(0, 0);
         r[35] = 0x05;
-        CTM_CHECK(!gate_open(Gate::NotTouchpad, ctm_rebind::kDs4Layout, r.data(), r.size()));
+        CTM_CHECK(!gate_open(gate_until(kGateTouch), ctm_rebind::kDs4Layout, r.data(), r.size()));
     }
 
     section("gyro-mouse: a DS4's L2 gate is [8], not a face button");
     {
         auto r = ds4_report(0, 0);
         r[5] = 0x28;                                  // cross held, hat centred
-        CTM_CHECK(!gate_open(Gate::L2, ctm_rebind::kDs4Layout, r.data(), r.size()));
-        CTM_CHECK(gate_open(Gate::L2, ctm_rebind::kDs5Layout, r.data(), r.size()));   // the fault
+        CTM_CHECK(!gate_open(gate_while(ctm_rebind::kBtnL2), ctm_rebind::kDs4Layout, r.data(), r.size()));
+        CTM_CHECK(gate_open(gate_while(ctm_rebind::kBtnL2), ctm_rebind::kDs5Layout, r.data(), r.size()));   // the fault
         r[8] = 40;
-        CTM_CHECK(gate_open(Gate::L2, ctm_rebind::kDs4Layout, r.data(), r.size()));
+        CTM_CHECK(gate_open(gate_while(ctm_rebind::kBtnL2), ctm_rebind::kDs4Layout, r.data(), r.size()));
         r[6] = 0x01;                                  // L1
-        CTM_CHECK(gate_open(Gate::L1, ctm_rebind::kDs4Layout, r.data(), r.size()));
+        CTM_CHECK(gate_open(gate_while(ctm_rebind::kBtnL1), ctm_rebind::kDs4Layout, r.data(), r.size()));
+
+        // ⭐ T-241: and a FACE button gates it now, which no config could say
+        // before -- the old enum named eleven values and cross was not one.
+        CTM_CHECK(gate_open(parse_gate_pair("while_held", "cross"),
+                            ctm_rebind::kDs4Layout, r.data(), r.size()));
+        CTM_CHECK(!gate_open(parse_gate_pair("until_held", "cross"),
+                             ctm_rebind::kDs4Layout, r.data(), r.size()));
+        // ⓘ Both pads' names reach the same button.
+        CTM_CHECK(gate_open(parse_gate_pair("while_held", "a"),
+                            ctm_rebind::kDs4Layout, r.data(), r.size()));
     }
 
     // ---- Calibration: three reports, two field orders ---------------------------

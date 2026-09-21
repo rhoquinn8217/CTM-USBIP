@@ -53,6 +53,8 @@
 #include "gamepadmotion/GamepadMotion.hpp"
 // ⓘ Where each pad keeps what the gates and the motion read. Depends on nothing,
 // so including it here keeps this file compiling in the test binary too.
+#include <cstdlib>
+
 #include "input/button_layout.inl"
 // ⓘ The trigger's hold on this pad's cursor, which gate_open reads. Depends on
 // nothing, so the trigger's tests include the real one too.
@@ -68,65 +70,338 @@ struct MouseDelta {
 
 // ---- Gate ------------------------------------------------------------------
 
-enum class Gate {
-    Off,
-    Always,
-    L2,
-    R2,
-    L1,
-    R1,
-    Touchpad,
-    NotTouchpad,
-    TouchpadClick,
-    PS,
-    // T-235: the right stick pressed in. Nothing new was needed to read it --
-    // kBtnR3 already has a spot in BOTH button tables, the DualSense's and the
-    // generic one -- so this is the same shape as L1 and R1 below.
-    R3,
-    // ⭐ TRIGGER: the gyro moves the cursor EXCEPT while a trigger is being
-    // worked, so a click lands on a cursor that is already still. Unlike every
-    // gate above, this one is not a function of the report bytes -- the trigger
-    // logic owns a small state machine (a press, a double click, a drag are all
-    // different) and simply says whether it wants the cursor held.
-    TriggerHold,
+// ⭐⭐ A GATE IS TWO QUESTIONS, NOT ONE (T-241, 2026-09-20).
+//
+// ⛔ It used to be ONE choice list that mixed them: `"", always, L2, R2, L1,
+// R1, R3, touchpad, !touchpad, touchpad_click, PS`. So "off" and "always" hid
+// among the buttons, and the button list was hand-written -- T-235 had to add
+// R3 to the enum, the parser, gate_open() and the schema before a preset could
+// name it. Every button anyone wanted next cost the same four edits.
+//
+// rhoquinn8217 settled the shape: *"There's only two types. Always on until
+// hold a button. Or on only when you hold a button. The other setting is what
+// button you want to press which could be any button on a controller including
+// triggers, touchpad touchpad press."*
+enum class GateWhen {
+    Off,         // no type chosen
+    WhileHeld,   // the gyro moves only while the button is held
+    UntilHeld,   // the gyro moves, and holding the button stops it
 };
+
+// ⚠️ **OFF IS THE ABSENCE OF A TYPE, NOT A THIRD TYPE.** The gate is the only
+// on/off gyro-to-mouse has -- there is no separate enable, and the caller below
+// returns early on Off -- so a blank type has to keep meaning off, exactly as a
+// blank `gyro_to_mouse_gate` always has. A third entry would be a second way to
+// say the same thing, and the two would drift.
+
+// The button a gate watches: any of the 17 standard indices, plus two of the
+// gate's own. ⛔ The touchpad is NOT in the button table -- a finger and a
+// click are read out of the touch report bytes, not off a spot -- so they
+// cannot be indices, and are numbered clear of the table rather than crammed
+// into it.
+constexpr int kGateNone = -1;
+
+// ⭐⭐ THE TOUCHPAD'S SIX (rhoquinn8217, 2026-09-20). Three questions, each
+// asked with and without the pad pressed in:
+//   - is a finger on it AT ALL
+//   - is there ONLY ONE finger on it
+//   - are there ONLY TWO
+// ⓘ "Touch" and "only one finger touch" are different gestures, and the first
+// draft of this had only the second, which cannot say "any finger".
+// ⓘ Both pads report two contacts, at their own offsets: a DualSense at 33 and
+// 37, a DS4 at 35 and 39. Two is the hardware maximum, so "only two" needs no
+// upper check -- but "only one" does need to know the other is UP.
+constexpr int kGateTouch           = 200;   // a finger on it, either one
+constexpr int kGateTouchPress      = 201;   // a finger on it, and pressed in
+constexpr int kGateTouch1Only      = 202;   // exactly one finger
+constexpr int kGateTouch1OnlyPress = 203;   // exactly one finger, and pressed in
+constexpr int kGateTouch2Only      = 204;   // exactly two fingers
+constexpr int kGateTouch2OnlyPress = 205;   // exactly two fingers, and pressed in
+
+// ⛔ NOT OFFERED, STILL PARSED: pressed in with NO finger requirement. That is
+// what `touchpad_click` has always meant, gyro_mouse_recenter_button still
+// offers that word, and configs carry it -- so folding it into kGateTouchPress
+// would quietly add a condition that was never there.
+constexpr int kGateClickOnly       = 206;
+
+// ⛔⛔ COUNTED, NOT NEGATED. A pad with no touchpad, and a report too short to
+// say, STATE NEITHER -- touch_finger_down and touch_finger_up both answer false
+// for them, on purpose, because "no finger" is something a report has to say
+// just as a finger is. ➡️ So every gesture below is decided from how many
+// contacts the report states are down and how many it states are up, and a
+// report that says nothing decides nothing: the gate stays where it was rather
+// than flapping on a truncated packet.
+struct TouchStated {
+    int down = 0;
+    int up = 0;
+    bool both() const { return down + up == 2; }   // the report answered for both
+};
+
+inline TouchStated touch_stated(const ctm_rebind::Layout &lay, const uint8_t *d, size_t len)
+{
+    TouchStated c;
+    for (int f = 0; f < 2; ++f) {
+        if (ctm_rebind::touch_finger_down(lay, d, len, f)) ++c.down;
+        else if (ctm_rebind::touch_finger_up(lay, d, len, f)) ++c.up;
+    }
+    return c;
+}
+
+struct Gate {
+    GateWhen when   = GateWhen::Off;
+    int      button = kGateNone;
+};
+
+inline bool operator==(const Gate &a, const Gate &b)
+{
+    return a.when == b.when && a.button == b.button;
+}
+inline bool operator!=(const Gate &a, const Gate &b) { return !(a == b); }
+
+// ⭐ "Always" needs no entry of its own: UntilHeld with NO button is a gate
+// nothing can close. The readers below give that for free, so the old `always`
+// is not a special case any more -- it is the general rule with a blank.
+inline Gate gate_off()             { return Gate{}; }
+inline Gate gate_always()          { return Gate{GateWhen::UntilHeld, kGateNone}; }
+inline Gate gate_while(int button) { return Gate{GateWhen::WhileHeld, button}; }
+inline Gate gate_until(int button) { return Gate{GateWhen::UntilHeld, button}; }
+
+// ⛔⛔ HELD AND RELEASED ARE BOTH THINGS A REPORT HAS TO STATE, so neither is
+// the other's negation, and `until_held` is NOT written as `!held`. This is the
+// rule touch_finger_down/touch_finger_up already follow, and it is load-bearing:
+//   - a pad with NO touchpad has no finger on it, so it is RELEASED, and a gyro
+//     gated "until you touch the pad" has to MOVE there. Reading that as
+//     touch_finger_up() instead shut the gate forever on an Xbox pad, which was
+//     a real bug found in review (2026-09-15). It is answered explicitly below.
+//   - a report too SHORT to say is neither held nor released. Both finger
+//     readers answer false, so the gate stays shut rather than flapping on a
+//     truncated packet.
+inline bool gate_button_held(const ctm_rebind::Layout &lay, const uint8_t *d, size_t len,
+                             int button)
+{
+    switch (button) {
+        case kGateNone: return false;   // nothing to hold: never open
+        case kGateTouch:
+        case kGateTouchPress:
+        case kGateTouch1Only:
+        case kGateTouch1OnlyPress:
+        case kGateTouch2Only:
+        case kGateTouch2OnlyPress: {
+            const TouchStated c = touch_stated(lay, d, len);
+            bool fingers = false;
+            switch (button) {
+                case kGateTouch:
+                case kGateTouchPress:
+                    fingers = c.down >= 1;
+                    break;
+                case kGateTouch1Only:
+                case kGateTouch1OnlyPress:
+                    // ⓘ Exactly one: one down AND the other stated up, so a report
+                    // that only mentions one contact does not pass as "only one".
+                    fingers = (c.down == 1 && c.up == 1);
+                    break;
+                default:
+                    // Exactly two, which is also the hardware maximum.
+                    fingers = (c.down == 2);
+                    break;
+            }
+            const bool wantsPress = (button == kGateTouchPress ||
+                                     button == kGateTouch1OnlyPress ||
+                                     button == kGateTouch2OnlyPress);
+            if (!wantsPress) return fingers;
+            return fingers && ctm_rebind::touch_pressed(lay, d, len);
+        }
+        case kGateClickOnly: return ctm_rebind::touch_pressed(lay, d, len);
+        default: break;
+    }
+    // ⛔⛔ THE TRIGGERS ARE NOT is_pressed(), AND THE DIFFERENCE ONLY SHOWS ON A
+    // DUALSENSE. is_pressed() reads whatever the layout says a spot is: an Xbox
+    // pad has no trigger BIT, so its spot is a travel and the two agree exactly
+    // -- while a DualSense reports L2/R2 as a bit as well, and that bit sets far
+    // lighter than the 12% this gate has always used.
+    // ➡️ So reading the triggers through is_pressed() would compile, pass on an
+    // Xbox pad, and quietly turn gyro-to-mouse-on-L2-aiming into a hair trigger
+    // on the pad it was written for. Read the travel for both, from the one
+    // constant, so "pulled" cannot mean two things.
+    if (button == ctm_rebind::kBtnL2 || button == ctm_rebind::kBtnR2) {
+        return ctm_rebind::trigger_travel(lay, d, len, button == ctm_rebind::kBtnL2) >=
+               ctm_rebind::kTriggerPulledTravel;
+    }
+    return ctm_rebind::is_pressed(lay, d, len, button);
+}
+
+inline bool gate_button_released(const ctm_rebind::Layout &lay, const uint8_t *d, size_t len,
+                                 int button)
+{
+    switch (button) {
+        case kGateNone:
+            // Nothing to hold, so nothing is ever holding it. This IS "always".
+            return true;
+        case kGateTouch:
+        case kGateTouch1Only:
+        case kGateTouch2Only: {
+            // ⓘ A pad with no touchpad states nothing either way, so answer for
+            // it: there is no finger on a touchpad it does not have.
+            if (!lay.touch.present) return true;
+            const TouchStated c = touch_stated(lay, d, len);
+            // ⛔ The report has to have answered for BOTH contacts before the
+            // gesture can be called released. Otherwise a packet that mentions
+            // one finger would read as "not two fingers" and open a gate that
+            // should have stayed where it was.
+            if (!c.both()) return false;
+            if (button == kGateTouch) return c.down == 0;
+            if (button == kGateTouch1Only) return c.down != 1;
+            return c.down != 2;
+        }
+        case kGateTouchPress:
+        case kGateTouch1OnlyPress:
+        case kGateTouch2OnlyPress:
+        case kGateClickOnly:
+            if (!lay.touch.present) return true;
+            // ⭐ The PRESS is a bit, stated either way by any report long enough
+            // to hold it, and it is the binding half of these three: with no
+            // press there is no gesture, whatever the fingers are doing. So the
+            // counting care above buys nothing here.
+            return !gate_button_held(lay, d, len, button);
+        default: break;
+    }
+    if (button == ctm_rebind::kBtnL2 || button == ctm_rebind::kBtnR2) {
+        const int travel =
+            ctm_rebind::trigger_travel(lay, d, len, button == ctm_rebind::kBtnL2);
+        // ⓘ -1 is "the report was too short to say", which is not "released".
+        return travel >= 0 && travel < ctm_rebind::kTriggerPulledTravel;
+    }
+    // ⓘ An index outside the table names no button, so nothing holds it.
+    if (button < 0 || button >= ctm_rebind::kButtonCount) return true;
+    return !ctm_rebind::is_pressed(lay, d, len, button);
+}
 
 // ⓘ The trigger's hold on the cursor, set_gyro_hold() and gyro_hold(), is in
 // input/gyro_hold.inl, included at the top of this file.
 
-inline Gate parse_gate(const std::string &raw)
+// device_config already trims callers as needed; match on a lowered copy so
+// "L2" and "l2" both work, everywhere a gate is read.
+inline std::string gate_lower(const std::string &raw)
 {
-    // device_config already trims and lowercases callers as needed; match on a
-    // lowered copy so "L2" and "l2" both work.
     std::string v;
     v.reserve(raw.size());
     for (char c : raw) {
         v.push_back(static_cast<char>((c >= 'A' && c <= 'Z') ? c - 'A' + 'a' : c));
     }
-    if (v.empty()) return Gate::Off;
-    if (v == "always") return Gate::Always;
-    // ⓘ An old spelling of "always"; the steady is no longer a gate.
-    if (v == "trigger") return Gate::Always;
-    if (v == "l2") return Gate::L2;
-    if (v == "r2") return Gate::R2;
-    if (v == "l1") return Gate::L1;
-    if (v == "r1") return Gate::R1;
-    if (v == "touchpad") return Gate::Touchpad;
-    if (v == "!touchpad" || v == "not_touchpad") return Gate::NotTouchpad;
-    if (v == "touchpad_click" || v == "click") return Gate::TouchpadClick;
-    if (v == "trigger") return Gate::TriggerHold;
-    if (v == "ps") return Gate::PS;
-    if (v == "r3") return Gate::R3;
-    // Unknown value is OFF, never an error -- a typo silently disables the
-    // feature, it never breaks a session. Same rule as every config lookup.
-    return Gate::Off;
+    return v;
+}
+
+// ⭐ ANY BUTTON, BY NAME OR BY INDEX. The pad-neutral token is what the page
+// and the presets write; the PlayStation and Xbox names are accepted because
+// they are what people type, and a bare index because that is what the button
+// table actually is. ⓘ kGateNone for anything unrecognised, which reads as
+// "no button" rather than as an error -- the same rule as every config lookup.
+inline int parse_gate_button(const std::string &raw)
+{
+    const std::string v = gate_lower(raw);
+    if (v.empty()) return kGateNone;
+
+    // The ones that are not buttons at all.
+    // ⓘ `touchpad` and `touch` are the older spellings of plain touch, which is
+    // what they have always meant, so they land on it rather than needing care.
+    if (v == "touchpad_touch" || v == "touchpad" || v == "touch") return kGateTouch;
+    if (v == "touchpad_touch_press") return kGateTouchPress;
+    if (v == "touchpad_only_1_touch") return kGateTouch1Only;
+    if (v == "touchpad_only_1_touch_press") return kGateTouch1OnlyPress;
+    if (v == "touchpad_only_2_touch") return kGateTouch2Only;
+    if (v == "touchpad_only_2_touch_press") return kGateTouch2OnlyPress;
+    // ⛔ A press with no finger requirement: not offered, still read.
+    if (v == "touchpad_click" || v == "click" || v == "touchpad_press") return kGateClickOnly;
+
+    struct Named { const char *name; int index; };
+    static const Named kNamed[] = {
+        { "face_down",  ctm_rebind::kBtnFaceDown  }, { "cross",    ctm_rebind::kBtnFaceDown  },
+        { "a",          ctm_rebind::kBtnFaceDown  },
+        { "face_right", ctm_rebind::kBtnFaceRight }, { "circle",   ctm_rebind::kBtnFaceRight },
+        { "b",          ctm_rebind::kBtnFaceRight },
+        { "face_left",  ctm_rebind::kBtnFaceLeft  }, { "square",   ctm_rebind::kBtnFaceLeft  },
+        { "x",          ctm_rebind::kBtnFaceLeft  },
+        { "face_up",    ctm_rebind::kBtnFaceUp    }, { "triangle", ctm_rebind::kBtnFaceUp    },
+        { "y",          ctm_rebind::kBtnFaceUp    },
+        { "l1",         ctm_rebind::kBtnL1        }, { "lb",       ctm_rebind::kBtnL1        },
+        { "r1",         ctm_rebind::kBtnR1        }, { "rb",       ctm_rebind::kBtnR1        },
+        { "l2",         ctm_rebind::kBtnL2        }, { "lt",       ctm_rebind::kBtnL2        },
+        { "r2",         ctm_rebind::kBtnR2        }, { "rt",       ctm_rebind::kBtnR2        },
+        { "select",     ctm_rebind::kBtnSelect    }, { "create",   ctm_rebind::kBtnSelect    },
+        { "view",       ctm_rebind::kBtnSelect    }, { "share",    ctm_rebind::kBtnSelect    },
+        { "start",      ctm_rebind::kBtnStart     }, { "options",  ctm_rebind::kBtnStart     },
+        { "menu",       ctm_rebind::kBtnStart     },
+        { "l3",         ctm_rebind::kBtnL3        }, { "r3",       ctm_rebind::kBtnR3        },
+        { "dpad_up",    ctm_rebind::kBtnDpadUp    }, { "dpad_down",  ctm_rebind::kBtnDpadDown  },
+        { "dpad_left",  ctm_rebind::kBtnDpadLeft  }, { "dpad_right", ctm_rebind::kBtnDpadRight },
+        { "home",       ctm_rebind::kBtnHome      }, { "ps",       ctm_rebind::kBtnHome      },
+        { "guide",      ctm_rebind::kBtnHome      },
+    };
+    for (const Named &n : kNamed) {
+        if (v == n.name) return n.index;
+    }
+
+    // A bare index, so the table can grow without this list growing with it.
+    bool digits = true;
+    for (char c : v) {
+        if (c < '0' || c > '9') { digits = false; break; }
+    }
+    if (digits) {
+        const int index = std::atoi(v.c_str());
+        if (index >= 0 && index < ctm_rebind::kButtonCount) return index;
+    }
+    return kGateNone;
+}
+
+// ⭐ THE NEW PAIR: a type and a button.
+inline Gate parse_gate_pair(const std::string &type, const std::string &button)
+{
+    const std::string t = gate_lower(type);
+    if (t.empty()) return gate_off();
+    const int b = parse_gate_button(button);
+    // ⓘ The stored tokens are until_held and while_held. The spellings beside
+    // them are what the PAGE says -- "on button hold", "on button release" --
+    // so a config typed by hand to match what is on screen still parses.
+    if (t == "while_held" || t == "on_button" || t == "hold" ||
+        t == "on_hold" || t == "on button hold") {
+        return gate_while(b);
+    }
+    if (t == "until_held" || t == "always_until" || t == "always" ||
+        t == "on_release" || t == "on button release") {
+        return gate_until(b);
+    }
+    // Unknown type is OFF, never an error.
+    return gate_off();
+}
+
+// ⛔ THE OLD SINGLE KEY, AND IT CANNOT BE DELETED. Four presets write it and
+// every config anyone has made from them carries it, so reading it is what
+// stops those configs silently losing their gate -- the parser treats an
+// unknown value as OFF, which is exactly the behaviour that would swallow it.
+//
+// ⭐ Every one of the eleven values it could hold maps onto the pair, with
+// nothing stranded. `!touchpad` is the one worth reading twice: "move unless a
+// finger is down" IS "always on until you hold it", with the touchpad as the
+// button. The value that fit nowhere in the old shape is the one that shows the
+// new shape is right.
+inline Gate parse_gate(const std::string &raw)
+{
+    const std::string v = gate_lower(raw);
+    if (v.empty()) return gate_off();
+    // ⓘ "trigger" is an old spelling of "always"; the steady stopped being a
+    // gate on 2026-09-11 and became a check that runs for every gate.
+    if (v == "always" || v == "trigger") return gate_always();
+    if (v == "!touchpad" || v == "not_touchpad") return gate_until(kGateTouch);
+    const int b = parse_gate_button(v);
+    if (b == kGateNone) return gate_off();   // unknown value is off, never an error
+    return gate_while(b);
 }
 
 // True when the gate condition says gyro should be producing movement right
 // now. `d` is the mapped report (id at [0]), read at `lay`'s offsets.
-// ⓘ The device key is optional because every gate but one is a pure function of
-// the report bytes, and every existing caller passes only those. Gate::TriggerHold
-// is the exception: whose trigger is being worked is a question about a pad.
+// ⓘ The device key is optional because a gate is a pure function of the report
+// bytes; the one thing that is not -- whether a trigger is being worked -- is
+// the steady check below, and every existing caller passes only the bytes.
 //
 // ⛔⛔ EVERY GATE READ DUALSENSE BYTES, FOR EVERY PAD. L2 was [5], the PS button
 // [10], a finger [33]. On a DS4 those are the hat and face buttons, a timestamp
@@ -137,8 +412,8 @@ inline Gate parse_gate(const std::string &raw)
 //
 // ⚠️ For a DualSense each case below is exactly the read it replaced, bounds
 // checks included.
-inline bool gate_open(Gate gate, const ctm_rebind::Layout &lay, const uint8_t *d, size_t len,
-                      const void *deviceKey = nullptr)
+inline bool gate_open(const Gate &gate, const ctm_rebind::Layout &lay, const uint8_t *d,
+                      size_t len, const void *deviceKey = nullptr)
 {
     // ⭐⭐ THE TRIGGER'S STEADY SUPPRESSES THE GYRO WHATEVER THE GATE IS
     // (rhoquinn8217, 2026-09-11).
@@ -155,48 +430,19 @@ inline bool gate_open(Gate gate, const ctm_rebind::Layout &lay, const uint8_t *d
     // ⓘ A null key means no controller is in play -- the recenter check calls it
     // that way -- and gyro_hold() answers false for one, so nothing changes there.
     if (gyro_hold(deviceKey)) return false;
-    switch (gate) {
-        case Gate::Off:
-            return false;
-        case Gate::Always:
-            return true;
-        case Gate::L2:
-            // Analog, ~12% travel -- on the DualSense's 0..255 scale for every pad.
-            // ⓘ The same depth an Xbox trigger presses a binding at, from one
-            // constant, so "pulled" cannot mean two things (2026-09-15).
-            return ctm_rebind::trigger_travel(lay, d, len, true) >= ctm_rebind::kTriggerPulledTravel;
-        case Gate::R2:
-            return ctm_rebind::trigger_travel(lay, d, len, false) >= ctm_rebind::kTriggerPulledTravel;
-        case Gate::L1:
-            return ctm_rebind::is_pressed(lay, d, len, ctm_rebind::kBtnL1);
-        case Gate::R1:
-            return ctm_rebind::is_pressed(lay, d, len, ctm_rebind::kBtnR1);
-        case Gate::R3:
-            return ctm_rebind::is_pressed(lay, d, len, ctm_rebind::kBtnR3);
-        case Gate::Touchpad:
-            return ctm_rebind::touch_finger_down(lay, d, len, 0);   // finger 1 down
-        case Gate::NotTouchpad:
-            // ⓘ "Move unless a finger is down" -- and a pad with no touchpad has
-            // no finger to pause for, so it is open there. ⛔ touch_finger_up()
-            // answers false for such a pad on purpose (a report has to STATE "no
-            // finger"), which shut this gate forever on an Xbox pad once the stick
-            // mouse reached one (found in review, 2026-09-15).
-            if (!lay.touch.present) return true;
-            return ctm_rebind::touch_finger_up(lay, d, len, 0);     // ratchet: touch pauses
-        case Gate::TouchpadClick:
-            return ctm_rebind::touch_pressed(lay, d, len);          // pad pressed in
-        case Gate::PS:
-            return ctm_rebind::is_pressed(lay, d, len, ctm_rebind::kBtnHome);
-        case Gate::TriggerHold:
-            // ⓘ Kept so configs written before 2026-09-11 still parse. The hold
-            // is checked above for every gate now, so this IS Always.
-            return true;
+    // ⭐ ELEVEN CASES BECAME TWO. Each one used to name its own button AND say
+    // when it opened; now the button is a value and only the WHEN is a branch.
+    switch (gate.when) {
+        case GateWhen::Off:       return false;
+        case GateWhen::WhileHeld: return gate_button_held(lay, d, len, gate.button);
+        case GateWhen::UntilHeld: return gate_button_released(lay, d, len, gate.button);
     }
     return false;
 }
 
 // ⓘ The DualSense's gates, for callers that only ever had a DualSense report.
-inline bool gate_open(Gate gate, const uint8_t *d, size_t len, const void *deviceKey = nullptr)
+inline bool gate_open(const Gate &gate, const uint8_t *d, size_t len,
+                      const void *deviceKey = nullptr)
 {
     return gate_open(gate, ctm_rebind::kDs5Layout, d, len, deviceKey);
 }
@@ -204,7 +450,7 @@ inline bool gate_open(Gate gate, const uint8_t *d, size_t len, const void *devic
 // ---- Config (read live per report; the watcher applies changes instantly) --
 
 struct Config {
-    Gate gate = Gate::Off;
+    Gate gate = gate_off();
     // ⭐ Calibration, Steam/JSM style. "Pixels per 360 degrees": turn the
     // controller a full circle and the cursor travels this many pixels at
     // sensitivity 1. 1920 makes one full turn sweep a 1080p screen, which is
@@ -232,7 +478,7 @@ struct Config {
     // POSITION -- warping it does nothing there. It exists because navigating
     // Windows from a couch has no desk to lift a mouse off, so running the
     // cursor into a screen edge is otherwise a dead end.
-    Gate recenter = Gate::Off;
+    Gate recenter = gate_off();
 };
 
 // The section is "ds5" or "ds5_edge" -- same keys under each so an Edge can be
@@ -241,7 +487,20 @@ struct Config {
 inline Config load_config(const char *section)
 {
     Config c;
-    c.gate = parse_gate(device_config_str(section, "gyro_to_mouse_gate"));
+    // ⭐ THE PAIR WINS, AND THE OLD KEY IS THE FALLBACK (T-241). A config that
+    // has never been touched since the split still names `gyro_to_mouse_gate`,
+    // and four shipped presets write it, so reading it is not politeness -- it
+    // is what stops those configs silently losing their gate.
+    // ⚠️ The TYPE decides which is read, not the button: a type with no button
+    // is a real setting ("always on", "never"), so an empty button cannot mean
+    // "fall back" without making that unsayable.
+    const std::string gateType = device_config_str(section, "gyro_to_mouse_gate_type");
+    if (!gateType.empty()) {
+        c.gate = parse_gate_pair(gateType,
+                                 device_config_str(section, "gyro_to_mouse_gate_button"));
+    } else {
+        c.gate = parse_gate(device_config_str(section, "gyro_to_mouse_gate"));
+    }
     c.px_per_360 = device_config_int(section, "gyro_mouse_px_per_360", 1920);
     if (c.px_per_360 < 1) c.px_per_360 = 1920;
     c.speed_h = static_cast<float>(device_config_int(section, "gyro_mouse_speed_h", 100));
@@ -298,10 +557,10 @@ inline void warp_cursor_to_centre()
 
 class GyroMouse {
 public:
-    // ⭐ WHICH PAD THIS IS. Every gate but one is a pure function of the report
-    // bytes, so this class never needed to know. Gate::TriggerHold does: the
-    // trigger state machine keeps its answer per pad, and two bridged
-    // controllers must not freeze each other's cursor.
+    // ⭐ WHICH PAD THIS IS. A gate is a pure function of the report bytes, so
+    // this class never needed to know. The trigger STEADY does: its state
+    // machine keeps its answer per pad, and two bridged controllers must not
+    // freeze each other's cursor.
     // ⓘ Set once per report by gyro_for(), which is the only place a key and an
     // instance are both in hand.
     const void *key_ = nullptr;
@@ -368,7 +627,7 @@ public:
         // when the cursor is stranded and gyro may well be off.
         //
         // Edge-triggered: fires once on press, not repeatedly while held.
-        if (cfg.recenter != Gate::Off) {
+        if (cfg.recenter.when != GateWhen::Off) {
             const bool down = gate_open(cfg.recenter, lay, d, len);
             if (down && !recenterWasDown_) {
                 warp_cursor_to_centre();
@@ -378,7 +637,7 @@ public:
             recenterWasDown_ = false;
         }
 
-        if (cfg.gate == Gate::Off) {
+        if (cfg.gate.when == GateWhen::Off) {
             reset_remainder();
             return false;
         }

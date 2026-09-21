@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.11 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.16 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,42 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.16 Six touchpad choices, not four (rhoquinn8217): a finger on
+            the pad at all, ONLY one finger, or ONLY two -- each either
+            resting or with the pad pressed in. The four skipped the plain
+            "any finger" case, which is what the old "touchpad" value
+            meant, so the list could not say the thing it replaced.
+    2.66.15 The gyro gate's touchpad choices are four, not two
+            (rhoquinn8217): one or two fingers resting on the pad, and one
+            or two fingers with it pressed in. A finger resting and a
+            finger pressing are different gestures, and so are one finger
+            and two -- a DS4 and a DualSense both report two contacts. The
+            older "touchpad_click", a press with no finger requirement, is
+            no longer offered but is still read, so a config that names it
+            still means what it meant.
+    2.66.14 The gate type reads "on button release -- always on", and the
+            button row's blank is plain "no button set" (rhoquinn8217).
+            The hint about what no button MEANS moved off the button row
+            and onto the type, which is the half that decides it.
+    2.66.13 The gyro gate's type reads "off", "on button release" and "on
+            button hold" (rhoquinn8217). Both are the same sentence with
+            one word changed, where the pair they replace -- "moves,
+            until the button is held" and "moves only while the button is
+            held" -- were a comma apart and had to be read to the end.
+    2.66.12 The gyro gate is two settings, not one. gyro_to_mouse_gate_type
+            says WHEN -- it moves until the button is held, or only while
+            it is held -- and gyro_to_mouse_gate_button says WHICH, from
+            any button on the pad plus a finger on the touchpad and the
+            touchpad pressed in. The old single key mixed both questions,
+            so "off" and "always" hid among the buttons and the button
+            list was hand-written: adding R3 to it cost four edits.
+            "Always on" needs no entry of its own now, being the type with
+            no button, and "!touchpad" stops being a special case -- "move
+            unless a finger is down" IS "until held", with the touchpad as
+            the button. gyro_to_mouse_gate is hidden but still read, so a
+            config written before the split keeps its gate. The options
+            are labelled from the same /api/v1/keys entry the binding rows
+            use, so the picker says "(L1) | (LB)" and cannot drift.
     2.66.11 Copy asks for a name before it makes one, the way Rename does:
             an expanding row, opened on the name it WOULD have chosen, with
             Create and Cancel. Both Copy buttons, not only the Editor
@@ -2655,6 +2691,85 @@ var PRESET_VALUE_LABELS = {
 // ⓘ Button labels come from /api/v1/keys, whose help opens with the button's
 // own name ("Cross / A (bottom face) -- ..."), so the picker cannot drift from
 // the settings page.
+// ⭐ T-241: THE GATE'S BUTTON LIST IS SHOWN THE WAY THE BINDING ROWS ARE.
+// The schema offers pad-neutral tokens -- l1, face_down, dpad_left -- which are
+// what a config stores and nothing anyone wants to read. Each one is labelled
+// from the SAME /api/v1/keys entry that rebind_<index> carries, so the gate's
+// picker says "(L1) | (LB)" exactly as the binding row above it does, and it
+// cannot drift from the settings page.
+// ⚠️ This map mirrors one in gyro_mouse.inl. It is kept to the tokens the
+// SCHEMA offers, so the schema is the thing both sides agree with rather than
+// each other.
+var GATE_BUTTON_INDEX = {
+  face_down: 0, face_right: 1, face_left: 2, face_up: 3,
+  l1: 4, r1: 5, l2: 6, r2: 7,
+  select: 8, start: 9, l3: 10, r3: 11,
+  dpad_up: 12, dpad_down: 13, dpad_left: 14, dpad_right: 15,
+  home: 16
+};
+
+// ⛔ The touchpad is NOT in the button table -- a finger and a click are read
+// out of the touch report bytes -- so these two have no rebind_<index> to
+// borrow a name from and carry their own.
+var GATE_BUTTON_EXTRA = {
+  touchpad_touch: 'touchpad — touch',
+  touchpad_touch_press: 'touchpad — touch press',
+  touchpad_only_1_touch: 'touchpad — only 1 finger touch',
+  touchpad_only_1_touch_press: 'touchpad — only 1 finger touch press',
+  touchpad_only_2_touch: 'touchpad — only 2 finger touch',
+  touchpad_only_2_touch_press: 'touchpad — only 2 finger touch press',
+  // ⓘ Not offered by the schema any more, but a config written before the six
+  // still holds one of these, and a row showing a raw token reads like a fault.
+  touchpad: 'touchpad — touch',
+  touchpad_click: 'touchpad — pressed in (old)'
+};
+
+// ⭐ rhoquinn8217's wording, 2026-09-20, replacing a longer pair of mine.
+// Both of these read as "the gyro is ON when ..." -- on release, on hold --
+// so the two options are the same sentence with one word changed. Mine were
+// "moves, until the button is held" and "moves only while the button is held",
+// which are a comma apart and have to be read to the end to tell apart.
+// ⓘ Blank is listed here so this row says "off" flatly rather than taking the
+// "(blank — off)" every other choice row falls back to.
+// ⓘ "always on" is the BASELINE the type describes: with "on button release"
+// the gyro is on all the time and the button is what stops it. The hint used to
+// sit on the button row's blank as "(no button — always)"; rhoquinn8217 moved
+// it here, where it explains the type rather than the absence of a button.
+var GATE_TYPE_LABELS = {
+  '': 'off',
+  until_held: 'on button release — always on',
+  while_held: 'on button hold'
+};
+
+// The label for one option of one choice row. Everything not named here reads
+// as its own value, which is what every other choice row has always done.
+function choiceLabel(key, value) {
+  // ⚠️ The type row is asked FIRST, blank included, because its blank has a
+  // word of its own -- "off" -- and falling through to the generic blank below
+  // would put "(blank — off)" back on it.
+  if (key === 'gyro_to_mouse_gate_type') {
+    return GATE_TYPE_LABELS[value] !== undefined ? GATE_TYPE_LABELS[value] : value;
+  }
+  if (value === '') {
+    // ⓘ A blank BUTTON is not "off" -- it means no button at all, which is a
+    // real setting: with until_held it is always on, with while_held it is off.
+    // ⭐ It says only that now. What the absence MEANS moved onto the type,
+    // which is where the two halves are read together anyway.
+    return key === 'gyro_to_mouse_gate_button' ? 'no button set'
+                                               : '(blank — off)';
+  }
+  if (key === 'gyro_to_mouse_gate_button') {
+    if (GATE_BUTTON_EXTRA[value]) return GATE_BUTTON_EXTRA[value];
+    var index = GATE_BUTTON_INDEX[value];
+    if (index === undefined) return value;
+    var named = buttonLabel('rebind_' + index);
+    // ⓘ buttonLabel answers with the key itself when /api/v1/keys has not
+    // arrived yet, and the raw token reads better than "rebind_4".
+    return (named && named.indexOf('rebind_') !== 0) ? named : value;
+  }
+  return value;
+}
+
 function buttonLabel(key) {
   var meta = (KEYS || []).filter(function(k) { return k.key === key; })[0];
   if (!meta) return key;
@@ -3367,7 +3482,11 @@ function inertReason(key, sessionKind) {
 // trigger_click.inl -- and anyone who has it set in a config file would have
 // lost it silently. Hiding the row leaves the key working for whoever edits
 // the file by hand, which is what a diagnostic is for.
-var HIDDEN_SETTINGS = { trigger_probe: 1 };
+// ⓘ gyro_to_mouse_gate is SUPERSEDED, not gone (T-241). The listener still
+// reads it, so a config written before the split keeps its gate -- but showing
+// it beside the pair that replaced it would be two controls for one feature,
+// and whichever you touched last would look like the one that lost.
+var HIDDEN_SETTINGS = { trigger_probe: 1, gyro_to_mouse_gate: 1 };
 
 function hiddenSetting(key) {
   return HIDDEN_SETTINGS[key] === 1 || /_debug(_|$)/.test(key);
@@ -3643,7 +3762,7 @@ function renderConfigEditor(hostId, configName, prefix, ordinal) {
           }
         } else if (meta.type === 'choice' && meta.choices) {
           control = '<select id="' + id + '"' + onchange + dis + '>' + meta.choices.map(function(c) {
-            var label = c === '' ? '(blank — off)' : c;
+            var label = choiceLabel(meta.key, c);
             return '<option value="' + esc(c) + '"' +
                    (String(shown) === c ? ' selected' : '') + '>' + esc(label) + '</option>';
           }).join('') + '</select>';

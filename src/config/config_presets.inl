@@ -102,7 +102,9 @@ struct Preset {
 inline const Setting kGyroMouseMode[] = {
     { "gyro_no_passthrough", "true" },
     CTM_PRESET_SHARED_BINDINGS,
-    { "gyro_to_mouse_gate", "always" },
+    /* ⓘ T-241: "always on" is the type with no button -- a gate nothing can
+       close. It needs no entry of its own and no button beside it. */
+    { "gyro_to_mouse_gate_type", "until_held" },
     /* ⭐⭐ SCROLL IS THE LEFT STICK, AND THAT IS A REVERSAL (rhoquinn8217,
        2026-09-10). It was the touchpad from 2026-09-03, chosen so that neither
        stick was spent, on the grounds that movement is what a gamer cannot give
@@ -143,7 +145,8 @@ inline const Setting kGyroMouseMode[] = {
 inline const Setting kGyroMouseR3Mode[] = {
     { "gyro_no_passthrough", "true" },
     CTM_PRESET_SHARED_BINDINGS,
-    { "gyro_to_mouse_gate", "R3" },
+    { "gyro_to_mouse_gate_type", "while_held" },
+    { "gyro_to_mouse_gate_button", "r3" },
     { "left_stick_mode", "scroll" },
     { "left_stick_no_passthrough", "true" },
     { "gyro_mouse_recenter_button", "touchpad_click" },
@@ -230,8 +233,9 @@ inline const Setting kSteadyGyroMouseMode[] = {
        button you HOLD to enable the gyro, and that one meant "always, minus the
        steady". It also made the two mutually exclusive -- choosing L2 as the
        gate gave up the steady. The steady is a suppression now, so this says
-       what it has always meant. */
-    { "gyro_to_mouse_gate", "always" },
+       what it has always meant.
+       ⓘ T-241: and "always" is now the type with no button beside it. */
+    { "gyro_to_mouse_gate_type", "until_held" },
 
     /* ⭐ Bound like any other button, then told to steady the cursor. */
     /* ⛔⛔ 80 IS CHOSEN, NOT INHERITED. Do not "fix" it to 50.
@@ -311,7 +315,11 @@ inline const Setting kStickMouseMode[] = {
 // ⚠️ It moves the MOUSE, so it suits a game being played with mouse look. A
 // game reading the pad as a gamepad will not see it.
 inline const Setting kL2GyroAiming[] = {
-    { "gyro_to_mouse_gate", "L2" },
+    /* ⛔ T-241: the trigger still gates on ANALOG TRAVEL at 12%, not on the
+       DualSense's L2 bit, which sets far lighter. gate_button_held() reads the
+       travel for indices 6 and 7 for exactly this preset's sake. */
+    { "gyro_to_mouse_gate_type", "while_held" },
+    { "gyro_to_mouse_gate_button", "l2" },
     /* ⭐ AND THE GYRO STOPS REACHING THE GAME (rhoquinn8217, 2026-09-03).
        This is the preset FOR gyro aiming, which is exactly the case where a
        game reading the gyro alongside the cursor gives you double input --

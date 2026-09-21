@@ -425,20 +425,28 @@ int run_config_store_tests()
         // with nothing on screen to say why (2026-09-19, the rename in this
         // very ticket). A find() that returns null is a normal test failure.
         if (p == nullptr) return 0;
-        CTM_CHECK_EQ(static_cast<int>(p->count), 2);
+        // ⓘ T-241: three, not two. The gate is a type AND a button now, so the
+        // one line that said "L2" is two lines that say while_held and l2.
+        CTM_CHECK_EQ(static_cast<int>(p->count), 3);
 
-        bool gate = false, hidden = false, anyBinding = false;
+        bool gateType = false, gateButton = false, hidden = false, anyBinding = false;
         for (size_t k = 0; k < p->count; ++k) {
             const std::string key = p->settings[k].key;
             const std::string val = p->settings[k].value;
-            if (key == "gyro_to_mouse_gate" && val == "L2") gate = true;
+            if (key == "gyro_to_mouse_gate_type" && val == "while_held") gateType = true;
+            // ⛔ The button is "l2", and the gate reads it as ANALOG TRAVEL past
+            // 12% -- not as the DualSense's L2 bit, which sets far lighter. That
+            // distinction lives in gate_button_held() and is checked in
+            // gyro_mouse_test; here we only pin which button this preset names.
+            if (key == "gyro_to_mouse_gate_button" && val == "l2") gateButton = true;
             if (key == "gyro_no_passthrough" && val == "true") hidden = true;
             // ⛔ The rule that matters: NO button is taken from the game.
             if (key.rfind("rebind_", 0) == 0 || key.rfind("turbo_", 0) == 0) {
                 anyBinding = true;
             }
         }
-        CTM_CHECK(gate);
+        CTM_CHECK(gateType);
+        CTM_CHECK(gateButton);
         CTM_CHECK(hidden);
         CTM_CHECK(!anyBinding);
     }
@@ -570,7 +578,10 @@ int run_config_store_tests()
             return false;
         };
 
-        CTM_CHECK(has("gyro-to-mouse-always-on", "gyro_to_mouse_gate", "always"));
+        // ⓘ T-241: "always on" is the type with NO button -- a gate nothing can
+        // close -- so this preset names one key where it used to name one value.
+        CTM_CHECK(has("gyro-to-mouse-always-on", "gyro_to_mouse_gate_type", "until_held"));
+        CTM_CHECK(!mentions("gyro-to-mouse-always-on", "gyro_to_mouse_gate_button"));
         // ⭐⭐ SCROLL IS THE LEFT STICK, AND THIS ASSERTION IS REVERSED
         // (rhoquinn8217, 2026-09-10). It used to check the opposite, guarding a
         // decision from 2026-09-03 that scroll belonged on the touchpad so that
@@ -642,20 +653,42 @@ int run_config_store_tests()
         CTM_CHECK(r3 != nullptr);
         if (always == nullptr || r3 == nullptr) return 0;
 
-        CTM_CHECK_EQ(static_cast<int>(r3->count), static_cast<int>(always->count));
-        if (r3->count == always->count) {
-            for (size_t k = 0; k < always->count; ++k) {
-                const std::string key = always->settings[k].key;
-                CTM_CHECK_EQ(std::string(r3->settings[k].key), key);
-                if (key == "gyro_to_mouse_gate") {
-                    CTM_CHECK_EQ(std::string(always->settings[k].value), std::string("always"));
-                    CTM_CHECK_EQ(std::string(r3->settings[k].value), std::string("R3"));
-                } else {
-                    CTM_CHECK_EQ(std::string(r3->settings[k].value),
-                                 std::string(always->settings[k].value));
-                }
+        // ⚠️ T-241: THE COUNTS NO LONGER MATCH, AND THAT IS CORRECT. The gate
+        // is a type plus a button, and "always on" needs no button -- so the R3
+        // copy carries one key its twin does not. Comparing counts would now
+        // fail on the one difference the presets are ALLOWED to have.
+        // ➡️ So compare everything that is NOT the gate, in order, which is the
+        // drift this section exists to catch, and pin the gate separately below.
+        auto without_gate = [](const ctm_presets::Preset *p) {
+            std::vector<std::pair<std::string, std::string>> out;
+            for (size_t k = 0; k < p->count; ++k) {
+                const std::string key = p->settings[k].key;
+                if (key.rfind("gyro_to_mouse_gate", 0) == 0) continue;
+                out.push_back(std::make_pair(key, std::string(p->settings[k].value)));
+            }
+            return out;
+        };
+        const auto rest_always = without_gate(always);
+        const auto rest_r3 = without_gate(r3);
+        CTM_CHECK_EQ(static_cast<int>(rest_r3.size()), static_cast<int>(rest_always.size()));
+        if (rest_r3.size() == rest_always.size()) {
+            for (size_t k = 0; k < rest_always.size(); ++k) {
+                CTM_CHECK_EQ(rest_r3[k].first, rest_always[k].first);
+                CTM_CHECK_EQ(rest_r3[k].second, rest_always[k].second);
             }
         }
+
+        // And the gate, which is the one difference they are allowed.
+        auto value_of = [](const ctm_presets::Preset *p, const char *key) {
+            for (size_t k = 0; k < p->count; ++k) {
+                if (std::string(p->settings[k].key) == key) return std::string(p->settings[k].value);
+            }
+            return std::string();
+        };
+        CTM_CHECK_EQ(value_of(always, "gyro_to_mouse_gate_type"), std::string("until_held"));
+        CTM_CHECK_EQ(value_of(always, "gyro_to_mouse_gate_button"), std::string());
+        CTM_CHECK_EQ(value_of(r3, "gyro_to_mouse_gate_type"), std::string("while_held"));
+        CTM_CHECK_EQ(value_of(r3, "gyro_to_mouse_gate_button"), std::string("r3"));
 
         // ⓘ That R3 is a gate the parser knows is gyro_mouse_test's job, and
         // that the schema OFFERS it is schema_json_test's. Both would otherwise
