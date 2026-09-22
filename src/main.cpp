@@ -116,6 +116,11 @@ void ctm_chord_show_ui(const std::string &ordinal);
 // input path holds a device pointer; the ordinal lives with the session.
 std::string ctm_ordinal_for_device(const void *deviceKey);
 void ctm_rebind_set_gate_hold(bool hold);
+// ⭐ Which device pressed a button last, or nullptr. 🔗 T-240: the page's
+// legend follows the pad in the hand, and only the listener can say which that
+// is -- the rebinder clears a bound button before the browser ever sees it.
+// ⓘ Declared here because rest_config.inl is included well before rebind.inl.
+const void *rebind_last_press_device();
 
 void ctm_rebind_apply(const void *deviceKey,
                       const std::vector<unsigned char> &descriptor,

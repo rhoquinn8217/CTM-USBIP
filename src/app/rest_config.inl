@@ -789,6 +789,49 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
         return true;
     }
 
+    // ⭐⭐ GET /api/v1/lastpress -- WHICH PAD IS IN THE HAND (T-240).
+    //
+    // ⛔ ITS OWN ENDPOINT, AND DELIBERATELY TINY. The page polls /devices
+    // every POLL_MS, which is four seconds -- fine for a battery reading and
+    // useless for a legend that is meant to follow the pad you just pressed.
+    // This answers in a few dozen bytes so the page can ask several times a
+    // second while its window is in front, and stop when it is not.
+    //
+    // ⓘ The kind is what the caller actually wants -- "ds5", "ds4", "xbox",
+    // "hid" -- because the page already maps a kind to a legend, including
+    // rhoquinn8217's 2026-09-20 rule that a generic `hid` pad shows the Xbox
+    // set. The ordinal rides along so the page can tell two pads of one kind
+    // apart without asking again.
+    //
+    // ⓘ Empty strings mean "nothing has pressed anything yet", which is a
+    // real state: a listener that has just started, or a window opened and not
+    // yet touched. The page keeps its own fallback for that.
+    if (req.path == "/api/v1/lastpress") {
+        if (req.method != "GET") {
+            *out = rest_error_response(405, "method not allowed", "Allow: GET, OPTIONS\r\n");
+            return true;
+        }
+        std::string ordinal;
+        std::string kind;
+        const void *key = rebind_last_press_device();
+        if (key != nullptr) {
+            ordinal = ctm_ordinal_for_device(key);
+            RestDeviceView view;
+            // ⚠️ A pad that has since been unplugged still has a pointer here,
+            // and its session is gone. Not an error: the answer is simply
+            // empty, and the page falls back like it does before any press.
+            if (!ordinal.empty() && rest_find_device(ordinal, &view)) {
+                kind = view.kind;
+            } else {
+                ordinal.clear();
+            }
+        }
+        *out = rest_http_response(200,
+            std::string("{\"ordinal\":\"") + rest_json_escape(ordinal) +
+            "\",\"kind\":\"" + rest_json_escape(kind) + "\"}");
+        return true;
+    }
+
     // GET /api/v1/keys
     if (req.path == "/api/v1/keys") {
         if (req.method != "GET") {

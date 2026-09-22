@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.21 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.22 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,17 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.22 The legend asks the LISTENER which pad pressed last (T-240).
+            The browser cannot answer it: the rebinder clears a bound
+            button out of the report before Windows sees it, so
+            navigator.getGamepads only ever showed the buttons a config
+            had not claimed -- in practice just L1 and R1. A new
+            /api/v1/lastpress, polled four times a second while this
+            window is in front, carries the kind; padLegendForKind turns
+            it into a legend, which also reuses the rule that a generic
+            hid pad shows the Xbox set. The browser scan stays as the
+            answer for a pad that is plugged in but not bridged, because
+            nothing clears that one's buttons.
     2.66.21 The legend follows EVERY button, not just the ten the page
             maps (T-240). The family scan hung off edge(), which is only
             ever asked about buttons 0-5 and the d-pad, so a trigger, a
@@ -2532,6 +2543,44 @@ function padLegendForKind(kind) {
 // ("... Vendor: 054c Product: 0ce6") and writes neither for one it reads
 // through XInput ("Xbox 360 Controller (XInput STANDARD GAMEPAD)"), so both
 // shapes have to be read: the vendor when it is there, the words when it is not.
+// ⭐⭐ WHAT THE LISTENER SAYS PRESSED LAST. This is the REAL source.
+//
+// ⛔⛔ THE BROWSER IS STRUCTURALLY UNABLE TO ANSWER THIS, which the note in
+// gpPoll() has said since 2026-09-03 and which T-240 was built on top of
+// anyway. The listener CLEARS a rebound button out of the report before
+// Windows sees it, so `navigator.getGamepads()` only ever shows the buttons
+// nobody has bound. rhoquinn8217, 2026-09-21: *"only L1 and R1 on xbox and
+// dualsense trigger the legend switch. all button from controller in the
+// config are mapped to keyboad keys."* ➡️ L1 and R1 are the two a config does
+// not claim, so they were the only two getting through.
+var LAST_PRESS_KIND = '';     // 'ds5', 'ds4', 'xbox', 'hid' ... '' until a press
+var LAST_PRESS_ORDINAL = '';
+// ⓘ Four times a second. The legend is meant to follow your hand, and
+// /devices at POLL_MS (four seconds) cannot do that. The reply is a few dozen
+// bytes to a loopback server, and it stops entirely when the window is behind.
+var LAST_PRESS_MS = 250;
+
+function pollLastPress() {
+  // ⛔ Nothing while this window is behind: the pad is being used somewhere
+  // else, and the poll is only ever for what is on this page.
+  if (typeof STOPPED !== 'undefined' && STOPPED) return;
+  if (!document.hasFocus()) return;
+  // ⓘ quiet: a listener too old to know this route would otherwise put the
+  // page into its "cannot reach the agent" state four times a second.
+  call('GET', '/api/v1/lastpress', undefined, true).then(function (r) {
+    if (!r) return;
+    var kind = r.kind || '';
+    LAST_PRESS_ORDINAL = r.ordinal || '';
+    // ⭐ Only a change of KIND can change the legend. Two DualSenses passed
+    // back and forth are still the PlayStation set, and repainting on every
+    // press would rebuild the footer under someone's hand.
+    if (kind === LAST_PRESS_KIND) return;
+    LAST_PRESS_KIND = kind;
+    if (COMPACT) paintCompact();
+    gpPaint();
+  }).catch(function () { /* ⓘ offline is the page's own problem to report */ });
+}
+
 var PAD_FAMILY_LAST = '';     // 'ps' or 'xbox', empty until something is pressed
 // ⚠️ SEPARATE FROM `GP_PREV`, deliberately: see the scan in gpPoll().
 var GP_FAM_PREV = {};
@@ -2570,7 +2619,14 @@ function notepadPress(pad) {
 // the first bridged controller answers, and a DualSense answers when nothing
 // is bridged at all, because that is this project's primary device.
 function padLegend() {
-  // ⭐ The hand first.
+  // ⭐⭐ THE LISTENER FIRST. It is the only thing that sees a press the
+  // rebinder has already cleared out of the report, and its `kind` carries
+  // rhoquinn8217's 2026-09-20 rule that a generic `hid` pad shows the Xbox set.
+  if (LAST_PRESS_KIND) return padLegendForKind(LAST_PRESS_KIND);
+  // ⓘ THEN A PAD THE BROWSER CAN STILL SEE. Worth keeping rather than
+  // deleting: a pad plugged into this PC and NOT bridged never reaches the
+  // rebinder, so nothing clears its buttons and the browser reads it fine.
+  // The listener has nothing to say about that pad, and this does.
   if (PAD_FAMILY_LAST) {
     return PAD_FAMILY_LAST === 'ps' ? PAD_LEGEND_PS : PAD_LEGEND_XBOX;
   }
@@ -8056,6 +8112,9 @@ window.addEventListener('gamepadconnected', function() { gpCollect(); pollDevice
 window.addEventListener('gamepaddisconnected', pollDevices);
 
 setInterval(pollDevices, POLL_MS);
+// ⭐ T-240. Its own interval, four times a second, because POLL_MS above is
+// four SECONDS and a legend that lags your hand by that much reads as broken.
+setInterval(pollLastPress, LAST_PRESS_MS);
 
 // ⭐ Configs refresh on their own clock, slowly.
 //
