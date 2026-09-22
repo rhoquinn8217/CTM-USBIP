@@ -292,6 +292,12 @@ inline void set_view(bool compact, bool quick, bool restore)
     if (!compact) g_size.store(1);
     else if (quick) g_sizeQuick.store(0);
     else g_sizeCompact.store(0);
+    device_log::input(device_log::msg()
+        << "ui/size-reset by set_view: compact=" << (compact ? 1 : 0)
+        << " quick=" << (quick ? 1 : 0)
+        << " -> adv=" << g_size.load()
+        << " simple=" << g_sizeCompact.load()
+        << " quick=" << g_sizeQuick.load());
     state_save();
 }
 
@@ -619,6 +625,15 @@ inline void state_load()
         else if (key == "size_simple") g_sizeCompact.store(n);
         else if (key == "size_quick") g_sizeQuick.store(n);
     }
+    device_log::input(device_log::msg()
+        << "ui/state-load: compact=" << (g_compact.load() ? 1 : 0)
+        << " quick=" << (g_quick.load() ? 1 : 0)
+        << " known=" << (g_known.load() ? 1 : 0)
+        << " sizes adv=" << g_size.load()
+        << " simple=" << g_sizeCompact.load()
+        << " quick=" << g_sizeQuick.load()
+        << " posQuick=" << (g_posQuick.have ? 1 : 0)
+        << " " << g_posQuick.x << "," << g_posQuick.y);
 }
 
 // This layout's slot, and the table it indexes.
@@ -655,6 +670,13 @@ inline void apply_size(HWND hwnd, int *outW, int *outH)
     SetWindowPos(hwnd, nullptr, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
     if (outW) *outW = w;
     if (outH) *outH = h;
+    // T-239 DIAGNOSIS: which slot, which index, and where the centre put it.
+    device_log::input(device_log::msg()
+        << "ui/size: idx=" << idx
+        << (g_compact.load() ? (g_quick.load() ? " quick" : " simple") : " advanced")
+        << " from=" << (int)rc.left << "," << (int)rc.top
+        << " " << (int)(rc.right - rc.left) << "x" << (int)(rc.bottom - rc.top)
+        << " to=" << x << "," << y << " " << w << "x" << h);
     // ⛔ AND IT DOES NOT REMEMBER WHERE THAT LEFT IT. Growing about the centre
     // moves a window without anyone having chosen a place; recording it here
     // overwrote a place someone HAD chosen. Deliberate placings write the
@@ -672,6 +694,8 @@ inline void resize_next(HWND hwnd)
 {
     std::atomic_int &slot = size_slot();
     slot.store((slot.load() + 1) % size_count());
+    device_log::input(device_log::msg()
+        << "ui/size-next by resize_next: idx now " << slot.load());
     apply_size(hwnd);
     state_save();   // T-239: the size outlives the process now
 }
