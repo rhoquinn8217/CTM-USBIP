@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.19 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.20 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,15 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.20 The legend follows the pad that pressed LAST, not the pad the
+            window is showing (T-240, rhoquinn8217). A legend is
+            instructions for the pad in your hand. Read from the
+            Gamepad's own id -- vendor 054c is PlayStation, 045e is Xbox,
+            and a pad Chrome reaches through XInput carries no vendor at
+            all, so the words are read too. Anything unrecognised is
+            Xbox, by the same answer that settled the generic hid case.
+            Until something is pressed there is no last press, so the
+            shown controller still answers.
     2.66.19 Simple and Quick come back where they were left (T-239).
             The page was undoing the listener's restore: sizeOnOpen ->
             compactHome does not only resize, it moves the window to
@@ -2501,13 +2510,61 @@ function padLegendForKind(kind) {
   return PAD_LEGEND_XBOX;
 }
 
-// ⭐ THE PAD THE WINDOW IS SHOWING, which is the one whose config is being
-// edited. ⚠️ It means the legend changes under L1/R1, and that is the point:
+// ⭐⭐ THE LEGEND FOLLOWS THE PAD THAT PRESSED LAST (rhoquinn8217, 2026-09-21:
+// *"Can the legend be based on the input of the last controller press. So if an
+// xbox press a button last, then it would show the xbox legend, if a Dual Sense
+// press a button last, then it would be a playstation legend and anything else
+// just defaults t xbox legend."*).
+//
+// ⭐ That settles a tension the first version had and admitted to. A legend is
+// instructions for the pad IN YOUR HAND, not for the pad whose config happens
+// to be on screen -- so it follows the hand.
+//
+// ⓘ Read from the Gamepad's own `id`, which needs no help from the listener.
+// Chrome writes a vendor and product for a pad it reaches over HID
+// ("... Vendor: 054c Product: 0ce6") and writes neither for one it reads
+// through XInput ("Xbox 360 Controller (XInput STANDARD GAMEPAD)"), so both
+// shapes have to be read: the vendor when it is there, the words when it is not.
+var PAD_FAMILY_LAST = '';     // 'ps' or 'xbox', empty until something is pressed
+
+function padFamilyFromId(id) {
+  var t = String(id || '').toLowerCase();
+  // Sony 054c, Microsoft 045e. ⓘ The space after the colon varies.
+  if (t.indexOf('vendor: 054c') >= 0 || t.indexOf('vendor:054c') >= 0) return 'ps';
+  if (t.indexOf('vendor: 045e') >= 0 || t.indexOf('vendor:045e') >= 0) return 'xbox';
+  if (t.indexOf('dualsense') >= 0 || t.indexOf('dualshock') >= 0 ||
+      t.indexOf('playstation') >= 0) return 'ps';
+  if (t.indexOf('xinput') >= 0 || t.indexOf('xbox') >= 0) return 'xbox';
+  // ⚠️ ANYTHING ELSE IS XBOX, by the same answer that settled the `hid` case:
+  // a pad imitating something is most likely imitating an Xbox one.
+  return 'xbox';
+}
+
+// ⭐ Called from the pad poll when a button goes DOWN. Repaints only when the
+// family actually changes, so the legend does not rebuild on every press.
+function notepadPress(pad) {
+  var fam = padFamilyFromId(pad && pad.id);
+  if (fam === PAD_FAMILY_LAST) return;
+  PAD_FAMILY_LAST = fam;
+  if (COMPACT) paintCompact();
+  gpPaint();
+}
+
+// ⓘ THE FALLBACK IS THE PAD THE WINDOW IS SHOWING, which is the one whose
+// config is being edited. ⚠️ It means the legend changes under L1/R1, and that is the point:
 // the shown pad is the one the person is thinking about.
 // ⓘ Advanced can sit on Overview or the Editor, where no pad is shown -- then
 // the first bridged controller answers, and a DualSense answers when nothing
 // is bridged at all, because that is this project's primary device.
 function padLegend() {
+  // ⭐ The hand first.
+  if (PAD_FAMILY_LAST) {
+    return PAD_FAMILY_LAST === 'ps' ? PAD_LEGEND_PS : PAD_LEGEND_XBOX;
+  }
+  // ⚠️ NOTHING HAS BEEN PRESSED YET -- a window just opened and not yet
+  // touched has no last press, and the legend still has to say something. The
+  // shown controller is the sensible answer there, and a DualSense when
+  // nothing is bridged, because that is this project's primary device.
   var d = (LAST_DEVICES || []).filter(function (x) { return x.ordinal === ACTIVE; })[0];
   if (!d) d = (LAST_DEVICES || []).filter(function (x) { return x.supports_config; })[0];
   return padLegendForKind(d ? d.kind : 'ds5');
@@ -7480,7 +7537,11 @@ function gpPoll() {
       var idx = live[p].index;
       var down = !!(live[p].buttons[i] && live[p].buttons[i].pressed);
       GP_PREV[idx] = GP_PREV[idx] || {};
-      if (down && !GP_PREV[idx][i]) any = true;
+      if (down && !GP_PREV[idx][i]) {
+        any = true;
+        // T-240: whichever pad this is, the legend now speaks its language.
+        notepadPress(live[p]);
+      }
       GP_PREV[idx][i] = down;
     }
     return any;
