@@ -42,3 +42,7 @@ configs*/
 src/app/ui_page_generated.inl
 # The previous 20 MB of device.log, kept by the log cap (src/log/capped_log.inl).
 device.log.1
+
+# T-239: the settings window's remembered place, size and layout.
+# Runtime state beside device.log and configs/, not source.
+window-state.txt

@@ -315,6 +315,58 @@ int run_button_layout_tests()
         CTM_CHECK(!is_pressed(*xbox, r.data(), r.size(), kButtonCount));
     }
 
+    section("last press: any button at all counts, on every pad (T-240)");
+    {
+        // ⭐⭐ THE PREDICATE THE LEGEND TURNS ON. rebind.inl records WHICH
+        // device pressed something, so the settings page can show the legend
+        // for the pad in the hand, and it asks exactly this of every report.
+        //
+        // ⛔ Mirrored here rather than called, for the reason at the top of
+        // this file: rebind.inl cannot be included by the test binary. ⚠️ If
+        // the loop in apply() changes, change this one with it.
+        auto any_pressed = [](const Layout &lay, const uint8_t *data, size_t len) {
+            for (int i = 0; i < kButtonCount; ++i) {
+                if (is_pressed(lay, data, len, i)) return true;
+            }
+            return false;
+        };
+
+        // ⓘ A PAD AT REST IS NOT PRESSING ANYTHING. The case that matters
+        // most: it runs on every report from every idle pad, and a false
+        // positive here would freeze the legend on whichever pad is plugged in.
+        for (const Layout *lay : { ds5, ds4, xbox }) {
+            std::vector<uint8_t> rest = blank_report(48);
+            blank_to_rest(*lay, rest.data(), rest.size(), false);
+            CTM_CHECK(!any_pressed(*lay, rest.data(), rest.size()));
+        }
+
+        // ⭐ EVERY BUTTON COUNTS, not the ten the page navigates with -- a
+        // trigger, a stick click or Options is a press (rhoquinn8217 asked for
+        // "the input of the last controller press"). ⓘ The plain bit spots
+        // here; hats and trigger travel have their own sections above.
+        int covered = 0;
+        for (const Layout *lay : { ds5, ds4, xbox }) {
+            for (int i = 0; i < kButtonCount; ++i) {
+                const BitSpot &spot = lay->spots[i];
+                if (spot.how != kSpotBit) continue;
+                std::vector<uint8_t> r = blank_report(48);
+                blank_to_rest(*lay, r.data(), r.size(), false);
+                r[spot.byteIndex] = static_cast<uint8_t>(r[spot.byteIndex] | spot.mask);
+                CTM_CHECK(any_pressed(*lay, r.data(), r.size()));
+                ++covered;
+            }
+        }
+        // ⚠️ A guard on the guard: if the spot tables were ever emptied the
+        // loop above would pass by doing nothing at all.
+        CTM_CHECK(covered > 20);
+
+        // ⛔ A truncated report is refused rather than read past, so it can
+        // never report a phantom press.
+        std::vector<uint8_t> tiny = blank_report(4);
+        CTM_CHECK(!any_pressed(*xbox, tiny.data(), tiny.size()));
+        CTM_CHECK(!any_pressed(*ds5, tiny.data(), tiny.size()));
+    }
+
     section("config mode rest: a DualSense report comes out exactly as the old lines left it");
     {
         // ⛔ The regression guard for the rewrite: every byte of every report,

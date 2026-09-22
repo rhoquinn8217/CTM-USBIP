@@ -176,6 +176,28 @@ inline std::atomic_bool g_configMode{false};
 // say so again.
 inline std::atomic_bool g_gateHold{false};
 
+// ⭐⭐ WHICH DEVICE PRESSED SOMETHING LAST (T-240).
+//
+// ⛔⛔ THE BROWSER CANNOT ANSWER THIS, and that is the whole reason this
+// exists. `apply()` below CLEARS a rebound button from the report before
+// Windows sees it, so a pad whose buttons are bound to keys is invisible to
+// `navigator.getGamepads()` -- rhoquinn8217, 2026-09-21: *"only L1 and R1 on
+// xbox and dualsense trigger the legend switch. all button from controller in
+// the config are mapped to keyboad keys. It looks like L1 and R1 are not."*
+// ➡️ Exactly right: L1 and R1 are the two the config does not claim, so they
+// are the only two that survive into the report the browser reads. The better
+// someone's config, the blinder the page.
+//
+// ⓘ The POINTER only. Resolving it to an ordinal costs a string and a lock,
+// and this runs on every report from every pad; the REST side resolves it once
+// when it is asked, with ctm_ordinal_for_device().
+inline std::atomic<const void *> g_lastPressDevice{nullptr};
+
+inline const void *last_press_device()
+{
+    return g_lastPressDevice.load(std::memory_order_relaxed);
+}
+
 // ⭐ The chord's memory, PER PAD: its last Options state (for the edge),
 // whether its own chord press is still held -- so the gate below leaves that one
 // button alone and the game can pause itself -- and what chord_debug last said.
@@ -507,6 +529,24 @@ inline void apply(const void *deviceKey,
     // so a truncated report is refused per pad rather than against a DualSense
     // constant that means nothing to the others.
     if (len < layout->minLength) return;
+
+    // ⭐⭐ WHO PRESSED LAST -- RECORDED HERE, BEFORE ANYTHING CLEARS A BUTTON.
+    //
+    // ⛔ Position is the whole point: config mode below and the user's rebinds
+    // further down both call clear_button(), so by the end of this function the
+    // report no longer shows what was pressed. ⓘ The chord gate above may
+    // already have taken Options, which is a deliberate gesture rather than a
+    // press, and is the one acceptable gap.
+    //
+    // ⓘ Any button at all, not the ten the page navigates with: a trigger
+    // pull is a press. ⚠️ Buttons only -- a stick is an axis, it idles off
+    // centre, and it would thrash between two pads.
+    for (int i = 0; i < kButtonCount; ++i) {
+        if (is_pressed(*layout, data, len, i)) {
+            g_lastPressDevice.store(deviceKey, std::memory_order_relaxed);
+            break;
+        }
+    }
 
     // ⭐ CONFIG MODE WINS over anything the user bound.
     //
@@ -1121,6 +1161,12 @@ void ctm_rebind_clear_provisional()
 bool ctm_rebind_config_mode_effective()
 {
     return ctm_rebind::config_mode() && ctm_ui_has_foreground();
+}
+
+// ⓘ No ctm_ prefix: new symbols of ours do not take one. 🔗 T-240.
+const void *rebind_last_press_device()
+{
+    return ctm_rebind::last_press_device();
 }
 
 bool ctm_rebind_gate_hold()

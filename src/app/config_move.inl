@@ -38,6 +38,8 @@
 
 #include <windows.h>
 #include <climits>
+#include <fstream>
+#include <sstream>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -109,9 +111,13 @@ inline std::atomic_int  g_sizeQuick{0};
 inline std::atomic_bool g_quick{false};
 
 inline HWND page_window();              // all four are defined below, with the placing
-inline void apply_size(HWND hwnd);
+inline void state_save();               // T-239: the place on disk, defined below
+// ⓘ apply_size REPORTS the size it set, because the caller cannot reliably
+// measure it afterwards -- see place_exact below.
+inline void apply_size(HWND hwnd, int *outW = nullptr, int *outH = nullptr);
 inline void place_default(HWND hwnd);
 inline void place_exact(HWND hwnd, int x, int y);
+inline void place_exact(HWND hwnd, int x, int y, int w, int h);
 inline void place_centre(HWND hwnd);
 
 // ⭐⭐ THIS FILE IS THE MEMORY (rhoquinn8217, 2026-09-09: "when closing
@@ -153,11 +159,17 @@ inline Pos &pos_slot()
 
 inline void note_pos(int x, int y)
 {
-    std::lock_guard<std::mutex> lock(g_posMutex);
-    Pos &p = pos_slot();
-    p.x = x;
-    p.y = y;
-    p.have = true;
+    {
+        std::lock_guard<std::mutex> lock(g_posMutex);
+        Pos &p = pos_slot();
+        p.x = x;
+        p.y = y;
+        p.have = true;
+    }
+    // ⛔ OUTSIDE THE LOCK. state_save() takes g_posMutex itself, and this
+    // mutex is not recursive -- saving from inside the guard would deadlock
+    // the first time anyone moved the window.
+    state_save();
 }
 
 inline bool last_pos(int *x, int *y)
@@ -183,8 +195,11 @@ inline void remember_pos_now()
 
 inline void note_ordinal(const std::string &ordinal)
 {
-    std::lock_guard<std::mutex> lock(g_ordinalMutex);
-    g_ordinal = ordinal;
+    {
+        std::lock_guard<std::mutex> lock(g_ordinalMutex);
+        g_ordinal = ordinal;
+    }
+    state_save();   // outside the lock, for the reason in note_pos
 }
 
 inline bool view_get(bool *compact, bool *quick, std::string *ordinal)
@@ -219,8 +234,27 @@ inline void restore_geometry_soon()
                 // means no future one can do it again.
                 int x = 0, y = 0;
                 const bool had = last_pos(&x, &y);
-                apply_size(h);
-                if (had) place_exact(h, x, y); else place_default(h);
+                // ⓘ The size apply_size ASKED for, clamped against below. The
+                // window itself may not have reached it yet.
+                int w = 0, ht = 0;
+                apply_size(h, &w, &ht);
+                if (had && w > 0 && ht > 0) place_exact(h, x, y, w, ht);
+                else if (had) place_exact(h, x, y);
+                else place_default(h);
+                // ⭐ SAY WHAT WAS READ AND WHAT WAS SET. There are TWO placers
+                // -- this file and the page's own moveTo -- so the final rect
+                // cannot tell you which one won, and a whole evening went into
+                // inferring it from where the window ended up (T-239).
+                RECT after;
+                const bool got = GetWindowRect(h, &after) != 0;
+                device_log::input(device_log::msg()
+                    << "ui/restore: had=" << (had ? 1 : 0)
+                    << " want=" << x << "," << y
+                    << " size=" << w << "x" << ht
+                    << " after=" << (got ? (int)after.left : -1)
+                    << "," << (got ? (int)after.top : -1)
+                    << " " << (got ? (int)(after.right - after.left) : -1)
+                    << "x" << (got ? (int)(after.bottom - after.top) : -1));
                 return;
             }
             Sleep(100);
@@ -251,12 +285,20 @@ inline void set_view(bool compact, bool quick, bool restore)
 
     if (restore) {
         restore_geometry_soon();
+        state_save();
         return;
     }
-    if (!changed) return;
+    if (!changed) { state_save(); return; }
     if (!compact) g_size.store(1);
     else if (quick) g_sizeQuick.store(0);
     else g_sizeCompact.store(0);
+    device_log::input(device_log::msg()
+        << "ui/size-reset by set_view: compact=" << (compact ? 1 : 0)
+        << " quick=" << (quick ? 1 : 0)
+        << " -> adv=" << g_size.load()
+        << " simple=" << g_sizeCompact.load()
+        << " quick=" << g_sizeQuick.load());
+    state_save();
 }
 
 // ⓘ Own edge tracking rather than ctm_overlay::edge(): that table's slots
@@ -333,6 +375,37 @@ inline void place_exact(HWND hwnd, int x, int y)
     if (!GetWindowRect(hwnd, &rc)) return;
     const RECT wa = work_area();
     clamp_into(wa, rc.right - rc.left, rc.bottom - rc.top, x, y);
+    place(hwnd, x, y);
+}
+
+// ⛔⛔ THE SIZE IS PASSED IN, NOT MEASURED (T-239, 2026-09-20). The version
+// above reads the window to learn how big it is, and a caller that has JUST
+// resized cannot use it: SetWindowPos on another process's window need not
+// have landed by the time GetWindowRect answers -- the same hazard this file
+// already warns about where the place is written.
+//
+// ⚠⚠ AND IT DID NOT FIX THE SYMPTOM THAT PROMPTED IT. Say so plainly:
+// restoring a window to 900,400 put it at 720,298 both BEFORE and AFTER this
+// overload existed. The y is the clamp doing its job (1104 work area - 806
+// window = 298). The x is still unexplained: the correct clamp is 881, the
+// page's own centring would give 440, and 720 is neither.
+// ➡️ So this change stands on its own terms -- clamping against a size you
+// just ASKED for is right, and measuring a window mid-resize is a hazard this
+// file already warns about -- but it is NOT the cause of the wrong column, and
+// nothing here should be read as having found it. T-239 carries the open
+// question, with the numbers.
+inline void place_exact(HWND hwnd, int x, int y, int w, int h)
+{
+    const RECT wa = work_area();
+    const int wantX = x, wantY = y;
+    clamp_into(wa, w, h, x, y);
+    if (x != wantX || y != wantY) {
+        device_log::input(device_log::msg()
+            << "ui/clamp: " << wantX << "," << wantY << " -> " << x << "," << y
+            << " for " << w << "x" << h
+            << " in work area " << (int)(wa.right - wa.left)
+            << "x" << (int)(wa.bottom - wa.top));
+    }
     place(hwnd, x, y);
 }
 
@@ -447,6 +520,122 @@ inline void snap_next(HWND hwnd)
     place_at(hwnd, (at + 1) % 3);
 }
 
+// ⭐⭐ THE PLACE, THE SIZE AND THE LAYOUT, ON DISK (T-239, 2026-09-20).
+//
+// ⛔ THIS WAS REPORTED AS A REGRESSION AND IT IS NOT ONE. Both close paths
+// were measured on 2026-09-20 and both save and restore exactly: the page's
+// own Close (`ui/close`, which calls remember_pos_now() while the window is
+// still up) and the X (`ui/closed`, the teardown beacon). A window put at
+// 200,200 came back at 200,200 through either.
+//
+// ⓘ What looked like a lost place in the measurement was clamp_into() doing
+// its job: a window dragged so its BOTTOM fell past the work area came back
+// with its top at (work area height - window height), which on this machine
+// is 1104 - 806 = 298. Exactly 298 every time, for any y below it. Not a
+// fault -- a window that opens off the bottom of the screen is worse.
+//
+// ➡️ **The real fault is that none of it outlived the PROCESS.** Everything
+// above is atomics and two mutexes, so every rebuild forgot the lot -- and the
+// listener is rebuilt several times on a working day (five times on the day
+// this was written). rhoquinn8217 filed it as *"window mode, size and location
+// needs to be remembered on close"*, and a restart is simply the case where
+// "remembered" failed hardest.
+//
+// ⓘ The file sits in the WORKING DIRECTORY, beside configs/ and device.log,
+// which agent.inl logs at startup for exactly this sort of question. It is
+// disposable: delete it and the window opens where it always did.
+// ⚠️ A restored place still goes through clamp_into() on the way back, which
+// is what stops a place remembered on one monitor stranding the window off
+// the edge of another.
+inline const char *state_file() { return "window-state.txt"; }
+
+inline void state_save()
+{
+    std::ostringstream out;
+    out << "# DS5-USBIP window state, written by config_move.inl (T-239).\n"
+        << "# Safe to delete: the window then opens at its defaults.\n";
+    out << "compact = " << (g_compact.load() ? 1 : 0) << "\n"
+        << "quick = " << (g_quick.load() ? 1 : 0) << "\n"
+        << "known = " << (g_known.load() ? 1 : 0) << "\n"
+        << "size_advanced = " << g_size.load() << "\n"
+        << "size_simple = " << g_sizeCompact.load() << "\n"
+        << "size_quick = " << g_sizeQuick.load() << "\n";
+    {
+        std::lock_guard<std::mutex> lock(g_ordinalMutex);
+        if (!g_ordinal.empty()) out << "ordinal = " << g_ordinal << "\n";
+    }
+    {
+        std::lock_guard<std::mutex> lock(g_posMutex);
+        // ⓘ A slot with nothing in it writes no line at all, so "never placed"
+        // and "placed at 0,0" stay different things.
+        if (g_posAdvanced.have) out << "pos_advanced = " << g_posAdvanced.x << "," << g_posAdvanced.y << "\n";
+        if (g_posSimple.have)   out << "pos_simple = "   << g_posSimple.x   << "," << g_posSimple.y   << "\n";
+        if (g_posQuick.have)    out << "pos_quick = "    << g_posQuick.x    << "," << g_posQuick.y    << "\n";
+    }
+    // ⓘ Best effort, and deliberately silent. A window place is not worth a
+    // log line on every move, and a read-only directory must not stop the
+    // window working.
+    std::ofstream f(state_file(), std::ios::trunc);
+    if (f) f << out.str();
+}
+
+// Read once at startup, before any window exists. ⚠️ Unknown keys and junk
+// are ignored rather than rejected: this file is disposable, and refusing to
+// start because someone edited it would be the worse failure.
+inline void state_load()
+{
+    std::ifstream f(state_file());
+    if (!f) return;
+    std::string line;
+    while (std::getline(f, line)) {
+        if (line.empty() || line[0] == '#') continue;
+        const size_t eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        std::string key = line.substr(0, eq);
+        std::string val = line.substr(eq + 1);
+        auto trim = [](std::string &t) {
+            while (!t.empty() && (t.front() == ' ' || t.front() == '\t')) t.erase(t.begin());
+            while (!t.empty() && (t.back() == ' ' || t.back() == '\t' || t.back() == '\r')) t.pop_back();
+        };
+        trim(key);
+        trim(val);
+        if (key == "ordinal") {
+            std::lock_guard<std::mutex> lock(g_ordinalMutex);
+            g_ordinal = val;
+            continue;
+        }
+        if (key.rfind("pos_", 0) == 0) {
+            const size_t comma = val.find(',');
+            if (comma == std::string::npos) continue;
+            Pos p;
+            p.x = std::atoi(val.substr(0, comma).c_str());
+            p.y = std::atoi(val.substr(comma + 1).c_str());
+            p.have = true;
+            std::lock_guard<std::mutex> lock(g_posMutex);
+            if (key == "pos_advanced") g_posAdvanced = p;
+            else if (key == "pos_simple") g_posSimple = p;
+            else if (key == "pos_quick") g_posQuick = p;
+            continue;
+        }
+        const int n = std::atoi(val.c_str());
+        if (key == "compact") g_compact.store(n != 0);
+        else if (key == "quick") g_quick.store(n != 0);
+        else if (key == "known") g_known.store(n != 0);
+        else if (key == "size_advanced") g_size.store(n);
+        else if (key == "size_simple") g_sizeCompact.store(n);
+        else if (key == "size_quick") g_sizeQuick.store(n);
+    }
+    device_log::input(device_log::msg()
+        << "ui/state-load: compact=" << (g_compact.load() ? 1 : 0)
+        << " quick=" << (g_quick.load() ? 1 : 0)
+        << " known=" << (g_known.load() ? 1 : 0)
+        << " sizes adv=" << g_size.load()
+        << " simple=" << g_sizeCompact.load()
+        << " quick=" << g_sizeQuick.load()
+        << " posQuick=" << (g_posQuick.have ? 1 : 0)
+        << " " << g_posQuick.x << "," << g_posQuick.y);
+}
+
 // This layout's slot, and the table it indexes.
 inline std::atomic_int &size_slot()
 {
@@ -464,7 +653,7 @@ inline const SizeShare *size_table()
 
 // The size this layout is at, applied about the window's CENTRE so it grows
 // and shrinks in place, then clamped fully on screen.
-inline void apply_size(HWND hwnd)
+inline void apply_size(HWND hwnd, int *outW, int *outH)
 {
     RECT rc;
     if (!GetWindowRect(hwnd, &rc)) return;
@@ -479,6 +668,15 @@ inline void apply_size(HWND hwnd)
     int y = cy - h / 2;
     clamp_into(wa, w, h, x, y);
     SetWindowPos(hwnd, nullptr, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
+    if (outW) *outW = w;
+    if (outH) *outH = h;
+    // T-239 DIAGNOSIS: which slot, which index, and where the centre put it.
+    device_log::input(device_log::msg()
+        << "ui/size: idx=" << idx
+        << (g_compact.load() ? (g_quick.load() ? " quick" : " simple") : " advanced")
+        << " from=" << (int)rc.left << "," << (int)rc.top
+        << " " << (int)(rc.right - rc.left) << "x" << (int)(rc.bottom - rc.top)
+        << " to=" << x << "," << y << " " << w << "x" << h);
     // ⛔ AND IT DOES NOT REMEMBER WHERE THAT LEFT IT. Growing about the centre
     // moves a window without anyone having chosen a place; recording it here
     // overwrote a place someone HAD chosen. Deliberate placings write the
@@ -496,7 +694,10 @@ inline void resize_next(HWND hwnd)
 {
     std::atomic_int &slot = size_slot();
     slot.store((slot.load() + 1) % size_count());
+    device_log::input(device_log::msg()
+        << "ui/size-next by resize_next: idx now " << slot.load());
     apply_size(hwnd);
+    state_save();   // T-239: the size outlives the process now
 }
 
 inline void nudge(HWND hwnd, int dx, int dy)

@@ -177,6 +177,28 @@ inline void set_drag_for(const void *deviceKey, uint8_t mask)
 }
 } // namespace ctm_mouse_device
 
+// ⓘ A STAND-IN, like the Gate one above. touch_mouse.inl asks the rebinder
+// how to read a binding value since T-242, and rebind.inl cannot be included
+// by this binary -- so the mapping it needs is restated here, matching the
+// real one in rebind.inl. ⚠️ It folds case, because the config reader
+// lowercases every value and a comparison that does not silently never
+// matches, which rebind.inl records happening three times.
+namespace ctm_rebind {
+enum MouseAction { kMouseNone = 0, kMouseLeft, kMouseRight, kMouseMiddle,
+                   kMouseWheelUp, kMouseWheelDown };
+inline MouseAction mouse_action_for(const std::string &code)
+{
+    std::string want;
+    for (char c : code) want.push_back(static_cast<char>(tolower(static_cast<unsigned char>(c))));
+    if (want == "mouseleft")      return kMouseLeft;
+    if (want == "mouseright")     return kMouseRight;
+    if (want == "mousemiddle")    return kMouseMiddle;
+    if (want == "mousewheelup")   return kMouseWheelUp;
+    if (want == "mousewheeldown") return kMouseWheelDown;
+    return kMouseNone;
+}
+}  // namespace ctm_rebind
+
 #include "input/touch_mouse.inl"
 
 // ---- Report scaffolding -----------------------------------------------------
@@ -356,6 +378,64 @@ int run_touch_mouse_tests()
         CTM_CHECK_EQ(g_clickCount, 1);
         CTM_CHECK_EQ(static_cast<int>(g_lastClick), 0x02);
         CTM_CHECK_EQ(g_wheelSum, 0);           // resting fingers never scroll
+    }
+
+    // ⓘ The two above now double as the MIGRATION tests: they set the old
+    // `touchpad_tap_click` bool and still expect left and right, which only
+    // holds while the old spelling keeps meaning exactly what it meant.
+
+    section("touch: T-242, a one-finger tap does what it is REMAPPED to");
+    {
+        reset_stubs();
+        fresh_device();
+        // ⛔ Right click from ONE finger -- impossible before, because the bool
+        // hard-coded one finger to left.
+        g_cfg["touchpad_one_finger_tap"] = "MouseRight";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 300, 300);
+        run_step(r, 0);
+        set_point(r, 0, false, 1, 300, 300);
+        run_step(r, 100);
+        CTM_CHECK_EQ(g_clickCount, 1);
+        CTM_CHECK_EQ(static_cast<int>(g_lastClick), 0x02);
+    }
+
+    section("touch: T-242, a finger count with no action set does NOTHING");
+    {
+        reset_stubs();
+        fresh_device();
+        // One finger acts; two is deliberately blank. ⚠️ It must NOT fall back
+        // to the one-finger action -- "two fingers do nothing" has to be sayable.
+        g_cfg["touchpad_one_finger_tap"] = "MouseLeft";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 300, 300);
+        run_step(r, 0);
+        set_point(r, 1, true, 2, 400, 300);
+        run_step(r, 30);
+        set_point(r, 0, false, 1, 300, 300);
+        set_point(r, 1, false, 2, 400, 300);
+        run_step(r, 110);
+        CTM_CHECK_EQ(g_clickCount, 0);
+    }
+
+    section("touch: T-242, the drag holds whichever button it is given");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_press_touch_drag"] = "MouseMiddle";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 300, 300);
+        r[10] = static_cast<uint8_t>(r[10] | 0x02);   // DS5 pad pressed in, clickByte 10
+        run_step(r, 0);
+        CTM_CHECK_EQ(static_cast<int>(g_dragMask), 0x04);
+        // ⭐ THE CLICK CAN GO AND THE DRAG STAYS. That is the whole point of it.
+        r[10] = static_cast<uint8_t>(r[10] & ~0x02);  // the click let go
+        run_step(r, 40);
+        CTM_CHECK_EQ(static_cast<int>(g_dragMask), 0x04);
+        // ⓘ It ends when the FINGER leaves, not when the click did.
+        set_point(r, 0, false, 1, 300, 300);
+        run_step(r, 80);
+        CTM_CHECK_EQ(static_cast<int>(g_dragMask), 0x00);
     }
 
     section("touch: a slow hold is not a tap");

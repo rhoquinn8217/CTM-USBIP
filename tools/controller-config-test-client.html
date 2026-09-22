@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.16 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.23 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,68 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.23 The legend shows the marks on the buttons rather than their
+            names (rhoquinn8217). The d-pad is a compass glyph in both
+            sets instead of the words "d-pad", and the Xbox set carries
+            the three-lines and two-rectangles marks instead of spelling
+            out Menu and View. The d-pad glyph lives in both legend
+            tables rather than in the strings, so a family that ever
+            needs a different one has somewhere to put it.
+    2.66.22 The legend asks the LISTENER which pad pressed last (T-240).
+            The browser cannot answer it: the rebinder clears a bound
+            button out of the report before Windows sees it, so
+            navigator.getGamepads only ever showed the buttons a config
+            had not claimed -- in practice just L1 and R1. A new
+            /api/v1/lastpress, polled four times a second while this
+            window is in front, carries the kind; padLegendForKind turns
+            it into a legend, which also reuses the rule that a generic
+            hid pad shows the Xbox set. The browser scan stays as the
+            answer for a pad that is plugged in but not bridged, because
+            nothing clears that one's buttons.
+    2.66.21 The legend follows EVERY button, not just the ten the page
+            maps (T-240). The family scan hung off edge(), which is only
+            ever asked about buttons 0-5 and the d-pad, so a trigger, a
+            stick click, Options, Share or Guide did not count as a
+            press. It is now its own scan over every button on every pad,
+            with its own previous-state map so it cannot steal edges from
+            the page's navigation.
+    2.66.20 The legend follows the pad that pressed LAST, not the pad the
+            window is showing (T-240, rhoquinn8217). A legend is
+            instructions for the pad in your hand. Read from the
+            Gamepad's own id -- vendor 054c is PlayStation, 045e is Xbox,
+            and a pad Chrome reaches through XInput carries no vendor at
+            all, so the words are read too. Anything unrecognised is
+            Xbox, by the same answer that settled the generic hid case.
+            Until something is pressed there is no last press, so the
+            shown controller still answers.
+    2.66.19 Simple and Quick come back where they were left (T-239).
+            The page was undoing the listener's restore: sizeOnOpen ->
+            compactHome does not only resize, it moves the window to
+            bottom centre, so a restored place was thrown away
+            milliseconds after it landed. Advanced was unaffected because
+            it is the one mode that line skips, which is what named the
+            bug. sizeOnOpen was right when T-193 added it -- the listener
+            remembered no size then -- and T-239 changed that premise, so
+            a restore is now entirely the listener's job.
+    2.66.18 Two legends, one per pad family (T-240, rhoquinn8217). An
+            Xbox pad was being told to press four buttons it does not
+            have, by shapes it does not carry: Cross, Circle, Square,
+            Create and Options in DualSense glyphs whatever was driving.
+            It now reads A, B, X, View, Menu and LB/RB. The set follows
+            the controller the WINDOW IS SHOWING, so it changes under
+            L1/R1, and a generic "hid" pad takes the Xbox set because it
+            is most likely imitating one -- which it got by accident
+            before, not by decision.
+    2.66.17 The touchpad's tap and press are remappable (T-242):
+            touchpad_one_finger_tap, touchpad_two_finger_tap and
+            touchpad_press_touch_drag, each choosing a mouse action or
+            nothing. The one bool they replace hard-coded TWO actions --
+            one finger left, two fingers right -- so a single remap
+            target could not carry it. The drag is the interesting one:
+            the press puts the action DOWN and it comes up when no finger
+            is left on the pad, not when the click is released. The old
+            bools are hidden and still read, so a config written before
+            the split keeps its gestures.
     2.66.16 Six touchpad choices, not four (rhoquinn8217): a finger on
             the pad at all, ONLY one finger, or ONLY two -- each either
             resting or with the pad pressed in. The four skipped the plain
@@ -1621,7 +1683,6 @@ var KEYS = [];
 var KEY_NAMES = [];   // KeyboardEvent.code names a button can be bound to
 
 function base() { return document.getElementById('base').value.replace(/\/+$/, ''); }
-
 // ⭐⭐ THE PAGE TALKS TO WHEREVER IT WAS SERVED FROM (T-217). The field above is
 // only a fallback now.
 //
@@ -1876,7 +1937,7 @@ function offerRealWindow() {
 function fitWindowIfOversized() {
   var wantW = wantSize().w;
   var wantH = wantSize().h;
-  if (window.outerWidth > wantW * 1.15 || window.outerHeight > wantH * 1.15) {
+  if (window.outerWidth > wantW * 1.15 || window.outerHeight > wantH * 1.15) { 
     fitWindow();
   }
 }
@@ -2442,6 +2503,177 @@ function deviceLabel(d) {
   return base || modelOrType(d) || d.kind || 'controller';
 }
 
+// ⭐⭐ TWO LEGENDS, ONE PER PAD FAMILY (T-240, rhoquinn8217: *"Legend based
+// on controller used. Two legends, one more xbox and one for playstation."*).
+//
+// ⛔ Every legend was written in DualSense glyphs whatever pad was driving,
+// so an Xbox pad was told to press four buttons it does not have, by shapes it
+// does not carry.
+//
+// ⓘ NOT the remap rows' both-names style. Those show "(✕) | (A)" and have
+// room; Quick's footer is one line in a 516px window and already holds three
+// items. So this is a choice by kind, not a second label.
+// ⛔⛔ THESE GLYPHS ARE SETTLED. DO NOT GO LOOKING FOR "PROPER" ONES.
+//
+// ⭐ rhoquinn8217, 2026-09-21: *"We've already looked through the glyphs
+// before. the 3 lines is what is used by the community so it's already
+// recognizable even if it's not a proper glyph."*
+//
+// ⓘ The reason this keeps getting reopened: ✕ ○ □ are ordinary geometric
+// shapes that happen to match PlayStation's face buttons, so it LOOKS as
+// though every mark here should have a Unicode equivalent. ⛔ It does not.
+// Create, Share and the PS button are Sony BRAND MARKS that live in
+// PlayStation's own font and were never encoded, so there is nothing to look
+// up and no search will turn one up.
+//
+// ➡️ `\|/` IS THE THREE LINES, drawn in ASCII because there is no character
+// for them, and three lines is what the community uses for that button. It is
+// recognizable already, which is the only thing a legend has to be.
+// ⚠️ The near misses considered and rejected: U+269F and U+269E ("three
+// lines converging"), U+2398, U+2387, U+22D4, U+2442. The last two render out
+// of a fallback font and look wrong beside the rest.
+var PAD_LEGEND_PS = {
+  select: '\u2715', close: '\u25cb', toggle: '\u25a1',
+  resize: '\\|/', position: '\u2630', shoulder: 'L1/R1',
+  // ⭐ The d-pad is the same shape on every pad, so both tables carry the
+  // same glyph. It lives here rather than in the strings, so a family that
+  // ever needs a different one has somewhere to put it.
+  dpad: '\u271c'
+};
+var PAD_LEGEND_XBOX = {
+  select: 'A', close: 'B', toggle: 'X',
+  // ⭐⭐ THE MARKS ON THE BUTTONS, NOT THEIR NAMES (rhoquinn8217,
+  // 2026-09-21). ⓘ View is the two-rectangles button and Menu the
+  // three-lines one, which is what Microsoft calls them now -- Back and Start
+  // on an older pad. The glyphs say the same thing without needing either
+  // generation's word for it, and they sit at the width of the PlayStation
+  // set beside them instead of putting two English words in a row of symbols.
+  resize: '\u29c9', position: '\u2630', shoulder: 'LB/RB',
+  dpad: '\u271c'
+};
+
+// ⚠️ A GENERIC `hid` PAD GETS THE XBOX SET (rhoquinn8217, 2026-09-20:
+// *"most controller will be emulating Xbox or ds4, but if one in genuinely hid
+// then just show xbox as legend as it most likely to be mimicking xbox"*).
+// ⓘ Before this it got the PlayStation set by accident rather than by
+// decision, which is the thing being fixed.
+function padLegendForKind(kind) {
+  var k = settingsKindOf(kind || '');
+  if (k === 'ds5' || k === 'ds5_edge' || k === 'ds4') return PAD_LEGEND_PS;
+  return PAD_LEGEND_XBOX;
+}
+
+// ⭐⭐ THE LEGEND FOLLOWS THE PAD THAT PRESSED LAST (rhoquinn8217, 2026-09-21:
+// *"Can the legend be based on the input of the last controller press. So if an
+// xbox press a button last, then it would show the xbox legend, if a Dual Sense
+// press a button last, then it would be a playstation legend and anything else
+// just defaults t xbox legend."*).
+//
+// ⭐ That settles a tension the first version had and admitted to. A legend is
+// instructions for the pad IN YOUR HAND, not for the pad whose config happens
+// to be on screen -- so it follows the hand.
+//
+// ⓘ Read from the Gamepad's own `id`, which needs no help from the listener.
+// Chrome writes a vendor and product for a pad it reaches over HID
+// ("... Vendor: 054c Product: 0ce6") and writes neither for one it reads
+// through XInput ("Xbox 360 Controller (XInput STANDARD GAMEPAD)"), so both
+// shapes have to be read: the vendor when it is there, the words when it is not.
+// ⭐⭐ WHAT THE LISTENER SAYS PRESSED LAST. This is the REAL source.
+//
+// ⛔⛔ THE BROWSER IS STRUCTURALLY UNABLE TO ANSWER THIS, which the note in
+// gpPoll() has said since 2026-09-03 and which T-240 was built on top of
+// anyway. The listener CLEARS a rebound button out of the report before
+// Windows sees it, so `navigator.getGamepads()` only ever shows the buttons
+// nobody has bound. rhoquinn8217, 2026-09-21: *"only L1 and R1 on xbox and
+// dualsense trigger the legend switch. all button from controller in the
+// config are mapped to keyboad keys."* ➡️ L1 and R1 are the two a config does
+// not claim, so they were the only two getting through.
+var LAST_PRESS_KIND = '';     // 'ds5', 'ds4', 'xbox', 'hid' ... '' until a press
+var LAST_PRESS_ORDINAL = '';
+// ⓘ Four times a second. The legend is meant to follow your hand, and
+// /devices at POLL_MS (four seconds) cannot do that. The reply is a few dozen
+// bytes to a loopback server, and it stops entirely when the window is behind.
+var LAST_PRESS_MS = 250;
+
+function pollLastPress() {
+  // ⛔ Nothing while this window is behind: the pad is being used somewhere
+  // else, and the poll is only ever for what is on this page.
+  if (typeof STOPPED !== 'undefined' && STOPPED) return;
+  if (!document.hasFocus()) return;
+  // ⓘ quiet: a listener too old to know this route would otherwise put the
+  // page into its "cannot reach the agent" state four times a second.
+  call('GET', '/api/v1/lastpress', undefined, true).then(function (r) {
+    if (!r) return;
+    var kind = r.kind || '';
+    LAST_PRESS_ORDINAL = r.ordinal || '';
+    // ⭐ Only a change of KIND can change the legend. Two DualSenses passed
+    // back and forth are still the PlayStation set, and repainting on every
+    // press would rebuild the footer under someone's hand.
+    if (kind === LAST_PRESS_KIND) return;
+    LAST_PRESS_KIND = kind;
+    if (COMPACT) paintCompact();
+    gpPaint();
+  }).catch(function () { /* ⓘ offline is the page's own problem to report */ });
+}
+
+var PAD_FAMILY_LAST = '';     // 'ps' or 'xbox', empty until something is pressed
+// ⚠️ SEPARATE FROM `GP_PREV`, deliberately: see the scan in gpPoll().
+var GP_FAM_PREV = {};
+
+function padFamilyFromId(id) {
+  var t = String(id || '').toLowerCase();
+  // Sony 054c, Microsoft 045e. ⓘ The space after the colon varies.
+  if (t.indexOf('vendor: 054c') >= 0 || t.indexOf('vendor:054c') >= 0) return 'ps';
+  if (t.indexOf('vendor: 045e') >= 0 || t.indexOf('vendor:045e') >= 0) return 'xbox';
+  if (t.indexOf('dualsense') >= 0 || t.indexOf('dualshock') >= 0 ||
+      t.indexOf('playstation') >= 0) return 'ps';
+  if (t.indexOf('xinput') >= 0 || t.indexOf('xbox') >= 0) return 'xbox';
+  // ⚠️ ANYTHING ELSE IS XBOX, by the same answer that settled the `hid` case:
+  // a pad imitating something is most likely imitating an Xbox one.
+  return 'xbox';
+}
+
+// ⭐ Called from the pad poll when ANY button goes DOWN. Repaints only when
+// the family actually changes, so the legend does not rebuild on every press.
+// ⚠️ The poll drops pad input entirely while this window is behind
+// (`document.hasFocus()`), so the legend does not follow a pad being used in a
+// game -- which is correct, and is also why a test has to click the window
+// first.
+function notepadPress(pad) {
+  var fam = padFamilyFromId(pad && pad.id);
+  if (fam === PAD_FAMILY_LAST) return;
+  PAD_FAMILY_LAST = fam;
+  if (COMPACT) paintCompact();
+  gpPaint();
+}
+
+// ⓘ THE FALLBACK IS THE PAD THE WINDOW IS SHOWING, which is the one whose
+// config is being edited. ⚠️ It means the legend changes under L1/R1, and that is the point:
+// the shown pad is the one the person is thinking about.
+// ⓘ Advanced can sit on Overview or the Editor, where no pad is shown -- then
+// the first bridged controller answers, and a DualSense answers when nothing
+// is bridged at all, because that is this project's primary device.
+function padLegend() {
+  // ⭐⭐ THE LISTENER FIRST. It is the only thing that sees a press the
+  // rebinder has already cleared out of the report, and its `kind` carries
+  // rhoquinn8217's 2026-09-20 rule that a generic `hid` pad shows the Xbox set.
+  if (LAST_PRESS_KIND) return padLegendForKind(LAST_PRESS_KIND);
+  // ⓘ THEN A PAD THE BROWSER CAN STILL SEE. Worth keeping rather than
+  // deleting: a pad plugged into this PC and NOT bridged never reaches the
+  // rebinder, so nothing clears its buttons and the browser reads it fine.
+  // The listener has nothing to say about that pad, and this does.
+  if (PAD_FAMILY_LAST) {
+    return PAD_FAMILY_LAST === 'ps' ? PAD_LEGEND_PS : PAD_LEGEND_XBOX;
+  }
+  // ⚠️ NOTHING HAS BEEN PRESSED YET -- a window just opened and not yet
+  // touched has no last press, and the legend still has to say something. The
+  // shown controller is the sensible answer there, and a DualSense when
+  // nothing is bridged, because that is this project's primary device.
+  var d = (LAST_DEVICES || []).filter(function (x) { return x.ordinal === ACTIVE; })[0];
+  if (!d) d = (LAST_DEVICES || []).filter(function (x) { return x.supports_config; })[0];
+  return padLegendForKind(d ? d.kind : 'ds5');
+}
+
 function settingsKindOf(sessionKind) {
   if (sessionKind === 'ds5' || sessionKind === 'ds5_usb') return 'ds5';
   if (sessionKind === 'ds5e_usb' || sessionKind === 'ds5_edge') return 'ds5_edge';
@@ -2735,6 +2967,18 @@ var GATE_BUTTON_EXTRA = {
 // the gyro is on all the time and the button is what stops it. The hint used to
 // sit on the button row's blank as "(no button — always)"; rhoquinn8217 moved
 // it here, where it explains the type rather than the absence of a button.
+// ⓘ T-242: the touchpad gestures take a mouse action, and "(blank)" on one
+// of those rows means that gesture does nothing -- not "off by default".
+var TOUCH_ACTION_KEYS = {
+  touchpad_one_finger_tap: 1, touchpad_two_finger_tap: 1, touchpad_press_touch_drag: 1
+};
+var TOUCH_ACTION_LABELS = {
+  '': 'does nothing',
+  MouseLeft: 'left click',
+  MouseRight: 'right click',
+  MouseMiddle: 'middle click'
+};
+
 var GATE_TYPE_LABELS = {
   '': 'off',
   until_held: 'on button release — always on',
@@ -2749,6 +2993,9 @@ function choiceLabel(key, value) {
   // would put "(blank — off)" back on it.
   if (key === 'gyro_to_mouse_gate_type') {
     return GATE_TYPE_LABELS[value] !== undefined ? GATE_TYPE_LABELS[value] : value;
+  }
+  if (TOUCH_ACTION_KEYS[key]) {
+    return TOUCH_ACTION_LABELS[value] !== undefined ? TOUCH_ACTION_LABELS[value] : value;
   }
   if (value === '') {
     // ⓘ A blank BUTTON is not "off" -- it means no button at all, which is a
@@ -3486,7 +3733,12 @@ function inertReason(key, sessionKind) {
 // reads it, so a config written before the split keeps its gate -- but showing
 // it beside the pair that replaced it would be two controls for one feature,
 // and whichever you touched last would look like the one that lost.
-var HIDDEN_SETTINGS = { trigger_probe: 1, gyro_to_mouse_gate: 1 };
+// ⓘ touchpad_tap_click and touchpad_click_drag are SUPERSEDED by the three
+// touchpad_*_tap / _drag keys (T-242) and still read, so a config written
+// before the split keeps its gestures. Hidden for the same reason the gate
+// is: two controls for one thing, and whichever you touched last wins.
+var HIDDEN_SETTINGS = { trigger_probe: 1, gyro_to_mouse_gate: 1,
+                        touchpad_tap_click: 1, touchpad_click_drag: 1 };
 
 function hiddenSetting(key) {
   return HIDDEN_SETTINGS[key] === 1 || /_debug(_|$)/.test(key);
@@ -6510,11 +6762,17 @@ function applySavedMode() {
 // restore, because setCompact says "the listener sizes and places it from what
 // it remembers".
 //
-// ⛔⛔ THAT COMMENT IS NOT TRUE OF THE SIZE. The listener remembers the VIEW
-// -- compact, quick, which controller -- and `/api/v1/ui/view` returns exactly
-// those three. It has no remembered width or height, and open_ui.inl reads
-// none. So on every path the window kept Advanced's geometry while showing
-// Simple or Quick.
+// ⛔⛔ THAT COMMENT WAS NOT TRUE OF THE SIZE, WHEN THIS WAS WRITTEN. The
+// listener remembered the VIEW -- compact, quick, which controller -- and
+// `/api/v1/ui/view` returned exactly those three. It had no remembered width or
+// height, and open_ui.inl read none. So on every path the window kept
+// Advanced's geometry while showing Simple or Quick.
+//
+// ✅ **T-239 (2026-09-20) MADE IT TRUE.** The listener holds a size index per
+// layout and a place per layout, `restore_geometry_soon()` applies both, and
+// since T-239 they survive a restart on disk. ➡️ So this function is NO LONGER
+// called on a restore -- only on the path where the listener knows nothing --
+// and the reason is written at that call site in restoreView().
 //
 // ⚠️ Seen as "two windows open in simple mode, one the correct size and the
 // other the advanced mode size" (rhoquinn8217, 2026-09-15). The second window
@@ -6712,20 +6970,54 @@ function postView(restore) {
 function restoreView() {
   fetch(base() + '/api/v1/ui/view')
     .then(function (r) { return r.json(); })
-    .then(function (v) {
-      if (!v || !v.known) { applySavedMode(); return; }
+    .then(function (v) {      if (!v || !v.known) {
+        // ⭐ The listener has nothing to restore, so the page is the only
+        // authority and the oversize rescue belongs here.
+        fitWindowIfOversized();
+        applySavedMode();
+        return;
+      }
       if (v.ordinal) WANT_ORDINAL = v.ordinal;
       setMode(v.compact ? (v.quick ? 'quick' : 'simple') : 'advanced', true);
-      sizeOnOpen();          // the listener remembers the VIEW, never the size
+      // ⛔⛔ NO sizeOnOpen() HERE ANY MORE (fixed 2026-09-21, rhoquinn8217:
+      // *"Closing the quick mode box doesn't reopen it in the same spot"*, then
+      // *"all modes don't open in the same spot"*, then *"correction, advance
+      // mode does open in the same spot"* -- and that correction is what named
+      // the bug, because Advanced is the one mode sizeOnOpen SKIPS).
+      //
+      // ⚠️ sizeOnOpen -> sizeForMode -> compactHome, and compactHome does not
+      // only resize: it MOVES the window to bottom centre. So on every restore
+      // of Simple or Quick the page threw away the place the listener had just
+      // put back, a few milliseconds after it landed. Advanced survived only
+      // because `if (COMPACT)` skipped it.
+      //
+      // ⭐ IT WAS RIGHT WHEN IT WAS WRITTEN. T-193 added it because the
+      // listener remembered the VIEW and no size, so a window opened at
+      // Advanced's geometry and stayed there while showing Simple. **T-239
+      // changed that premise**: the listener now remembers a size index per
+      // layout AND the place, and restore_geometry_soon() applies both.
+      // ➡️ So the page's job on a restore is nothing at all.
+      //
+      // ⓘ The unknown-listener path KEEPS it: applySavedMode() still calls
+      // sizeOnOpen(), because there the page's own record is all there is.
+      // ⚠️ The window may show Advanced's opening geometry for the moment
+      // before the listener's restore lands -- it polls up to three seconds for
+      // the window. Briefly the wrong size beats permanently the wrong place.
     })
-    .catch(function () { applySavedMode(); });
+    .catch(function () {
+      // Same case: no answer means no remembered view, so the page decides.
+      fitWindowIfOversized();
+      applySavedMode();
+    });
 }
 // ⓘ `restore` is the window coming back, not a switch, so the page must not
 // resize it HERE -- a window someone has sized themselves should stay put.
-// ⚠️ This used to say "the listener sizes and places it from what it
-// remembers". It does not: it remembers the VIEW (compact, quick, which
-// controller) and has no width or height at all. Sizing on the way in is
-// sizeOnOpen()'s job, once.
+// ✅ **AND THE ORIGINAL COMMENT IS TRUE AGAIN.** It used to say "the listener
+// sizes and places it from what it remembers"; that was struck out because the
+// listener remembered no size. Since T-239 it remembers the size index and the
+// place, per layout, and on disk. ➡️ On a restore the listener does both and
+// the page does nothing -- which is why restoreView() no longer calls
+// sizeOnOpen().
 function setCompact(on, restore) {
   on = !!on;
   if (on === COMPACT) return;
@@ -6758,7 +7050,7 @@ function setCompact(on, restore) {
   }
 }
 // The whole tool, from the top: the full page on its Overview.
-function openConfigurator() {
+function openConfigurator() { 
   setMode('advanced');
   showTab('overview');
 }
@@ -7020,6 +7312,8 @@ function paintCompact() {
     // different mode"*). A collapsed picker has nothing to protect.
   if (GP_SELECTING && box.contains(GP_SELECTING) && GP_SELECTING.size > 1) return;
   var d = (LAST_DEVICES || []).filter(function (x) { return x.ordinal === ACTIVE; })[0];
+  // T-240: the legend's glyphs, for the pad this window is showing.
+  var LG = padLegend();
   // The listener remembers which controller was on screen, for the next
   // window; L1/R1 change it without any layout changing, so it is told here.
   if (d && d.ordinal !== LAST_VIEW_ORDINAL) postView(false);
@@ -7191,16 +7485,18 @@ function paintCompact() {
     // to the right -- the order here IS the order on screen.
     html += '<div class="cbar">' +
             '<div class="cbarText"><div class="clegend">' +
-            '\u2630 position | \\|/ resize | ' +
-            '\u25cb close</div></div>' +
+            LG.position + ' position | ' + LG.resize + ' resize | ' +
+            LG.close + ' close</div></div>' +
             modePickerHtml('cselMode') +
             '<button class="cclose" onclick="closeWindow()">Close</button></div>';
   } else {
     html += '<div class="cbar">' +
             '<div class="cbarText">' +
             '<div class="clegend">' +
-            'L1/R1 controller | \u2715 select | d-pad move | ' +
-            '\u2630 position | \\|/ resize | \u25cb to close</div>' +
+            LG.shoulder + ' controller | ' + LG.select + ' select | ' +
+            LG.dpad + ' move | ' +
+            LG.position + ' position | ' + LG.resize + ' resize | ' +
+            LG.close + ' to close</div>' +
             '<div class="cinfo">To bring this window back: <b>hold two fingers on the touchpad ' +
             'and press Options</b> (DS5/DS4 only), or right-click the tray icon and choose ' +
             '<b>Open settings</b>.</div>' +
@@ -7315,9 +7611,36 @@ function gpPoll() {
   // The mode identifier lives ON the Mode picker in every view now
   // (rhoquinn8217, 2026-09-20), so the legend no longer names the mode here
   // either. The `.cmode` rule itself stays; `#modePick` wears it.
-  hint.innerHTML = '' +
+  // ⭐⭐ T-240: WHICH FAMILY PRESSED LAST, FROM EVERY BUTTON ON EVERY PAD.
+  //
+  // ⛔ This used to hang off `edge()` below, and `edge()` is only ever asked
+  // about the ten buttons the page MAPS -- 0-5 and the d-pad at 12-15. So a
+  // trigger, a stick click, Options, Share or the Guide button did not count
+  // as a press and the legend did not follow it. rhoquinn8217 asked for "the
+  // input of the last controller press", and a trigger pull is a press.
+  //
+  // ⓘ Its own previous-state map, NOT `GP_PREV`: that one belongs to the
+  // page's navigation, `edge()` writes it as it reads, and sharing it would
+  // make one of the two miss edges. ⓘ Buttons only -- a stick is an axis, it
+  // idles off centre, and it would thrash the legend between two pads.
+  for (var fp = 0; fp < live.length; fp++) {
+    var fpad = live[fp];
+    var fprev = GP_FAM_PREV[fpad.index] || (GP_FAM_PREV[fpad.index] = {});
+    for (var fb = 0; fb < fpad.buttons.length; fb++) {
+      var fdown = !!(fpad.buttons[fb] && fpad.buttons[fb].pressed);
+      if (fdown && !fprev[fb]) notepadPress(fpad);
+      fprev[fb] = fdown;
+    }
+  }
+
+  // T-240: the same two sets as the compact legends, for the pad in the hand.
+  var LGA = padLegend();
+  hint.innerHTML = '\u2014 ' +
                      (live.length > 1 ? live.length + ' controllers' : 'controller') +
-                     ' — L1/R1 controller | ✕ select | d-pad move | □ on/off | ☰ position | \\|/ resize | ○ footer/close';
+                     ' \u2014 ' + LGA.shoulder + ' controller | ' + LGA.select +
+                     ' select | ' + LGA.dpad + ' move | ' + LGA.toggle + ' on/off | ' +
+                     LGA.position + ' position | ' + LGA.resize + ' resize | ' +
+                     LGA.close + ' footer/close';
   bar.className = 'live';
   measureGpBar();
 
@@ -7341,6 +7664,8 @@ function gpPoll() {
       var idx = live[p].index;
       var down = !!(live[p].buttons[i] && live[p].buttons[i].pressed);
       GP_PREV[idx] = GP_PREV[idx] || {};
+      // ⓘ T-240's family scan is NOT here any more -- it is above, over every
+      // button, because this only ever sees the ten the page maps.
       if (down && !GP_PREV[idx][i]) any = true;
       GP_PREV[idx][i] = down;
     }
@@ -7823,6 +8148,9 @@ window.addEventListener('gamepadconnected', function() { gpCollect(); pollDevice
 window.addEventListener('gamepaddisconnected', pollDevices);
 
 setInterval(pollDevices, POLL_MS);
+// ⭐ T-240. Its own interval, four times a second, because POLL_MS above is
+// four SECONDS and a legend that lags your hand by that much reads as broken.
+setInterval(pollLastPress, LAST_PRESS_MS);
 
 // ⭐ Configs refresh on their own clock, slowly.
 //
@@ -8031,7 +8359,14 @@ function startPage() {
       paintTitle();
     }
   }).catch(function() {});
-  fitWindowIfOversized();
+  // ⛔⛔ NOT HERE ANY MORE (2026-09-21). This rescued a stretched window on
+  // load, and on a RESTORE it fought the listener: it reads window.outerWidth,
+  // which is STALE because resizeTo is asynchronous -- this file says so a few
+  // lines above -- so it saw Chrome's remembered 2341x1009 rather than the
+  // 636x207 the listener had just set, called itself oversized, and yanked the
+  // window to Advanced's size and centre. Measured, in that order, twice per
+  // open. ➡️ It now runs only where nothing else will size the window: the
+  // path where the listener knows nothing. See restoreView().
   refreshAll();
   restorePlace();
   restoreView();      // ⭐ the layout, controller, size and place it went away in

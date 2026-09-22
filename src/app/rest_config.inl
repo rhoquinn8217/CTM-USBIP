@@ -373,8 +373,11 @@ static std::string rest_keys_json()
 {"key":"touchpad_scroll","type":"choice","choices":["0","1","2"],"default":"0","help":"How many fingers scroll. 0 is off. 1 is one finger, which is what controller makers do -- and on a DualSense/DualShock4 a pointer finger reaches the pad without either thumb leaving a stick. 2 is two fingers, the laptop way, and the only option when one finger is already moving the cursor. An older config saying true means 2."},
 {"key":"touchpad_scroll_speed","type":"int","min":1,"max":400,"default":100,"help":"Scroll speed, percent."},
 {"key":"touchpad_scroll_natural","type":"bool","default":false,"help":"Scroll direction. Off: fingers down scrolls the page down, the classic wheel. On: content follows your fingers, the phone convention."},
-{"key":"touchpad_click_drag","type":"bool","default":false,"help":"Click the touchpad in with a finger on it to grab, move to drag, then LIFT THE FINGER to drop -- the click itself can be released straight away. Trackpads call this drag lock; three-finger drag is not possible here because the pad reports only two touches."},
-{"key":"touchpad_tap_click","type":"bool","default":false,"help":"A quick tap clicks: one finger is left click, two fingers is right click. Double-click is just tapping twice. Turn off if taps misfire in your grip."},
+{"key":"touchpad_one_finger_tap","type":"choice","choices":["","MouseLeft","MouseRight","MouseMiddle"],"default":"","name":"One finger tap","help":"What a quick ONE finger tap does. Takes the same values a button remap does. The list is the three that work TODAY: a keyboard key needs these gestures merged into the rebinder's key state, which is T-242's remaining half. Blank means the one finger tap does nothing. A double click is simply two taps."},
+{"key":"touchpad_two_finger_tap","type":"choice","choices":["","MouseLeft","MouseRight","MouseMiddle"],"default":"","name":"Two finger tap","help":"What a quick TWO finger tap does, in the same values. Blank means it does nothing, which is why this is a key of its own rather than part of the one finger tap."},
+{"key":"touchpad_press_touch_drag","type":"choice","choices":["","MouseLeft","MouseRight","MouseMiddle"],"default":"","name":"Press and drag","help":"What is HELD while you drag. Press the pad in with a finger on it and this goes down; it comes back up when no finger is left on the pad, NOT when the click is released, so you can let go of the click and keep dragging. Trackpads call it drag lock. Blank turns it off."},
+{"key":"touchpad_click_drag","type":"bool","default":false,"help":"SUPERSEDED by touchpad_press_touch_drag, and read only when that key is blank, so a config written before the split keeps its drag. Click the touchpad in with a finger on it to grab, move to drag, then LIFT THE FINGER to drop -- the click itself can be released straight away. Trackpads call this drag lock; three-finger drag is not possible here because the pad reports only two touches."},
+{"key":"touchpad_tap_click","type":"bool","default":false,"help":"SUPERSEDED by touchpad_one_finger_tap and touchpad_two_finger_tap, and read only when both are blank. ON meant exactly those two set to MouseLeft and MouseRight. A quick tap clicks: one finger is left click, two fingers is right click. Double-click is just tapping twice. Turn off if taps misfire in your grip."},
 {"key":"gyro_no_passthrough","type":"bool","default":false,"help":"Turn this on together with the gyro-to-mouse setting below, so tilting the pad moves only the cursor and nothing else can read the gyro. Leave it off and, in a game that responds to gyro, you get both at once -- the game reacting to the tilt AND the cursor moving."},
 )CTMKEYS";
     // ⛔ SPLIT ON PURPOSE. MSVC refuses a single string literal over 16380
@@ -783,6 +786,49 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
         }
 
         *out = rest_error_response(404, "unknown ui action");
+        return true;
+    }
+
+    // ⭐⭐ GET /api/v1/lastpress -- WHICH PAD IS IN THE HAND (T-240).
+    //
+    // ⛔ ITS OWN ENDPOINT, AND DELIBERATELY TINY. The page polls /devices
+    // every POLL_MS, which is four seconds -- fine for a battery reading and
+    // useless for a legend that is meant to follow the pad you just pressed.
+    // This answers in a few dozen bytes so the page can ask several times a
+    // second while its window is in front, and stop when it is not.
+    //
+    // ⓘ The kind is what the caller actually wants -- "ds5", "ds4", "xbox",
+    // "hid" -- because the page already maps a kind to a legend, including
+    // rhoquinn8217's 2026-09-20 rule that a generic `hid` pad shows the Xbox
+    // set. The ordinal rides along so the page can tell two pads of one kind
+    // apart without asking again.
+    //
+    // ⓘ Empty strings mean "nothing has pressed anything yet", which is a
+    // real state: a listener that has just started, or a window opened and not
+    // yet touched. The page keeps its own fallback for that.
+    if (req.path == "/api/v1/lastpress") {
+        if (req.method != "GET") {
+            *out = rest_error_response(405, "method not allowed", "Allow: GET, OPTIONS\r\n");
+            return true;
+        }
+        std::string ordinal;
+        std::string kind;
+        const void *key = rebind_last_press_device();
+        if (key != nullptr) {
+            ordinal = ctm_ordinal_for_device(key);
+            RestDeviceView view;
+            // ⚠️ A pad that has since been unplugged still has a pointer here,
+            // and its session is gone. Not an error: the answer is simply
+            // empty, and the page falls back like it does before any press.
+            if (!ordinal.empty() && rest_find_device(ordinal, &view)) {
+                kind = view.kind;
+            } else {
+                ordinal.clear();
+            }
+        }
+        *out = rest_http_response(200,
+            std::string("{\"ordinal\":\"") + rest_json_escape(ordinal) +
+            "\",\"kind\":\"" + rest_json_escape(kind) + "\"}");
         return true;
     }
 

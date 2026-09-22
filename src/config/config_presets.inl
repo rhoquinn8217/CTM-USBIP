@@ -182,10 +182,15 @@ inline const Setting kTouchpadMouseMode[] = {
        the fingers are ON the surface, and every trackpad a person has used
        for a decade moves the page with them. */
     { "touchpad_scroll_natural", "true" },
-    { "touchpad_tap_click", "true" },
+    /* ⓘ T-242: the two taps are keys of their own now, and the values are
+       what the bool hard-coded -- one finger left, TWO FINGERS RIGHT. Setting
+       the second to MouseLeft as well would keep the key and quietly lose the
+       right click this preset has always had. */
+    { "touchpad_one_finger_tap", "MouseLeft" },
+    { "touchpad_two_finger_tap", "MouseRight" },
     // ⭐ Click the pad in to grab, move, lift the finger to drop. The pad's
     // click is free here because there is no gyro to recentre.
-    { "touchpad_click_drag", "true" },
+    { "touchpad_press_touch_drag", "MouseLeft" },
 };
 
 // ---- steady_gyro_mouse_mode ------------------------------------------------

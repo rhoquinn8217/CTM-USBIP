@@ -108,6 +108,30 @@ struct TouchState {
 inline std::mutex g_touchMutex;
 inline std::map<const void *, TouchState> g_touch;
 
+// ⭐ A GESTURE'S ACTION, FROM THE SAME VALUE SPACE A REBIND USES (T-242).
+// ⓘ mouse_action_for() folds case itself, which matters: the config reader
+// lowercases every value, and rebind.inl records three bindings that silently
+// never matched because a comparison did not.
+//
+// ⛔⛔ MOUSE BUTTONS ONLY, FOR NOW, AND THE REASON IS NOT LAZINESS. A
+// keyboard key would have to go through ctm_keyboard_device::set_state_for(),
+// which is keyed per DEVICE and rewritten by the rebinder on every report --
+// so a key set from here would be overwritten within 4 ms. Making a tap type a
+// letter means merging these gestures into the rebinder's own key-state
+// computation, which is a change to its model rather than a call. T-242 carries
+// that as the remaining half.
+// ⓘ A wheel value maps to nothing here and reads as "no action" rather than
+// as left click, because silently doing the wrong thing is worse.
+inline uint8_t touch_action_mask(const std::string &code)
+{
+    switch (ctm_rebind::mouse_action_for(code)) {
+        case ctm_rebind::kMouseLeft:   return 0x01;
+        case ctm_rebind::kMouseRight:  return 0x02;
+        case ctm_rebind::kMouseMiddle: return 0x04;
+        default:                       return 0x00;
+    }
+}
+
 inline void forget(const void *deviceKey)
 {
     std::lock_guard<std::mutex> lock(g_touchMutex);
@@ -169,15 +193,41 @@ inline void step(const void *deviceKey, const std::string &section,
         (scrollRaw == "1")                          ? 1 :
         (scrollRaw == "2" || scrollRaw == "true")   ? 2 : 0;
     const bool scrollOn = scrollFingers > 0;
-    const bool tapsOn = device_config_bool(section.c_str(), "touchpad_tap_click", false);
+    // ⭐⭐ THE TOUCHPAD'S GESTURES ARE REMAPPABLE (T-242, 2026-09-20).
+    // rhoquinn8217: *"touchpad_one_finger_tap - can be remapped to anything /
+    // touchpad_two_finger_tap - can be remapped to anything /
+    // touchpad_press_touch_drag - remapped to anything, pressed to start hold
+    // and hold release when no longer touching touchpad"*.
+    //
+    // ⛔ ONE BOOL COULD NOT CARRY IT. `touchpad_tap_click` hard-coded TWO
+    // actions -- one finger left, two fingers right -- so a single remap target
+    // could not say both, and the choice was to split it or lose the two-finger
+    // tap. Split, both halves take a value from the same space a rebind does.
+    std::string oneTap = device_config_str(section.c_str(), "touchpad_one_finger_tap");
+    std::string twoTap = device_config_str(section.c_str(), "touchpad_two_finger_tap");
+    std::string dragTo = device_config_str(section.c_str(), "touchpad_press_touch_drag");
+
+    // ⭐ THE OLD BOOLS ARE THE MIGRATION, and they say exactly what they meant:
+    // tap_click ON was one finger left and two fingers right, click_drag ON held
+    // the left button. ⚠️ Only when the new key is silent -- a config that has
+    // been re-saved names the new one, and the old line may still sit beside it.
+    if (oneTap.empty() && twoTap.empty() &&
+        device_config_bool(section.c_str(), "touchpad_tap_click", false)) {
+        oneTap = "MouseLeft";
+        twoTap = "MouseRight";
+    }
+    if (dragTo.empty() && device_config_bool(section.c_str(), "touchpad_click_drag", false)) {
+        dragTo = "MouseLeft";
+    }
+    const bool tapsOn = !oneTap.empty() || !twoTap.empty();
+    const bool dragOn = !dragTo.empty();
 
     std::lock_guard<std::mutex> lock(g_touchMutex);
     TouchState &st = g_touch[deviceKey];
 
     // ⭐ Everything off: keep no state, so turning a feature on later starts
     // clean rather than against a stale anchor.
-    if (!cursorOn && !scrollOn && !tapsOn &&
-        !device_config_bool(section.c_str(), "touchpad_click_drag", false)) {
+    if (!cursorOn && !scrollOn && !tapsOn && !dragOn) {
         if (st.dragging) ctm_mouse_device::set_drag_for(deviceKey, 0x00);
         st = TouchState();
         return;
@@ -210,7 +260,8 @@ inline void step(const void *deviceKey, const std::string &section,
     // ---- Drag ---------------------------------------------------------------
     // Read before anything else so a drag survives whatever the cursor and tap
     // paths decide to do with the same touch.
-    if (device_config_bool(section.c_str(), "touchpad_click_drag", false)) {
+    const uint8_t dragMask = touch_action_mask(dragTo);
+    if (dragOn && dragMask != 0) {
         const bool padPressed = ctm_rebind::touch_pressed(lay, data, len);
         const TouchPoint d1 = read_point(data, static_cast<size_t>(lay.touch.finger1));
         const TouchPoint d2 = read_point(data, static_cast<size_t>(lay.touch.finger2));
@@ -221,7 +272,7 @@ inline void step(const void *deviceKey, const std::string &section,
             // finger is an ordinary click and is left alone.
             if (padPressed && anyFinger) {
                 st.dragging = true;
-                ctm_mouse_device::set_drag_for(deviceKey, 0x01);
+                ctm_mouse_device::set_drag_for(deviceKey, dragMask);
                 ctm_gyro_mouse_ensure_mouse_started();
             }
         } else if (!anyFinger) {
@@ -281,11 +332,17 @@ inline void step(const void *deviceKey, const std::string &section,
         } else if (st.sessionActive) {
             const long long heldMs = nowMs - st.sessionStart;
             if (tapsOn && !st.sessionMoved && heldMs <= kTapMaxMs) {
-                // 1 finger = left (0x01), 2 fingers = right (0x02) -- and a
-                // double-click is simply two taps, no special case needed.
-                ctm_mouse_device::add_click(
-                    st.sessionMaxFingers >= 2 ? 0x02 : 0x01);
-                ctm_gyro_mouse_ensure_mouse_started();
+                // ⓘ Whichever of the two this tap was. A double click is still
+                // simply two taps, with no special case -- that has not changed.
+                // ⚠️ A finger count with no action set does NOTHING, rather than
+                // falling back to the other one: "two-finger tap does nothing"
+                // has to be sayable, and it is said by leaving it blank.
+                const std::string &want = (st.sessionMaxFingers >= 2) ? twoTap : oneTap;
+                const uint8_t mask = touch_action_mask(want);
+                if (mask != 0) {
+                    ctm_mouse_device::add_click(mask);
+                    ctm_gyro_mouse_ensure_mouse_started();
+                }
             }
             st.sessionActive = false;
             st.sessionMaxFingers = 0;
