@@ -14,6 +14,8 @@
 
 #include <cstdint>
 #include <cstring>
+#include <cstdlib>
+#include <string>
 
 namespace ctm_rebind {
 
@@ -547,6 +549,35 @@ inline void hat_clear(const Layout &lay, uint8_t *data, size_t len, uint8_t dir)
     data[lay.hatByte] = static_cast<uint8_t>((data[lay.hatByte] & ~lay.hatMask) | next);
 }
 
+// ⭐⭐ THE MIRROR OF hat_clear: put a direction DOWN. 🔗 T-242 part A.
+//
+// ⚠️ A hat carries ONE ordinal, so "down" is not a bit to set -- it is a move
+// to whichever ordinal means "the directions already held, plus this one".
+// ⓘ The four legal pairs are the diagonals; up+down and left+right cannot be
+// expressed and do not exist on real hardware, so the new direction simply
+// replaces the one it contradicts.
+inline void hat_set(const Layout &lay, uint8_t *data, size_t len, uint8_t dir)
+{
+    if (lay.hatByte < 0 || len <= static_cast<size_t>(lay.hatByte)) return;
+    const uint8_t hat = static_cast<uint8_t>(data[lay.hatByte] & lay.hatMask);
+    if (hat_has(hat, dir)) return;                    // already down
+    uint8_t next = dir;                               // the pure direction
+    if (hat <= 7) {
+        const bool up = hat_has(hat, kDirUp);
+        const bool rt = hat_has(hat, kDirRight);
+        const bool dn = hat_has(hat, kDirDown);
+        const bool lf = hat_has(hat, kDirLeft);
+        switch (dir) {
+            case kDirUp:    next = rt ? 1 : (lf ? 7 : kDirUp);    break;  // NE / NW
+            case kDirRight: next = up ? 1 : (dn ? 3 : kDirRight); break;  // NE / SE
+            case kDirDown:  next = rt ? 3 : (lf ? 5 : kDirDown);  break;  // SE / SW
+            case kDirLeft:  next = dn ? 5 : (up ? 7 : kDirLeft);  break;  // SW / NW
+            default: return;
+        }
+    }
+    data[lay.hatByte] = static_cast<uint8_t>((data[lay.hatByte] & ~lay.hatMask) | next);
+}
+
 // ⭐ HOW FAR A TRIGGER WITH NO BIT TRAVELS BEFORE IT COUNTS AS PRESSED: 30, on
 // the DualSense's 0..255 scale that trigger_travel() gives every pad -- about
 // 12%, or raw 121 of an Xbox trigger's 1023.
@@ -561,6 +592,7 @@ constexpr int kTriggerPulledTravel = 30;
 // other readers of what lies beyond the buttons.
 inline int  trigger_travel(const Layout &lay, const uint8_t *data, size_t len, bool left);
 inline void blank_trigger(const Layout &lay, uint8_t *data, size_t len, bool left);
+inline void press_trigger(const Layout &lay, uint8_t *data, size_t len, bool left);
 
 inline bool is_pressed(const Layout &lay, const uint8_t *data, size_t len, int standardIndex)
 {
@@ -581,6 +613,112 @@ inline bool is_pressed(const Layout &lay, const uint8_t *data, size_t len, int s
         default:
             // ⓘ The pad has no such button. Never pressed, and nothing to clear.
             return false;
+    }
+}
+
+// ⭐⭐ ONE NAME FOR EACH BUTTON, FOR THE WHOLE PROJECT. Returns a standard
+// index, or -1 for anything that is not a button on any pad.
+//
+// ⛔⛔ IT LIVES HERE SO THERE IS ONLY ONE OF IT. This table was written for
+// T-241's `gyro_to_mouse_gate_button` and lived in gyro_mouse.inl; T-242 needs
+// the same names to say which button a binding becomes, and a second copy is
+// exactly how this project's numbers have drifted apart before -- the note on
+// `kTriggerPulledTravel` a few lines down says so about a depth.
+// ➡️ `parse_gate_button()` now calls this after its touchpad gestures, which
+// are gate-only and are not buttons.
+//
+// ⓘ Every pad's vocabulary at once, on purpose: `cross`, `a` and `face_down`
+// are one button, so a config written while thinking in Xbox reads correctly
+// on a DualSense. ⓘ A bare index is accepted last, so the table below can
+// grow without this list growing with it.
+inline int button_index_for(const std::string &raw)
+{
+    std::string v;
+    v.reserve(raw.size());
+    for (char c : raw) {
+        v.push_back(static_cast<char>((c >= 'A' && c <= 'Z') ? c - 'A' + 'a' : c));
+    }
+    if (v.empty()) return -1;
+
+    struct Named { const char *name; int index; };
+    static const Named kNamed[] = {
+        { "face_down",  kBtnFaceDown  }, { "cross",      kBtnFaceDown  },
+        { "a",          kBtnFaceDown  },
+        { "face_right", kBtnFaceRight }, { "circle",     kBtnFaceRight },
+        { "b",          kBtnFaceRight },
+        { "face_left",  kBtnFaceLeft  }, { "square",     kBtnFaceLeft  },
+        { "x",          kBtnFaceLeft  },
+        { "face_up",    kBtnFaceUp    }, { "triangle",   kBtnFaceUp    },
+        { "y",          kBtnFaceUp    },
+        { "l1",         kBtnL1        }, { "lb",         kBtnL1        },
+        { "r1",         kBtnR1        }, { "rb",         kBtnR1        },
+        { "l2",         kBtnL2        }, { "lt",         kBtnL2        },
+        { "r2",         kBtnR2        }, { "rt",         kBtnR2        },
+        { "select",     kBtnSelect    }, { "create",     kBtnSelect    },
+        { "view",       kBtnSelect    }, { "share",      kBtnSelect    },
+        { "start",      kBtnStart     }, { "options",    kBtnStart     },
+        { "menu",       kBtnStart     },
+        { "l3",         kBtnL3        }, { "r3",         kBtnR3        },
+        { "dpad_up",    kBtnDpadUp    }, { "dpad_down",  kBtnDpadDown  },
+        { "dpad_left",  kBtnDpadLeft  }, { "dpad_right", kBtnDpadRight },
+        { "home",       kBtnHome      }, { "ps",         kBtnHome      },
+        { "guide",      kBtnHome      },
+    };
+    for (const Named &n : kNamed) {
+        if (v == n.name) return n.index;
+    }
+
+    bool digits = true;
+    for (char c : v) {
+        if (c < '0' || c > '9') { digits = false; break; }
+    }
+    if (digits) {
+        const int index = std::atoi(v.c_str());
+        if (index >= 0 && index < kButtonCount) return index;
+    }
+    return -1;
+}
+
+// ⭐⭐ PUT A BUTTON DOWN. The exact mirror of clear_button below, and the
+// thing this project has never had. 🔗 T-242 part A.
+//
+// ⛔⛔ EVERYTHING HERE HAS ONLY EVER REMOVED BUTTONS. The rebinder clears a
+// bound button so the game cannot see it; the trigger click clears a trigger to
+// take it over; config mode clears whatever it turns into a keystroke. So
+// "remap this to a controller button" had nowhere to write, which is why T-242
+// part B's controller-input half was blocked on this and not on the touchpad.
+//
+// ⚠️ A REPORT IS NOT A KEYBOARD. Three spot kinds, three different meanings
+// of "down", and only one of them is a bit:
+//   - `kSpotBit`         set the bit, the easy case
+//   - `kSpotHatDir`      MOVE THE HAT ORDINAL. A hat holds one value, so this
+//                        is a combine, not an or -- see hat_set
+//   - `kSpotTriggerTravel` write FULL TRAVEL, because there is no bit at all
+//   - `kSpotAbsent`      this pad does not have the button: do nothing, and
+//                        say nothing. A pad without Home cannot be given one
+//
+// ⓘ Bounds-checked per byte like every writer in this file, so a short report
+// is left alone rather than written past.
+inline void set_button(const Layout &lay, uint8_t *data, size_t len, int standardIndex)
+{
+    if (data == nullptr) return;
+    if (standardIndex < 0 || standardIndex >= kButtonCount) return;
+    const BitSpot &spot = lay.spots[standardIndex];
+    switch (spot.how) {
+        case kSpotHatDir:
+            hat_set(lay, data, len, spot.mask);
+            return;
+        case kSpotBit:
+            if (len > static_cast<size_t>(spot.byteIndex)) {
+                data[spot.byteIndex] = static_cast<uint8_t>(data[spot.byteIndex] | spot.mask);
+            }
+            return;
+        case kSpotTriggerTravel:
+            press_trigger(lay, data, len, spot.mask == kTriggerLeft);
+            return;
+        case kSpotAbsent:
+        default:
+            return;
     }
 }
 
@@ -757,6 +895,36 @@ inline void blank_trigger(const Layout &lay, uint8_t *data, size_t len, bool lef
                                                          : 0;
     if (width == 0 || !fits(len, offset, width)) return;
     for (int i = 0; i < width; ++i) data[offset + i] = 0;
+}
+
+// ⭐⭐ A TRIGGER HELD ALL THE WAY DOWN: what SETTING a kSpotTriggerTravel
+// button means. 🔗 T-242 part A.
+//
+// ⛔ FULL TRAVEL, not the threshold. `kTriggerPulledTravel` is where a pull
+// starts counting, and writing exactly that would sit on the boundary of the
+// reader's own test -- one rounding step either way decides it. Full scale is
+// unambiguous and is what a finger on the stop actually produces.
+// ⓘ Written in the pad's OWN units, so `trigger_travel()` reads it back as
+// 255 on every pad: one byte of 0xFF, or `fullScale` little-endian in two.
+inline void press_trigger(const Layout &lay, uint8_t *data, size_t len, bool left)
+{
+    if (data == nullptr) return;
+    const int offset = left ? lay.triggers.l2 : lay.triggers.r2;
+    switch (lay.triggers.format) {
+        case kTriggerU8:
+            if (fits(len, offset, 1)) data[offset] = 0xFF;
+            return;
+        case kTriggerU16: {
+            if (!fits(len, offset, 2) || lay.triggers.fullScale <= 0) return;
+            const uint16_t full = static_cast<uint16_t>(lay.triggers.fullScale);
+            data[offset]     = static_cast<uint8_t>(full & 0xFF);
+            data[offset + 1] = static_cast<uint8_t>((full >> 8) & 0xFF);
+            return;
+        }
+        case kTriggerAbsent:
+        default:
+            return;
+    }
 }
 
 // ⓘ Whether the pad reports each trigger as a BUTTON as well as a travel. The

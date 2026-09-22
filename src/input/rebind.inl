@@ -932,6 +932,15 @@ inline void apply(const void *deviceKey,
     // ⛔ A trigger handed to the gesture still counts as something we have an
     // opinion about. See where this is used, at the publish below.
     bool gaveUpATrigger = false;
+    // ⭐⭐ BUTTONS THIS REPORT SHOULD GAIN (T-242 part A), pressed AFTER the
+    // loop and not inside it.
+    // ⛔ Inside would be a bug that only shows on some pairs: the loop clears
+    // every bound button as it reaches it, so binding Cross -> Circle works
+    // while Circle -> Cross does not -- index 0 is visited before index 1, and
+    // the press would be wiped by the clear that follows it.
+    bool pressAfter[kButtonCount];
+    for (int i = 0; i < kButtonCount; ++i) pressAfter[i] = false;
+    bool anyPressAfter = false;
 
     for (int i = 0; i < kButtonCount; ++i) {
         // ⛔⛔ A TRIGGER BOUND THROUGH THE GESTURE IS NOT ALSO BOUND HERE.
@@ -1030,6 +1039,34 @@ inline void apply(const void *deviceKey,
         // rebind would double up with the original.
         clear_button(*layout, data, len, i);
 
+        // ⭐⭐ A CONTROLLER BUTTON BECOMES ANOTHER CONTROLLER BUTTON
+        // (T-242 part A). ⓘ First, because `button_` is an unambiguous prefix
+        // and cannot collide with a key name, a mouse action or an opener.
+        //
+        // ⚠️ PREFIXED ON PURPOSE. The bare names -- `cross`, `x`, `a` -- are
+        // what the gate takes, and they would be ambiguous here: `x` is both a
+        // face button and a letter someone may want typed. The gate has no
+        // keyboard to confuse it with; this does.
+        // 🔗 `button_index_for` in button_layout.inl is the one vocabulary,
+        // shared with `gyro_to_mouse_gate_button`.
+        if (code.size() > 7) {
+            std::string low;
+            low.reserve(code.size());
+            for (char c : code) {
+                low.push_back(static_cast<char>((c >= 'A' && c <= 'Z') ? c - 'A' + 'a' : c));
+            }
+            if (low.compare(0, 7, "button_") == 0) {
+                const int target = button_index_for(low.substr(7));
+                // ⓘ An unknown name binds to nothing, like an unknown key name
+                // below -- it must not fall through and be read as a keystroke.
+                if (target >= 0 && active) {
+                    pressAfter[target] = true;
+                    anyPressAfter = true;
+                }
+                continue;
+            }
+        }
+
         // ⭐ The on-screen keyboard, before the mouse and key paths: it is
         // neither, and like a wheel click it fires ONCE per press -- a toggle
         // repeated at 250Hz would open and close the keyboard continuously.
@@ -1076,6 +1113,16 @@ inline void apply(const void *deviceKey,
             modifiers = static_cast<uint8_t>(modifiers | k->modifier);
         } else if (keyCount < 6) {
             keys[keyCount++] = k->usage;
+        }
+    }
+
+    // ⭐ T-242 part A: now that every bound button has been cleared, the
+    // report can be given the ones it should gain. ⓘ Nothing to undo on
+    // release -- the next report arrives without the source held, so nothing
+    // is collected and nothing is pressed.
+    if (anyPressAfter) {
+        for (int i = 0; i < kButtonCount; ++i) {
+            if (pressAfter[i]) set_button(*layout, data, len, i);
         }
     }
 

@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.24 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.25 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,13 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.25 A button can be remapped to another BUTTON (T-242 part A).
+            The listener gained set_button, the mirror of clear_button it
+            never had, so 17 button_* values now sit in the rebind list
+            beside the keys and mouse actions. Each row names the button
+            on both vocabularies -- "pad: (cross) / A" -- because a config
+            is a file two people may read on two different pads, so
+            picking one would be wrong half the time.
     2.66.24 Opening the mode selector no longer moves the footer about
             (T-243). pickerExpand sets position:fixed, so the box leaves
             the flow and the footer closes over the gap: .cbarText grew
@@ -2988,6 +2995,34 @@ var TOUCH_ACTION_LABELS = {
   MouseMiddle: 'middle click'
 };
 
+// ⭐⭐ A REBIND TARGET THAT IS ANOTHER CONTROLLER BUTTON (T-242 part A).
+//
+// ⓘ BOTH VOCABULARIES ON EVERY ROW, deliberately. The legend follows the pad
+// in your hand (T-240), but a CONFIG is a file two people may read on two
+// different pads -- so a row says what the button is called on each, rather
+// than picking one and being wrong half the time.
+// ⓘ The "pad:" prefix separates them at a glance from the keyboard keys and
+// mouse actions in the same list.
+var BUTTON_VALUE_LABELS = {
+  'button_cross':      'pad: \u2715 / A',
+  'button_circle':     'pad: \u25cb / B',
+  'button_square':     'pad: \u25a1 / X',
+  'button_triangle':   'pad: \u25b3 / Y',
+  'button_l1':         'pad: L1 / LB',
+  'button_r1':         'pad: R1 / RB',
+  'button_l2':         'pad: L2 / LT',
+  'button_r2':         'pad: R2 / RT',
+  'button_l3':         'pad: L3 / LS',
+  'button_r3':         'pad: R3 / RS',
+  'button_dpad_up':    'pad: d-pad up',
+  'button_dpad_down':  'pad: d-pad down',
+  'button_dpad_left':  'pad: d-pad left',
+  'button_dpad_right': 'pad: d-pad right',
+  'button_select':     'pad: Create / View',
+  'button_start':      'pad: Options / Menu',
+  'button_home':       'pad: PS / Guide'
+};
+
 var GATE_TYPE_LABELS = {
   '': 'off',
   until_held: 'on button release — always on',
@@ -3006,6 +3041,9 @@ function choiceLabel(key, value) {
   if (TOUCH_ACTION_KEYS[key]) {
     return TOUCH_ACTION_LABELS[value] !== undefined ? TOUCH_ACTION_LABELS[value] : value;
   }
+  // ⭐ T-242: a pad button reads the same wherever it is offered, so this is
+  // asked before the per-row cases below rather than inside any one of them.
+  if (BUTTON_VALUE_LABELS[value]) return BUTTON_VALUE_LABELS[value];
   if (value === '') {
     // ⓘ A blank BUTTON is not "off" -- it means no button at all, which is a
     // real setting: with until_held it is always on, with while_held it is off.

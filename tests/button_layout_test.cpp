@@ -315,6 +315,115 @@ int run_button_layout_tests()
         CTM_CHECK(!is_pressed(*xbox, r.data(), r.size(), kButtonCount));
     }
 
+    section("set_button: a button can be put DOWN, on every pad (T-242 part A)");
+    {
+        // ⭐⭐ THE ROUND TRIP IS THE PROPERTY. set_button then is_pressed must
+        // agree, for every button every pad actually has -- that is the whole
+        // contract the rebinder will lean on.
+        int covered = 0, absent = 0;
+        for (const Layout *lay : { ds5, ds4, xbox }) {
+            for (int i = 0; i < kButtonCount; ++i) {
+                std::vector<uint8_t> r = blank_report(48);
+                blank_to_rest(*lay, r.data(), r.size(), false);
+                CTM_CHECK(!is_pressed(*lay, r.data(), r.size(), i));
+                set_button(*lay, r.data(), r.size(), i);
+                if (lay->spots[i].how == kSpotAbsent) {
+                    // ⛔ A pad cannot be given a button it does not have, and
+                    // set_button must not invent one somewhere else either.
+                    CTM_CHECK(!is_pressed(*lay, r.data(), r.size(), i));
+                    ++absent;
+                    continue;
+                }
+                CTM_CHECK(is_pressed(*lay, r.data(), r.size(), i));
+                ++covered;
+                // ✅ AND BACK AGAIN: clear_button undoes it exactly.
+                clear_button(*lay, r.data(), r.size(), i);
+                CTM_CHECK(!is_pressed(*lay, r.data(), r.size(), i));
+            }
+        }
+        CTM_CHECK(covered > 30);   // a guard on the guard
+        CTM_CHECK(absent > 0);     // at least one pad is missing something
+
+        // ⚠️ SETTING ONE BUTTON SETS ONLY THAT ONE. The bit case is easy to
+        // get right and the hat is not, so this is asked of every button.
+        for (const Layout *lay : { ds5, ds4, xbox }) {
+            for (int i = 0; i < kButtonCount; ++i) {
+                if (lay->spots[i].how != kSpotBit) continue;
+                std::vector<uint8_t> r = blank_report(48);
+                blank_to_rest(*lay, r.data(), r.size(), false);
+                set_button(*lay, r.data(), r.size(), i);
+                for (int j = 0; j < kButtonCount; ++j) {
+                    if (j == i) continue;
+                    CTM_CHECK(!is_pressed(*lay, r.data(), r.size(), j));
+                }
+            }
+        }
+    }
+
+    section("set_button: the hat combines into diagonals, and cannot hold opposites");
+    {
+        // ⛔ A HAT CARRIES ONE ORDINAL, so two directions are a diagonal and
+        // not two bits. Up then Right must read as BOTH down.
+        for (const Layout *lay : { ds5, ds4, xbox }) {
+            std::vector<uint8_t> r = blank_report(48);
+            blank_to_rest(*lay, r.data(), r.size(), false);
+            if (lay->spots[kBtnDpadUp].how != kSpotHatDir) continue;
+            set_button(*lay, r.data(), r.size(), kBtnDpadUp);
+            set_button(*lay, r.data(), r.size(), kBtnDpadRight);
+            CTM_CHECK(is_pressed(*lay, r.data(), r.size(), kBtnDpadUp));
+            CTM_CHECK(is_pressed(*lay, r.data(), r.size(), kBtnDpadRight));
+            CTM_CHECK(!is_pressed(*lay, r.data(), r.size(), kBtnDpadDown));
+            CTM_CHECK(!is_pressed(*lay, r.data(), r.size(), kBtnDpadLeft));
+
+            // ⚠️ Opposites cannot coexist on real hardware. Adding Down to a
+            // held Up replaces it rather than producing a nonsense ordinal.
+            set_button(*lay, r.data(), r.size(), kBtnDpadDown);
+            CTM_CHECK(!is_pressed(*lay, r.data(), r.size(), kBtnDpadUp));
+            CTM_CHECK(is_pressed(*lay, r.data(), r.size(), kBtnDpadDown));
+
+            // ✅ And clearing a diagonal leaves the other direction standing,
+            // which is hat_clear's own rule seen from the other side.
+            std::vector<uint8_t> d = blank_report(48);
+            blank_to_rest(*lay, d.data(), d.size(), false);
+            set_button(*lay, d.data(), d.size(), kBtnDpadDown);
+            set_button(*lay, d.data(), d.size(), kBtnDpadLeft);
+            clear_button(*lay, d.data(), d.size(), kBtnDpadDown);
+            CTM_CHECK(is_pressed(*lay, d.data(), d.size(), kBtnDpadLeft));
+            CTM_CHECK(!is_pressed(*lay, d.data(), d.size(), kBtnDpadDown));
+        }
+    }
+
+    section("set_button: a trigger with no bit is pressed by TRAVEL, to the stop");
+    {
+        // ⛔ An Xbox trigger has no bit behind it, so "pressed" is a depth.
+        // ⭐ Full scale, not the threshold: sitting on kTriggerPulledTravel
+        // would put the reader's own comparison one rounding step from false.
+        for (const Layout *lay : { ds5, ds4, xbox }) {
+            if (lay->spots[kBtnR2].how != kSpotTriggerTravel) continue;
+            std::vector<uint8_t> r = blank_report(48);
+            blank_to_rest(*lay, r.data(), r.size(), false);
+            CTM_CHECK_EQ(trigger_travel(*lay, r.data(), r.size(), false), 0);
+            set_button(*lay, r.data(), r.size(), kBtnR2);
+            CTM_CHECK_EQ(trigger_travel(*lay, r.data(), r.size(), false), 255);
+            CTM_CHECK(is_pressed(*lay, r.data(), r.size(), kBtnR2));
+            // ⚠️ And only that trigger: L2 is untouched.
+            CTM_CHECK_EQ(trigger_travel(*lay, r.data(), r.size(), true), 0);
+            CTM_CHECK(!is_pressed(*lay, r.data(), r.size(), kBtnL2));
+        }
+    }
+
+    section("set_button: a short report is never written past");
+    {
+        // ⛔ Same rule as every other writer here: refuse rather than reach.
+        for (const Layout *lay : { ds5, ds4, xbox }) {
+            std::vector<uint8_t> buf(48, 0xEE);
+            for (int i = 0; i < kButtonCount; ++i) set_button(*lay, buf.data(), 4, i);
+            int past = 0;
+            for (size_t k = 4; k < buf.size(); ++k) if (buf[k] != 0xEE) ++past;
+            CTM_CHECK_EQ(past, 0);
+        }
+    }
+
     section("last press: any button at all counts, on every pad (T-240)");
     {
         // ⭐⭐ THE PREDICATE THE LEGEND TURNS ON. rebind.inl records WHICH
