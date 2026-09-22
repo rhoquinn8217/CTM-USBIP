@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.23 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.24 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,15 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.24 Opening the mode selector no longer moves the footer about
+            (T-243). pickerExpand sets position:fixed, so the box leaves
+            the flow and the footer closes over the gap: .cbarText grew
+            767 -> 993 to fill it, sliding the centred legend 113px
+            right, and the extra width let .cinfo fit on one line, which
+            shrank the bar 16px and dropped Close 8px. A measured spacer
+            now holds the collapsed footprint while the list is open. It
+            is a span, so the pad's focus list -- which collects
+            '.cbar > button, .cbar > select' -- does not see it.
     2.66.23 The legend shows the marks on the buttons rather than their
             names (rhoquinn8217). The d-pad is a compass glyph in both
             sets instead of the words "d-pad", and the Xbox set carries
@@ -5386,6 +5395,34 @@ function pickerExpand(el) {
   var left = Math.round(rect.left + rect.width / 2 - w / 2);
   left = Math.max(margin, Math.min(left, window.innerWidth - w - margin));
 
+  // ⭐⭐ HOLD THE SPACE IT IS ABOUT TO VACATE (T-243, rhoquinn8217:
+  // *"when the mode selector expands the footer moves around"*).
+  //
+  // ⛔ `position:fixed` below takes this box OUT OF THE FLOW, and the footer
+  // closes over the gap. Measured in Simple at 1238x498: `.cbarText` is
+  // `flex:1 1 auto`, so it grew 767 -> 993 to fill the 226px the select left
+  // behind; the legend is centred in it, so it slid **113px right** -- exactly
+  // half; and with the extra width `.cinfo` fitted on ONE line instead of two,
+  // which shrank `.cbar` by 16px and dropped the Close button 8px.
+  // ➡️ So the jump is not the list growing. It is the footer re-flowing
+  // around a hole, and a spacer of the same size fills it.
+  //
+  // ⓘ A `<span>`, so the pad's focus list is untouched: it collects
+  // `.cbar > button, .cbar > select` and a span matches neither.
+  // ⓘ Measured from `rect`, captured at the top of this function while the
+  // box was still closed, so it is the collapsed footprint and not the open
+  // one.
+  if (!el._pickerSlot) {
+    var slot = document.createElement('span');
+    slot.className = 'pickerslot';
+    slot.setAttribute('aria-hidden', 'true');
+    slot.style.cssText = 'flex:0 0 auto;display:inline-block;pointer-events:none;' +
+                         'width:' + Math.round(rect.width) + 'px;' +
+                         'height:' + Math.round(rect.height) + 'px;';
+    el.parentNode.insertBefore(slot, el);
+    el._pickerSlot = slot;
+  }
+
   el.style.position = 'fixed';
   el.style.top = top + 'px';
   el.style.left = left + 'px';
@@ -5426,6 +5463,13 @@ function pickerExpand(el) {
 // Undo all of it. ⛔ Clearing `size` alone would leave a fixed-positioned box
 // floating over the page at one row high.
 function pickerCollapse(el) {
+  // T-243: the box is back in the flow, so the spacer holding its place goes.
+  // ⚠️ Before the style is cleared, so there is never a frame with both the
+  // spacer and an in-flow select taking up room.
+  if (el._pickerSlot) {
+    el._pickerSlot.remove();
+    el._pickerSlot = null;
+  }
   el.size = 0;
   el.style.position = '';
   el.style.top = '';
