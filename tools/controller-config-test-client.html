@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.22 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.23 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,13 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.23 The legend shows the marks on the buttons rather than their
+            names (rhoquinn8217). The d-pad is a compass glyph in both
+            sets instead of the words "d-pad", and the Xbox set carries
+            the three-lines and two-rectangles marks instead of spelling
+            out Menu and View. The d-pad glyph lives in both legend
+            tables rather than in the strings, so a family that ever
+            needs a different one has somewhere to put it.
     2.66.22 The legend asks the LISTENER which pad pressed last (T-240).
             The browser cannot answer it: the rebinder clears a bound
             button out of the report before Windows sees it, so
@@ -2508,13 +2515,22 @@ function deviceLabel(d) {
 // items. So this is a choice by kind, not a second label.
 var PAD_LEGEND_PS = {
   select: '\u2715', close: '\u25cb', toggle: '\u25a1',
-  resize: '\\|/', position: '\u2630', shoulder: 'L1/R1'
+  resize: '\\|/', position: '\u2630', shoulder: 'L1/R1',
+  // ⭐ The d-pad is the same shape on every pad, so both tables carry the
+  // same glyph. It lives here rather than in the strings, so a family that
+  // ever needs a different one has somewhere to put it.
+  dpad: '\u271c'
 };
 var PAD_LEGEND_XBOX = {
   select: 'A', close: 'B', toggle: 'X',
-  // ⓘ View is the two-rectangles button and Menu the three-lines one, which
-  // is what Microsoft calls them now -- Back and Start on an older pad.
-  resize: 'View', position: 'Menu', shoulder: 'LB/RB'
+  // ⭐⭐ THE MARKS ON THE BUTTONS, NOT THEIR NAMES (rhoquinn8217,
+  // 2026-09-21). ⓘ View is the two-rectangles button and Menu the
+  // three-lines one, which is what Microsoft calls them now -- Back and Start
+  // on an older pad. The glyphs say the same thing without needing either
+  // generation's word for it, and they sit at the width of the PlayStation
+  // set beside them instead of putting two English words in a row of symbols.
+  resize: '\u29c9', position: '\u2630', shoulder: 'LB/RB',
+  dpad: '\u271c'
 };
 
 // ⚠️ A GENERIC `hid` PAD GETS THE XBOX SET (rhoquinn8217, 2026-09-20:
@@ -7458,7 +7474,8 @@ function paintCompact() {
     html += '<div class="cbar">' +
             '<div class="cbarText">' +
             '<div class="clegend">' +
-            LG.shoulder + ' controller | ' + LG.select + ' select | d-pad move | ' +
+            LG.shoulder + ' controller | ' + LG.select + ' select | ' +
+            LG.dpad + ' move | ' +
             LG.position + ' position | ' + LG.resize + ' resize | ' +
             LG.close + ' to close</div>' +
             '<div class="cinfo">To bring this window back: <b>hold two fingers on the touchpad ' +
@@ -7602,7 +7619,7 @@ function gpPoll() {
   hint.innerHTML = '\u2014 ' +
                      (live.length > 1 ? live.length + ' controllers' : 'controller') +
                      ' \u2014 ' + LGA.shoulder + ' controller | ' + LGA.select +
-                     ' select | d-pad move | ' + LGA.toggle + ' on/off | ' +
+                     ' select | ' + LGA.dpad + ' move | ' + LGA.toggle + ' on/off | ' +
                      LGA.position + ' position | ' + LGA.resize + ' resize | ' +
                      LGA.close + ' footer/close';
   bar.className = 'live';
