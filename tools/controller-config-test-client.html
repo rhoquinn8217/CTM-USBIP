@@ -2513,6 +2513,25 @@ function deviceLabel(d) {
 // ⓘ NOT the remap rows' both-names style. Those show "(✕) | (A)" and have
 // room; Quick's footer is one line in a 516px window and already holds three
 // items. So this is a choice by kind, not a second label.
+// ⛔⛔ THESE GLYPHS ARE SETTLED. DO NOT GO LOOKING FOR "PROPER" ONES.
+//
+// ⭐ rhoquinn8217, 2026-09-21: *"We've already looked through the glyphs
+// before. the 3 lines is what is used by the community so it's already
+// recognizable even if it's not a proper glyph."*
+//
+// ⓘ The reason this keeps getting reopened: ✕ ○ □ are ordinary geometric
+// shapes that happen to match PlayStation's face buttons, so it LOOKS as
+// though every mark here should have a Unicode equivalent. ⛔ It does not.
+// Create, Share and the PS button are Sony BRAND MARKS that live in
+// PlayStation's own font and were never encoded, so there is nothing to look
+// up and no search will turn one up.
+//
+// ➡️ `\|/` IS THE THREE LINES, drawn in ASCII because there is no character
+// for them, and three lines is what the community uses for that button. It is
+// recognizable already, which is the only thing a legend has to be.
+// ⚠️ The near misses considered and rejected: U+269F and U+269E ("three
+// lines converging"), U+2398, U+2387, U+22D4, U+2442. The last two render out
+// of a fallback font and look wrong beside the rest.
 var PAD_LEGEND_PS = {
   select: '\u2715', close: '\u25cb', toggle: '\u25a1',
   resize: '\\|/', position: '\u2630', shoulder: 'L1/R1',
