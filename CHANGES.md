@@ -93,6 +93,9 @@ carry it; upstream's own history is unchanged.
 | 2026-09-20 | A DS4 is still NOT offered the Audio section, after a day spent finding out why it cannot be. The three settings travel to the TV rather than being patched into a DualSense report, so they reach any pad and the section was opened up on that reasoning -- then neither volume moved anything on the pad, and the routing mode neither silenced a connected headset nor started the speaker. Arriving is not acting, so it is hidden again with the finding and an undo list against T-229 | `d68fc4d`, `006290a` |
 | 2026-09-20 | Copy asks for a name before it makes one, the way Rename does: an expanding row opened on the name it would have chosen, editable, with Create and Cancel. Both Copy buttons, because one expanding and one firing instantly is two buttons with the same word behaving differently. ONE row serves both jobs -- a second would have been a dozen more places to keep the guard flag in step, since it gates the d-pad, the plain keys, Escape, Space and the config poll. And the row now closes on a tab change: it used to survive, still pointing at the config from the tab you left, so Save renamed something off screen while the ten-second config poll stayed suppressed | `6f5daa4` |
 | 2026-09-20 | The gyro gate is TWO settings: `gyro_to_mouse_gate_type` says when -- off, on button release, on button hold -- and `gyro_to_mouse_gate_button` says which, from any of the 17 button indices plus six touchpad gestures. The one key before it mixed both questions, so "off" and "always" hid among the buttons and the button list was hand-written: T-235 paid four edits to add R3. The invert IS the type, so "always on" is the type with no button and `!touchpad` becomes "on button release" on the touchpad, which is what "move unless a finger is down" says. Two traps, both pinned by tests: reading the triggers through `is_pressed()` would have passed on an Xbox pad while making a DualSense's L2 a hair trigger, and a draft with four touchpad gestures had no plain "any finger" case, which is what the old `touchpad` value meant. The old key is hidden and still read, proven on three legacy files covering `always`, `L2` and the dead `trigger` alias. `Gate::TriggerHold`, unreachable, is gone | `1d6267e`, `0854cb2`, `5c24bfb`, `a92775f`, merge `f510a3d` |
+| 2026-09-21 | The settings window comes back where it was left, in every mode. Two placers were fighting: the page's `sizeOnOpen` reaches `compactHome`, which does not only resize but MOVES the window to bottom centre, so a restored place was discarded milliseconds after it landed; and `fitWindowIfOversized` read a stale `window.outerWidth` -- `resizeTo` is asynchronous, a fact stated a few lines above it -- saw Chrome's remembered 2341x1009 instead of the size just set, and yanked the window to Advanced's geometry. Twice per open, measured. Advanced was the one mode unaffected, because it is the one `sizeOnOpen` skips, and that is what named the bug. The layout, size, place and controller now also survive a listener restart, in `window-state.txt` beside `configs/`. A false alarm is recorded with it: the fix was twice declared incomplete from a PowerShell probe that was DPI-unaware while the listener is `PER_MONITOR_AWARE_V2`, so every coordinate it read came back divided by the 1.25 display scale. Three separate unexplained numbers were that one mistake | `833eb44`, `1587dfc`, `cfd5a84`, merge `9116c5a` |
+| 2026-09-21 | The settings page's button legend follows the pad in your hand, not the pad the window is showing. It asks the LISTENER which device pressed last, because the browser structurally cannot answer: the rebinder clears a bound button out of the report before Windows sees it, so `navigator.getGamepads()` only ever shows the buttons a config has not claimed -- in practice L1 and R1 alone, which is exactly what was observed. A new `GET /api/v1/lastpress` returns the ordinal and kind, recorded at the top of `apply()` before anything clears a button, for ANY button rather than the ten the page navigates with, since a trigger pull is a press. The page polls it four times a second while its window is in front and not at all when it is behind, so the legend is right the moment you look at it; `/devices` at four seconds could never have done this. The browser scan stays as the answer for a pad plugged in but not bridged, whose buttons nothing clears. The legend also shows the marks on the buttons rather than their names: a compass for the d-pad in both sets, and the three-lines and two-rectangles marks in place of spelling out Menu and View | `c9df0a2`, `f3f2b2b`, `16fb5f4`, `13e80ac`, `867bccc`, `386f441`, merge `9116c5a` |
+| 2026-09-21 | PARTIAL, and the ticket stays open. A touchpad tap is remappable: one finger, two fingers, and press-and-drag each take a mouse action instead of being hard-wired to left, right and drag. The ask was wider -- keyboard keys, controller buttons and the on-screen keyboard openers as well. Keyboard openers were reachable and were simply not done. Keyboard keys need a synthetic hold, because `set_state_for()` publishes a device's WHOLE held-key set and the rebinder republishes it every report, so an outside writer is overwritten within about 4ms and a tap holds nothing. Controller buttons need a `set_button()` that does not exist: the layout only offers `clear_button()` and the rebinder only ever removes buttons from a report | `d5ac645`, merge `9116c5a` |
 
 ## Files changed
 
@@ -102,8 +105,8 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
 
 ```
  .gitattributes                                |   48 +
- .gitignore                                    |   30 +-
- CHANGES.md                                    |  223 +
+ .gitignore                                    |   34 +-
+ CHANGES.md                                    |  224 +
  LINK                                          |    0
  README.md                                     |   18 +
  app/ctm-usbip-tests.vcxproj                   |  108 +
@@ -126,18 +129,18 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  profiles/descriptors/virtual_keyboard.profile |   74 +
  profiles/descriptors/virtual_mouse.profile    |   59 +
  release.ps1                                   |  152 +
- src/app/agent.inl                             |  566 +-
+ src/app/agent.inl                             |  570 +-
  src/app/agent_session_sweep.inl               |  320 +
  src/app/cli.inl                               |   24 +-
  src/app/common.inl                            |   32 +
- src/app/config_move.inl                       |  569 ++
+ src/app/config_move.inl                       |  770 +++
  src/app/device_capabilities.inl               |   75 +
  src/app/device_type.inl                       |   70 +
  src/app/nickname.inl                          |   90 +
  src/app/open_ui.inl                           |  489 ++
  src/app/overlay_window.inl                    | 1995 ++++++
  src/app/rest.inl                              |  760 +++
- src/app/rest_config.inl                       | 1130 ++++
+ src/app/rest_config.inl                       | 1176 ++++
  src/app/rest_config_sessions.inl              |  204 +
  src/app/rest_sessions.inl                     |   33 +
  src/app/same_controller.inl                   |   38 +
@@ -158,7 +161,7 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  src/backend/bridge.inl                        |  256 +-
  src/backend/bridge_enet.inl                   |   35 +-
  src/backend/bt.inl                            |   16 +-
- src/config/config_presets.inl                 |  447 ++
+ src/config/config_presets.inl                 |  452 ++
  src/config/config_store.inl                   |  820 +++
  src/config/config_watcher.inl                 |  170 +
  src/config/device_config.inl                  |  218 +
@@ -175,24 +178,24 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  src/input/mouse_exclusive.inl                 |  122 +
  src/input/mouse_held.inl                      |   99 +
  src/input/osk.inl                             |  200 +
- src/input/rebind.inl                          | 1232 ++++
+ src/input/rebind.inl                          | 1278 ++++
  src/input/stick_mouse.inl                     |  471 ++
- src/input/touch_mouse.inl                     |  409 ++
+ src/input/touch_mouse.inl                     |  466 ++
  src/input/trigger_click.inl                   |  801 +++
  src/input/trigger_effect.inl                  |  630 ++
  src/log/capped_log.inl                        |  117 +
  src/log/device_log.inl                        |  233 +
- src/main.cpp                                  |  440 +-
+ src/main.cpp                                  |  449 +-
  src/map/runtime.cpp                           |   68 +-
  src/usbip/device.inl                          |  650 +-
  src/usbip/server.inl                          |   55 +-
- tests/button_layout_test.cpp                  |  953 +++
+ tests/button_layout_test.cpp                  | 1005 +++
  tests/capped_log_test.cpp                     |  140 +
- tests/config_store_test.cpp                   |  895 +++
+ tests/config_store_test.cpp                   |  906 +++
  tests/device_capabilities_test.cpp            |   75 +
  tests/device_config_test.cpp                  |  521 ++
  tests/device_type_test.cpp                    |   89 +
- tests/gyro_mouse_test.cpp                     |  688 +++
+ tests/gyro_mouse_test.cpp                     |  688 ++
  tests/harness.h                               |   55 +
  tests/host_audio_settings_test.cpp            |  125 +
  tests/iso_in_pacing_test.cpp                  |  118 +
@@ -209,16 +212,16 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  tests/schema_json_test.cpp                    |  158 +
  tests/stick_mouse_test.cpp                    |  715 +++
  tests/tests_main.cpp                          |  117 +
- tests/touch_mouse_test.cpp                    |  669 ++
+ tests/touch_mouse_test.cpp                    |  749 +++
  tests/trigger_click_test.cpp                  |  835 +++
  tests/trigger_effect_test.cpp                 |  529 ++
  tests/units.h                                 |   54 +
- tools/controller-config-test-client.html      | 8053 +++++++++++++++++++++++++
+ tools/controller-config-test-client.html      | 8388 +++++++++++++++++++++++++
  tools/device-config-panel-edge.bat            |    9 +
  tools/device-config-panel-edge.ps1            |  327 +
  tools/device-config-panel.bat                 |    4 +
  tools/device-config-panel.ps1                 |  303 +
  tools/osk-mockups.py                          |  103 +
  tools/start-ctm-usbip.bat                     |   67 +
- 119 files changed, 37659 insertions(+), 145 deletions(-)
+ 119 files changed, 38510 insertions(+), 145 deletions(-)
 ```
