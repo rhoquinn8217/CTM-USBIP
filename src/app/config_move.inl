@@ -241,6 +241,20 @@ inline void restore_geometry_soon()
                 if (had && w > 0 && ht > 0) place_exact(h, x, y, w, ht);
                 else if (had) place_exact(h, x, y);
                 else place_default(h);
+                // ⭐ SAY WHAT WAS READ AND WHAT WAS SET. There are TWO placers
+                // -- this file and the page's own moveTo -- so the final rect
+                // cannot tell you which one won, and a whole evening went into
+                // inferring it from where the window ended up (T-239).
+                RECT after;
+                const bool got = GetWindowRect(h, &after) != 0;
+                device_log::input(device_log::msg()
+                    << "ui/restore: had=" << (had ? 1 : 0)
+                    << " want=" << x << "," << y
+                    << " size=" << w << "x" << ht
+                    << " after=" << (got ? (int)after.left : -1)
+                    << "," << (got ? (int)after.top : -1)
+                    << " " << (got ? (int)(after.right - after.left) : -1)
+                    << "x" << (got ? (int)(after.bottom - after.top) : -1));
                 return;
             }
             Sleep(100);
@@ -377,7 +391,15 @@ inline void place_exact(HWND hwnd, int x, int y)
 inline void place_exact(HWND hwnd, int x, int y, int w, int h)
 {
     const RECT wa = work_area();
+    const int wantX = x, wantY = y;
     clamp_into(wa, w, h, x, y);
+    if (x != wantX || y != wantY) {
+        device_log::input(device_log::msg()
+            << "ui/clamp: " << wantX << "," << wantY << " -> " << x << "," << y
+            << " for " << w << "x" << h
+            << " in work area " << (int)(wa.right - wa.left)
+            << "x" << (int)(wa.bottom - wa.top));
+    }
     place(hwnd, x, y);
 }
 

@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.18 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.19 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,15 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.19 Simple and Quick come back where they were left (T-239).
+            The page was undoing the listener's restore: sizeOnOpen ->
+            compactHome does not only resize, it moves the window to
+            bottom centre, so a restored place was thrown away
+            milliseconds after it landed. Advanced was unaffected because
+            it is the one mode that line skips, which is what named the
+            bug. sizeOnOpen was right when T-193 added it -- the listener
+            remembered no size then -- and T-239 changed that premise, so
+            a restore is now entirely the listener's job.
     2.66.18 Two legends, one per pad family (T-240, rhoquinn8217). An
             Xbox pad was being told to press four buttons it does not
             have, by shapes it does not carry: Cross, Circle, Square,
@@ -1640,7 +1649,6 @@ var KEYS = [];
 var KEY_NAMES = [];   // KeyboardEvent.code names a button can be bound to
 
 function base() { return document.getElementById('base').value.replace(/\/+$/, ''); }
-
 // ⭐⭐ THE PAGE TALKS TO WHEREVER IT WAS SERVED FROM (T-217). The field above is
 // only a fallback now.
 //
@@ -1895,7 +1903,7 @@ function offerRealWindow() {
 function fitWindowIfOversized() {
   var wantW = wantSize().w;
   var wantH = wantSize().h;
-  if (window.outerWidth > wantW * 1.15 || window.outerHeight > wantH * 1.15) {
+  if (window.outerWidth > wantW * 1.15 || window.outerHeight > wantH * 1.15) { 
     fitWindow();
   }
 }
@@ -6593,11 +6601,17 @@ function applySavedMode() {
 // restore, because setCompact says "the listener sizes and places it from what
 // it remembers".
 //
-// ⛔⛔ THAT COMMENT IS NOT TRUE OF THE SIZE. The listener remembers the VIEW
-// -- compact, quick, which controller -- and `/api/v1/ui/view` returns exactly
-// those three. It has no remembered width or height, and open_ui.inl reads
-// none. So on every path the window kept Advanced's geometry while showing
-// Simple or Quick.
+// ⛔⛔ THAT COMMENT WAS NOT TRUE OF THE SIZE, WHEN THIS WAS WRITTEN. The
+// listener remembered the VIEW -- compact, quick, which controller -- and
+// `/api/v1/ui/view` returned exactly those three. It had no remembered width or
+// height, and open_ui.inl read none. So on every path the window kept
+// Advanced's geometry while showing Simple or Quick.
+//
+// ✅ **T-239 (2026-09-20) MADE IT TRUE.** The listener holds a size index per
+// layout and a place per layout, `restore_geometry_soon()` applies both, and
+// since T-239 they survive a restart on disk. ➡️ So this function is NO LONGER
+// called on a restore -- only on the path where the listener knows nothing --
+// and the reason is written at that call site in restoreView().
 //
 // ⚠️ Seen as "two windows open in simple mode, one the correct size and the
 // other the advanced mode size" (rhoquinn8217, 2026-09-15). The second window
@@ -6795,20 +6809,54 @@ function postView(restore) {
 function restoreView() {
   fetch(base() + '/api/v1/ui/view')
     .then(function (r) { return r.json(); })
-    .then(function (v) {
-      if (!v || !v.known) { applySavedMode(); return; }
+    .then(function (v) {      if (!v || !v.known) {
+        // ⭐ The listener has nothing to restore, so the page is the only
+        // authority and the oversize rescue belongs here.
+        fitWindowIfOversized();
+        applySavedMode();
+        return;
+      }
       if (v.ordinal) WANT_ORDINAL = v.ordinal;
       setMode(v.compact ? (v.quick ? 'quick' : 'simple') : 'advanced', true);
-      sizeOnOpen();          // the listener remembers the VIEW, never the size
+      // ⛔⛔ NO sizeOnOpen() HERE ANY MORE (fixed 2026-09-21, rhoquinn8217:
+      // *"Closing the quick mode box doesn't reopen it in the same spot"*, then
+      // *"all modes don't open in the same spot"*, then *"correction, advance
+      // mode does open in the same spot"* -- and that correction is what named
+      // the bug, because Advanced is the one mode sizeOnOpen SKIPS).
+      //
+      // ⚠️ sizeOnOpen -> sizeForMode -> compactHome, and compactHome does not
+      // only resize: it MOVES the window to bottom centre. So on every restore
+      // of Simple or Quick the page threw away the place the listener had just
+      // put back, a few milliseconds after it landed. Advanced survived only
+      // because `if (COMPACT)` skipped it.
+      //
+      // ⭐ IT WAS RIGHT WHEN IT WAS WRITTEN. T-193 added it because the
+      // listener remembered the VIEW and no size, so a window opened at
+      // Advanced's geometry and stayed there while showing Simple. **T-239
+      // changed that premise**: the listener now remembers a size index per
+      // layout AND the place, and restore_geometry_soon() applies both.
+      // ➡️ So the page's job on a restore is nothing at all.
+      //
+      // ⓘ The unknown-listener path KEEPS it: applySavedMode() still calls
+      // sizeOnOpen(), because there the page's own record is all there is.
+      // ⚠️ The window may show Advanced's opening geometry for the moment
+      // before the listener's restore lands -- it polls up to three seconds for
+      // the window. Briefly the wrong size beats permanently the wrong place.
     })
-    .catch(function () { applySavedMode(); });
+    .catch(function () {
+      // Same case: no answer means no remembered view, so the page decides.
+      fitWindowIfOversized();
+      applySavedMode();
+    });
 }
 // ⓘ `restore` is the window coming back, not a switch, so the page must not
 // resize it HERE -- a window someone has sized themselves should stay put.
-// ⚠️ This used to say "the listener sizes and places it from what it
-// remembers". It does not: it remembers the VIEW (compact, quick, which
-// controller) and has no width or height at all. Sizing on the way in is
-// sizeOnOpen()'s job, once.
+// ✅ **AND THE ORIGINAL COMMENT IS TRUE AGAIN.** It used to say "the listener
+// sizes and places it from what it remembers"; that was struck out because the
+// listener remembered no size. Since T-239 it remembers the size index and the
+// place, per layout, and on disk. ➡️ On a restore the listener does both and
+// the page does nothing -- which is why restoreView() no longer calls
+// sizeOnOpen().
 function setCompact(on, restore) {
   on = !!on;
   if (on === COMPACT) return;
@@ -6841,7 +6889,7 @@ function setCompact(on, restore) {
   }
 }
 // The whole tool, from the top: the full page on its Overview.
-function openConfigurator() {
+function openConfigurator() { 
   setMode('advanced');
   showTab('overview');
 }
@@ -8122,7 +8170,14 @@ function startPage() {
       paintTitle();
     }
   }).catch(function() {});
-  fitWindowIfOversized();
+  // ⛔⛔ NOT HERE ANY MORE (2026-09-21). This rescued a stretched window on
+  // load, and on a RESTORE it fought the listener: it reads window.outerWidth,
+  // which is STALE because resizeTo is asynchronous -- this file says so a few
+  // lines above -- so it saw Chrome's remembered 2341x1009 rather than the
+  // 636x207 the listener had just set, called itself oversized, and yanked the
+  // window to Advanced's size and centre. Measured, in that order, twice per
+  // open. ➡️ It now runs only where nothing else will size the window: the
+  // path where the listener knows nothing. See restoreView().
   refreshAll();
   restorePlace();
   restoreView();      // ⭐ the layout, controller, size and place it went away in
