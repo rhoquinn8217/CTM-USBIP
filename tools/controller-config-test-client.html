@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.20 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.21 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,13 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.21 The legend follows EVERY button, not just the ten the page
+            maps (T-240). The family scan hung off edge(), which is only
+            ever asked about buttons 0-5 and the d-pad, so a trigger, a
+            stick click, Options, Share or Guide did not count as a
+            press. It is now its own scan over every button on every pad,
+            with its own previous-state map so it cannot steal edges from
+            the page's navigation.
     2.66.20 The legend follows the pad that pressed LAST, not the pad the
             window is showing (T-240, rhoquinn8217). A legend is
             instructions for the pad in your hand. Read from the
@@ -2526,6 +2533,8 @@ function padLegendForKind(kind) {
 // through XInput ("Xbox 360 Controller (XInput STANDARD GAMEPAD)"), so both
 // shapes have to be read: the vendor when it is there, the words when it is not.
 var PAD_FAMILY_LAST = '';     // 'ps' or 'xbox', empty until something is pressed
+// ⚠️ SEPARATE FROM `GP_PREV`, deliberately: see the scan in gpPoll().
+var GP_FAM_PREV = {};
 
 function padFamilyFromId(id) {
   var t = String(id || '').toLowerCase();
@@ -2540,8 +2549,12 @@ function padFamilyFromId(id) {
   return 'xbox';
 }
 
-// ⭐ Called from the pad poll when a button goes DOWN. Repaints only when the
-// family actually changes, so the legend does not rebuild on every press.
+// ⭐ Called from the pad poll when ANY button goes DOWN. Repaints only when
+// the family actually changes, so the legend does not rebuild on every press.
+// ⚠️ The poll drops pad input entirely while this window is behind
+// (`document.hasFocus()`), so the legend does not follow a pad being used in a
+// game -- which is correct, and is also why a test has to click the window
+// first.
 function notepadPress(pad) {
   var fam = padFamilyFromId(pad && pad.id);
   if (fam === PAD_FAMILY_LAST) return;
@@ -7506,7 +7519,29 @@ function gpPoll() {
   // The mode identifier lives ON the Mode picker in every view now
   // (rhoquinn8217, 2026-09-20), so the legend no longer names the mode here
   // either. The `.cmode` rule itself stays; `#modePick` wears it.
-  // T-240: the same two sets as the compact legends, for the shown pad.
+  // ⭐⭐ T-240: WHICH FAMILY PRESSED LAST, FROM EVERY BUTTON ON EVERY PAD.
+  //
+  // ⛔ This used to hang off `edge()` below, and `edge()` is only ever asked
+  // about the ten buttons the page MAPS -- 0-5 and the d-pad at 12-15. So a
+  // trigger, a stick click, Options, Share or the Guide button did not count
+  // as a press and the legend did not follow it. rhoquinn8217 asked for "the
+  // input of the last controller press", and a trigger pull is a press.
+  //
+  // ⓘ Its own previous-state map, NOT `GP_PREV`: that one belongs to the
+  // page's navigation, `edge()` writes it as it reads, and sharing it would
+  // make one of the two miss edges. ⓘ Buttons only -- a stick is an axis, it
+  // idles off centre, and it would thrash the legend between two pads.
+  for (var fp = 0; fp < live.length; fp++) {
+    var fpad = live[fp];
+    var fprev = GP_FAM_PREV[fpad.index] || (GP_FAM_PREV[fpad.index] = {});
+    for (var fb = 0; fb < fpad.buttons.length; fb++) {
+      var fdown = !!(fpad.buttons[fb] && fpad.buttons[fb].pressed);
+      if (fdown && !fprev[fb]) notepadPress(fpad);
+      fprev[fb] = fdown;
+    }
+  }
+
+  // T-240: the same two sets as the compact legends, for the pad in the hand.
   var LGA = padLegend();
   hint.innerHTML = '\u2014 ' +
                      (live.length > 1 ? live.length + ' controllers' : 'controller') +
@@ -7537,11 +7572,9 @@ function gpPoll() {
       var idx = live[p].index;
       var down = !!(live[p].buttons[i] && live[p].buttons[i].pressed);
       GP_PREV[idx] = GP_PREV[idx] || {};
-      if (down && !GP_PREV[idx][i]) {
-        any = true;
-        // T-240: whichever pad this is, the legend now speaks its language.
-        notepadPress(live[p]);
-      }
+      // ⓘ T-240's family scan is NOT here any more -- it is above, over every
+      // button, because this only ever sees the ten the page maps.
+      if (down && !GP_PREV[idx][i]) any = true;
       GP_PREV[idx][i] = down;
     }
     return any;
