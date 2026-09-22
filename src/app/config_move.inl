@@ -43,6 +43,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <atomic>
+#include <chrono>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -369,6 +371,78 @@ inline int bottom_gap(const RECT &wa)
 
 // A place asked for outright, kept on screen. ⓘ place() itself does not
 // clamp: nudge() steers a pixel at a time and has already done it.
+// ⭐⭐ DRAG THE WINDOW BY ANY EMPTY SPACE (T-237).
+//
+// ⛔ THE PAGE CANNOT DO THIS ITSELF. It is a Chrome window we do not own from
+// the page's side, and `-webkit-app-region: drag` is honoured only in Electron
+// and in INSTALLED PWAs -- not in a plain `--app=` window, where the page is
+// ordinary web content. ➡️ So the page says "a drag started" once, and the
+// listener does the dragging, exactly as it already moves this window for the
+// pad's ☰ position.
+//
+// ⓘ ONE MESSAGE TO START AND NOTHING PER FRAME. A POST per mouse-move would
+// be a request every few milliseconds over HTTP for as long as someone holds
+// the button.
+inline std::atomic_bool g_dragging{false};
+
+inline void drag_begin()
+{
+    // ⛔ ONE AT A TIME. A second mousedown while a drag is live would start a
+    // rival thread, and the two would fight over the same window.
+    bool idle = false;
+    if (!g_dragging.compare_exchange_strong(idle, true)) return;
+
+    std::thread([] {
+        HWND h = page_window();
+        POINT start{};
+        RECT rc{};
+        if (h == nullptr || !GetCursorPos(&start) || !GetWindowRect(h, &rc)) {
+            g_dragging.store(false);
+            return;
+        }
+
+        // ⭐ The grab point, so the window does not jump to put its corner
+        // under the cursor -- it moves WITH the cursor from where it was.
+        const int offX = start.x - rc.left;
+        const int offY = start.y - rc.top;
+        const int w  = rc.right - rc.left;
+        const int ht = rc.bottom - rc.top;
+        const RECT wa = work_area();
+
+        // ⚠️ THE PHYSICAL LEFT BUTTON IS NOT ALWAYS THE PRIMARY ONE. Someone
+        // with swapped buttons pressed their primary, which Windows reports as
+        // VK_RBUTTON -- watching VK_LBUTTON would end the drag instantly.
+        const int held = GetSystemMetrics(SM_SWAPBUTTON) ? VK_RBUTTON : VK_LBUTTON;
+
+        int x = rc.left, y = rc.top;
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+        while (std::chrono::steady_clock::now() < deadline) {
+            if ((GetAsyncKeyState(held) & 0x8000) == 0) break;
+            POINT p{};
+            if (!GetCursorPos(&p)) break;
+            x = p.x - offX;
+            y = p.y - offY;
+            // ⓘ The same clamp every other placer here uses, so a window cannot
+            // be dragged off the bottom of the work area and lost.
+            clamp_into(wa, w, ht, x, y);
+            // ⛔ NOT place(): that calls note_pos(), which writes the state file.
+            // At 125Hz for as long as someone drags, that is a file write every
+            // 8ms. The place is remembered ONCE, below, when the drag ends.
+            SetWindowPos(h, nullptr, x, y, 0, 0,
+                         SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+            std::this_thread::sleep_for(std::chrono::milliseconds(8));
+        }
+
+        // ⭐ REMEMBER WHERE IT WAS PUT. Without this a window dragged and then
+        // closed would come back where it was BEFORE the drag, which reads as
+        // the close having forgotten -- the fault T-239 spent an evening on.
+        note_pos(x, y);
+        device_log::input(device_log::msg()
+            << "ui/drag: ended at " << x << "," << y << " " << w << "x" << ht);
+        g_dragging.store(false);
+    }).detach();
+}
+
 inline void place_exact(HWND hwnd, int x, int y)
 {
     RECT rc;
