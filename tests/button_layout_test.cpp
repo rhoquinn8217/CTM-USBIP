@@ -315,13 +315,83 @@ int run_button_layout_tests()
         CTM_CHECK(!is_pressed(*xbox, r.data(), r.size(), kButtonCount));
     }
 
+    section("button_index_for: ONE vocabulary, now that two callers share it (T-242)");
+    {
+        // ⭐⭐ This table moved out of gyro_mouse.inl so the gyro gate and a
+        // rebind target read the same names. It had no test of its own -- the
+        // gate's tests covered it by accident -- and a shared table whose only
+        // owner is an accident is how the next drift starts.
+
+        // ⓘ The three vocabularies for one button all agree.
+        CTM_CHECK_EQ(button_index_for("cross"),     kBtnFaceDown);
+        CTM_CHECK_EQ(button_index_for("a"),         kBtnFaceDown);
+        CTM_CHECK_EQ(button_index_for("face_down"), kBtnFaceDown);
+        CTM_CHECK_EQ(button_index_for("circle"),    kBtnFaceRight);
+        CTM_CHECK_EQ(button_index_for("b"),         kBtnFaceRight);
+        CTM_CHECK_EQ(button_index_for("square"),    kBtnFaceLeft);
+        CTM_CHECK_EQ(button_index_for("x"),         kBtnFaceLeft);
+        CTM_CHECK_EQ(button_index_for("triangle"),  kBtnFaceUp);
+        CTM_CHECK_EQ(button_index_for("y"),         kBtnFaceUp);
+
+        // ⚠️ The names that differ most between pads, which is exactly where
+        // a second copy of this table would have drifted first.
+        CTM_CHECK_EQ(button_index_for("create"),  kBtnSelect);
+        CTM_CHECK_EQ(button_index_for("share"),   kBtnSelect);
+        CTM_CHECK_EQ(button_index_for("view"),    kBtnSelect);
+        CTM_CHECK_EQ(button_index_for("select"),  kBtnSelect);
+        CTM_CHECK_EQ(button_index_for("options"), kBtnStart);
+        CTM_CHECK_EQ(button_index_for("menu"),    kBtnStart);
+        CTM_CHECK_EQ(button_index_for("start"),   kBtnStart);
+        CTM_CHECK_EQ(button_index_for("ps"),      kBtnHome);
+        CTM_CHECK_EQ(button_index_for("guide"),   kBtnHome);
+        CTM_CHECK_EQ(button_index_for("home"),    kBtnHome);
+        CTM_CHECK_EQ(button_index_for("l1"),      kBtnL1);
+        CTM_CHECK_EQ(button_index_for("lb"),      kBtnL1);
+        CTM_CHECK_EQ(button_index_for("r2"),      kBtnR2);
+        CTM_CHECK_EQ(button_index_for("rt"),      kBtnR2);
+
+        // ⓘ Case is folded, because a config is typed by a person.
+        CTM_CHECK_EQ(button_index_for("Cross"),   kBtnFaceDown);
+        CTM_CHECK_EQ(button_index_for("DPAD_UP"), kBtnDpadUp);
+        CTM_CHECK_EQ(button_index_for("R3"),      kBtnR3);
+
+        // ⓘ A bare index, so the spot table can grow without the name list.
+        CTM_CHECK_EQ(button_index_for("0"),  0);
+        CTM_CHECK_EQ(button_index_for("16"), 16);
+
+        // ⛔⛔ EVERYTHING ELSE IS -1, AND MUST BE. The rebinder falls through
+        // to the key path on -1, so a name that silently became button 0 would
+        // bind a keystroke to Cross.
+        CTM_CHECK_EQ(button_index_for(""),           -1);
+        CTM_CHECK_EQ(button_index_for("KeyX"),       -1);
+        CTM_CHECK_EQ(button_index_for("MouseLeft"),  -1);
+        CTM_CHECK_EQ(button_index_for("OSKeyboard"), -1);
+        CTM_CHECK_EQ(button_index_for("nonsense"),   -1);
+        CTM_CHECK_EQ(button_index_for("17"),         -1);   // past the table
+        CTM_CHECK_EQ(button_index_for("-1"),         -1);
+        CTM_CHECK_EQ(button_index_for("99"),         -1);
+
+        // ⭐ And every name the PAGE offers must resolve, or a row in the
+        // dropdown would bind to nothing. These are the 17 in /api/v1/keys
+        // with their `button_` prefix removed.
+        const char *offered[] = {
+            "cross", "circle", "square", "triangle",
+            "l1", "r1", "l2", "r2", "l3", "r3",
+            "dpad_up", "dpad_down", "dpad_left", "dpad_right",
+            "select", "start", "home"
+        };
+        for (const char *name : offered) {
+            CTM_CHECK(button_index_for(name) >= 0);
+        }
+    }
+
     section("set_button: a button can be put DOWN, on every pad (T-242 part A)");
     {
         // ⭐⭐ THE ROUND TRIP IS THE PROPERTY. set_button then is_pressed must
         // agree, for every button every pad actually has -- that is the whole
         // contract the rebinder will lean on.
         int covered = 0, absent = 0;
-        for (const Layout *lay : { ds5, ds4, xbox }) {
+        for (const Layout *lay : { ds5, ds4, xbox, edge }) {
             for (int i = 0; i < kButtonCount; ++i) {
                 std::vector<uint8_t> r = blank_report(48);
                 blank_to_rest(*lay, r.data(), r.size(), false);
@@ -346,7 +416,7 @@ int run_button_layout_tests()
 
         // ⚠️ SETTING ONE BUTTON SETS ONLY THAT ONE. The bit case is easy to
         // get right and the hat is not, so this is asked of every button.
-        for (const Layout *lay : { ds5, ds4, xbox }) {
+        for (const Layout *lay : { ds5, ds4, xbox, edge }) {
             for (int i = 0; i < kButtonCount; ++i) {
                 if (lay->spots[i].how != kSpotBit) continue;
                 std::vector<uint8_t> r = blank_report(48);
@@ -364,7 +434,7 @@ int run_button_layout_tests()
     {
         // ⛔ A HAT CARRIES ONE ORDINAL, so two directions are a diagonal and
         // not two bits. Up then Right must read as BOTH down.
-        for (const Layout *lay : { ds5, ds4, xbox }) {
+        for (const Layout *lay : { ds5, ds4, xbox, edge }) {
             std::vector<uint8_t> r = blank_report(48);
             blank_to_rest(*lay, r.data(), r.size(), false);
             if (lay->spots[kBtnDpadUp].how != kSpotHatDir) continue;
@@ -398,7 +468,7 @@ int run_button_layout_tests()
         // ⛔ An Xbox trigger has no bit behind it, so "pressed" is a depth.
         // ⭐ Full scale, not the threshold: sitting on kTriggerPulledTravel
         // would put the reader's own comparison one rounding step from false.
-        for (const Layout *lay : { ds5, ds4, xbox }) {
+        for (const Layout *lay : { ds5, ds4, xbox, edge }) {
             if (lay->spots[kBtnR2].how != kSpotTriggerTravel) continue;
             std::vector<uint8_t> r = blank_report(48);
             blank_to_rest(*lay, r.data(), r.size(), false);
@@ -415,7 +485,7 @@ int run_button_layout_tests()
     section("set_button: a short report is never written past");
     {
         // ⛔ Same rule as every other writer here: refuse rather than reach.
-        for (const Layout *lay : { ds5, ds4, xbox }) {
+        for (const Layout *lay : { ds5, ds4, xbox, edge }) {
             std::vector<uint8_t> buf(48, 0xEE);
             for (int i = 0; i < kButtonCount; ++i) set_button(*lay, buf.data(), 4, i);
             int past = 0;
@@ -443,7 +513,7 @@ int run_button_layout_tests()
         // ⓘ A PAD AT REST IS NOT PRESSING ANYTHING. The case that matters
         // most: it runs on every report from every idle pad, and a false
         // positive here would freeze the legend on whichever pad is plugged in.
-        for (const Layout *lay : { ds5, ds4, xbox }) {
+        for (const Layout *lay : { ds5, ds4, xbox, edge }) {
             std::vector<uint8_t> rest = blank_report(48);
             blank_to_rest(*lay, rest.data(), rest.size(), false);
             CTM_CHECK(!any_pressed(*lay, rest.data(), rest.size()));
@@ -454,7 +524,7 @@ int run_button_layout_tests()
         // "the input of the last controller press"). ⓘ The plain bit spots
         // here; hats and trigger travel have their own sections above.
         int covered = 0;
-        for (const Layout *lay : { ds5, ds4, xbox }) {
+        for (const Layout *lay : { ds5, ds4, xbox, edge }) {
             for (int i = 0; i < kButtonCount; ++i) {
                 const BitSpot &spot = lay->spots[i];
                 if (spot.how != kSpotBit) continue;
