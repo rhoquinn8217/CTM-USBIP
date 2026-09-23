@@ -34,7 +34,10 @@ static void rest_fill_capabilities(RestDeviceView *view)
     // bridged DS4's speaker and headset -- so this is that line coming due.
     // ⓘ Both rules, and the reasoning for each, are in
     // app/device_capabilities.inl, where they can be tested.
-    view->hasAudio = ctm_caps::has_audio_hardware(k);
+    // ⭐ view->kind is the SESSION kind, and audio is the one capability that
+    // needs it: a DS4 has an audio path over Bluetooth ("ds4") and none over a
+    // cable ("ds4_usb"). 🔗 device_capabilities.inl.
+    view->hasAudio = ctm_caps::has_audio_hardware(k, view->kind);
     view->hasRumbleGains = ctm_caps::has_rumble_gains(k);
 
     // ⚠️ A WIRED XBOX PAD ARRIVES AS "xpad", WHICH settings_kind_for() DOES NOT

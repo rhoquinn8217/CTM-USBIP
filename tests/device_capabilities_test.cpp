@@ -22,16 +22,26 @@ int run_device_capabilities_tests()
     {
         CTM_CHECK(ctm_caps::has_audio_hardware("ds5"));
         CTM_CHECK(ctm_caps::has_audio_hardware("ds5_edge"));
+        // ⓘ A DualSense keeps audio however it is attached -- the transport
+        // exception below is the DS4's alone.
+        CTM_CHECK(ctm_caps::has_audio_hardware("ds5", "ds5_usb"));
+        CTM_CHECK(ctm_caps::has_audio_hardware("ds5_edge", "ds5e_usb"));
 
-        // ⛔⛔ A DS4 IS REFUSED, AND THIS ASSERTION IS REVERSED FROM THE ONE
-        // WRITTEN HOURS EARLIER. T-229 item A opened audio to a DS4 on the
-        // reasoning that three of the settings TRAVEL to the TV rather than
-        // being patched here -- which is true, and they did arrive. They just
-        // did not WORK: tested on a bridged DS4 2026-09-20, neither volume
-        // moved anything and the routing mode neither silenced a headset nor
-        // started the speaker.
-        // ➡️ Arriving is not acting. The section is hidden again until T-229
-        // finds out what those settings actually do on a DS4.
+        // ✅✅ A BLUETOOTH DS4 HAS AUDIO AGAIN (2026-09-22), AND A CABLED ONE
+        // DOES NOT. ⓘ Third state of this rule; the reversal on 2026-09-20 was
+        // right about the symptom and wrong about the cause. The settings DID
+        // arrive at the TV -- what never happened was the TV telling the pad,
+        // because ds4_patch_output only edits reports the host was already
+        // sending. Fixed in ctm-bridge-webos 78499c9 and HEARD on build 401.
+        //
+        // ⛔ The transport is the whole distinction: over Bluetooth a DS4
+        // carries audio inside its HID reports, which any revision can do;
+        // over a cable it needs a USB sound card the pads here lack.
+        CTM_CHECK(ctm_caps::has_audio_hardware("ds4", "ds4"));
+        CTM_CHECK(!ctm_caps::has_audio_hardware("ds4", "ds4_usb"));
+
+        // ⭐ AND NOT TOLD AT ALL IS NOT TOLD YES. A caller that forgets the
+        // session kind gets the section HIDDEN, never a dead one shown.
         CTM_CHECK(!ctm_caps::has_audio_hardware("ds4"));
 
         // ⛔ And the pads that never had the hardware at all.

@@ -15,6 +15,10 @@
 // answers -- not the session kind off the wire. "ds4_usb" is how a pad is
 // ATTACHED; "ds4" is what it IS.
 //
+// ⭐⭐ WITH ONE EXCEPTION, AND IT IS AUDIO. For a DS4, how it is attached
+// decides whether there is an audio path at all, so has_audio_hardware() takes
+// the session kind as a SECOND argument. See the note on it.
+//
 // INCLUDE ORDER: after config/config_store.inl, before app/rest_config.inl.
 // ---------------------------------------------------------------------------
 
@@ -26,38 +30,52 @@ inline bool is_dualsense(const std::string &settingsKind)
     return settingsKind == "ds5" || settingsKind == "ds5_edge";
 }
 
-// ⛔⛔ DUALSENSE ONLY AGAIN, AND DELIBERATELY SO (rhoquinn8217, 2026-09-20).
-// T-229 item A opened this to a DS4 on the reasoning below -- that four of the
-// six settings TRAVEL to the TV rather than being patched here, so they ought
-// to reach any pad. The reasoning is sound and the settings did arrive; they
-// just did not WORK. Tested on a bridged DS4 the same day:
-//   * speaker_volume and headset_volume changed neither the pad's speaker nor
-//     the headset
-//   * audio_output = speaker did not silence a connected headset, and did not
-//     start the speaker
-//   * whether "auto" is anything but default behaviour is still unknown
-// ➡️ So the section is hidden again until T-229 says what those three
-// actually do on a DS4. ⚠️ THIS LINE IS THE ONE TO CHANGE when it does --
-// the rest of the plumbing is already general.
-// ⓘ The original reasoning, kept because it is still true of the transport:
-// speaker volume, headset volume and the routing mode travel to the TV
-// (agent.inl, the T-130 block), and audio_latency_ms travels the same way.
-// None of those four is gated on being a DualSense -- only on
-// settings_kind_for() answering at all. Arriving is not the same as acting.
+// ✅✅ OPEN TO A BLUETOOTH DS4 AGAIN, AND THIS TIME THE PAD WAS HEARD
+// (2026-09-22). ⓘ This is the third state of this line, so the whole story is
+// kept rather than the current verdict alone.
+//
+// ⛔ IT WAS CLOSED ON 2026-09-20 for a good reason: item A had opened it, the
+// settings DID arrive at the TV, and the pad did nothing -- speaker_volume and
+// headset_volume moved neither the speaker nor the headset, and
+// audio_output = speaker neither silenced a headset nor started the speaker.
+//
+// ⭐⭐ THE CAUSE WAS FOUND ON 2026-09-22, AND IT WAS NEVER THIS FLAG. On the
+// TV, ds4_patch_output is a PATCH hook: it edits reports flowing from the host
+// and originates none. The volume bytes live only inside a 0x11 effects
+// report, so unless a game happened to send rumble or a lightbar change,
+// nothing carried them and the setting never left the TV. ➡️ **Arriving was
+// never the problem. Nobody was ever TELLING the pad.**
+// 🔗 ctm-bridge-webos `78499c9` gives the DS4 type its own .set_settings, and
+// it sends a 0x11 on a change. Heard on build 401 rooted, Bluetooth DS4
+// 054c:05c4: silent at 20, audible at 100.
+//
+// ⛔⛔ BUT ONLY OVER BLUETOOTH, WHICH IS WHY THE SESSION KIND IS NEEDED HERE.
+// A DS4 carries audio INSIDE its HID reports over Bluetooth (SBC in
+// 0x12/0x14/0x17), which any revision can do. Over a CABLE it needs a real USB
+// audio interface, and ds4_usb_over_ds4_usb.map carries audio_output = false
+// because the pads here have none. ➡️ rhoquinn8217, 2026-09-22: *"we only need
+// to hid them for usb ds4 connected"*.
+// ⚠️ The claim that the cabled pad has no sound card rests on ONE reading from
+// 2026-09-15/16 and has not been re-checked. 🔗 T-229's park note.
 //
 // ⛔ THE OTHER TWO ARE STILL DUALSENSE-ONLY, and the PAGE greys them rather
 // than this flag hiding the section: audio_gain rides the wired ISO path, whose
 // four-channel buffer is a DualSense layout, and force_echo_cancel is an
-// output-report patch behind the 0x02 gate. Hiding the section for the sake of
-// two rows took the four working ones with it, which is the fault T-229 item A
-// exists to fix.
+// output-report patch behind the 0x02 gate.
 //
 // ⛔ AND IT IS A LIST OF PADS WITH SPEAKERS, NOT "anything not an Xbox pad". An
 // Xbox pad has neither speaker nor jack, and an unknown generic pad has told us
 // nothing about either.
-inline bool has_audio_hardware(const std::string &settingsKind)
+//
+// ⭐ sessionKind DEFAULTS TO EMPTY, and empty means "not told", which answers
+// false for a DS4. A caller that forgets gets the section hidden rather than a
+// dead one shown -- the same safe direction the rest of this file takes.
+inline bool has_audio_hardware(const std::string &settingsKind,
+                               const std::string &sessionKind = std::string())
 {
-    return is_dualsense(settingsKind);
+    if (is_dualsense(settingsKind)) return true;   /* wired or Bluetooth */
+    if (settingsKind == "ds4") return sessionKind == "ds4";
+    return false;
 }
 
 // ⛔ The three gains are patched by ds5_output_overrides.inl, and every override
