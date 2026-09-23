@@ -121,12 +121,18 @@ static bool encode_one(const int16_t *interleaved, std::vector<uint8_t> *out)
 }
 
 /* The DualSense's envelope, and its reasoning, which was learned by ear:
- * attack, HOLD, then a short release. A triangular envelope dwindles to
+ * attack, HOLD, then a short release.
+ *
+ * The attack was 16 ms and is 28 ms after rhoquinn8217 heard build 403:
+ * "bridge tone is short sometimes I only hear a crack". The main cause of that
+ * was the host's audio interleaving with ours, fixed in ds4_patch_output -- but
+ * a fast attack is the other half of a click, and a slower one costs nothing.
+ * The gains came down by about a third at the same time: "tone are a bit loud". A triangular envelope dwindles to
  * nothing, and on a speaker this small a low note is inaudible before it has
  * finished -- so every signal ending on a low note sounded cut off. */
 static double envelope(int frame, int total)
 {
-    const double attack = 4.0;    /* 16 ms */
+    const double attack = 7.0;    /* 28 ms -- see the note below */
     const double release = 6.0;   /* 24 ms */
     if ((double)frame < attack) return ((double)frame + 1.0) / (attack + 1.0);
     if ((double)frame >= (double)total - release) {
@@ -212,9 +218,12 @@ int main(int argc, char **argv)
 
     /* AND THE LOW NOTES ARE LOUDER, for the DualSense's reason: the speaker
      * rolls off at the bottom, so equal amplitude is not equal loudness. */
-    std::vector<std::vector<uint8_t> > low, lower;
-    if (!render_note(660.0, 0.85, &low)) return 1;
-    if (!render_note(495.0, 1.00, &lower)) return 1;
+    std::vector<std::vector<uint8_t> > low, high, lower;
+    if (!render_note(660.0, 0.58, &low)) return 1;
+    /* Quieter on purpose: the speaker rolls off at the BOTTOM, so a high
+     * note at equal amplitude is the loud one. The mirror of the lift. */
+    if (!render_note(990.0, 0.48, &high)) return 1;
+    if (!render_note(495.0, 0.68, &lower)) return 1;
 
     FILE *o = fopen(argv[1], "wb");
     if (!o) { fprintf(stderr, "cannot write %s\n", argv[1]); return 1; }
@@ -234,7 +243,11 @@ int main(int argc, char **argv)
         " * is already fed by the host every time a game plays a sound, so they are\n"
         " * proven rather than derived.\n"
         " *\n"
-        " * REFUSED is low then LOWER -- sinking, it did not happen. The same\n"
+        " * THREE TONES, and the order they play in is the message:\n"
+        " *   handing over   low  then high   -- rising, going to the host\n"
+        " *   handed back    high then low    -- falling, coming home\n"
+        " *   refused        low  then LOWER  -- sinking, it did not happen\n"
+        " * The same\n"
         " * vocabulary the DualSense uses, at the same two frequencies, so one pad\n"
         " * does not mean something different from the other.\n"
         " *\n"
@@ -253,11 +266,13 @@ int main(int argc, char **argv)
 
     fprintf(o, "/* 660 Hz */\n");
     emit_table(o, "g_ds4sig_low", low);
+    fprintf(o, "/* 990 Hz */\n");
+    emit_table(o, "g_ds4sig_high", high);
     fprintf(o, "/* 495 Hz */\n");
     emit_table(o, "g_ds4sig_lower", lower);
     fclose(o);
 
-    printf("wrote %s: silence + %d low + %d lower, %u bytes each\n",
-           argv[1], kToneFrames, kToneFrames, (unsigned)kFrameBytes);
+    printf("wrote %s: silence + %d low + %d high + %d lower, %u bytes each\n",
+           argv[1], kToneFrames, kToneFrames, kToneFrames, (unsigned)kFrameBytes);
     return 0;
 }
