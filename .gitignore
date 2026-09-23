@@ -46,3 +46,5 @@ device.log.1
 # T-239: the settings window's remembered place, size and layout.
 # Runtime state beside device.log and configs/, not source.
 window-state.txt
+tools/ds4-tone-gen/*.exe
+tools/ds4-tone-gen/*.obj
