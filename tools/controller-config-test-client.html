@@ -2660,13 +2660,6 @@ function pollLastPress() {
 // or `keyboard -` from the advanced mode legend. Instead, the part of the
 // legend that says `controller -> page` should change to `keyboard -> page`."*
 //
-// ⓘ These two globals exist so `paintPadDestination()` can stay the ONLY
-// writer of `#padDest`. gpPoll knows how many pads the browser can see and the
-// devices poll knows the gate state; neither should paint the other's element.
-// 🔗 Two writers to one element is the shape of T-239 and T-243 both.
-var PADS_SEEN = 0;            // pads the BROWSER can see, maintained by gpPoll
-var LAST_DEVICE_PAYLOAD = null;   // the devices poll's last answer, for repaints
-
 var PAD_FAMILY_LAST = '';     // 'ps' or 'xbox', empty until something is pressed
 // ⚠️ SEPARATE FROM `GP_PREV`, deliberately: see the scan in gpPoll().
 var GP_FAM_PREV = {};
@@ -7663,19 +7656,6 @@ function gpPoll() {
   var pads = navigator.getGamepads ? navigator.getGamepads() : [];
   var live = [];
   for (var i = 0; i < pads.length; i++) { if (pads[i]) live.push(pads[i]); }
-  // ⭐ T-247: the destination line needs to know whether a pad exists, and it
-  // is painted from the DEVICES poll. Repaint it only when the answer crosses
-  // zero, not every frame -- this runs at animation rate.
-  if ((live.length === 0) !== (PADS_SEEN === 0)) {
-    PADS_SEEN = live.length;
-    // ⛔ ONLY ONCE THE DEVICES POLL HAS ANSWERED. paintPadDestination reads
-    // the gate out of the payload and WRITES GATE_ON from it, so calling it
-    // with null before the first poll would clear a gate that is on. The poll
-    // paints it itself the moment it lands, so nothing is lost by waiting.
-    if (LAST_DEVICE_PAYLOAD) paintPadDestination(LAST_DEVICE_PAYLOAD);
-  } else {
-    PADS_SEEN = live.length;
-  }
   var bar = document.getElementById('gpbar');
   var hint = document.getElementById('gphint');
   // ⛔⛔ ASK THE LISTENER, NOT THE BROWSER (rhoquinn8217, 2026-09-03: the
@@ -8153,19 +8133,18 @@ function paintPadDestination(d) {
   // ⓘ Three states, not two: held off reads differently from simply not gated,
   // because one is a choice and the other is just where focus happens to be.
   //
-  // ⭐⭐ AND A FOURTH (T-247): NO PAD AT ALL. With nothing gated and no pad
-  // the browser can see, nothing is going to a game and the KEYBOARD is what
-  // reaches this page -- so the line says so, instead of the legend opening
-  // with `keyboard —` a few centimetres to its left.
-  // ⚠️ Checked in this order on purpose: a HELD gate is a deliberate choice
-  // and outranks "no pad is plugged in", which is just a fact about the room.
-  dest.textContent = GATE_HELD       ? 'controllers → game (held)'
-                   : gated           ? 'controllers → page'
-                   : PADS_SEEN === 0 ? 'keyboard → page'
-                                     : 'controllers → game';
-  // ⓘ The green stays for the GATE alone. It means "your controllers are
-  // captured to this page", which is a state you chose and can be surprised
-  // by; a keyboard reaching the page is simply how a page works.
+  // ⛔⛔ AND IT STAYS ABOUT CONTROLLERS ONLY (rhoquinn8217, 2026-09-24).
+  // A fourth `keyboard → page` state was added here and taken back out:
+  // *"This is mainly for controller because their inputs get mirrored to the
+  // game even when the game is unfocused. That doesn't happen for keyboards
+  // and we don't need to specify that keyboards are going to the page because
+  // they will."*
+  // ➡️ That names what this line is FOR. It is not a label saying what is
+  // driving the page -- the LEGEND says that now -- it is a warning about the
+  // one input that reaches a game you are not looking at.
+  dest.textContent = GATE_HELD ? 'controllers → game (held)'
+                   : gated     ? 'controllers → page'
+                               : 'controllers → game';
   dest.classList.toggle('on', gated);
 
   // ⭐ The button says the STATE it is in; the line beside it says what a click
@@ -8216,7 +8195,6 @@ function pollDevices() {
     LAST_COUNT = list.length;
     FAILS = 0;
     paintHealth();
-    LAST_DEVICE_PAYLOAD = d;   // T-247: so gpPoll can ask for a repaint
     paintPadDestination(d);
     LAST_DEVICES = list;
 
