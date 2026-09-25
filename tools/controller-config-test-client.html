@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.31 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.32 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,20 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.32 The hint is clickable and the timer is slower (T-248).
+            A click goes to the next one, which needed the step split
+            out from the timer's guards: clicking means the pointer is
+            ON the hint, and that is exactly what pauses the timer, so
+            routing a click through the same path would have done
+            nothing at all and said nothing about it.
+            .cinfo is also a DRAG surface from T-237, so a press means
+            drag when the pointer travels and next-hint when it does
+            not, with 4px of slop for a hand letting go. The drag runs
+            in the listener, which cannot tell the page whether the
+            window moved, so the page measures the pointer itself.
+            The timer goes to 30s, which it can afford now that a click
+            advances it: its only job is to make sure a second hint is
+            ever seen.
     2.66.31 Simple's footer line rotates through hints (T-248). Seven of
             them: the original "how do I get this window back" text,
             which stays in the cycle and leads on every open, plus the
@@ -1132,7 +1146,11 @@
      ⓘ In `em`, so it follows the vh font size rather than fixing a pixel
      height that would be wrong at another window size. 1.4 is the
      line-height below, so 2.8em is exactly two lines. */
-  #compactBox .cinfo { min-height:2.8em;
+  /* ⓘ It cycles on a click (T-248), so it says so. ⚠️ It is ALSO a drag
+     surface -- a press that travels moves the window instead -- which is why
+     the cursor is a pointer rather than a move arrow: the click is the thing
+     you would not otherwise guess at. */
+  #compactBox .cinfo { cursor:pointer; min-height:2.8em;
                        font-size:2.3vh; color:#c8c9ce; text-align:center; line-height:1.4;
     max-width:80vw; }
   #compactBox .cinfo b { color:#e8e8ea; }
@@ -3177,20 +3195,61 @@ var HINT_HELD = false;     // true while the pointer rests on the hint
 
 // ⛔⛔ SLOW, AND IT STOPS WHEN YOU LOOK AT IT. This footer is read WHILE
 // configuring, and text that changes under a reader is worse than text that
-// sits still. ⓘ 12s is long enough to finish a sentence and short enough
-// that a second hint is seen at all.
-var HINT_EVERY_MS = 12000;
+// sits still.
+// ⭐ 30s (rhoquinn8217, 2026-09-24: *"longer interval to wait between
+// tips"*). ⓘ It can afford to be slow now that a CLICK advances it: someone
+// who wants the next one does not have to wait for the timer, so the timer's
+// only job is to make sure a second hint is ever seen at all.
+var HINT_EVERY_MS = 30000;
 
+// ⭐ THE STEP ITSELF, with no guards on it. A CLICK must always work:
+// clicking means the pointer is ON the hint, which is exactly what pauses the
+// timer -- so routing a click through hintNext() below would do nothing at
+// all, silently.
+function hintAdvance() {
+  if (!COMPACT || QUICK) return;
+  HINT_AT = (HINT_AT + 1) % FOOTER_HINTS.length;
+  var el = document.querySelector('#compactBox .cinfo');
+  if (el) el.innerHTML = FOOTER_HINTS[HINT_AT];
+}
+
+// ⓘ The TIMER's path, which is the one that must hold back.
 function hintNext() {
   // ⛔ NOT WHILE A PICKER IS OPEN. paintCompact already refuses to repaint
   // then -- a repaint would close the list under someone's hand -- so a
   // rotation would either be lost or fight it.
   if (GP_SELECTING) return;
   if (HINT_HELD) return;
-  if (!COMPACT || QUICK) return;
-  HINT_AT = (HINT_AT + 1) % FOOTER_HINTS.length;
-  var el = document.querySelector('#compactBox .cinfo');
-  if (el) el.innerHTML = FOOTER_HINTS[HINT_AT];
+  hintAdvance();
+}
+
+// ⭐⭐ A CLICK GOES TO THE NEXT HINT (rhoquinn8217, 2026-09-24).
+//
+// ⛔⛔ BUT `.cinfo` IS ALREADY A DRAG SURFACE. T-237 made any empty part of
+// the window draggable, and this div is empty space by that test -- so a press
+// here starts a window drag. A press must therefore mean DRAG when the pointer
+// travels and NEXT HINT when it does not, which is how a draggable-but-
+// clickable thing behaves everywhere else.
+// ⓘ The drag runs in the LISTENER, so the page cannot ask it whether the
+// window moved. It measures the pointer itself instead.
+// ⓘ 4px of slop: a hand resting on a mouse moves a pixel or two on the way
+// to letting go, and that should still count as a click.
+var HINT_DOWN = null;
+var HINT_SLOP = 4;
+
+function hintPressed(ev) {
+  HINT_DOWN = { x: ev.clientX, y: ev.clientY };
+}
+
+function hintReleased(ev) {
+  if (!HINT_DOWN) return;
+  var moved = Math.abs(ev.clientX - HINT_DOWN.x) + Math.abs(ev.clientY - HINT_DOWN.y);
+  HINT_DOWN = null;
+  if (moved > HINT_SLOP) return;          // that was a drag, not a click
+  hintAdvance();
+  // ⓘ Restart the clock, so a hint you just asked for does not vanish a
+  // moment later because the timer happened to be nearly up.
+  hintStart();
 }
 
 function hintStart() {
@@ -7841,8 +7900,10 @@ function paintCompact() {
             LG.dpad + ' move | ' +
             LG.position + ' position | ' + LG.resize + ' resize | ' +
             LG.close + ' to close</div>' +
-            '<div class="cinfo" onmouseenter="HINT_HELD = true" ' +
-            'onmouseleave="HINT_HELD = false">' + FOOTER_HINTS[HINT_AT] + '</div>' +
+            '<div class="cinfo" title="Click for the next tip" ' +
+            'onmouseenter="HINT_HELD = true" onmouseleave="HINT_HELD = false" ' +
+            'onmousedown="hintPressed(event)" onmouseup="hintReleased(event)">' +
+            FOOTER_HINTS[HINT_AT] + '</div>' +
             '</div>' + modePickerHtml('cselMode') +
             '<button class="cclose" onclick="closeWindow()">Close</button></div>';
   }
