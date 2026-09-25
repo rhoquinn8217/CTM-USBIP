@@ -5809,24 +5809,30 @@ function fieldIsEditable(el) {
           'tel'].indexOf(type) >= 0;
 }
 
-// ⭐⭐ WHICH FIELD MAY OPEN THE VIRTUAL KEYBOARD (rhoquinn8217, 2026-09-24:
-// *"Right now if you are in a value box, you can press square/x to bring up
-// the virtual keyboard. I want to disable this everywhere except when copying
-// or renaming a config"*).
+// ⭐⭐ WHICH FIELD MAY OPEN THE VIRTUAL KEYBOARD.
 //
-// ⛔ NARROWER THAN `fieldIsEditable`, ON PURPOSE. That one answers "can this
-// be typed into", which is true of every setting's value box -- and a value
-// box is navigated with the pad, so a keyboard over it is in the way.
-// ⓘ Naming a config is the one place there is nothing to navigate TO: the
-// text does not exist yet, so a keyboard is the only way in.
+// ✅ THE THREE PLACES YOU TYPE FREE TEXT: a config's name (renaming one, or
+// naming a copy), the agent URL, and the bearer token. Nothing else.
+// ⛔ NOT a setting's VALUE BOX. That is what rhoquinn8217 asked to stop
+// (2026-09-24: *"if you are in a value box, you can press square/x to bring up
+// the virtual keyboard. I want to disable this"*), and the reason is that a
+// value box is already driven by the pad -- `GP_EDITING` steps it up and down
+// -- so a keyboard over it is in the way of the thing you are doing.
+// ⚠️ I first read that as "only when naming a config" and took the agent URL
+// and the bearer with it. rhoquinn8217: *"That is the opposite of what I
+// want."* Those two ARE free text and there is no other way to fill them from
+// a pad. The line is value boxes, not "everything but naming".
 //
-// ⭐ Asked by CONTAINMENT rather than by id, because `#renameRow` is the host
-// for BOTH rename and copy -- `openNameRow(mode, ...)` fills it either way --
-// and a second field added to that row later would be covered without this
-// being revisited. ⓘ The row is MOVED around the page as it opens, but it is
-// the same element throughout, so containment holds.
+// ⓘ An ALLOW-LIST, deliberately. Settings boxes are generated with an id
+// taken from the setting key, so any rule written as "not a setting" would
+// have to keep up with that generator. Naming the three is dull and stays
+// true. ⓘ `#renameRow` is asked by CONTAINMENT because it hosts both rename
+// and copy, and could gain a second field.
+var FREE_TEXT_IDS = ['base', 'token'];
+
 function fieldWantsKeyboard(el) {
   if (!fieldIsEditable(el)) return false;
+  if (el.id && FREE_TEXT_IDS.indexOf(el.id) >= 0) return true;
   var row = document.getElementById('renameRow');
   return !!(row && row.contains(el));
 }
