@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.24 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.26 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,18 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.26 Drag the window by any empty space, in Simple and Quick
+            (T-237). The page cannot move its own window -- this is a
+            plain --app= window, where -webkit-app-region does nothing --
+            so it reports one mousedown and the listener does the
+            dragging, as it already does for the pad's position control.
+            Anything you can operate is not empty space, and the check
+            walks UP from the target because a click lands on the text
+            inside a button rather than on the button. The mousedown is
+            defaulted away so dragging across the legend does not select
+            it.
+            ⓘ .25 is skipped: the T-242 branch claims it and is merged
+            independently. .24 below arrived here with T-243.
     2.66.24 Opening the mode selector no longer moves the footer about
             (T-243). pickerExpand sets position:fixed, so the box leaves
             the flow and the footer closes over the gap: .cbarText grew
@@ -8195,6 +8207,48 @@ setInterval(pollDevices, POLL_MS);
 // ⭐ T-240. Its own interval, four times a second, because POLL_MS above is
 // four SECONDS and a legend that lags your hand by that much reads as broken.
 setInterval(pollLastPress, LAST_PRESS_MS);
+
+// ⭐⭐ DRAG THE WINDOW BY ANY EMPTY SPACE, in Simple and Quick (T-237,
+// rhoquinn8217: *"Can we make any place where there isn't a button or box a
+// place to hold and drag with the mouse?"*, widened from Quick to both).
+//
+// ⛔ THE PAGE CANNOT MOVE ITS OWN WINDOW. `-webkit-app-region: drag` is
+// honoured in Electron and in INSTALLED PWAs; in a plain `--app=` window this
+// page is ordinary web content and it does nothing. ➡️ So the page says "a
+// drag started" ONCE and the listener does the dragging, the same way it moves
+// this window for the pad's ☰ position.
+//
+// ⓘ Advanced is left alone: it keeps its own frame and its own footer.
+function compactDragStart(ev) {
+  if (typeof STOPPED !== 'undefined' && STOPPED) return;
+  if (!COMPACT) return;
+  if (ev.button !== 0) return;                 // the primary button only
+  var box = document.getElementById('compactBox');
+  if (!box || !box.contains(ev.target)) return;
+
+  // ⛔ ANYTHING YOU CAN OPERATE IS NOT EMPTY SPACE. Walk UP from the target,
+  // because a click lands on the TEXT inside a button, not on the button.
+  for (var el = ev.target; el && el !== box; el = el.parentNode) {
+    var tag = (el.tagName || '').toLowerCase();
+    if (tag === 'button' || tag === 'select' || tag === 'option' ||
+        tag === 'input' || tag === 'textarea' || tag === 'a' ||
+        tag === 'label') return;
+    if (el.isContentEditable) return;
+  }
+
+  // ⚠️ STOP THE TEXT SELECTION. Without this, dragging across the legend
+  // selects it -- the window moves and leaves a trail of highlighted words.
+  ev.preventDefault();
+
+  // ⓘ quiet: a listener too old to know this route must not put the page into
+  // its "cannot reach the agent" state just because someone dragged a window.
+  call('POST', '/api/v1/ui/drag', undefined, true).catch(function () {});
+}
+
+// ⓘ On the BUBBLE phase, not capture: anything that handles its own mousedown
+// and stops propagation never reaches this at all.
+document.addEventListener('mousedown', compactDragStart);
+
 
 // ⭐ Configs refresh on their own clock, slowly.
 //
