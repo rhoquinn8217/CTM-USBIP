@@ -5799,9 +5799,34 @@ function fieldIsEditable(el) {
           'tel'].indexOf(type) >= 0;
 }
 
+// ⭐⭐ WHICH FIELD MAY OPEN THE VIRTUAL KEYBOARD (rhoquinn8217, 2026-09-24:
+// *"Right now if you are in a value box, you can press square/x to bring up
+// the virtual keyboard. I want to disable this everywhere except when copying
+// or renaming a config"*).
+//
+// ⛔ NARROWER THAN `fieldIsEditable`, ON PURPOSE. That one answers "can this
+// be typed into", which is true of every setting's value box -- and a value
+// box is navigated with the pad, so a keyboard over it is in the way.
+// ⓘ Naming a config is the one place there is nothing to navigate TO: the
+// text does not exist yet, so a keyboard is the only way in.
+//
+// ⭐ Asked by CONTAINMENT rather than by id, because `#renameRow` is the host
+// for BOTH rename and copy -- `openNameRow(mode, ...)` fills it either way --
+// and a second field added to that row later would be covered without this
+// being revisited. ⓘ The row is MOVED around the page as it opens, but it is
+// the same element throughout, so containment holds.
+function fieldWantsKeyboard(el) {
+  if (!fieldIsEditable(el)) return false;
+  var row = document.getElementById('renameRow');
+  return !!(row && row.contains(el));
+}
+
 function reportField() {
   if (inPlainTab()) return;
-  var on = fieldIsEditable(document.activeElement);
+  // ⛔ NOT fieldIsEditable: this flag is what the listener uses to decide
+  // whether Square opens the keyboard, and it should say yes only while a
+  // config is being named. 🔗 fieldWantsKeyboard above.
+  var on = fieldWantsKeyboard(document.activeElement);
   if (on === LAST_FIELD_SENT) return;
   LAST_FIELD_SENT = on;
   try {

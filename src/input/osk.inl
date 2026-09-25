@@ -94,8 +94,17 @@ inline void do_open(Program program, int openedByButton)
         // the pad silently: nothing says the window has stopped listening, or
         // that the keyboard must be closed to get it back.
         //
-        // ⭐ EXCEPT in a text field, which is the one place on that page a
-        // keyboard earns its place. Everywhere else the pad already navigates.
+        // ⭐ EXCEPT WHILE NAMING A CONFIG -- renaming one, or naming a copy
+        // (rhoquinn8217, 2026-09-24, narrowing this from "any text field":
+        // *"I want to disable this everywhere except when copying or renaming
+        // a config"*).
+        // ⓘ A setting's VALUE box was a text field too, so the keyboard used
+        // to open over it -- and a value box is navigated with the pad, so the
+        // keyboard was in the way of the thing you were trying to do. Naming
+        // is the one case with nothing to navigate to: the text does not exist
+        // yet, so a keyboard is the only way in.
+        // ⓘ The PAGE decides this, in fieldWantsKeyboard(), and says so
+        // through ui/field. This side only honours the flag.
         //
         // ⓘ Refuse rather than open-then-close: something that appears and
         // vanishes is worse than something that never appears. The page says
@@ -105,9 +114,8 @@ inline void do_open(Program program, int openedByButton)
                 << "osk: refused -- the config window has focus and no field is "
                    "being edited");
             ctm_ui_notify(
-                "DS5-USBIP Virtual keyboard restricted from opening with "
-                "Controller Config except when making text input based "
-                "changes.");
+                "DS5-USBIP Virtual keyboard opens only while naming a "
+                "config -- renaming one, or naming a copy.");
             return;
         }
         ctm_overlay::show(0, 0, openedByButton);
