@@ -6689,6 +6689,18 @@ function setFooterMode(on) {
 //
 // ⓘ GP_EDITING and GP_SELECTING are NOT typing -- the pad put focus there, and
 // gpKeySelect and gpKeyBack already know what those states mean.
+// ⭐⭐ IS THIS ELEMENT REAL TEXT ENTRY? Asked in two places now, so it is
+// one function -- `typingInAField()` below, which decides whether the keyboard
+// is off limits, and `gpTab()`, which must not FOCUS one of these.
+// ⛔ `type === ''` matters: `<input id="base">` carries no type attribute at
+// all, and it is the agent URL -- the exact field this was found on.
+function isTextEntry(el) {
+  if (!el) return false;
+  if (el.tagName === 'TEXTAREA') return true;
+  return el.tagName === 'INPUT' &&
+         (el.type === 'text' || el.type === '' || el.type === 'search');
+}
+
 function typingInAField() {
   if (GP_EDITING || GP_SELECTING) return false;
   var el = document.activeElement;
@@ -6700,13 +6712,11 @@ function typingInAField() {
   // ⭐ Only REAL text entry is protected: the rename box, and a textarea. A
   // select is not typed into, and a setting's own box is driven through
   // GP_EDITING, which is allowed above.
-  if (el.tagName === 'TEXTAREA') return true;
   // ⭐ A TEXT field with focus is being typed into -- a config name, a key
   // binding -- so the arrows belong to its caret and Enter to its own handler.
   // ⓘ Keyed on the FIELD's kind rather than on RENAMING: a rebind box is a
   // text field too, and the halo must not wander off mid-binding.
-  if (el.tagName === 'INPUT' &&
-      (el.type === 'text' || el.type === '' || el.type === 'search')) return true;
+  if (isTextEntry(el)) return true;
   // ⛔ A number box and a select are NOT typing: a number is stepped through
   // GP_EDITING, and clicking a select used to kill the keyboard outright.
   return false;
@@ -7743,10 +7753,25 @@ function gpTab(delta) {
   // gpCollect to find and the pad's own focus list stays empty. Focus the first
   // real control instead, so Tab has somewhere to start from -- otherwise the
   // page changes tab and the keyboard is still pointing at nothing.
+  // ⛔⛔ BUT NEVER A TEXT FIELD (rhoquinn8217, 2026-09-24: *"when going into
+  // the overview tab, the agent url is automatically focus and editing"*).
+  //
+  // ⚠️ This is a TRAP, not an annoyance. `#pane-overview`'s first control is
+  // `<input id="base">`, the agent URL -- and a focused text field makes
+  // `typingInAField()` true, which turns the keyboard OFF ENTIRELY. Arrows,
+  // Enter, Q, E, P and R all stop. So landing on Overview left the keyboard
+  // with no way back out.
+  // ⓘ It only became reachable this way once T-247 let a plain Q and E drive
+  // gpTab; before that a keyboard could not get here at all.
+  // ⓘ If a pane holds nothing BUT text fields, nothing is focused -- which is
+  // the right answer, because focusing one is what breaks it.
   var pane = document.getElementById('pane-' + ACTIVE);
   if (pane) {
-    var first = pane.querySelector('button, select, input');
-    if (first && first.focus) first.focus();
+    var choices = pane.querySelectorAll('button, select, input');
+    for (var ci = 0; ci < choices.length; ci++) {
+      if (isTextEntry(choices[ci])) continue;
+      if (choices[ci].focus) { choices[ci].focus(); break; }
+    }
   }
 }
 
