@@ -96,6 +96,9 @@ carry it; upstream's own history is unchanged.
 | 2026-09-21 | The settings window comes back where it was left, in every mode. Two placers were fighting: the page's `sizeOnOpen` reaches `compactHome`, which does not only resize but MOVES the window to bottom centre, so a restored place was discarded milliseconds after it landed; and `fitWindowIfOversized` read a stale `window.outerWidth` -- `resizeTo` is asynchronous, a fact stated a few lines above it -- saw Chrome's remembered 2341x1009 instead of the size just set, and yanked the window to Advanced's geometry. Twice per open, measured. Advanced was the one mode unaffected, because it is the one `sizeOnOpen` skips, and that is what named the bug. The layout, size, place and controller now also survive a listener restart, in `window-state.txt` beside `configs/`. A false alarm is recorded with it: the fix was twice declared incomplete from a PowerShell probe that was DPI-unaware while the listener is `PER_MONITOR_AWARE_V2`, so every coordinate it read came back divided by the 1.25 display scale. Three separate unexplained numbers were that one mistake | `833eb44`, `1587dfc`, `cfd5a84`, merge `9116c5a` |
 | 2026-09-21 | The settings page's button legend follows the pad in your hand, not the pad the window is showing. It asks the LISTENER which device pressed last, because the browser structurally cannot answer: the rebinder clears a bound button out of the report before Windows sees it, so `navigator.getGamepads()` only ever shows the buttons a config has not claimed -- in practice L1 and R1 alone, which is exactly what was observed. A new `GET /api/v1/lastpress` returns the ordinal and kind, recorded at the top of `apply()` before anything clears a button, for ANY button rather than the ten the page navigates with, since a trigger pull is a press. The page polls it four times a second while its window is in front and not at all when it is behind, so the legend is right the moment you look at it; `/devices` at four seconds could never have done this. The browser scan stays as the answer for a pad plugged in but not bridged, whose buttons nothing clears. The legend also shows the marks on the buttons rather than their names: a compass for the d-pad in both sets, and the three-lines and two-rectangles marks in place of spelling out Menu and View | `c9df0a2`, `f3f2b2b`, `16fb5f4`, `13e80ac`, `867bccc`, `386f441`, merge `9116c5a` |
 | 2026-09-21 | PARTIAL, and the ticket stays open. A touchpad tap is remappable: one finger, two fingers, and press-and-drag each take a mouse action instead of being hard-wired to left, right and drag. The ask was wider -- keyboard keys, controller buttons and the on-screen keyboard openers as well. Keyboard openers were reachable and were simply not done. Keyboard keys need a synthetic hold, because `set_state_for()` publishes a device's WHOLE held-key set and the rebinder republishes it every report, so an outside writer is overwritten within about 4ms and a tap holds nothing. Controller buttons need a `set_button()` that does not exist: the layout only offers `clear_button()` and the rebinder only ever removes buttons from a report | `d5ac645`, merge `9116c5a` |
+| 2026-09-24 | Opening the settings window's mode selector no longer moves the footer about. The cause is the opposite of what it looks like: `pickerExpand` already sets `position:fixed`, so the box LEAVES the flow and the footer closes over the gap. Measured in Simple at 1238x498 -- `.cbarText` grew 767 to 993 to fill it, sliding the centred legend 113px right, and the extra width let `.cinfo` fit on one line, which shrank the bar 16px and dropped Close 8px. A measured spacer holds the collapsed footprint while the list is open; it is a `span`, so the pad's focus list (`.cbar > button, .cbar > select`) does not see it. The config selector shares the expand path and had the same fault | `63fcac2`, merge `b359238` |
+| 2026-09-24 | The settings window can be dragged by any empty space, in Simple and Quick. The page cannot move its own window -- it is a plain `--app=` window, where `-webkit-app-region` does nothing -- so it reports one mousedown and the LISTENER drags, as it already does for the pad's position control. Three traps avoided: `place()` writes the state file, so the loop moves the window directly and remembers the place once at the end; `SM_SWAPBUTTON` decides which button to watch, because a swapped-button user's primary press arrives as `VK_RBUTTON`; and the mousedown is defaulted away so dragging across the legend does not select it. The notice strip counts as empty space too -- it is `position:fixed` at body level, so the first version exited before its `preventDefault()` and both selected the text and refused the drag | `80c998c`, `b6b2052`, merge `b359238` |
+| 2026-09-24 | ⛔ The browser title bar STAYS on the settings window, and the reason is worth keeping. Clearing `WS_CAPTION` and `WS_THICKFRAME` on the `--app=` window works and Chrome does not re-assert it -- but the whole non-client area is **8px**, a resize border. A real title bar is ~31px. The caption is Chrome's own, painted INSIDE the client area, so no style bit reaches it. Removing it would mean an installed PWA with `window-controls-overlay`, which is where `-webkit-app-region: drag` becomes supported | spike only, no code |
 
 ## Files changed
 
@@ -106,7 +109,7 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
 ```
  .gitattributes                                |   48 +
  .gitignore                                    |   34 +-
- CHANGES.md                                    |  224 +
+ CHANGES.md                                    |  227 +
  LINK                                          |    0
  README.md                                     |   18 +
  app/ctm-usbip-tests.vcxproj                   |  108 +
@@ -133,14 +136,14 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  src/app/agent_session_sweep.inl               |  320 +
  src/app/cli.inl                               |   24 +-
  src/app/common.inl                            |   32 +
- src/app/config_move.inl                       |  770 +++
+ src/app/config_move.inl                       |  844 +++
  src/app/device_capabilities.inl               |   75 +
  src/app/device_type.inl                       |   70 +
  src/app/nickname.inl                          |   90 +
  src/app/open_ui.inl                           |  489 ++
  src/app/overlay_window.inl                    | 1995 ++++++
  src/app/rest.inl                              |  760 +++
- src/app/rest_config.inl                       | 1176 ++++
+ src/app/rest_config.inl                       | 1190 ++++
  src/app/rest_config_sessions.inl              |  204 +
  src/app/rest_sessions.inl                     |   33 +
  src/app/same_controller.inl                   |   38 +
@@ -151,7 +154,7 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  src/app/window_move.inl                       |  245 +
  src/audio/audio_gain.inl                      |  178 +
  src/audio/ds5_apply_settings.inl              |  310 +
- src/audio/ds5_output_overrides.inl            |  699 +++
+ src/audio/ds5_output_overrides.inl            |  699 ++
  src/audio/iso_in_pacing.inl                   |  221 +
  src/audio/iso_in_test_tone.inl                |   95 +
  src/audio/mic_ring.inl                        |  202 +
@@ -171,7 +174,7 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  src/input/gyro_calibration.inl                |  168 +
  src/input/gyro_calibration_fetch.inl          |   99 +
  src/input/gyro_hold.inl                       |   48 +
- src/input/gyro_mouse.inl                      | 1053 ++++
+ src/input/gyro_mouse.inl                      | 1053 +++
  src/input/keyboard_device.inl                 |  301 +
  src/input/mic_report.inl                      |   41 +
  src/input/mouse_device.inl                    |  304 +
@@ -185,7 +188,7 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  src/input/trigger_effect.inl                  |  630 ++
  src/log/capped_log.inl                        |  117 +
  src/log/device_log.inl                        |  233 +
- src/main.cpp                                  |  449 +-
+ src/main.cpp                                  |  457 +-
  src/map/runtime.cpp                           |   68 +-
  src/usbip/device.inl                          |  650 +-
  src/usbip/server.inl                          |   55 +-
@@ -216,12 +219,12 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  tests/trigger_click_test.cpp                  |  835 +++
  tests/trigger_effect_test.cpp                 |  529 ++
  tests/units.h                                 |   54 +
- tools/controller-config-test-client.html      | 8388 +++++++++++++++++++++++++
+ tools/controller-config-test-client.html      | 8511 +++++++++++++++++++++++++
  tools/device-config-panel-edge.bat            |    9 +
  tools/device-config-panel-edge.ps1            |  327 +
  tools/device-config-panel.bat                 |    4 +
  tools/device-config-panel.ps1                 |  303 +
  tools/osk-mockups.py                          |  103 +
  tools/start-ctm-usbip.bat                     |   67 +
- 119 files changed, 38510 insertions(+), 145 deletions(-)
+ 119 files changed, 38732 insertions(+), 145 deletions(-)
 ```
