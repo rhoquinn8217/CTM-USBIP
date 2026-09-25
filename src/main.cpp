@@ -106,6 +106,10 @@ bool ui_view_get(bool *compact, bool *quick, std::string *ordinal);
 /* Where the window stands right now, kept for the next one. Called on the way
  * out, while it still exists. */
 void ui_view_remember_pos();
+// ⭐ T-237: a drag started on empty space in the settings page. The page
+// cannot move its own window, so the listener does it. ⓘ No ctm_ prefix:
+// new symbols of ours do not take one.
+void ui_drag_begin();
 // ⓘ The chord calls this from the input path; the REST endpoint calls it too.
 // ⓘ Takes the controller that ran the chord, so the window can come up on its
 // tab. Empty means "no particular one" -- the REST spawn path has no controller
@@ -271,6 +275,10 @@ bool ui_view_get(bool *compact, bool *quick, std::string *ordinal)
 void ui_view_remember_pos()
 {
     config_move::remember_pos_now();
+}
+void ui_drag_begin()
+{
+    config_move::drag_begin();
 }
 
 

@@ -752,6 +752,20 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
             return true;
         }
 
+        // ⭐⭐ DRAG: the page saw a mousedown on empty space (T-237).
+        //
+        // ⓘ Fire and forget -- it answers at once and the drag runs on its own
+        // thread until the button comes up. The page sends nothing further;
+        // one POST per drag, not one per mouse-move.
+        // ⚠️ Not guarded on config mode or the foreground: the window has just
+        // been clicked, so it IS in front, and refusing here would only make a
+        // drag fail silently the moment the checks disagreed.
+        if (what == "drag") {
+            ui_drag_begin();
+            *out = rest_http_response(200, R"({"ok":true})");
+            return true;
+        }
+
         // ⭐ CLOSE: Circle, in Simple or Quick. The window ENDS -- it does not
         // hide behind the game (rhoquinn8217, 2026-09-09, reversing that
         // morning's park). The ways back are the chord and the tray icon's

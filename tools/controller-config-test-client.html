@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.23 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.27 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,33 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.27 The notice strip is draggable too, and its text no longer
+            selects (T-237, rhoquinn8217). #bubbles is position:fixed at
+            body level, so the compactBox.contains() test returned false
+            for it and the handler left before its preventDefault --
+            which is why the text selected AND the window did not move.
+            One cause, both halves.
+    2.66.26 Drag the window by any empty space, in Simple and Quick
+            (T-237). The page cannot move its own window -- this is a
+            plain --app= window, where -webkit-app-region does nothing --
+            so it reports one mousedown and the listener does the
+            dragging, as it already does for the pad's position control.
+            Anything you can operate is not empty space, and the check
+            walks UP from the target because a click lands on the text
+            inside a button rather than on the button. The mousedown is
+            defaulted away so dragging across the legend does not select
+            it.
+            ⓘ .25 is skipped: the T-242 branch claims it and is merged
+            independently. .24 below arrived here with T-243.
+    2.66.24 Opening the mode selector no longer moves the footer about
+            (T-243). pickerExpand sets position:fixed, so the box leaves
+            the flow and the footer closes over the gap: .cbarText grew
+            767 -> 993 to fill it, sliding the centred legend 113px
+            right, and the extra width let .cinfo fit on one line, which
+            shrank the bar 16px and dropped Close 8px. A measured spacer
+            now holds the collapsed footprint while the list is open. It
+            is a span, so the pad's focus list -- which collects
+            '.cbar > button, .cbar > select' -- does not see it.
     2.66.23 The legend shows the marks on the buttons rather than their
             names (rhoquinn8217). The d-pad is a compass glyph in both
             sets instead of the words "d-pad", and the Xbox set carries
@@ -5386,6 +5413,34 @@ function pickerExpand(el) {
   var left = Math.round(rect.left + rect.width / 2 - w / 2);
   left = Math.max(margin, Math.min(left, window.innerWidth - w - margin));
 
+  // ⭐⭐ HOLD THE SPACE IT IS ABOUT TO VACATE (T-243, rhoquinn8217:
+  // *"when the mode selector expands the footer moves around"*).
+  //
+  // ⛔ `position:fixed` below takes this box OUT OF THE FLOW, and the footer
+  // closes over the gap. Measured in Simple at 1238x498: `.cbarText` is
+  // `flex:1 1 auto`, so it grew 767 -> 993 to fill the 226px the select left
+  // behind; the legend is centred in it, so it slid **113px right** -- exactly
+  // half; and with the extra width `.cinfo` fitted on ONE line instead of two,
+  // which shrank `.cbar` by 16px and dropped the Close button 8px.
+  // ➡️ So the jump is not the list growing. It is the footer re-flowing
+  // around a hole, and a spacer of the same size fills it.
+  //
+  // ⓘ A `<span>`, so the pad's focus list is untouched: it collects
+  // `.cbar > button, .cbar > select` and a span matches neither.
+  // ⓘ Measured from `rect`, captured at the top of this function while the
+  // box was still closed, so it is the collapsed footprint and not the open
+  // one.
+  if (!el._pickerSlot) {
+    var slot = document.createElement('span');
+    slot.className = 'pickerslot';
+    slot.setAttribute('aria-hidden', 'true');
+    slot.style.cssText = 'flex:0 0 auto;display:inline-block;pointer-events:none;' +
+                         'width:' + Math.round(rect.width) + 'px;' +
+                         'height:' + Math.round(rect.height) + 'px;';
+    el.parentNode.insertBefore(slot, el);
+    el._pickerSlot = slot;
+  }
+
   el.style.position = 'fixed';
   el.style.top = top + 'px';
   el.style.left = left + 'px';
@@ -5426,6 +5481,13 @@ function pickerExpand(el) {
 // Undo all of it. ⛔ Clearing `size` alone would leave a fixed-positioned box
 // floating over the page at one row high.
 function pickerCollapse(el) {
+  // T-243: the box is back in the flow, so the spacer holding its place goes.
+  // ⚠️ Before the style is cleared, so there is never a frame with both the
+  // spacer and an in-flow select taking up room.
+  if (el._pickerSlot) {
+    el._pickerSlot.remove();
+    el._pickerSlot = null;
+  }
   el.size = 0;
   el.style.position = '';
   el.style.top = '';
@@ -8151,6 +8213,67 @@ setInterval(pollDevices, POLL_MS);
 // ⭐ T-240. Its own interval, four times a second, because POLL_MS above is
 // four SECONDS and a legend that lags your hand by that much reads as broken.
 setInterval(pollLastPress, LAST_PRESS_MS);
+
+// ⭐⭐ DRAG THE WINDOW BY ANY EMPTY SPACE, in Simple and Quick (T-237,
+// rhoquinn8217: *"Can we make any place where there isn't a button or box a
+// place to hold and drag with the mouse?"*, widened from Quick to both).
+//
+// ⛔ THE PAGE CANNOT MOVE ITS OWN WINDOW. `-webkit-app-region: drag` is
+// honoured in Electron and in INSTALLED PWAs; in a plain `--app=` window this
+// page is ordinary web content and it does nothing. ➡️ So the page says "a
+// drag started" ONCE and the listener does the dragging, the same way it moves
+// this window for the pad's ☰ position.
+//
+// ⓘ Advanced is left alone: it keeps its own frame and its own footer.
+function compactDragStart(ev) {
+  if (typeof STOPPED !== 'undefined' && STOPPED) return;
+  if (!COMPACT) return;
+  if (ev.button !== 0) return;                 // the primary button only
+  // ⚠⚠ THE NOTICE STRIP IS NOT INSIDE THE COMPACT BOX (rhoquinn8217,
+  // 2026-09-24: *"text inside bubble notifications is selected when you try to
+  // drag on them"*). `#bubbles` is `position:fixed` at BODY level, so a
+  // `compactBox.contains()` test returns false for it -- and this function
+  // then returned before its `preventDefault()`, which is why the text
+  // selected AND the window did not move. Both halves, one cause.
+  //
+  // ⭐ A notice is not something you operate: all four are plain text, built
+  // as a div with `<strong>` and `<br>` and nothing else. So it IS empty space
+  // for this purpose, and dragging from it moves the window.
+  // ⓘ `body.quick #bubbles` is `display:none`, so Quick never reaches this.
+  // ⓘ Advanced keeps ordinary selection, because `!COMPACT` returns above --
+  // that is the view where copying an error message out is plausible.
+  var box = document.getElementById('compactBox');
+  var strip = document.getElementById('bubbles');
+  var root = (box && box.contains(ev.target)) ? box
+           : (strip && strip.contains(ev.target)) ? strip
+           : null;
+  if (!root) return;
+
+  // ⛔ ANYTHING YOU CAN OPERATE IS NOT EMPTY SPACE. Walk UP from the target,
+  // because a click lands on the TEXT inside a button, not on the button.
+  // ⓘ Stops at whichever container matched, so a notice is walked too -- if
+  // one ever gains a button, this keeps working without being revisited.
+  for (var el = ev.target; el && el !== root; el = el.parentNode) {
+    var tag = (el.tagName || '').toLowerCase();
+    if (tag === 'button' || tag === 'select' || tag === 'option' ||
+        tag === 'input' || tag === 'textarea' || tag === 'a' ||
+        tag === 'label') return;
+    if (el.isContentEditable) return;
+  }
+
+  // ⚠️ STOP THE TEXT SELECTION. Without this, dragging across the legend
+  // selects it -- the window moves and leaves a trail of highlighted words.
+  ev.preventDefault();
+
+  // ⓘ quiet: a listener too old to know this route must not put the page into
+  // its "cannot reach the agent" state just because someone dragged a window.
+  call('POST', '/api/v1/ui/drag', undefined, true).catch(function () {});
+}
+
+// ⓘ On the BUBBLE phase, not capture: anything that handles its own mousedown
+// and stops propagation never reaches this at all.
+document.addEventListener('mousedown', compactDragStart);
+
 
 // ⭐ Configs refresh on their own clock, slowly.
 //
