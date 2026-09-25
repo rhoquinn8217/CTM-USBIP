@@ -99,6 +99,10 @@ carry it; upstream's own history is unchanged.
 | 2026-09-24 | Opening the settings window's mode selector no longer moves the footer about. The cause is the opposite of what it looks like: `pickerExpand` already sets `position:fixed`, so the box LEAVES the flow and the footer closes over the gap. Measured in Simple at 1238x498 -- `.cbarText` grew 767 to 993 to fill it, sliding the centred legend 113px right, and the extra width let `.cinfo` fit on one line, which shrank the bar 16px and dropped Close 8px. A measured spacer holds the collapsed footprint while the list is open; it is a `span`, so the pad's focus list (`.cbar > button, .cbar > select`) does not see it. The config selector shares the expand path and had the same fault | `63fcac2`, merge `b359238` |
 | 2026-09-24 | The settings window can be dragged by any empty space, in Simple and Quick. The page cannot move its own window -- it is a plain `--app=` window, where `-webkit-app-region` does nothing -- so it reports one mousedown and the LISTENER drags, as it already does for the pad's position control. Three traps avoided: `place()` writes the state file, so the loop moves the window directly and remembers the place once at the end; `SM_SWAPBUTTON` decides which button to watch, because a swapped-button user's primary press arrives as `VK_RBUTTON`; and the mousedown is defaulted away so dragging across the legend does not select it. The notice strip counts as empty space too -- it is `position:fixed` at body level, so the first version exited before its `preventDefault()` and both selected the text and refused the drag | `80c998c`, `b6b2052`, merge `b359238` |
 | 2026-09-24 | ⛔ The browser title bar STAYS on the settings window, and the reason is worth keeping. Clearing `WS_CAPTION` and `WS_THICKFRAME` on the `--app=` window works and Chrome does not re-assert it -- but the whole non-client area is **8px**, a resize border. A real title bar is ~31px. The caption is Chrome's own, painted INSIDE the client area, so no style bit reaches it. Removing it would mean an installed PWA with `window-controls-overlay`, which is where `-webkit-app-region: drag` becomes supported | spike only, no code |
+| 2026-09-24 | The settings page's legend has THREE forms -- PlayStation, Xbox and keyboard -- chosen by what last pressed. The footer used to name the input device twice in one bar: the legend opened with `- controller -` or `keyboard -` while the destination line beside it said `controllers -> page`. Both prefixes are gone. ⭐ The mechanism is the thing that made it look impossible: a gated pad arrives AS KEYSTROKES, so nothing about what arrives separates it from typing -- but those keystrokes carry `CTM_GATE_MODS 0x07`, Ctrl+Alt+Shift, and a real keyboard's do not. The page already had two keydown handlers split on that guard and never said which was which. The keyboard table uses the same seven fields as the pad ones, so all three render through one string | `c1b7205`, `c1a49d0`, merge `61224dd` |
+| 2026-09-24 | A keyboard can now drive the settings window fully. `Q` and `E` switch controller -- they existed only in `CONFIG_MODE_KEYS`, behind the three-modifier guard that tells a gated pad's keystroke from typing, so a bare `Q` reached nothing. `P` positions and `R` resizes, which a keyboard could not do at all: both were readable only from the pad's RAW report, so new `ui/position` and `ui/resize` routes call the same two functions the pad does (`snap_next`, `resize_next`) and cannot drift from it | `c1a49d0`, merge `61224dd` |
+| 2026-09-24 | The virtual keyboard opens only where you type FREE TEXT -- a config's name, the agent URL, the bearer token -- and not over a setting's value box, which the pad already steps through with `GP_EDITING`. ⚠️ Two mistakes are recorded with it because each was a different shape: the page's flag was too generous (any typeable field), and the listener's refusal keyed on the GATE rather than on the settings window being in front -- so with no pad gated the refusal was skipped entirely and a keyboard opened over anything | `4a1aeea`, `d6c9d2a`, `e1e05b1`, merge `61224dd` |
+| 2026-09-24 | ⛔ Landing on a tab no longer focuses a text field, which used to switch the page's keyboard off completely. `gpTab()` focused the first control on the pane and `#pane-overview`'s first control is the agent URL; a focused text field makes `typingInAField()` true, which stops arrows, Enter and every other key with no message. ⓘ Only reachable once a plain `Q` could drive `gpTab`. The text test is one shared function now, and `type === ''` counts -- `<input id="base">` has no type attribute at all | `a5688fc`, merge `61224dd` |
 
 ## Files changed
 
@@ -109,7 +113,7 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
 ```
  .gitattributes                                |   48 +
  .gitignore                                    |   34 +-
- CHANGES.md                                    |  227 +
+ CHANGES.md                                    |  230 +
  LINK                                          |    0
  README.md                                     |   18 +
  app/ctm-usbip-tests.vcxproj                   |  108 +
@@ -136,14 +140,14 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  src/app/agent_session_sweep.inl               |  320 +
  src/app/cli.inl                               |   24 +-
  src/app/common.inl                            |   32 +
- src/app/config_move.inl                       |  844 +++
+ src/app/config_move.inl                       |  863 +++
  src/app/device_capabilities.inl               |   75 +
  src/app/device_type.inl                       |   70 +
  src/app/nickname.inl                          |   90 +
  src/app/open_ui.inl                           |  489 ++
  src/app/overlay_window.inl                    | 1995 ++++++
  src/app/rest.inl                              |  760 +++
- src/app/rest_config.inl                       | 1190 ++++
+ src/app/rest_config.inl                       | 1209 ++++
  src/app/rest_config_sessions.inl              |  204 +
  src/app/rest_sessions.inl                     |   33 +
  src/app/same_controller.inl                   |   38 +
@@ -180,15 +184,15 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  src/input/mouse_device.inl                    |  304 +
  src/input/mouse_exclusive.inl                 |  122 +
  src/input/mouse_held.inl                      |   99 +
- src/input/osk.inl                             |  200 +
- src/input/rebind.inl                          | 1278 ++++
+ src/input/osk.inl                             |  222 +
+ src/input/rebind.inl                          | 1277 ++++
  src/input/stick_mouse.inl                     |  471 ++
  src/input/touch_mouse.inl                     |  466 ++
  src/input/trigger_click.inl                   |  801 +++
  src/input/trigger_effect.inl                  |  630 ++
  src/log/capped_log.inl                        |  117 +
  src/log/device_log.inl                        |  233 +
- src/main.cpp                                  |  457 +-
+ src/main.cpp                                  |  469 +-
  src/map/runtime.cpp                           |   68 +-
  src/usbip/device.inl                          |  650 +-
  src/usbip/server.inl                          |   55 +-
@@ -213,18 +217,18 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  tests/same_controller_test.cpp                |   49 +
  tests/same_device_test.cpp                    |   95 +
  tests/schema_json_test.cpp                    |  158 +
- tests/stick_mouse_test.cpp                    |  715 +++
+ tests/stick_mouse_test.cpp                    |  715 ++
  tests/tests_main.cpp                          |  117 +
  tests/touch_mouse_test.cpp                    |  749 +++
  tests/trigger_click_test.cpp                  |  835 +++
  tests/trigger_effect_test.cpp                 |  529 ++
  tests/units.h                                 |   54 +
- tools/controller-config-test-client.html      | 8511 +++++++++++++++++++++++++
+ tools/controller-config-test-client.html      | 8725 +++++++++++++++++++++++++
  tools/device-config-panel-edge.bat            |    9 +
  tools/device-config-panel-edge.ps1            |  327 +
  tools/device-config-panel.bat                 |    4 +
  tools/device-config-panel.ps1                 |  303 +
  tools/osk-mockups.py                          |  103 +
  tools/start-ctm-usbip.bat                     |   67 +
- 119 files changed, 38732 insertions(+), 145 deletions(-)
+ 119 files changed, 39020 insertions(+), 145 deletions(-)
 ```
