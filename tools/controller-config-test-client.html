@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.28 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.29 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,27 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.29 THREE legends, chosen by what last pressed: PlayStation,
+            Xbox, or keyboard (T-247). A gated pad arrives as keystrokes,
+            which is why this looked unanswerable -- and is also the
+            answer, because those keystrokes carry Ctrl+Alt+Shift and a
+            real keyboard's do not. The two handlers already separated
+            them; they just never said so. The keyboard table uses the
+            same seven fields as the pad ones, so all three render
+            through one string, and its move glyph is U+2725 while the
+            pad tables keep U+271C.
+            Q and E now work from a keyboard at all -- they lived only in
+            CONFIG_MODE_KEYS, behind that same three-modifier guard, so a
+            bare Q reached nothing. P and R are new: position and resize
+            were readable only from the pad's raw report, so a keyboard
+            could not move or size this window. Both call the same two
+            functions the pad does, through new ui/position and
+            ui/resize routes.
+            The unmodified handler gained an auto-repeat guard it never
+            needed before, when every key it served was an arrow.
+            The destination line is unchanged and stays about controllers
+            only: it warns about the one input that reaches a game you
+            are not looking at.
     2.66.28 One voice for what is reaching the page (T-247). The footer
             said it twice in the same bar: the legend opened with
             "- controller -" or "keyboard -", and the destination line
@@ -2684,6 +2705,8 @@ function padFamilyFromId(id) {
 // game -- which is correct, and is also why a test has to click the window
 // first.
 function notepadPress(pad) {
+  // ⭐ T-247: an unbridged pad the browser can see is still a pad.
+  noteInputSource('pad');
   var fam = padFamilyFromId(pad && pad.id);
   if (fam === PAD_FAMILY_LAST) return;
   PAD_FAMILY_LAST = fam;
@@ -2698,7 +2721,11 @@ function notepadPress(pad) {
 // the first bridged controller answers, and a DualSense answers when nothing
 // is bridged at all, because that is this project's primary device.
 function padLegend() {
-  // ⭐⭐ THE LISTENER FIRST. It is the only thing that sees a press the
+  // ⭐⭐ A REAL KEYBOARD FIRST, because it is the only one of the three that
+  // is known from the PRESS ITSELF rather than from a device list. 🔗
+  // INPUT_LAST, set by the two keydown handlers.
+  if (INPUT_LAST === 'keyboard') return KEY_LEGEND;
+  // ⭐⭐ THEN THE LISTENER. It is the only thing that sees a press the
   // rebinder has already cleared out of the report, and its `kind` carries
   // rhoquinn8217's 2026-09-20 rule that a generic `hid` pad shows the Xbox set.
   if (LAST_PRESS_KIND) return padLegendForKind(LAST_PRESS_KIND);
@@ -3022,6 +3049,47 @@ var TOUCH_ACTION_LABELS = {
   MouseRight: 'right click',
   MouseMiddle: 'middle click'
 };
+
+// ⭐⭐ THE THIRD LEGEND: A REAL KEYBOARD (T-247, rhoquinn8217, 2026-09-24:
+// *"I want the legend to change based on whether it's a playstation
+// controller, xbox(emulated xbox) or keyboard."*).
+//
+// ⭐ Same SEVEN FIELDS as the two pad tables, so all three render through one
+// string. The legend was already written as `LGA.shoulder + ' controller | '
+// + ...`, which turns out to be exactly the seam this needed.
+//
+// ⓘ `✥` is the keyboard's move glyph and REPLACES NOTHING -- rhoquinn8217,
+// correcting me: *"✥ is for keyboard. ✜ is for playstation and xbox."*
+// ⚠️ `close` is `Esc`, which the page routes to gpKeyBack -- the same action
+// ○ performs on a pad. The shared label reads "footer/close" in Advanced and
+// "to close" in Simple; Esc is the nearest true key for both.
+// ⛔ Q/E and P/R are ADVERTISED HERE BEFORE THEY WORK. Q/E are stuck behind
+// the three-modifier guard, and P/R have no route at all. Both are fixed in
+// this ticket -- if either is still dead, this table is lying and should be
+// trimmed rather than left to mislead.
+var KEY_LEGEND = {
+  select: 'Enter', close: 'Esc', toggle: 'Space',
+  resize: 'R', position: 'P', shoulder: 'Q/E',
+  dpad: '\u2725'
+};
+
+// ⭐ WHAT LAST DROVE THIS PAGE: 'pad' or 'keyboard'.
+//
+// ⛔⛔ A GATED PAD ARRIVES AS KEYSTROKES, which is why this looked
+// unanswerable. ✅ It is also the answer: those keystrokes carry
+// **Ctrl+Alt+Shift** (`CTM_GATE_MODS 0x07` in rebind.inl), and a real keyboard
+// press does not. So the two handlers below already separate them perfectly --
+// the modified one IS the pad, the unmodified one IS a keyboard.
+// ⓘ Starts as 'pad' so nothing changes until someone actually types.
+var INPUT_LAST = 'pad';
+
+// ⓘ Repaints only on a CHANGE, like notepadPress: these fire on every press.
+function noteInputSource(what) {
+  if (INPUT_LAST === what) return;
+  INPUT_LAST = what;
+  if (COMPACT) paintCompact();
+  gpPaint();
+}
 
 var GATE_TYPE_LABELS = {
   '': 'off',
@@ -6651,8 +6719,37 @@ var PLAIN_KEYS = {
   ArrowRight: function () { gpKeyStep(1); },
   Enter:      function () { gpKeySelect(); },
   Escape:     function () { gpKeyBack(); },
-  Space:      function () { gpToggleManaged(); }
+  Space:      function () { gpToggleManaged(); },
+
+  // ⭐⭐ Q AND E DID NOT WORK FROM A KEYBOARD, AND THE REASON WAS ONE LINE
+  // (rhoquinn8217, 2026-09-24: *"I should mention that Q and E currently don't
+  // work"*). They existed only in `CONFIG_MODE_KEYS`, which is read by the
+  // handler guarded with `if (!ev.ctrlKey || !ev.altKey || !ev.shiftKey)
+  // return;` -- three modifiers, because that is how a GATED PAD's keystroke
+  // is told apart from someone typing. So a bare `Q` reached nothing.
+  // ⓘ Their destination was already right: gpKeyCoarse falls through to
+  // gpTab(), the same call the pad's L1/R1 make.
+  // ⚠️ Safe here because this whole handler returns early on
+  // `typingInAField()`, so typing "q" into a config name still types a q.
+  KeyQ:       function () { gpKeyCoarse(-1); },
+  KeyE:       function () { gpKeyCoarse(1); },
+
+  // ⭐⭐ AND TWO THE KEYBOARD NEVER HAD AT ALL. Position and resize are read
+  // by the LISTENER from the pad's raw report (`config_move.inl` watches
+  // Create at index 8), a path no keystroke can reach -- so a keyboard user
+  // could not move or size this window. P and R are rhoquinn8217's choice.
+  // 🔗 They POST to the listener, which does the work, exactly as `ui/drag`
+  // does for the mouse.
+  KeyP:       function () { uiAsk('position'); },
+  KeyR:       function () { uiAsk('resize'); }
 };
+
+// ⓘ One line for the two window actions a keyboard has no other way to
+// reach. quiet: an older listener that does not know the route must not throw
+// the page into its "cannot reach the agent" state over a keypress.
+function uiAsk(what) {
+  call('POST', '/api/v1/ui/' + what, undefined, true).catch(function () {});
+}
 
 document.addEventListener('keydown', function (ev) {
   if (STOPPED) return;
@@ -6700,18 +6797,33 @@ document.addEventListener('keydown', function (ev) {
   // nowhere to go.
   var plain = PLAIN_KEYS[ev.code];
   if (!plain) return;
+  // ⛔⛔ AND NOT AN AUTO-REPEAT, except for movement (T-247). This handler
+  // had no repeat guard because every key it served was an arrow, where
+  // repeating IS the point. Q, E, P and R are per-press: holding P would
+  // otherwise cycle the window through every position dozens of times.
+  if (ev.repeat && !REPEATABLE[ev.code]) return;
   // ⚠️ Space is the exception while renaming: it toggles a setting, and the
   // one behind the row is not what someone naming a config means to change.
   if (RENAMING && ev.code === 'Space') return;
   // ⛔ Stop the page scrolling under the halo: arrows and space both do by
   // default, which makes the highlight and the view disagree.
   ev.preventDefault();
+  // ⭐ T-247: this handler has NO modifier requirement, so reaching it means a
+  // real keyboard -- a gated pad's keystrokes always carry Ctrl+Alt+Shift and
+  // are served by the other handler below.
+  noteInputSource('keyboard');
   plain();
 });
 
 // ⭐ Which actions may fire from an AUTO-REPEATED key. Movement repeats,
 // because holding to scroll a long list is the point of holding; choosing,
 // backing out, toggling and switching tabs do not.
+// ⓘ P, R, Q and E are deliberately ABSENT. Cycling a window's position or
+// size, or switching controller, is a per-press action and holding the key
+// should not run it dozens of times.
+// ⚠️ THIS TABLE GUARDS THE MODIFIED HANDLER ONLY -- the one a gated pad
+// arrives on. The unmodified handler consults it too now, because until T-247
+// every key it served was movement and a repeat guard was not needed there.
 var REPEATABLE = { ArrowUp: true, ArrowDown: true, ArrowLeft: true, ArrowRight: true,
                    KeyW: true, KeyS: true, KeyA: true, KeyD: true };
 
@@ -6742,6 +6854,10 @@ document.addEventListener('keydown', function (ev) {
   var fn = CONFIG_MODE_KEYS[ev.code];
   if (!fn) return;
   ev.preventDefault();
+  // ⭐ T-247: three modifiers means this came from a GATED PAD, not a person
+  // typing -- that is the whole point of the guard at the top of this handler.
+  // ⓘ Which family it is comes from LAST_PRESS_KIND, polled from the listener.
+  noteInputSource('pad');
   fn();
 }, true);
 
