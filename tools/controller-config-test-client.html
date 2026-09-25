@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.29 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.30 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,16 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.30 The virtual keyboard opens only while naming a config
+            (T-247). reportField used to send editing=true for anything
+            typeable, which is every setting's value box; it now asks
+            fieldWantsKeyboard, which is containment in #renameRow --
+            the host for BOTH rename and copy. fieldIsEditable is
+            unchanged and keeps its other three callers.
+            The listener half went with it: its refusal keyed on the
+            GATE flag, so with no pad gated it was skipped entirely and
+            a keyboard opened over the agent URL and the bearer token.
+            It keys on the settings window being in front now.
     2.66.29 THREE legends, chosen by what last pressed: PlayStation,
             Xbox, or keyboard (T-247). A gated pad arrives as keystrokes,
             which is why this looked unanswerable -- and is also the

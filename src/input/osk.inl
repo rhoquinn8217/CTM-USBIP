@@ -109,10 +109,24 @@ inline void do_open(Program program, int openedByButton)
         // ⓘ Refuse rather than open-then-close: something that appears and
         // vanishes is worse than something that never appears. The page says
         // why, so the press is not silence.
-        if (ctm_rebind_config_mode() && !ctm_rebind_editing_field()) {
+        // ⛔⛔ THE WINDOW BEING IN FRONT IS THE TEST, NOT THE GATE
+        // (rhoquinn8217, 2026-09-24: *"virtual keyboard can be used for the
+        // agent url and the bearer input boxes"*).
+        //
+        // ⚠️ This asked `ctm_rebind_config_mode()`, which is the GATE flag --
+        // "are controllers captured to the page". With no pad gated that is
+        // false, so the whole refusal was skipped and Square opened a keyboard
+        // over anything, including the agent URL and the bearer token. The
+        // narrowing done on the page side was correct and simply never
+        // consulted.
+        // ➡️ What matters is whether the SETTINGS WINDOW IS IN FRONT. If it
+        // is, the only field that earns a keyboard is the one naming a config;
+        // if it is not, the pad is driving a game and a keyboard binding is
+        // that person's business.
+        if (ctm_ui_has_foreground() && !ctm_rebind_editing_field()) {
             device_log::input(device_log::msg()
-                << "osk: refused -- the config window has focus and no field is "
-                   "being edited");
+                << "osk: refused -- the config window has focus and no config "
+                   "is being named");
             ctm_ui_notify(
                 "DS5-USBIP Virtual keyboard opens only while naming a "
                 "config -- renaming one, or naming a copy.");
