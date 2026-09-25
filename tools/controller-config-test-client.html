@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.27 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.28 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,15 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.28 One voice for what is reaching the page (T-247). The footer
+            said it twice in the same bar: the legend opened with
+            "- controller -" or "keyboard -", and the destination line
+            beside it said "controllers -> page". The prefixes are gone
+            and the destination line carries it, gaining a fourth state
+            -- "keyboard -> page" when nothing is gated and the browser
+            can see no pad. The gate's green stays for the gate alone: a
+            keyboard reaching the page is how a page works, not a state
+            you can be surprised by. The pad COUNT went with the prefix.
     2.66.27 The notice strip is draggable too, and its text no longer
             selects (T-237, rhoquinn8217). #bubbles is position:fixed at
             body level, so the compactBox.contains() test returned false
@@ -2642,6 +2651,21 @@ function pollLastPress() {
     gpPaint();
   }).catch(function () { /* ⓘ offline is the page's own problem to report */ });
 }
+
+// ⭐⭐ T-247: WHAT IS REACHING THE PAGE IS SAID IN ONE PLACE NOW.
+//
+// ⛔ The footer used to say it TWICE, in the same bar: `#gphint` opened with
+// `— controller —` or `keyboard —`, and `#padDest` beside it said
+// `controllers → page`. rhoquinn8217: *"remove logic that shows `- controller -`
+// or `keyboard -` from the advanced mode legend. Instead, the part of the
+// legend that says `controller -> page` should change to `keyboard -> page`."*
+//
+// ⓘ These two globals exist so `paintPadDestination()` can stay the ONLY
+// writer of `#padDest`. gpPoll knows how many pads the browser can see and the
+// devices poll knows the gate state; neither should paint the other's element.
+// 🔗 Two writers to one element is the shape of T-239 and T-243 both.
+var PADS_SEEN = 0;            // pads the BROWSER can see, maintained by gpPoll
+var LAST_DEVICE_PAYLOAD = null;   // the devices poll's last answer, for repaints
 
 var PAD_FAMILY_LAST = '';     // 'ps' or 'xbox', empty until something is pressed
 // ⚠️ SEPARATE FROM `GP_PREV`, deliberately: see the scan in gpPoll().
@@ -7639,6 +7663,19 @@ function gpPoll() {
   var pads = navigator.getGamepads ? navigator.getGamepads() : [];
   var live = [];
   for (var i = 0; i < pads.length; i++) { if (pads[i]) live.push(pads[i]); }
+  // ⭐ T-247: the destination line needs to know whether a pad exists, and it
+  // is painted from the DEVICES poll. Repaint it only when the answer crosses
+  // zero, not every frame -- this runs at animation rate.
+  if ((live.length === 0) !== (PADS_SEEN === 0)) {
+    PADS_SEEN = live.length;
+    // ⛔ ONLY ONCE THE DEVICES POLL HAS ANSWERED. paintPadDestination reads
+    // the gate out of the payload and WRITES GATE_ON from it, so calling it
+    // with null before the first poll would clear a gate that is on. The poll
+    // paints it itself the moment it lands, so nothing is lost by waiting.
+    if (LAST_DEVICE_PAYLOAD) paintPadDestination(LAST_DEVICE_PAYLOAD);
+  } else {
+    PADS_SEEN = live.length;
+  }
   var bar = document.getElementById('gpbar');
   var hint = document.getElementById('gphint');
   // ⛔⛔ ASK THE LISTENER, NOT THE BROWSER (rhoquinn8217, 2026-09-03: the
@@ -7659,7 +7696,9 @@ function gpPoll() {
     // The page is fully drivable from a keyboard, so "press any button to
     // connect" was the only thing on offer and it described a controller the
     // person may not be using -- leaving the keys undiscoverable.
-    hint.textContent = 'keyboard — arrows move, Enter select, Esc back, Space on/off' +
+    // ⓘ T-247: no `keyboard —` prefix. The destination line to the right of
+    // this one says what is reaching the page; this says only how to drive it.
+    hint.textContent = 'arrows move, Enter select, Esc back, Space on/off' +
                        '   ·   press a controller button to use a pad';
     bar.className = '';
     requestAnimationFrame(gpPoll);
@@ -7697,9 +7736,12 @@ function gpPoll() {
 
   // T-240: the same two sets as the compact legends, for the pad in the hand.
   var LGA = padLegend();
-  hint.innerHTML = '\u2014 ' +
-                     (live.length > 1 ? live.length + ' controllers' : 'controller') +
-                     ' \u2014 ' + LGA.shoulder + ' controller | ' + LGA.select +
+  // ⓘ T-247: no `— controller —` prefix either, for the same reason.
+  // ⚠️ The pad COUNT went with it. It was the only place two pads were
+  // announced; if that is wanted back it belongs on the destination line,
+  // which owns this question now, and from LAST_DEVICES rather than the
+  // browser's view -- that mismatch is what T-240 had to be rebuilt for.
+  hint.innerHTML = LGA.shoulder + ' controller | ' + LGA.select +
                      ' select | ' + LGA.dpad + ' move | ' + LGA.toggle + ' on/off | ' +
                      LGA.position + ' position | ' + LGA.resize + ' resize | ' +
                      LGA.close + ' footer/close';
@@ -8110,9 +8152,20 @@ function paintPadDestination(d) {
 
   // ⓘ Three states, not two: held off reads differently from simply not gated,
   // because one is a choice and the other is just where focus happens to be.
-  dest.textContent = GATE_HELD ? 'controllers → game (held)'
-                   : gated     ? 'controllers → page'
-                               : 'controllers → game';
+  //
+  // ⭐⭐ AND A FOURTH (T-247): NO PAD AT ALL. With nothing gated and no pad
+  // the browser can see, nothing is going to a game and the KEYBOARD is what
+  // reaches this page -- so the line says so, instead of the legend opening
+  // with `keyboard —` a few centimetres to its left.
+  // ⚠️ Checked in this order on purpose: a HELD gate is a deliberate choice
+  // and outranks "no pad is plugged in", which is just a fact about the room.
+  dest.textContent = GATE_HELD       ? 'controllers → game (held)'
+                   : gated           ? 'controllers → page'
+                   : PADS_SEEN === 0 ? 'keyboard → page'
+                                     : 'controllers → game';
+  // ⓘ The green stays for the GATE alone. It means "your controllers are
+  // captured to this page", which is a state you chose and can be surprised
+  // by; a keyboard reaching the page is simply how a page works.
   dest.classList.toggle('on', gated);
 
   // ⭐ The button says the STATE it is in; the line beside it says what a click
@@ -8163,6 +8216,7 @@ function pollDevices() {
     LAST_COUNT = list.length;
     FAILS = 0;
     paintHealth();
+    LAST_DEVICE_PAYLOAD = d;   // T-247: so gpPoll can ask for a repaint
     paintPadDestination(d);
     LAST_DEVICES = list;
 
