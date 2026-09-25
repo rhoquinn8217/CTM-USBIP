@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.30 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.31 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,23 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.31 Simple's footer line rotates through hints (T-248). Seven of
+            them: the original "how do I get this window back" text,
+            which stays in the cycle and leads on every open, plus the
+            window drag, the tray icon, the mouse presets, where your
+            controllers are going, dragging by empty space, and the
+            keyboard's Q/E/P/R.
+            .cinfo reserves TWO LINES whether it needs them or not. The
+            hints are different lengths -- the first wraps to two lines
+            at Simple's width and the rest fit on one -- so without it
+            the footer resized on every rotation: measured 32px vs 16px,
+            the bar 69 vs 53, and Close stepping 438 to 446. That is the
+            same 8px shift T-243 was filed to stop, arriving by a new
+            route.
+            It rotates slowly, stops while the pointer rests on it, and
+            never while a picker is expanded -- paintCompact already
+            refuses to repaint then. Simple only; Quick's short footer
+            has no .cinfo and Advanced has none at all.
     2.66.30 The virtual keyboard opens only while naming a config
             (T-247). reportField used to send editing=true for anything
             typeable, which is every setting's value box; it now asks
@@ -1105,7 +1122,18 @@
      and capital, against every background it sits on. */
   .cmode { color:#ffd166; font-weight:700; letter-spacing:.08em;
     text-transform:uppercase; margin-right:0.7em; }
-  #compactBox .cinfo { font-size:2.3vh; color:#c8c9ce; text-align:center; line-height:1.4;
+  /* ⛔⛔ TWO LINES ALWAYS RESERVED (T-248). The hints are different lengths
+     -- the "bring this window back" one wraps to two lines at Simple's width
+     and the rest fit on one -- so without this the footer RESIZES on every
+     rotation. Measured 2026-09-24 at 1238x498: `.cinfo` 32px vs 16px, `.cbar`
+     69px vs 53px, and the Close button stepping between y=438 and y=446.
+     ⭐ That is the same 8px shift T-243 was filed to stop, arriving by a new
+     route. 🔗 T-243, and the spacer in pickerExpand.
+     ⓘ In `em`, so it follows the vh font size rather than fixing a pixel
+     height that would be wrong at another window size. 1.4 is the
+     line-height below, so 2.8em is exactly two lines. */
+  #compactBox .cinfo { min-height:2.8em;
+                       font-size:2.3vh; color:#c8c9ce; text-align:center; line-height:1.4;
     max-width:80vw; }
   #compactBox .cinfo b { color:#e8e8ea; }
   /* ⭐ The footer's two corners: Configurator bottom-left, Close bottom-right,
@@ -3100,6 +3128,76 @@ function noteInputSource(what) {
   if (COMPACT) paintCompact();
   gpPaint();
 }
+
+// ⭐⭐ THE FOOTER'S HINTS (T-248, rhoquinn8217). Simple's `.cinfo` line was
+// one fixed sentence; it rotates now.
+//
+// ⛔ SIMPLE ONLY, said twice: *"no tips or hints in advance mode or quick
+// mode. Tips and hints go where this text originally was."* Quick's footer is
+// the short branch and has no `.cinfo`; Advanced has none at all. Nothing but
+// the long branch is touched.
+//
+// ⚠️ HINT 0 IS THE ONE THAT ANSWERS "how do I get this window back", which
+// is the question someone has when the window is already GONE. It stays in the
+// cycle -- *"I still want this text part of the cycle"* -- and is shown FIRST
+// on every open, so a freshly opened window leads with it.
+//
+// ⓘ `<b>` is allowed and nothing here is user text, so there is nothing to
+// escape. 🔗 The same reasoning as the legend a few lines above.
+var FOOTER_HINTS = [
+  'To bring this window back: <b>hold two fingers on the touchpad and press ' +
+  'Options</b> (DS5/DS4 only), or right-click the tray icon and choose ' +
+  '<b>Open settings</b>.',
+
+  'Hold <b>☰</b> and move the <b>left stick</b> to drag this window. Tap it ' +
+  'instead and the window steps between three spots.',
+
+  'Click the <b>DS5-USBIP icon by the clock</b> -- either mouse button -- and ' +
+  'choose <b>Open settings</b>. The same menu shows and hides the virtual ' +
+  'keyboard.',
+
+  'Give a pad a <b>stick, gyro or touchpad to mouse</b> preset and it drives ' +
+  'this PC with no mouse or keyboard. <b>Square</b> opens the DS5-USBIP ' +
+  'virtual keyboard.',
+
+  'Your controllers still reach the <b>game</b> while this window is open. ' +
+  'The line above says where they are going.',
+
+  'Drag this window by <b>any empty part of it</b>, not just the title bar.',
+
+  'From a keyboard: <b>Q</b> and <b>E</b> change controller, <b>P</b> moves ' +
+  'this window, <b>R</b> resizes it.'
+];
+
+// ⓘ Which hint is showing. Reset to 0 whenever the window opens, so the
+// "how do I get this back" hint leads.
+var HINT_AT = 0;
+var HINT_TIMER = null;
+var HINT_HELD = false;     // true while the pointer rests on the hint
+
+// ⛔⛔ SLOW, AND IT STOPS WHEN YOU LOOK AT IT. This footer is read WHILE
+// configuring, and text that changes under a reader is worse than text that
+// sits still. ⓘ 12s is long enough to finish a sentence and short enough
+// that a second hint is seen at all.
+var HINT_EVERY_MS = 12000;
+
+function hintNext() {
+  // ⛔ NOT WHILE A PICKER IS OPEN. paintCompact already refuses to repaint
+  // then -- a repaint would close the list under someone's hand -- so a
+  // rotation would either be lost or fight it.
+  if (GP_SELECTING) return;
+  if (HINT_HELD) return;
+  if (!COMPACT || QUICK) return;
+  HINT_AT = (HINT_AT + 1) % FOOTER_HINTS.length;
+  var el = document.querySelector('#compactBox .cinfo');
+  if (el) el.innerHTML = FOOTER_HINTS[HINT_AT];
+}
+
+function hintStart() {
+  if (HINT_TIMER) clearInterval(HINT_TIMER);
+  HINT_TIMER = setInterval(hintNext, HINT_EVERY_MS);
+}
+hintStart();
 
 var GATE_TYPE_LABELS = {
   '': 'off',
@@ -7743,9 +7841,8 @@ function paintCompact() {
             LG.dpad + ' move | ' +
             LG.position + ' position | ' + LG.resize + ' resize | ' +
             LG.close + ' to close</div>' +
-            '<div class="cinfo">To bring this window back: <b>hold two fingers on the touchpad ' +
-            'and press Options</b> (DS5/DS4 only), or right-click the tray icon and choose ' +
-            '<b>Open settings</b>.</div>' +
+            '<div class="cinfo" onmouseenter="HINT_HELD = true" ' +
+            'onmouseleave="HINT_HELD = false">' + FOOTER_HINTS[HINT_AT] + '</div>' +
             '</div>' + modePickerHtml('cselMode') +
             '<button class="cclose" onclick="closeWindow()">Close</button></div>';
   }
