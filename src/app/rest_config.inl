@@ -766,6 +766,25 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
             return true;
         }
 
+        // ⭐⭐ POSITION and RESIZE: P and R from a keyboard (T-247).
+        //
+        // ⛔ The pad reaches both from its RAW REPORT -- Create at index 8
+        // resizes, Options taps to snap -- and a keystroke cannot get there.
+        // ➡️ These call the SAME two functions the pad does, so the two ways
+        // in cannot drift apart.
+        // ⓘ A tap, not the hold: holding Options steers the window with the
+        // stick, which has no keyboard equivalent.
+        if (what == "position") {
+            ui_position_tap();
+            *out = rest_http_response(200, R"({"ok":true})");
+            return true;
+        }
+        if (what == "resize") {
+            ui_size_next();
+            *out = rest_http_response(200, R"({"ok":true})");
+            return true;
+        }
+
         // ⭐ CLOSE: Circle, in Simple or Quick. The window ENDS -- it does not
         // hide behind the game (rhoquinn8217, 2026-09-09, reversing that
         // morning's park). The ways back are the chord and the tray icon's

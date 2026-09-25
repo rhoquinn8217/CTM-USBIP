@@ -94,20 +94,42 @@ inline void do_open(Program program, int openedByButton)
         // the pad silently: nothing says the window has stopped listening, or
         // that the keyboard must be closed to get it back.
         //
-        // ⭐ EXCEPT in a text field, which is the one place on that page a
-        // keyboard earns its place. Everywhere else the pad already navigates.
+        // ⭐ EXCEPT WHILE NAMING A CONFIG -- renaming one, or naming a copy
+        // (rhoquinn8217, 2026-09-24, narrowing this from "any text field":
+        // *"I want to disable this everywhere except when copying or renaming
+        // a config"*).
+        // ⓘ A setting's VALUE box was a text field too, so the keyboard used
+        // to open over it -- and a value box is navigated with the pad, so the
+        // keyboard was in the way of the thing you were trying to do. Naming
+        // is the one case with nothing to navigate to: the text does not exist
+        // yet, so a keyboard is the only way in.
+        // ⓘ The PAGE decides this, in fieldWantsKeyboard(), and says so
+        // through ui/field. This side only honours the flag.
         //
         // ⓘ Refuse rather than open-then-close: something that appears and
         // vanishes is worse than something that never appears. The page says
         // why, so the press is not silence.
-        if (ctm_rebind_config_mode() && !ctm_rebind_editing_field()) {
+        // ⛔⛔ THE WINDOW BEING IN FRONT IS THE TEST, NOT THE GATE
+        // (rhoquinn8217, 2026-09-24: *"virtual keyboard can be used for the
+        // agent url and the bearer input boxes"*).
+        //
+        // ⚠️ This asked `ctm_rebind_config_mode()`, which is the GATE flag --
+        // "are controllers captured to the page". With no pad gated that is
+        // false, so the whole refusal was skipped and Square opened a keyboard
+        // over anything, including the agent URL and the bearer token. The
+        // narrowing done on the page side was correct and simply never
+        // consulted.
+        // ➡️ What matters is whether the SETTINGS WINDOW IS IN FRONT. If it
+        // is, the only field that earns a keyboard is the one naming a config;
+        // if it is not, the pad is driving a game and a keyboard binding is
+        // that person's business.
+        if (ctm_ui_has_foreground() && !ctm_rebind_editing_field()) {
             device_log::input(device_log::msg()
-                << "osk: refused -- the config window has focus and no field is "
-                   "being edited");
+                << "osk: refused -- the config window has focus and no config "
+                   "is being named");
             ctm_ui_notify(
-                "DS5-USBIP Virtual keyboard restricted from opening with "
-                "Controller Config except when making text input based "
-                "changes.");
+                "DS5-USBIP Virtual keyboard opens only while naming a "
+                "config -- renaming one, or naming a copy.");
             return;
         }
         ctm_overlay::show(0, 0, openedByButton);

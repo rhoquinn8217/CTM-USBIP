@@ -722,9 +722,8 @@ inline void apply(const void *deviceKey,
                      code_is(sqCode, "KeyboardWindows"))) {
                     g_saidKeyboardRefused = true;
                     ctm_ui_notify(
-                        "DS5-USBIP Virtual keyboard restricted from opening "
-                        "with Controller Config except when making text input "
-                        "based changes.");
+                        "DS5-USBIP Virtual keyboard opens only while naming "
+                        "a config -- renaming one, or naming a copy.");
                 }
             }
         }

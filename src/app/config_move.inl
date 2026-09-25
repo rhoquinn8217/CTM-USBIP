@@ -774,6 +774,25 @@ inline void resize_next(HWND hwnd)
     state_save();   // T-239: the size outlives the process now
 }
 
+// ⭐⭐ THE TWO WINDOW ACTIONS A KEYBOARD HAD NO WAY TO REACH (T-247).
+//
+// ⛔ Both were readable only from the PAD'S RAW REPORT: Create at index 8
+// resizes, and Options taps to snap. A keystroke cannot reach that path at
+// all, so a keyboard user could not move or size this window.
+// ➡️ rhoquinn8217 chose P and R. These are the same two calls the pad makes,
+// so the pad and the keyboard cannot drift apart.
+// ⓘ A TAP, not the hold. Holding Options steers the window with the stick,
+// which has no keyboard equivalent and is not what P is for.
+inline void position_tap()
+{
+    if (HWND h = page_window()) snap_next(h);
+}
+
+inline void size_next()
+{
+    if (HWND h = page_window()) resize_next(h);
+}
+
 inline void nudge(HWND hwnd, int dx, int dy)
 {
     RECT rc;

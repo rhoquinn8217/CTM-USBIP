@@ -110,6 +110,10 @@ void ui_view_remember_pos();
 // cannot move its own window, so the listener does it. ⓘ No ctm_ prefix:
 // new symbols of ours do not take one.
 void ui_drag_begin();
+// ⭐ T-247: the two window actions a keyboard reaches by P and R. The pad
+// does them from its raw report; these are the same calls behind a route.
+void ui_position_tap();
+void ui_size_next();
 // ⓘ The chord calls this from the input path; the REST endpoint calls it too.
 // ⓘ Takes the controller that ran the chord, so the window can come up on its
 // tab. Empty means "no particular one" -- the REST spawn path has no controller
@@ -279,6 +283,14 @@ void ui_view_remember_pos()
 void ui_drag_begin()
 {
     config_move::drag_begin();
+}
+void ui_position_tap()
+{
+    config_move::position_tap();
+}
+void ui_size_next()
+{
+    config_move::size_next();
 }
 
 
