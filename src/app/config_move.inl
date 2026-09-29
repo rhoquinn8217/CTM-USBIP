@@ -117,6 +117,8 @@ inline void state_save();               // T-239: the place on disk, defined bel
 // ⓘ apply_size REPORTS the size it set, because the caller cannot reliably
 // measure it afterwards -- see place_exact below.
 inline void apply_size(HWND hwnd, int *outW = nullptr, int *outH = nullptr);
+// T-253: defined beside the size tables it has to compare against.
+inline void remember_size_now();
 inline void place_default(HWND hwnd);
 inline void place_exact(HWND hwnd, int x, int y);
 inline void place_exact(HWND hwnd, int x, int y, int w, int h);
@@ -184,6 +186,67 @@ inline bool last_pos(int *x, int *y)
     return true;
 }
 
+// ⭐⭐ A SIZE SOMEONE MADE BY DRAGGING AN EDGE (T-253).
+//
+// ⛔ THE FAULT: every size this file could remember was an INDEX into a
+// three-entry table, so a window dragged to any other size had nowhere to be
+// written. It came back at the last preset -- which read as "the save is
+// broken" and was really "there is no field for it". Position never had this
+// problem because it is stored as real numbers read off the window.
+//
+// ⭐ STORED AS A SHARE OF THE WORK AREA, NOT PIXELS, because that is what
+// every other size here is (SizeShare above). A share survives a resolution
+// change, a scaling change and a different monitor; a pixel size would come
+// back wrong on all three.
+//
+// ⓘ THOUSANDTHS, as an int, rather than a double. The state file is otherwise
+// all integers, and a double would be written and read through the global
+// locale -- so a machine with a comma decimal separator would write "0,55"
+// and read it back as 0. An int cannot do that.
+// ⓘ The arithmetic lives next door so it can be tested without a window.
+#include "window_size_rule.inl"
+
+struct CustomSize { int wThou = 0; int hThou = 0; bool have = false; };
+inline CustomSize g_customAdvanced, g_customSimple, g_customQuick;
+
+// ⓘ Guarded by g_posMutex, the same lock as the places: the two are written
+// together on the way out and saved by the same function.
+inline CustomSize &custom_slot()
+{
+    if (!g_compact.load()) return g_customAdvanced;
+    return g_quick.load() ? g_customQuick : g_customSimple;
+}
+
+inline void note_custom_size(int wThou, int hThou)
+{
+    {
+        std::lock_guard<std::mutex> lock(g_posMutex);
+        CustomSize &c = custom_slot();
+        c.wThou = wThou;
+        c.hThou = hThou;
+        c.have = true;
+    }
+    state_save();   // ⛔ outside the lock, for the reason in note_pos
+}
+
+// ⓘ DOES NOT SAVE. Every caller changes something else in the same breath and
+// saves once afterwards; saving here would write the file twice per action.
+inline void clear_custom_size()
+{
+    std::lock_guard<std::mutex> lock(g_posMutex);
+    custom_slot().have = false;
+}
+
+inline bool last_custom_size(int *wThou, int *hThou)
+{
+    std::lock_guard<std::mutex> lock(g_posMutex);
+    const CustomSize &c = custom_slot();
+    if (!c.have) return false;
+    if (wThou) *wThou = c.wThou;
+    if (hThou) *hThou = c.hThou;
+    return true;
+}
+
 // The window as it stands, dragged or not. Called while it still exists, on
 // the way out.
 inline void remember_pos_now()
@@ -193,6 +256,9 @@ inline void remember_pos_now()
     RECT rc;
     if (!GetWindowRect(h, &rc)) return;
     note_pos((int)rc.left, (int)rc.top);
+    // ⭐ T-253: the same last look also catches a size someone dragged. ⓘ One
+    // call site on purpose -- a separate one would drift from the place.
+    remember_size_now();
 }
 
 inline void note_ordinal(const std::string &ordinal)
@@ -291,6 +357,11 @@ inline void set_view(bool compact, bool quick, bool restore)
         return;
     }
     if (!changed) { state_save(); return; }
+    // ⛔ T-253: and its dragged size with it. A switch already resets this
+    // view to its ENTRY size, and the page resizes to that same size on the
+    // switch -- so keeping a custom one here would put the two placers into
+    // disagreement, which is the fault T-239 spent an evening on.
+    clear_custom_size();
     if (!compact) g_size.store(1);
     else if (quick) g_sizeQuick.store(0);
     else g_sizeCompact.store(0);
@@ -645,6 +716,12 @@ inline void state_save()
         if (g_posAdvanced.have) out << "pos_advanced = " << g_posAdvanced.x << "," << g_posAdvanced.y << "\n";
         if (g_posSimple.have)   out << "pos_simple = "   << g_posSimple.x   << "," << g_posSimple.y   << "\n";
         if (g_posQuick.have)    out << "pos_quick = "    << g_posQuick.x    << "," << g_posQuick.y    << "\n";
+        // ⓘ T-253: thousandths of the work area, and only when someone
+        // actually dragged. Same rule as the places above -- no line at all
+        // means "never resized by hand", which is not the same as any size.
+        if (g_customAdvanced.have) out << "size_custom_advanced = " << g_customAdvanced.wThou << "," << g_customAdvanced.hThou << "\n";
+        if (g_customSimple.have)   out << "size_custom_simple = "   << g_customSimple.wThou   << "," << g_customSimple.hThou   << "\n";
+        if (g_customQuick.have)    out << "size_custom_quick = "    << g_customQuick.wThou    << "," << g_customQuick.hThou    << "\n";
     }
     // ⓘ Best effort, and deliberately silent. A window place is not worth a
     // log line on every move, and a read-only directory must not stop the
@@ -676,6 +753,26 @@ inline void state_load()
         if (key == "ordinal") {
             std::lock_guard<std::mutex> lock(g_ordinalMutex);
             g_ordinal = val;
+            continue;
+        }
+        // ⚠️ T-253: this must sit ABOVE the atoi fallback -- these values
+        // are a PAIR, not a single number, and atoi would silently take the
+        // width and drop the height.
+        if (key.rfind("size_custom_", 0) == 0) {
+            const size_t comma = val.find(',');
+            if (comma == std::string::npos) continue;
+            CustomSize c;
+            c.wThou = std::atoi(val.substr(0, comma).c_str());
+            c.hThou = std::atoi(val.substr(comma + 1).c_str());
+            // ⛔ A share outside sane bounds is junk, and this file is
+            // hand-editable. Ignore it rather than open a window nobody can
+            // find or click.
+            if (!ctm_window_size::share_sane(c.wThou, c.hThou)) continue;
+            c.have = true;
+            std::lock_guard<std::mutex> lock(g_posMutex);
+            if (key == "size_custom_advanced") g_customAdvanced = c;
+            else if (key == "size_custom_simple") g_customSimple = c;
+            else if (key == "size_custom_quick") g_customQuick = c;
             continue;
         }
         if (key.rfind("pos_", 0) == 0) {
@@ -725,6 +822,57 @@ inline const SizeShare *size_table()
     return !compact ? kSizes : (quick ? kQuickSizes : kCompactSizes);
 }
 
+// ⭐ T-253. The window as it stands, on the way out -- and whether that is a
+// size a PERSON chose or just the preset it was already at.
+//
+// ⛔ IT MUST TELL THOSE TWO APART. Recording every close as a custom size
+// would mean the preset tables could never apply again: the first close would
+// pin the window to whatever it happened to be, for ever. So a size within a
+// few pixels of what this layout's current preset would give is treated as
+// "not resized by hand", and the slot is cleared instead.
+//
+// ⓘ The tolerance is in PIXELS because that is what a person can see, and
+// because integer rounding through a share loses a pixel or two by itself.
+inline void remember_size_now()
+{
+    HWND h = page_window();
+    if (h == nullptr) return;
+    RECT rc;
+    if (!GetWindowRect(h, &rc)) return;
+    const RECT wa = work_area();
+    const int waW = wa.right - wa.left;
+    const int waH = wa.bottom - wa.top;
+    if (waW <= 0 || waH <= 0) return;
+
+    const int w = (int)(rc.right - rc.left);
+    const int h2 = (int)(rc.bottom - rc.top);
+    if (w <= 0 || h2 <= 0) return;
+
+    const SizeShare *table = size_table();
+    const int idx = size_slot().load();
+    const int presetW = (int)(waW * table[idx].w);
+    const int presetH = (int)(waH * table[idx].h);
+
+    const bool isPreset = ctm_window_size::is_preset(w, h2, presetW, presetH);
+
+    if (isPreset) {
+        clear_custom_size();
+        device_log::input(device_log::msg()
+            << "ui/size-remember: " << w << "x" << h2
+            << " is preset " << idx << " (" << presetW << "x" << presetH
+            << ") -- no custom size kept");
+        return;
+    }
+
+    const int wThou = ctm_window_size::to_thousandths(w, waW);
+    const int hThou = ctm_window_size::to_thousandths(h2, waH);
+    note_custom_size(wThou, hThou);
+    device_log::input(device_log::msg()
+        << "ui/size-remember: " << w << "x" << h2
+        << " differs from preset " << idx << " (" << presetW << "x" << presetH
+        << ") -- kept as " << wThou << "/1000 x " << hThou << "/1000");
+}
+
 // The size this layout is at, applied about the window's CENTRE so it grows
 // and shrinks in place, then clamped fully on screen.
 inline void apply_size(HWND hwnd, int *outW, int *outH)
@@ -734,8 +882,16 @@ inline void apply_size(HWND hwnd, int *outW, int *outH)
     const SizeShare *table = size_table();
     const int idx = size_slot().load();
     const RECT wa = work_area();
-    const int w = (int)((wa.right - wa.left) * table[idx].w);
-    const int h = (int)((wa.bottom - wa.top) * table[idx].h);
+    // ⭐ T-253: a size someone dragged wins over the preset, because they
+    // chose it later. ⓘ Everything downstream is unchanged -- the restore
+    // path asks apply_size for the size it set and places the window at it,
+    // so honouring the custom here is the whole of putting it back.
+    int customW = 0, customH = 0;
+    const bool custom = last_custom_size(&customW, &customH);
+    const int w = custom ? ctm_window_size::from_thousandths(customW, wa.right - wa.left)
+                         : (int)((wa.right - wa.left) * table[idx].w);
+    const int h = custom ? ctm_window_size::from_thousandths(customH, wa.bottom - wa.top)
+                         : (int)((wa.bottom - wa.top) * table[idx].h);
     const int cx = rc.left + (rc.right - rc.left) / 2;
     const int cy = rc.top + (rc.bottom - rc.top) / 2;
     int x = cx - w / 2;
@@ -766,6 +922,11 @@ inline int size_count()
 // R3: the next of this layout's sizes.
 inline void resize_next(HWND hwnd)
 {
+    // ⛔ T-253: ONE SOURCE OF TRUTH. A custom size outranks the preset in
+    // apply_size, so asking for the next preset while one is held would step
+    // the index and change nothing on screen. Choosing a preset is choosing
+    // to drop the dragged size.
+    clear_custom_size();
     std::atomic_int &slot = size_slot();
     slot.store((slot.load() + 1) % size_count());
     device_log::input(device_log::msg()
