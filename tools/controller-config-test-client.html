@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.32 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.33 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,10 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.33 An eighth hint: where a controller's name comes from, and
+            that it is new on every connect (T-248, folded in from
+            T-250). Shorter than hint 1, which already fits the two
+            lines the footer reserves.
     2.66.32 The hint is clickable and the timer is slower (T-248).
             A click goes to the next one, which needed the step split
             out from the timer's guards: clicking means the pointer is
@@ -3184,7 +3188,11 @@ var FOOTER_HINTS = [
   'Drag this window by <b>any empty part of it</b>, not just the title bar.',
 
   'From a keyboard: <b>Q</b> and <b>E</b> change controller, <b>P</b> moves ' +
-  'this window, <b>R</b> resizes it.'
+  'this window, <b>R</b> resizes it.',
+
+  'Every bridged controller gets a name like <b>Titan</b> or <b>Wasabi</b>, so ' +
+  'you can say which one from across the room. It is a new name each time it ' +
+  'connects.'
 ];
 
 // ⓘ Which hint is showing. Reset to 0 whenever the window opens, so the
@@ -8738,6 +8746,32 @@ function selfTest() {
     ok('an unknown device falls back to the ordinal',
        nameFor('ds5_usb_9') === 'ds5_usb_9');
     LAST_DEVICES = savedDevices;
+  }
+
+  // 🔗 T-248. The hints are a plain array of strings, and the one way this
+  // file has ACTUALLY broken before is an unescaped apostrophe truncating an
+  // array mid-literal -- which is why the nickname pool's S'more was checked
+  // for. A truncated FOOTER_HINTS would not throw; it would silently rotate
+  // through fewer hints, and nothing on screen would say so.
+  // ⓘ Rendering is not testable from here. The two-line reservation
+  // (min-height:2.8em) is still measured by eye at Simple's width.
+  {
+    ok('every hint is present', FOOTER_HINTS.length === 8,
+       'got ' + FOOTER_HINTS.length);
+    var allText = true, i;
+    for (i = 0; i < FOOTER_HINTS.length; i++) {
+      if (typeof FOOTER_HINTS[i] !== 'string' || FOOTER_HINTS[i].length === 0) {
+        allText = false;
+      }
+    }
+    ok('no hint is empty or a non-string', allText);
+
+    // The rotation must return to the first hint and not run off the end.
+    var savedAt = HINT_AT;
+    HINT_AT = FOOTER_HINTS.length - 1;
+    HINT_AT = (HINT_AT + 1) % FOOTER_HINTS.length;
+    ok('the rotation wraps to the first hint', HINT_AT === 0, 'got ' + HINT_AT);
+    HINT_AT = savedAt;
   }
 
   // 4. ⭐ THE BIG ONE. renderTabs with real-shaped devices, which is what every
