@@ -66,12 +66,27 @@ $launcher = Join-Path $Root 'tools\start-ctm-usbip.bat'
 if (-not (Test-Path $launcher)) { throw "launcher missing: $launcher" }
 Copy-Item -Force -Path $launcher -Destination $stage
 
+# The desktop-shortcut generator, both halves (T-249). The .bat is what the
+# user double-clicks, because Windows opens a double-clicked .ps1 in Notepad
+# rather than running it.
+foreach ($shortcutPart in @('tools\create-desktop-shortcut.bat',
+                            'tools\create-desktop-shortcut.ps1')) {
+    $shortcutFile = Join-Path $Root $shortcutPart
+    if (-not (Test-Path $shortcutFile)) { throw "shortcut generator missing: $shortcutFile" }
+    Copy-Item -Force -Path $shortcutFile -Destination $stage
+}
+
 # A README in the zip, because the first question is always how to start it.
 $readme = @"
 DS5-USBIP $Version
 ==================
 
 Start it: double-click start-ctm-usbip.bat
+
+Want it on your desktop? Double-click create-desktop-shortcut.bat once.
+It builds the shortcut from wherever this folder currently is, so MOVE THE
+FOLDER FIRST and then run it -- a Windows shortcut stores the full path and
+cannot follow the folder afterwards. Running it again replaces the old one.
 
 Or from a command prompt in this folder:
 
@@ -92,6 +107,8 @@ step with the version you are running.
 
 What is in here, and what each part is for:
 
+    start-ctm-usbip.bat       starts it
+    create-desktop-shortcut.bat   puts a shortcut on your desktop
     ctm-usbip.exe             the listener
     *.dll                     ffmpeg, for audio
     profiles\descriptors\     what each controller looks like over USB
