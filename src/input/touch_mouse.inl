@@ -103,7 +103,123 @@ struct TouchState {
     float anchorX = 0.0f;
     float anchorY = 0.0f;
     bool sessionMoved = false;
+
+    // ⓘ MEASUREMENT, read only: what the touch looked like, logged when the
+    // last finger lifts (measure_end). Travel is in pad units from where the
+    // first finger landed; cursor is pixels already sent, |x| + |y|; -1 is
+    // "did not happen".
+    int mFirstId = -1;
+    int mFirstX = 0;
+    int mFirstY = 0;
+    int mLastAlone = 0;
+    int mMaxAlone = 0;
+    int mTravel100 = -1;
+    int mTravel200 = -1;
+    int mTravel300 = -1;
+    long long mSecondMs = -1;
+    int mTravelAtSecond = -1;
+    int mCursorBeforeSecond = 0;
+    int mCursorTotal = 0;
+    int mScrollTicks = 0;
+    long long mTailStartMs = -1;
+    int mCursorTail = 0;
+    bool mClicked = false;
 };
+
+// ---- Measurement ------------------------------------------------------------
+// ⭐ ONE device.log LINE PER TOUCH, so the timing of real taps and scrolls is
+// read off a real pad before any threshold is changed (rhoquinn8217,
+// 2026-09-30: a late second finger and a slow tap both move the cursor).
+// ⛔ READ ONLY: nothing here changes what a touch does.
+//
+// Travel is the larger of the x and y distance, the same shape the tap slop
+// uses, so the numbers compare directly with kTapSlopUnits.
+inline int travel_from(int x0, int y0, const TouchPoint &p)
+{
+    const int dx = p.x > x0 ? p.x - x0 : x0 - p.x;
+    const int dy = p.y > y0 ? p.y - y0 : y0 - p.y;
+    return dx > dy ? dx : dy;
+}
+
+inline void measure_begin(TouchState &st, int fingers, const TouchPoint &only, long long nowMs)
+{
+    st.mFirstId = fingers == 1 ? only.id : -1;
+    st.mFirstX = only.x;
+    st.mFirstY = only.y;
+    st.mLastAlone = 0;
+    st.mMaxAlone = 0;
+    st.mTravel100 = st.mTravel200 = st.mTravel300 = -1;
+    // Both fingers in the first report: a second finger with no lateness.
+    st.mSecondMs = fingers >= 2 ? nowMs : -1;
+    st.mTravelAtSecond = fingers >= 2 ? 0 : -1;
+    st.mCursorBeforeSecond = 0;
+    st.mCursorTotal = 0;
+    st.mScrollTicks = 0;
+    st.mTailStartMs = -1;
+    st.mCursorTail = 0;
+    st.mClicked = false;
+}
+
+// Every report after a touch's first. ⚠️ Called BEFORE the session's own
+// finger count is updated, so a change of count is still visible here.
+inline void measure_track(TouchState &st, int fingers, const TouchPoint &p1,
+                          const TouchPoint &p2, long long nowMs)
+{
+    // The first finger, wherever the pad reports it now.
+    const TouchPoint *first = nullptr;
+    if (p1.down && p1.id == st.mFirstId) first = &p1;
+    else if (p2.down && p2.id == st.mFirstId) first = &p2;
+    const int t = first ? travel_from(st.mFirstX, st.mFirstY, *first) : st.mLastAlone;
+
+    if (st.mSecondMs < 0) {
+        if (fingers >= 2) {
+            st.mSecondMs = nowMs;
+            st.mTravelAtSecond = t;
+        } else if (first) {
+            st.mLastAlone = t;
+            if (t > st.mMaxAlone) st.mMaxAlone = t;
+            const long long age = nowMs - st.sessionStart;
+            if (age >= 100 && st.mTravel100 < 0) st.mTravel100 = t;
+            if (age >= 200 && st.mTravel200 < 0) st.mTravel200 = t;
+            if (age >= 300 && st.mTravel300 < 0) st.mTravel300 = t;
+        }
+    }
+    // Two fingers down to one: the end of a scroll, usually one finger lifting
+    // a moment before the other.
+    if (fingers == 1 && st.sessionFingers >= 2 && st.mTailStartMs < 0) {
+        st.mTailStartMs = nowMs;
+    }
+}
+
+inline void measure_cursor(TouchState &st, int32_t px, int32_t py)
+{
+    const int n = (px < 0 ? -px : px) + (py < 0 ? -py : py);
+    st.mCursorTotal += n;
+    if (st.mSecondMs < 0) st.mCursorBeforeSecond += n;
+    if (st.mTailStartMs >= 0) st.mCursorTail += n;
+}
+
+inline void measure_end(const TouchState &st, long long nowMs)
+{
+    const auto n = [](long long v) { return v < 0 ? std::string("-") : std::to_string(v); };
+    const bool hadSecond = st.mSecondMs >= 0;
+    device_log::input(device_log::msg()
+        << "[touch] end fingers=" << st.sessionMaxFingers
+        << " dur=" << (nowMs - st.sessionStart) << "ms"
+        << " gap=" << (hadSecond ? std::to_string(st.mSecondMs - st.sessionStart) + "ms" : std::string("-"))
+        << " travel_at_2nd=" << n(st.mTravelAtSecond)
+        << " cursor_before_2nd=" << (hadSecond ? std::to_string(st.mCursorBeforeSecond) : std::string("-"))
+        << " travel100=" << n(st.mTravel100)
+        << " travel200=" << n(st.mTravel200)
+        << " travel300=" << n(st.mTravel300)
+        << " max_alone=" << st.mMaxAlone
+        << " cursor=" << st.mCursorTotal
+        << " wheel=" << st.mScrollTicks
+        << " tail=" << (st.mTailStartMs >= 0 ? std::to_string(nowMs - st.mTailStartMs) + "ms" : std::string("-"))
+        << " cursor_tail=" << st.mCursorTail
+        << " moved=" << (st.sessionMoved ? "yes" : "no")
+        << " tap=" << (st.mClicked ? "click" : "no"));
+}
 
 inline std::mutex g_touchMutex;
 inline std::map<const void *, TouchState> g_touch;
@@ -313,7 +429,9 @@ inline void step(const void *deviceKey, const std::string &section,
             st.anchorX = ax;
             st.anchorY = ay;
             st.sessionMoved = false;
+            measure_begin(st, fingers, only, nowMs);
         } else if (fingers > 0) {
+            measure_track(st, fingers, p1, p2, nowMs);   // before the count updates
             if (fingers > st.sessionMaxFingers) st.sessionMaxFingers = fingers;
             if (fingers != st.sessionFingers) {
                 // Finger count changed: the average jumps by construction, so
@@ -342,8 +460,10 @@ inline void step(const void *deviceKey, const std::string &section,
                 if (mask != 0) {
                     ctm_mouse_device::add_click(mask);
                     ctm_gyro_mouse_ensure_mouse_started();
+                    st.mClicked = true;
                 }
             }
+            measure_end(st, nowMs);
             st.sessionActive = false;
             st.sessionMaxFingers = 0;
             st.sessionFingers = 0;
@@ -390,6 +510,7 @@ inline void step(const void *deviceKey, const std::string &section,
                 ctm_gyro_mouse::shared_mailbox().push(
                     ctm_gyro_mouse::MouseDelta{px, py});
                 ctm_gyro_mouse_ensure_mouse_started();
+                measure_cursor(st, px, py);
             }
         }
     } else {
@@ -421,6 +542,7 @@ inline void step(const void *deviceKey, const std::string &section,
                     section.c_str(), "touchpad_scroll_natural", false);
                 ctm_mouse_device::add_wheel(natural ? ticks : -ticks);
                 ctm_gyro_mouse_ensure_mouse_started();
+                st.mScrollTicks += ticks < 0 ? -ticks : ticks;
             }
         }
     } else {
