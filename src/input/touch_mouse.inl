@@ -58,6 +58,7 @@ constexpr int kTapSlopUnits = 100;
 // cursor back where it belongs:
 //   a tap           back to where the finger landed, then the click
 //   a late 2nd finger  back to where the first landed, then the scroll
+//   any 2nd finger  back to before the pad dragged the first toward it
 //   a press to drag back to a moment before the press, then the grab
 //
 // How far a finger may move before the cursor follows at all, while a tap is
@@ -88,17 +89,32 @@ constexpr long long kPutBackCheckMs = 40;
 // 80 to 113 ms and moved the cursor 160 to 588 px. So the finger left behind
 // takes the cursor back once it has come to rest for kTailRestMs and then
 // moves, which is what a finger does when someone means to point with it, or
-// kTailMaxMs after the other lifted if it never stops sliding.
+// kTailMaxMs after the other lifted if it is still sliding then.
+// ⭐ A FINGER THAT STAYS STILL STAYS PUT: it is holding the pad while the other
+// strokes (rhoquinn8217, 2026-09-30: "holding one finger and scrolling with the
+// other"). Until then it took over by time too, and whatever it drifted, the
+// cursor followed between strokes.
 constexpr long long kTailRestMs = 30;
 constexpr long long kTailMaxMs = 150;
 
-// ⭐ THE PAD LEAPS; A FINGER DOES NOT (measured 2026-09-30). As a second finger
-// comes down beside the first, the pad can report the first leaping 200 to 490
-// units in a single report before it reports two, and the cursor leapt with it
-// (rhoquinn8217: "very large jumps"). The biggest real step in 408 one-finger
-// touches that day was 108 units, in a fast flick. So a bigger step moves
-// nothing, and the finger carries on from wherever the pad puts it next.
-constexpr int kJumpUnits = 120;
+// ⭐ A SECOND FINGER PUTS THE CURSOR BACK (measured 2026-09-30). For 30 to 75
+// ms before the pad reports a second finger, it drags the first finger's
+// position toward it, sometimes across the whole pad, and can hand the first
+// finger's id to the new one. The cursor followed, and those were the "very
+// large jumps" (rhoquinn8217). Nothing in a report says a second finger is on
+// its way, so when it lands, the cursor goes back to where it was this long
+// before.
+constexpr long long kLandingBackMs = 100;
+// ⭐ AND BETWEEN SCROLL STROKES, TO WHERE THE LAST STROKE LEFT IT: a second
+// finger back this soon after one lifted is the next stroke, so whatever the
+// finger left behind did in between is undone.
+constexpr long long kStrokeGapMs = 500;
+
+// ⭐ A LEAP IN ONE REPORT IS THE PAD. 120 until 2026-09-30, which cut the
+// fastest flicks short: flicking as fast as rhoquinn8217 could moved up to 188
+// units in one report. The pad's own leaps reached 490. A bigger step than
+// this moves nothing, and the finger carries on from where the pad puts it.
+constexpr int kJumpUnits = 300;
 
 // Pad units of two-finger travel per wheel tick, at scroll speed 100.
 constexpr int kScrollUnitsPerTick = 60;
@@ -159,6 +175,10 @@ struct TouchState {
     int restX = 0;                // where it last came to rest
     int restY = 0;
     long long restSince = 0;
+    bool strokeValid = false;     // the cursor as the last scroll stroke ended
+    long strokeX = 0;
+    long strokeY = 0;
+    long long strokeEndMs = 0;
 
     // ⓘ MEASUREMENT: the one finger's last few positions, each time it moved,
     // for a line about what the pad did just before a leap or a second finger.
@@ -537,6 +557,51 @@ inline void put_back_for_press(TouchState &st, long long nowMs, const TouchPoint
     }
 }
 
+// ⭐ A SECOND FINGER HAS COME DOWN, so the cursor goes back to where it
+// belongs, and the line says what the pad did as it came:
+//   early in a touch      where the first finger landed (kSecondFingerMs):
+//                         a scroll that started late
+//   the next scroll stroke  where the last stroke left it (kStrokeGapMs)
+//   otherwise             where it was kLandingBackMs ago, before the pad
+//                         dragged the first finger toward the second
+inline void land_second(TouchState &st, long long nowMs, int scrollFingers,
+                        const TouchPoint &p1, const TouchPoint &p2)
+{
+    const bool firstLanding = st.sessionMaxFingers < 2;
+    const char *why = nullptr;
+    long tx = 0;
+    long ty = 0;
+    if (firstLanding && scrollFingers == 2 && st.homeValid && st.movedCursor &&
+        nowMs - st.sessionStart <= kSecondFingerMs) {
+        why = "second";
+        tx = st.homeX;
+        ty = st.homeY;
+    } else if (!firstLanding && st.strokeValid && nowMs - st.strokeEndMs <= kStrokeGapMs) {
+        why = "stroke";
+        tx = st.strokeX;
+        ty = st.strokeY;
+    } else if (const TouchState::Sample *s = sample_before(st, nowMs, kLandingBackMs)) {
+        why = "landing";
+        tx = s->cx;
+        ty = s->cy;
+    }
+    long cx = 0;
+    long cy = 0;
+    const bool goBack = why != nullptr && ctm_gyro_mouse::cursor_read(&cx, &cy) &&
+                        (cx != tx || cy != ty);
+    device_log::input(device_log::msg()
+        << "[touch] second finger at +" << (nowMs - st.sessionStart) << "ms"
+        << (firstLanding ? std::string()
+                         : ", " + std::to_string(nowMs - st.strokeEndMs) + "ms after one lifted")
+        << ", first finger's path" << path_text(st, nowMs)
+        << " | now #" << p1.id << " " << p1.x << "," << p1.y
+        << " #" << p2.id << " " << p2.x << "," << p2.y
+        << " | cursor_back="
+        << (goBack ? std::to_string(cx - tx) + "," + std::to_string(cy - ty) + "px " + why
+                   : std::string("none")));
+    if (goBack) put_back(st, tx, ty, nowMs, why);
+}
+
 // ---- The finger left behind -------------------------------------------------
 
 inline void point_again(TouchState &st, long long nowMs, const char *why)
@@ -747,22 +812,15 @@ inline void step(const void *deviceKey, const std::string &section,
             st.stillX0 = only.x;
             st.stillY0 = only.y;
             st.tailLive = false;
+            st.strokeValid = false;
         } else if (fingers > 0) {
             // ⭐ A SECOND FINGER SOON AFTER THE FIRST is a scroll that started
             // late: the cursor goes back to where the first finger landed, and
             // the scroll happens there. Later than kSecondFingerMs, it was a
-            // move and then a scroll, and the move stands.
-            if (fingers >= 2 && st.sessionFingers < 2 && scrollFingers == 2 && cursorOn &&
-                st.homeValid && st.movedCursor && nowMs - st.sessionStart <= kSecondFingerMs) {
-                put_back(st, st.homeX, st.homeY, nowMs, "second");
-            }
-            // ⓘ MEASUREMENT: what the pad did as the second finger came down.
+            // move and then a scroll, and the move stands, all but what the
+            // pad did as the second finger came (land_second).
             if (fingers >= 2 && st.sessionFingers < 2 && cursorOn) {
-                device_log::input(device_log::msg()
-                    << "[touch] second finger at +" << (nowMs - st.sessionStart)
-                    << "ms, first finger's path" << path_text(st, nowMs)
-                    << " | now #" << p1.id << " " << p1.x << "," << p1.y
-                    << " #" << p2.id << " " << p2.x << "," << p2.y);
+                land_second(st, nowMs, scrollFingers, p1, p2);
             }
             measure_track(st, fingers, p1, p2, nowMs);   // before the count updates
             measure_clock(st, lay, data, len, nowMs, false, kind);
@@ -811,6 +869,7 @@ inline void step(const void *deviceKey, const std::string &section,
             st.homeValid = false;
             st.pressStill = false;
             st.tailLive = false;
+            st.strokeValid = false;
             st.sampleCount = 0;
             st.sampleNext = 0;
         }
@@ -827,13 +886,16 @@ inline void step(const void *deviceKey, const std::string &section,
             st.lastY = only.y;
             st.pathCount = 0;
             st.pathNext = 0;
-            // A finger has just lifted and this one stayed: it waits.
+            // A finger has just lifted and this one stayed: it waits, and the
+            // cursor is where this scroll stroke left it.
             if (st.sessionMaxFingers >= 2) {
                 st.tailLive = false;
                 st.tailStart = nowMs;
                 st.restX = only.x;
                 st.restY = only.y;
                 st.restSince = nowMs;
+                st.strokeValid = ctm_gyro_mouse::cursor_read(&st.strokeX, &st.strokeY);
+                st.strokeEndMs = nowMs;
             }
         } else if (st.sessionMaxFingers >= 2 && !st.tailLive) {
             // ⭐ AFTER TWO FINGERS, THE FINGER LEFT BEHIND WAITS UNTIL IT IS
@@ -855,7 +917,10 @@ inline void step(const void *deviceKey, const std::string &section,
                     st.restSince = nowMs;
                 }
             }
-            if (!st.tailLive && nowMs - st.tailStart >= kTailMaxMs) {
+            // By time only while it is still sliding: a finger at rest is
+            // holding the pad, and takes over only when it moves.
+            if (!st.tailLive && nowMs - st.tailStart >= kTailMaxMs &&
+                nowMs - st.restSince < kTailRestMs) {
                 point_again(st, nowMs, "time");
             }
         } else {

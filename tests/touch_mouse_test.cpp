@@ -612,6 +612,7 @@ int run_touch_mouse_tests()
         run_step(r, 0);
         set_point(r, 0, true, 1, 400, 420);
         run_step(r, 40);
+        run_step(r, 100);                      // the finger rests there
         set_point(r, 1, true, 2, 600, 300);    // 300 ms later: a move, then a scroll
         run_step(r, 300);
         CTM_CHECK_EQ(static_cast<int>(g_cursorY), 620);
@@ -815,36 +816,88 @@ int run_touch_mouse_tests()
         auto r = rest_report();
         set_point(r, 0, true, 1, 100, 500);
         run_step(r, 0);
-        for (int i = 1; i <= 10; ++i) {        // 110 units a report, past a real flick's biggest
-            set_point(r, 0, true, 1, 100 + 110 * i, 500);
-            run_step(r, 8 * i);
+        for (int i = 1; i <= 9; ++i) {         // 190 units a report: the fastest measured was 188
+            set_point(r, 0, true, 1, 100 + 190 * i, 500);
+            run_step(r, 5 * i);
         }
-        CTM_CHECK_EQ(static_cast<int>(g_pushedX), 1100);
+        CTM_CHECK_EQ(static_cast<int>(g_pushedX), 1710);
     }
 
-    section("touch: a second finger after a move: the pad's leap as it lands moves nothing");
+    section("touch: a second finger after a move puts back what the pad did as it came");
     {
         // rhoquinn8217, 2026-09-30: moving with one finger, then bringing the
-        // second down to scroll, made the cursor jump a long way.
+        // second down to scroll, made the cursor jump a long way. ⓘ Measured:
+        // for 30 to 75 ms before the pad reports a second finger, it drags the
+        // first one's position toward it.
         reset_stubs();
         fresh_device();
         g_cfg["touchpad_to_mouse"] = "true";
         g_cfg["touchpad_scroll"] = "2";
+        g_cursorX = 1000;
+        g_cursorY = 500;
         auto r = rest_report();
         set_point(r, 0, true, 1, 400, 300);
         run_step(r, 0);
-        set_point(r, 0, true, 1, 400, 360);    // a move
-        run_step(r, 200);
-        set_point(r, 0, true, 1, 400, 380);
-        run_step(r, 400);
-        set_point(r, 0, true, 1, 700, 390);    // the pad leaps toward the second finger
+        for (int i = 1; i <= 50; ++i) {        // a real move, 100 units down
+            set_point(r, 0, true, 1, 400, 300 + 2 * i);
+            run_step(r, 4 * i);
+        }
+        for (long long t = 250; t <= 400; t += 50) run_step(r, t);   // it rests
+        CTM_CHECK_EQ(static_cast<int>(g_cursorY), 600);
+        set_point(r, 0, true, 1, 460, 400);    // the pad drags it toward the second
         run_step(r, 404);
-        set_point(r, 0, true, 1, 402, 382);    // then reports both
-        set_point(r, 1, true, 2, 1000, 400);
+        set_point(r, 0, true, 1, 550, 400);
         run_step(r, 408);
-        CTM_CHECK_EQ(static_cast<int>(g_pushedX), 0);
-        CTM_CHECK_EQ(static_cast<int>(g_pushedY), 80);
-        CTM_CHECK_EQ(g_placeCount, 0);                  // no put-back: the move stands
+        set_point(r, 0, true, 1, 700, 400);
+        run_step(r, 412);
+        CTM_CHECK_EQ(static_cast<int>(g_cursorX), 1300);   // and the cursor followed
+        set_point(r, 0, true, 1, 402, 401);    // then reports both
+        set_point(r, 1, true, 2, 1000, 380);
+        run_step(r, 420);
+        CTM_CHECK_EQ(static_cast<int>(g_cursorX), 1000);   // the drag undone
+        CTM_CHECK_EQ(static_cast<int>(g_cursorY), 600);    // the move kept
+        CTM_CHECK_EQ(g_placeCount, 1);
+    }
+
+    section("touch: a finger held between scroll strokes stays put, and the next stroke undoes the pad");
+    {
+        // rhoquinn8217, 2026-09-30: holding one finger and scrolling with the
+        // other made the cursor jump.
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_to_mouse"] = "true";
+        g_cfg["touchpad_scroll"] = "2";
+        g_cursorX = 1000;
+        g_cursorY = 500;
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 400, 600);    // held
+        set_point(r, 1, true, 2, 1200, 300);   // strokes
+        run_step(r, 0);
+        set_point(r, 1, true, 2, 1200, 420);
+        run_step(r, 50);
+        CTM_CHECK(g_wheelSum != 0);
+        set_point(r, 1, false, 2, 1200, 420);  // the stroking finger lifts
+        run_step(r, 100);
+        for (long long t = 110; t <= 290; t += 10) {       // the held finger stays
+            set_point(r, 0, true, 1, 400 + static_cast<int>((t / 10) % 2), 600);
+            run_step(r, t);
+        }
+        set_point(r, 0, true, 1, 405, 600);    // a small roll, well past 150 ms
+        run_step(r, 295);
+        CTM_CHECK_EQ(g_pushCount, 0);          // no take-over by time
+        set_point(r, 0, true, 1, 440, 580);    // the pad drags it as the other returns
+        run_step(r, 304);
+        set_point(r, 0, true, 1, 500, 550);
+        run_step(r, 308);
+        set_point(r, 0, true, 1, 600, 500);
+        run_step(r, 312);
+        CTM_CHECK(g_pushCount > 0);            // and that did move the cursor
+        set_point(r, 0, true, 1, 402, 600);    // the next stroke lands
+        set_point(r, 1, true, 3, 1200, 300);
+        run_step(r, 320);
+        CTM_CHECK_EQ(static_cast<int>(g_cursorX), 1000);   // back where the stroke left it
+        CTM_CHECK_EQ(static_cast<int>(g_cursorY), 500);
+        CTM_CHECK_EQ(g_placeCount, 1);
     }
 
     section("touch: a short scroll is not a two-finger tap");
