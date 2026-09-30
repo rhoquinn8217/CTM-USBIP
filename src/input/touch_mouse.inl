@@ -81,6 +81,17 @@ constexpr int kPressMaxBackUnits = 120;
 // already on its way to Windows when it happened.
 constexpr long long kPutBackCheckMs = 40;
 
+// ⭐ AFTER A SCROLL, THE FINGER LEFT BEHIND POINTS AGAIN (rhoquinn8217,
+// 2026-09-30: lift one finger and carry on with the other, without lifting
+// both first). ⚠️ But two fingers rarely lift together, and the last one often
+// slides on as a scroll ends: 3 of 27 scroll ends measured that day slid for
+// 80 to 113 ms and moved the cursor 160 to 588 px. So the finger left behind
+// takes the cursor back once it has come to rest for kTailRestMs and then
+// moves, which is what a finger does when someone means to point with it, or
+// kTailMaxMs after the other lifted if it never stops sliding.
+constexpr long long kTailRestMs = 30;
+constexpr long long kTailMaxMs = 150;
+
 // Pad units of two-finger travel per wheel tick, at scroll speed 100.
 constexpr int kScrollUnitsPerTick = 60;
 
@@ -134,6 +145,13 @@ struct TouchState {
     int sampleCount = 0;
     int sampleNext = 0;
 
+    // ⭐ THE FINGER LEFT BEHIND AFTER TWO (see kTailRestMs).
+    bool tailLive = false;        // it moves the cursor again
+    long long tailStart = 0;      // when the other finger lifted
+    int restX = 0;                // where it last came to rest
+    int restY = 0;
+    long long restSince = 0;
+
     // Scroll tracking (two fingers), on the average of both y positions.
     bool scrollTracking = false;
     float lastAvgY = 0.0f;
@@ -180,6 +198,10 @@ struct TouchState {
     int mScrollTicks = 0;
     long long mTailStartMs = -1;
     int mCursorTail = 0;
+    // How long after a finger lifted the one left behind took the cursor
+    // back, and why: rest, or time.
+    long long mResumeMs = -1;
+    const char *mResumeBy = "-";
     bool mClicked = false;
     // Which put-back this touch made: tap, second, press, or -.
     const char *mPutBack = "-";
@@ -233,6 +255,8 @@ inline void measure_begin(TouchState &st, int fingers, const TouchPoint &only, l
     st.mScrollTicks = 0;
     st.mTailStartMs = -1;
     st.mCursorTail = 0;
+    st.mResumeMs = -1;
+    st.mResumeBy = "-";
     st.mClicked = false;
     st.mPutBack = "-";
     st.mPrevX = only.x;
@@ -296,7 +320,7 @@ inline void measure_track(TouchState &st, int fingers, const TouchPoint &p1,
         }
     }
     // Two fingers down to one: the end of a scroll, usually one finger lifting
-    // a moment before the other.
+    // a moment before the other, or one lifting so the other can point.
     if (fingers == 1 && st.sessionFingers >= 2 && st.mTailStartMs < 0) {
         st.mTailStartMs = nowMs;
     }
@@ -341,6 +365,7 @@ inline void measure_end(const TouchState &st, long long nowMs)
         << " cursor=" << st.mCursorTotal
         << " wheel=" << st.mScrollTicks
         << " tail=" << (st.mTailStartMs >= 0 ? std::to_string(nowMs - st.mTailStartMs) + "ms" : std::string("-"))
+        << " resume=" << (st.mResumeMs >= 0 ? std::to_string(st.mResumeMs) + "ms/" + st.mResumeBy : std::string("-"))
         << " cursor_tail=" << st.mCursorTail
         << " moved=" << (st.sessionMoved ? "yes" : "no")
         << " tap=" << (st.mClicked ? "click" : "no"));
@@ -462,6 +487,17 @@ inline void put_back_for_press(TouchState &st, long long nowMs, const TouchPoint
                    : std::string(fast ? "none (moving fast)" : "none")));
     if (goBack) {
         put_back(st, s->cx, s->cy, nowMs, "press");
+    }
+}
+
+// ---- The finger left behind -------------------------------------------------
+
+inline void point_again(TouchState &st, long long nowMs, const char *why)
+{
+    st.tailLive = true;
+    if (st.mResumeMs < 0) {
+        st.mResumeMs = nowMs - st.tailStart;
+        st.mResumeBy = why;
     }
 }
 
@@ -663,6 +699,7 @@ inline void step(const void *deviceKey, const std::string &section,
             st.cursorLive = false;
             st.stillX0 = only.x;
             st.stillY0 = only.y;
+            st.tailLive = false;
         } else if (fingers > 0) {
             // ⭐ A SECOND FINGER SOON AFTER THE FIRST is a scroll that started
             // late: the cursor goes back to where the first finger landed, and
@@ -718,6 +755,7 @@ inline void step(const void *deviceKey, const std::string &section,
             st.sessionMoved = false;
             st.homeValid = false;
             st.pressStill = false;
+            st.tailLive = false;
             st.sampleCount = 0;
             st.sampleNext = 0;
         }
@@ -732,15 +770,37 @@ inline void step(const void *deviceKey, const std::string &section,
             st.cursorId = only.id;
             st.lastX = only.x;
             st.lastY = only.y;
-        } else if (st.sessionMaxFingers >= 2) {
-            // ⭐ AFTER TWO FINGERS, NOTHING MOVES UNTIL EVERY FINGER HAS LIFTED
-            // (measured 2026-09-30: 3 of 11 scrolls moved the cursor while one
-            // finger lifted before the other, by up to 588 px). The finger
-            // left behind is the end of a scroll, not the start of a move.
+            // A finger has just lifted and this one stayed: it waits.
+            if (st.sessionMaxFingers >= 2) {
+                st.tailLive = false;
+                st.tailStart = nowMs;
+                st.restX = only.x;
+                st.restY = only.y;
+                st.restSince = nowMs;
+            }
+        } else if (st.sessionMaxFingers >= 2 && !st.tailLive) {
+            // ⭐ AFTER TWO FINGERS, THE FINGER LEFT BEHIND WAITS UNTIL IT IS
+            // POINTING (see kTailRestMs). Until 2026-09-30 it moved nothing
+            // until every finger had lifted, which stopped a scroll's end
+            // moving the cursor, and stopped anyone pointing with it too.
+            // ⓘ The anchor follows the finger meanwhile, so when it takes
+            // over, movement flows from right there with no jump.
             st.lastX = only.x;
             st.lastY = only.y;
             st.carryX = 0.0f;
             st.carryY = 0.0f;
+            if (travel_from(st.restX, st.restY, only) > kStillUnits) {
+                if (nowMs - st.restSince >= kTailRestMs) {
+                    point_again(st, nowMs, "rest");   // it rested, and now it moves
+                } else {
+                    st.restX = only.x;                // still sliding: rest starts again
+                    st.restY = only.y;
+                    st.restSince = nowMs;
+                }
+            }
+            if (!st.tailLive && nowMs - st.tailStart >= kTailMaxMs) {
+                point_again(st, nowMs, "time");
+            }
         } else {
             // ⭐ STILL UNTIL THE FINGER HAS CLEARLY MOVED, while a tap is still
             // possible and just after a press: the anchor follows the finger,

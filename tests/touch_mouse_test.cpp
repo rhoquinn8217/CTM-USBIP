@@ -676,8 +676,10 @@ int run_touch_mouse_tests()
         CTM_CHECK_EQ(g_placeCount, 0);
     }
 
-    section("touch: the finger left after a scroll moves nothing until every finger lifts");
+    section("touch: a finger still sliding as a scroll ends moves nothing");
     {
+        // ⓘ Measured 2026-09-30: the last finger slid on for up to 113 ms and
+        // moved the cursor up to 588 px.
         reset_stubs();
         fresh_device();
         g_cfg["touchpad_to_mouse"] = "true";
@@ -691,10 +693,97 @@ int run_touch_mouse_tests()
         run_step(r, 50);
         set_point(r, 1, false, 2, 600, 420);   // one finger lifts first
         run_step(r, 100);
-        set_point(r, 0, true, 1, 700, 600);    // the other slides on
-        run_step(r, 150);
-        set_point(r, 0, false, 1, 700, 600);
-        run_step(r, 200);
+        for (int i = 1; i <= 24; ++i) {        // the other slides on for 120 ms
+            set_point(r, 0, true, 1, 400, 420 + 20 * i);
+            run_step(r, 100 + 5 * i);
+        }
+        set_point(r, 0, false, 1, 400, 900);
+        run_step(r, 225);
+        CTM_CHECK_EQ(g_pushCount, 0);
+    }
+
+    section("touch: after a scroll, the finger left behind points again once it rests");
+    {
+        // rhoquinn8217, 2026-09-30: lift one finger after a scroll and carry
+        // on with the other, without lifting both first.
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_to_mouse"] = "true";
+        g_cfg["touchpad_scroll"] = "2";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 400, 300);
+        set_point(r, 1, true, 2, 600, 300);
+        run_step(r, 0);
+        set_point(r, 0, true, 1, 400, 420);    // a scroll
+        set_point(r, 1, true, 2, 600, 420);
+        run_step(r, 50);
+        CTM_CHECK(g_wheelSum != 0);
+        set_point(r, 1, false, 2, 600, 420);   // one finger lifts
+        run_step(r, 300);
+        set_point(r, 0, true, 1, 402, 421);    // the other rests a moment
+        run_step(r, 320);
+        run_step(r, 340);
+        CTM_CHECK_EQ(g_pushCount, 0);
+        set_point(r, 0, true, 1, 440, 421);    // and moves: it points again
+        run_step(r, 360);
+        set_point(r, 0, true, 1, 480, 421);
+        run_step(r, 380);
+        CTM_CHECK_EQ(static_cast<int>(g_pushedX), 40);   // from where it took over, no jump
+    }
+
+    section("touch: a finger that keeps sliding after a scroll points after 150 ms, from where it is");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_to_mouse"] = "true";
+        g_cfg["touchpad_scroll"] = "2";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 400, 300);
+        set_point(r, 1, true, 2, 600, 300);
+        run_step(r, 0);
+        set_point(r, 0, true, 1, 400, 420);
+        set_point(r, 1, true, 2, 600, 420);
+        run_step(r, 50);
+        set_point(r, 1, false, 2, 600, 420);   // one finger lifts
+        run_step(r, 100);
+        int x = 400;
+        for (long long t = 110; t < 250; t += 10) {   // the other slides right
+            x += 20;
+            set_point(r, 0, true, 1, x, 420);
+            run_step(r, t);
+        }
+        CTM_CHECK_EQ(g_pushCount, 0);                 // not yet
+        x += 20;
+        set_point(r, 0, true, 1, x, 420);
+        run_step(r, 250);                             // 150 ms: it takes over here
+        CTM_CHECK_EQ(g_pushCount, 0);
+        x += 20;
+        set_point(r, 0, true, 1, x, 420);
+        run_step(r, 260);
+        CTM_CHECK_EQ(static_cast<int>(g_pushedX), 20);   // only what came after
+    }
+
+    section("touch: a two-finger tap whose fingers lift apart still right-clicks, and moves nothing");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_to_mouse"] = "true";
+        g_cfg["touchpad_tap_click"] = "true";
+        g_cfg["touchpad_scroll"] = "2";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 400, 300);
+        set_point(r, 1, true, 2, 600, 300);
+        run_step(r, 0);
+        set_point(r, 1, false, 2, 600, 300);   // one lifts
+        run_step(r, 100);
+        for (int i = 1; i <= 8; ++i) {         // the other lingers, rolling a little
+            set_point(r, 0, true, 1, 400 + i, 300);
+            run_step(r, 100 + 10 * i);
+        }
+        set_point(r, 0, false, 1, 408, 300);
+        run_step(r, 190);
+        CTM_CHECK_EQ(g_clickCount, 1);
+        CTM_CHECK_EQ(static_cast<int>(g_lastClick), 0x02);
         CTM_CHECK_EQ(g_pushCount, 0);
     }
 
