@@ -485,7 +485,12 @@ int run_touch_mouse_tests()
         CTM_CHECK_EQ(g_clickCount, 1);         // and the tap still clicks
     }
 
-    section("touch: a drag unlocks at the slop and moves from there");
+    // ⭐ THE RULE CHANGED HERE (rhoquinn8217, 2026-09-30). This asserted that a
+    // move unlocked at a 15-unit slop and sent only that report's step, the
+    // held movement thrown away. Measured taps rolled up to 84 units, so the
+    // distance is 100 now, and a hold that threw 100 units away would lose the
+    // start of every stroke: the movement is KEPT and sent as the hold ends.
+    section("touch: a move unlocks past the tap distance and sends what it held");
     {
         reset_stubs();
         fresh_device();
@@ -494,13 +499,170 @@ int run_touch_mouse_tests()
         auto r = rest_report();
         set_point(r, 0, true, 1, 300, 300);
         run_step(r, 0);
-        set_point(r, 0, true, 1, 310, 300);    // inside the slop: held still
+        set_point(r, 0, true, 1, 310, 300);    // inside the tap distance: held
         run_step(r, 16);
         CTM_CHECK_EQ(g_pushCount, 0);
-        set_point(r, 0, true, 1, 322, 300);    // past the slop: unlocked
+        set_point(r, 0, true, 1, 420, 300);    // past it: a move
         run_step(r, 32);
-        CTM_CHECK_EQ(g_pushedX, 12);           // this report's step only --
-        CTM_CHECK_EQ(g_pushedY, 0);            // no replayed 22-unit jump
+        CTM_CHECK_EQ(g_pushCount, 1);          // in one go --
+        CTM_CHECK_EQ(g_pushedX, 120);          // all of it, nothing lost
+        CTM_CHECK_EQ(g_pushedY, 0);
+    }
+
+    section("touch: a tap that rolls up to the tap distance still clicks, and moves nothing");
+    {
+        // ⓘ 84 units is the largest roll measured on 2026-09-30.
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_to_mouse"] = "true";
+        g_cfg["touchpad_tap_click"] = "true";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 300, 300);
+        run_step(r, 0);
+        set_point(r, 0, true, 1, 350, 310);
+        run_step(r, 40);
+        set_point(r, 0, true, 1, 384, 312);
+        run_step(r, 120);
+        set_point(r, 0, false, 1, 384, 312);
+        run_step(r, 180);
+        CTM_CHECK_EQ(g_clickCount, 1);
+        CTM_CHECK_EQ(g_pushCount, 0);
+    }
+
+    section("touch: a late second finger starts a scroll, and the first finger's movement goes");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_to_mouse"] = "true";
+        g_cfg["touchpad_tap_click"] = "true";
+        g_cfg["touchpad_scroll"] = "2";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 400, 300);
+        run_step(r, 0);
+        set_point(r, 0, true, 1, 400, 420);    // 120 units: past the tap distance,
+        run_step(r, 40);                       // but inside the wait -- still held
+        CTM_CHECK_EQ(g_pushCount, 0);
+        set_point(r, 1, true, 2, 600, 300);    // the second finger, 80 ms late
+        run_step(r, 80);
+        set_point(r, 0, true, 1, 400, 540);    // both scroll down
+        set_point(r, 1, true, 2, 600, 420);
+        run_step(r, 100);
+        CTM_CHECK_EQ(g_pushCount, 0);          // ⭐ the cursor never moved
+        CTM_CHECK(g_wheelSum != 0);
+    }
+
+    section("touch: with two-finger scroll on, a lone finger moves once the wait is over");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_to_mouse"] = "true";
+        g_cfg["touchpad_scroll"] = "2";        // no taps: only the wait holds it
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 300, 300);
+        run_step(r, 0);
+        set_point(r, 0, true, 1, 350, 300);
+        run_step(r, 50);
+        set_point(r, 0, true, 1, 400, 300);
+        run_step(r, 100);
+        CTM_CHECK_EQ(g_pushCount, 0);          // inside the 150 ms wait
+        set_point(r, 0, true, 1, 420, 300);
+        run_step(r, 160);
+        CTM_CHECK_EQ(g_pushedX, 120);          // everything since it landed
+    }
+
+    section("touch: a long stroke moves at once, without waiting");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_to_mouse"] = "true";
+        g_cfg["touchpad_tap_click"] = "true";
+        g_cfg["touchpad_scroll"] = "2";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 300, 300);
+        run_step(r, 0);
+        set_point(r, 0, true, 1, 700, 300);    // 400 units in 20 ms
+        run_step(r, 20);
+        CTM_CHECK_EQ(g_pushedX, 400);
+    }
+
+    section("touch: a quick flick that lifts inside the wait still moves");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_to_mouse"] = "true";
+        g_cfg["touchpad_tap_click"] = "true";
+        g_cfg["touchpad_scroll"] = "2";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 300, 300);
+        run_step(r, 0);
+        set_point(r, 0, true, 1, 450, 300);
+        run_step(r, 20);
+        set_point(r, 0, true, 1, 550, 300);    // 250: past a tap, short of a long stroke
+        run_step(r, 40);
+        CTM_CHECK_EQ(g_pushCount, 0);
+        set_point(r, 0, false, 1, 550, 300);   // lifts before the wait is up
+        run_step(r, 60);
+        CTM_CHECK_EQ(g_pushedX, 250);          // sent at the lift
+        CTM_CHECK_EQ(g_clickCount, 0);         // and it was no tap
+    }
+
+    section("touch: the finger left after a scroll moves nothing until every finger lifts");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_to_mouse"] = "true";
+        g_cfg["touchpad_scroll"] = "2";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 400, 300);
+        set_point(r, 1, true, 2, 600, 300);
+        run_step(r, 0);
+        set_point(r, 0, true, 1, 400, 420);
+        set_point(r, 1, true, 2, 600, 420);
+        run_step(r, 50);
+        set_point(r, 1, false, 2, 600, 420);   // one finger lifts first
+        run_step(r, 100);
+        set_point(r, 0, true, 1, 700, 600);    // the other slides on
+        run_step(r, 150);
+        set_point(r, 0, false, 1, 700, 600);
+        run_step(r, 200);
+        CTM_CHECK_EQ(g_pushCount, 0);
+    }
+
+    section("touch: a short scroll is not a two-finger tap");
+    {
+        // ⛔ With the tap distance at 100, a one-tick scroll ends inside it, and
+        // without this rule it right-clicked as it lifted.
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_tap_click"] = "true";
+        g_cfg["touchpad_scroll"] = "2";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 400, 200);
+        set_point(r, 1, true, 2, 600, 200);
+        run_step(r, 0);
+        set_point(r, 0, true, 1, 400, 260);    // 60 units: one wheel tick
+        set_point(r, 1, true, 2, 600, 260);
+        run_step(r, 40);
+        set_point(r, 0, false, 1, 400, 260);
+        set_point(r, 1, false, 2, 600, 260);
+        run_step(r, 100);
+        CTM_CHECK(g_wheelSum != 0);
+        CTM_CHECK_EQ(g_clickCount, 0);
+    }
+
+    section("touch: the wait is a setting, and 0 is no wait");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_to_mouse"] = "true";
+        g_cfg["touchpad_scroll"] = "2";
+        g_cfg["touchpad_move_delay_ms"] = "0";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 300, 300);
+        run_step(r, 0);
+        set_point(r, 0, true, 1, 350, 300);
+        run_step(r, 20);
+        CTM_CHECK_EQ(g_pushedX, 50);
     }
 
     section("touch: a gate can hold the touchpad off, absent means always");

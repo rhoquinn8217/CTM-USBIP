@@ -44,7 +44,22 @@ namespace ctm_touch_mouse {
 // Tap limits. A tap is a touch that ends quickly and barely moved -- both
 // bounds exist to keep an ordinary grip from clicking things.
 constexpr long long kTapMaxMs = 250;
-constexpr int kTapSlopUnits = 15;
+// ⭐ 100, UP FROM 15 (measured 2026-09-30 on a DualSense Edge). A real finger
+// rolls as it lands and lifts: 8 of 10 taps moved 23 to 84 units, every one
+// well inside the time limit, so at 15 they moved the cursor instead of
+// clicking. 100 clears the largest with room to spare.
+constexpr int kTapSlopUnits = 100;
+
+// ⭐ A LONE FINGER THAT TRAVELS THIS FAR IS MOVING THE CURSOR, whatever else
+// could still happen, and stops waiting. Measured the same day: a scrolling
+// first finger had covered 132 units at most when its partner landed, and a
+// quick flick passes 300 within its first 15 ms or so.
+constexpr int kLongStrokeUnits = 300;
+
+// How long a lone finger waits for a second one when two fingers scroll. The
+// latest second finger measured landed 119 ms after the first. A setting,
+// touchpad_move_delay_ms; this is its default.
+constexpr int kMoveDelayDefaultMs = 150;
 
 // Pad units of two-finger travel per wheel tick, at scroll speed 100.
 constexpr int kScrollUnitsPerTick = 60;
@@ -76,6 +91,16 @@ struct TouchState {
     int lastY = 0;
     float carryX = 0.0f;
     float carryY = 0.0f;
+
+    // ⭐ THE HOLD (rhoquinn8217, 2026-09-30). A new touch keeps its cursor
+    // movement back until it shows what it is: a tap (discarded), a second
+    // finger arriving for a scroll (discarded), or a move (sent in one go, so
+    // nothing is lost). See step() for when each happens.
+    bool holding = false;
+    int holdX0 = 0;          // where the finger landed
+    int holdY0 = 0;
+    int32_t heldX = 0;       // cursor pixels kept back
+    int32_t heldY = 0;
 
     // Scroll tracking (two fingers), on the average of both y positions.
     bool scrollTracking = false;
@@ -124,6 +149,20 @@ struct TouchState {
     long long mTailStartMs = -1;
     int mCursorTail = 0;
     bool mClicked = false;
+    // How the hold ended: tap, rest, second, stroke, moved, lift, drag, or -.
+    const char *mHoldEnd = "-";
+    // ⓘ The route, and the pad: which pad this was, how many reports the touch
+    // arrived in and the longest wait between two of them on THIS PC's clock,
+    // and how long the touch lasted on the PAD's own clock. A pad clock that
+    // disagrees with the arrival clock, or a long gap between reports, is the
+    // path between the pad and this PC bunching or delaying the touch.
+    std::string mKind;
+    int mReports = 0;
+    long long mLastArrival = 0;
+    long long mMaxGap = 0;
+    bool mPadValid = false;
+    uint32_t mPadStart = 0;
+    uint32_t mPadLast = 0;
 };
 
 // ---- Measurement ------------------------------------------------------------
@@ -158,6 +197,34 @@ inline void measure_begin(TouchState &st, int fingers, const TouchPoint &only, l
     st.mTailStartMs = -1;
     st.mCursorTail = 0;
     st.mClicked = false;
+    st.mHoldEnd = "-";
+}
+
+// Every report of a touch, the first included. ⓘ The DualSense stamps each
+// report with its own clock, in thirds of a microsecond, at [28..31] of the
+// USB-shaped report both maps produce (the Edge shares the layout).
+inline void measure_clock(TouchState &st, const ctm_rebind::Layout &lay, const uint8_t *data,
+                          size_t len, long long nowMs, bool first, const char *kind)
+{
+    const bool padClock = std::strcmp(lay.name, "ds5") == 0 && len >= 32;
+    const uint32_t pad = padClock
+        ? (static_cast<uint32_t>(data[28]) | (static_cast<uint32_t>(data[29]) << 8) |
+           (static_cast<uint32_t>(data[30]) << 16) | (static_cast<uint32_t>(data[31]) << 24))
+        : 0u;
+    if (first) {
+        st.mKind = kind != nullptr ? kind : lay.name;
+        st.mReports = 1;
+        st.mLastArrival = nowMs;
+        st.mMaxGap = 0;
+        st.mPadValid = padClock;
+        st.mPadStart = st.mPadLast = pad;
+        return;
+    }
+    ++st.mReports;
+    const long long gap = nowMs - st.mLastArrival;
+    if (gap > st.mMaxGap) st.mMaxGap = gap;
+    st.mLastArrival = nowMs;
+    if (st.mPadValid) st.mPadLast = pad;
 }
 
 // Every report after a touch's first. ⚠️ Called BEFORE the session's own
@@ -203,9 +270,22 @@ inline void measure_end(const TouchState &st, long long nowMs)
 {
     const auto n = [](long long v) { return v < 0 ? std::string("-") : std::to_string(v); };
     const bool hadSecond = st.mSecondMs >= 0;
+    const long long dur = nowMs - st.sessionStart;
+    // Pad clock: wrap-safe in 32 bits, thirds of a microsecond to milliseconds.
+    const uint32_t padTicks = st.mPadLast - st.mPadStart;
+    const std::string padDur = st.mPadValid ? std::to_string(padTicks / 3000u) + "ms" : std::string("-");
+    const std::string padEvery = (st.mPadValid && st.mReports > 1)
+        ? std::to_string(static_cast<double>(padTicks) / 3000.0 / (st.mReports - 1)).substr(0, 4) + "ms"
+        : std::string("-");
     device_log::input(device_log::msg()
-        << "[touch] end fingers=" << st.sessionMaxFingers
-        << " dur=" << (nowMs - st.sessionStart) << "ms"
+        << "[touch] end pad=" << st.mKind
+        << " fingers=" << st.sessionMaxFingers
+        << " dur=" << dur << "ms"
+        << " pad_dur=" << padDur
+        << " reports=" << st.mReports
+        << " pad_every=" << padEvery
+        << " max_gap=" << st.mMaxGap << "ms"
+        << " hold=" << st.mHoldEnd
         << " gap=" << (hadSecond ? std::to_string(st.mSecondMs - st.sessionStart) + "ms" : std::string("-"))
         << " travel_at_2nd=" << n(st.mTravelAtSecond)
         << " cursor_before_2nd=" << (hadSecond ? std::to_string(st.mCursorBeforeSecond) : std::string("-"))
@@ -263,9 +343,10 @@ inline void forget(const void *deviceKey)
     g_touch.erase(deviceKey);
 }
 
+// ⓘ `kind` names the pad in the log (ds5, ds5_edge); it changes nothing else.
 inline void step(const void *deviceKey, const std::string &section,
                  const ctm_rebind::Layout &lay, const uint8_t *data, size_t len,
-                 long long nowMs);
+                 long long nowMs, const char *kind = nullptr);
 
 // ⓘ A DualSense report, for callers that only ever had one.
 inline void step(const void *deviceKey, const std::string &section,
@@ -277,7 +358,7 @@ inline void step(const void *deviceKey, const std::string &section,
 // The core, with the clock passed in so tests can drive time directly.
 inline void step(const void *deviceKey, const std::string &section,
                  const ctm_rebind::Layout &lay, const uint8_t *data, size_t len,
-                 long long nowMs)
+                 long long nowMs, const char *kind)
 {
     if (data == nullptr || !lay.touch.present || len < ctm_rebind::touch_min_len(lay)) return;
 
@@ -337,6 +418,13 @@ inline void step(const void *deviceKey, const std::string &section,
     }
     const bool tapsOn = !oneTap.empty() || !twoTap.empty();
     const bool dragOn = !dragTo.empty();
+
+    // ⭐ HOW LONG A LONE FINGER WAITS FOR A SECOND ONE, when two fingers scroll
+    // (rhoquinn8217, 2026-09-30, "a delay to register movement"). The wait keeps
+    // the movement back rather than dropping it. 0 is no wait at all.
+    int moveDelayMs = device_config_int(section.c_str(), "touchpad_move_delay_ms", kMoveDelayDefaultMs);
+    if (moveDelayMs < 0) moveDelayMs = 0;
+    if (moveDelayMs > 1000) moveDelayMs = 1000;
 
     std::lock_guard<std::mutex> lock(g_touchMutex);
     TouchState &st = g_touch[deviceKey];
@@ -430,8 +518,10 @@ inline void step(const void *deviceKey, const std::string &section,
             st.anchorY = ay;
             st.sessionMoved = false;
             measure_begin(st, fingers, only, nowMs);
+            measure_clock(st, lay, data, len, nowMs, true, kind);
         } else if (fingers > 0) {
             measure_track(st, fingers, p1, p2, nowMs);   // before the count updates
+            measure_clock(st, lay, data, len, nowMs, false, kind);
             if (fingers > st.sessionMaxFingers) st.sessionMaxFingers = fingers;
             if (fingers != st.sessionFingers) {
                 // Finger count changed: the average jumps by construction, so
@@ -448,7 +538,25 @@ inline void step(const void *deviceKey, const std::string &section,
                 }
             }
         } else if (st.sessionActive) {
+            measure_clock(st, lay, data, len, nowMs, false, kind);
             const long long heldMs = nowMs - st.sessionStart;
+            // ⭐ A HOLD STILL RUNNING AT THE LIFT. A touch that never left the
+            // tap distance moved nothing, click or no click -- a slow tap is
+            // not a move. One that did leave it, but lifted before its wait was
+            // up, was a quick flick: send what it moved.
+            if (st.holding) {
+                if (tapsOn && !st.sessionMoved) {
+                    st.mHoldEnd = heldMs <= kTapMaxMs ? "tap" : "rest";
+                } else if (st.sessionMaxFingers < 2 && (st.heldX != 0 || st.heldY != 0)) {
+                    ctm_gyro_mouse::shared_mailbox().push(
+                        ctm_gyro_mouse::MouseDelta{st.heldX, st.heldY});
+                    ctm_gyro_mouse_ensure_mouse_started();
+                    measure_cursor(st, st.heldX, st.heldY);
+                    st.mHoldEnd = "lift";
+                }
+                st.holding = false;
+                st.heldX = st.heldY = 0;
+            }
             if (tapsOn && !st.sessionMoved && heldMs <= kTapMaxMs) {
                 // ⓘ Whichever of the two this tap was. A double click is still
                 // simply two taps, with no special case -- that has not changed.
@@ -480,15 +588,22 @@ inline void step(const void *deviceKey, const std::string &section,
             st.cursorId = only.id;
             st.lastX = only.x;
             st.lastY = only.y;
-        } else if (tapsOn && st.sessionActive && !st.sessionMoved &&
-                   (nowMs - st.sessionStart) <= kTapMaxMs) {
-            // ⭐ THE TAP GUARD (hardware finding, 2026-08-31): tapping nudged
-            // the cursor a few pixels. While a touch could still become a tap
-            // -- inside the slop, inside the tap window -- the cursor holds
-            // still and the ANCHOR FOLLOWS THE FINGER, so when the touch stops
-            // being tap-shaped, movement flows from right here with no
-            // replayed jump. Only active when taps are on: a pure cursor
-            // config keeps zero-latency movement.
+            // ⭐ THE HOLD STARTS WITH A FRESH TOUCH, when anything could still
+            // claim it: a tap, or a second finger for a two-finger scroll. It
+            // replaces the tap guard of 2026-08-31, which let go the moment a
+            // finger passed 15 units -- so a scroll's first finger, or a tap's
+            // roll, moved the cursor. ⓘ A cursor-only config never holds and
+            // keeps zero-latency movement, as it always did.
+            st.holding = (tapsOn || scrollFingers == 2) && st.sessionMaxFingers < 2;
+            st.holdX0 = only.x;
+            st.holdY0 = only.y;
+            st.heldX = 0;
+            st.heldY = 0;
+        } else if (st.sessionMaxFingers >= 2) {
+            // ⭐ AFTER TWO FINGERS, NOTHING MOVES UNTIL EVERY FINGER HAS LIFTED
+            // (measured 2026-09-30: 3 of 11 scrolls moved the cursor while one
+            // finger lifted before the other, by up to 588 px). The finger
+            // left behind is the end of a scroll, not the start of a move.
             st.lastX = only.x;
             st.lastY = only.y;
             st.carryX = 0.0f;
@@ -506,7 +621,36 @@ inline void step(const void *deviceKey, const std::string &section,
             st.carryY = fy - static_cast<float>(py);
             st.lastX = only.x;
             st.lastY = only.y;
-            if (px != 0 || py != 0) {
+            if (st.holding) {
+                st.heldX += px;
+                st.heldY += py;
+                // ⭐ WHEN THE HOLD LETS GO, sending everything it kept, so the
+                // cursor catches up to the finger and nothing is lost:
+                //   stroke  the finger travelled kLongStrokeUnits: a move, at once
+                //   drag    the pad is pressed in: a drag is under way
+                //   moved   no tap is possible any more (past the tap distance or
+                //           the tap time) AND no second finger is coming (the
+                //           wait is over, or two-finger scroll is off)
+                const long long age = nowMs - st.sessionStart;
+                const bool tapPossible = tapsOn && !st.sessionMoved && age <= kTapMaxMs;
+                const bool secondPossible = scrollFingers == 2 && age < moveDelayMs;
+                const char *release = nullptr;
+                if (travel_from(st.holdX0, st.holdY0, only) >= kLongStrokeUnits) release = "stroke";
+                else if (st.dragging) release = "drag";
+                else if (!tapPossible && !secondPossible) release = "moved";
+                if (release != nullptr) {
+                    st.holding = false;
+                    st.mHoldEnd = release;
+                    if (st.heldX != 0 || st.heldY != 0) {
+                        ctm_gyro_mouse::shared_mailbox().push(
+                            ctm_gyro_mouse::MouseDelta{st.heldX, st.heldY});
+                        ctm_gyro_mouse_ensure_mouse_started();
+                        measure_cursor(st, st.heldX, st.heldY);
+                    }
+                    st.heldX = 0;
+                    st.heldY = 0;
+                }
+            } else if (px != 0 || py != 0) {
                 ctm_gyro_mouse::shared_mailbox().push(
                     ctm_gyro_mouse::MouseDelta{px, py});
                 ctm_gyro_mouse_ensure_mouse_started();
@@ -514,6 +658,13 @@ inline void step(const void *deviceKey, const std::string &section,
             }
         }
     } else {
+        // ⭐ A SECOND FINGER LANDED WHILE THE FIRST WAS HELD: that was the start
+        // of a scroll, and what it moved goes with it. ⓘ A lift is settled
+        // above, at the end of the tap session, before this runs.
+        if (st.holding && fingers >= 2) st.mHoldEnd = "second";
+        st.holding = false;
+        st.heldX = 0;
+        st.heldY = 0;
         st.cursorTracking = false;
         st.cursorId = -1;
         st.carryX = 0.0f;
@@ -543,6 +694,10 @@ inline void step(const void *deviceKey, const std::string &section,
                 ctm_mouse_device::add_wheel(natural ? ticks : -ticks);
                 ctm_gyro_mouse_ensure_mouse_started();
                 st.mScrollTicks += ticks < 0 ? -ticks : ticks;
+                // ⭐ A TOUCH THAT SCROLLED IS NOT A TAP. With the tap distance
+                // at 100, a short scroll could otherwise end inside it and
+                // right-click as it lifted.
+                st.sessionMoved = true;
             }
         }
     } else {
@@ -566,7 +721,7 @@ inline void on_ds5_input(const void *deviceKey,
     const InputPad pad = device_input_pad_for(descriptor);
     if (pad.layout == nullptr || !pad.layout->touch.present) return;
     step(deviceKey, device_settings_section(pad.kind, linkedConfig), *pad.layout,
-         data, len, touch_now_ms());
+         data, len, touch_now_ms(), pad.kind);
 }
 
 } // namespace ctm_touch_mouse
