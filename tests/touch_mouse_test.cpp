@@ -662,15 +662,13 @@ int run_touch_mouse_tests()
         auto r = rest_report();
         set_point(r, 0, true, 1, 300, 300);
         run_step(r, 0);
-        set_point(r, 0, true, 1, 600, 300);
-        run_step(r, 20);
-        set_point(r, 0, true, 1, 900, 300);
-        run_step(r, 40);
-        set_point(r, 0, true, 1, 1200, 300);
-        run_step(r, 60);
+        for (int i = 1; i <= 9; ++i) {         // 900 units in 45 ms
+            set_point(r, 0, true, 1, 300 + 100 * i, 300);
+            run_step(r, 5 * i);
+        }
         set_point(r, 0, true, 1, 1210, 300);
         r[10] = static_cast<uint8_t>(r[10] | 0x02);
-        run_step(r, 80);
+        run_step(r, 50);
         CTM_CHECK_EQ(static_cast<int>(g_dragMask), 0x01);
         CTM_CHECK_EQ(static_cast<int>(g_cursorX), 1900);
         CTM_CHECK_EQ(g_placeCount, 0);
@@ -785,6 +783,68 @@ int run_touch_mouse_tests()
         CTM_CHECK_EQ(g_clickCount, 1);
         CTM_CHECK_EQ(static_cast<int>(g_lastClick), 0x02);
         CTM_CHECK_EQ(g_pushCount, 0);
+    }
+
+    section("touch: a leap in one report is the pad, not a finger, and moves nothing");
+    {
+        // ⓘ Measured 2026-09-30: as a second finger came down, the pad reported
+        // the first leaping 200 to 490 units in one report. The biggest real
+        // step in 408 one-finger touches was 108.
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_to_mouse"] = "true";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 400, 300);
+        run_step(r, 0);
+        set_point(r, 0, true, 1, 410, 300);
+        run_step(r, 4);
+        set_point(r, 0, true, 1, 750, 310);    // the pad leaps 340 units
+        run_step(r, 8);
+        CTM_CHECK_EQ(static_cast<int>(g_pushedX), 10);
+        set_point(r, 0, true, 1, 760, 310);    // and the finger carries on from there
+        run_step(r, 12);
+        CTM_CHECK_EQ(static_cast<int>(g_pushedX), 20);
+        CTM_CHECK_EQ(static_cast<int>(g_pushedY), 0);
+    }
+
+    section("touch: a fast flick still moves the cursor all the way");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_to_mouse"] = "true";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 100, 500);
+        run_step(r, 0);
+        for (int i = 1; i <= 10; ++i) {        // 110 units a report, past a real flick's biggest
+            set_point(r, 0, true, 1, 100 + 110 * i, 500);
+            run_step(r, 8 * i);
+        }
+        CTM_CHECK_EQ(static_cast<int>(g_pushedX), 1100);
+    }
+
+    section("touch: a second finger after a move: the pad's leap as it lands moves nothing");
+    {
+        // rhoquinn8217, 2026-09-30: moving with one finger, then bringing the
+        // second down to scroll, made the cursor jump a long way.
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_to_mouse"] = "true";
+        g_cfg["touchpad_scroll"] = "2";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 400, 300);
+        run_step(r, 0);
+        set_point(r, 0, true, 1, 400, 360);    // a move
+        run_step(r, 200);
+        set_point(r, 0, true, 1, 400, 380);
+        run_step(r, 400);
+        set_point(r, 0, true, 1, 700, 390);    // the pad leaps toward the second finger
+        run_step(r, 404);
+        set_point(r, 0, true, 1, 402, 382);    // then reports both
+        set_point(r, 1, true, 2, 1000, 400);
+        run_step(r, 408);
+        CTM_CHECK_EQ(static_cast<int>(g_pushedX), 0);
+        CTM_CHECK_EQ(static_cast<int>(g_pushedY), 80);
+        CTM_CHECK_EQ(g_placeCount, 0);                  // no put-back: the move stands
     }
 
     section("touch: a short scroll is not a two-finger tap");
@@ -960,7 +1020,7 @@ int run_touch_mouse_tests()
         auto r = rest_report();
         set_point(r, 0, true, 1, 100, 100);
         run_step(r, 0);
-        set_point(r, 0, true, 1, 500, 500);
+        set_point(r, 0, true, 1, 150, 150);    // a finger's step, not a leap
         run_step(r, 16);
         CTM_CHECK(g_pushCount > 0);
     }

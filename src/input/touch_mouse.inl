@@ -92,6 +92,14 @@ constexpr long long kPutBackCheckMs = 40;
 constexpr long long kTailRestMs = 30;
 constexpr long long kTailMaxMs = 150;
 
+// ⭐ THE PAD LEAPS; A FINGER DOES NOT (measured 2026-09-30). As a second finger
+// comes down beside the first, the pad can report the first leaping 200 to 490
+// units in a single report before it reports two, and the cursor leapt with it
+// (rhoquinn8217: "very large jumps"). The biggest real step in 408 one-finger
+// touches that day was 108 units, in a fast flick. So a bigger step moves
+// nothing, and the finger carries on from wherever the pad puts it next.
+constexpr int kJumpUnits = 120;
+
 // Pad units of two-finger travel per wheel tick, at scroll speed 100.
 constexpr int kScrollUnitsPerTick = 60;
 
@@ -152,6 +160,14 @@ struct TouchState {
     int restY = 0;
     long long restSince = 0;
 
+    // ⓘ MEASUREMENT: the one finger's last few positions, each time it moved,
+    // for a line about what the pad did just before a leap or a second finger.
+    struct PathPoint { long long t; int x; int y; };
+    static constexpr int kPath = 10;
+    PathPoint path[kPath] = {};
+    int pathCount = 0;
+    int pathNext = 0;
+
     // Scroll tracking (two fingers), on the average of both y positions.
     bool scrollTracking = false;
     float lastAvgY = 0.0f;
@@ -202,6 +218,9 @@ struct TouchState {
     // back, and why: rest, or time.
     long long mResumeMs = -1;
     const char *mResumeBy = "-";
+    // Leaps the cursor ignored (kJumpUnits), and the biggest.
+    int mJumps = 0;
+    int mMaxJump = 0;
     bool mClicked = false;
     // Which put-back this touch made: tap, second, press, or -.
     const char *mPutBack = "-";
@@ -257,6 +276,8 @@ inline void measure_begin(TouchState &st, int fingers, const TouchPoint &only, l
     st.mCursorTail = 0;
     st.mResumeMs = -1;
     st.mResumeBy = "-";
+    st.mJumps = 0;
+    st.mMaxJump = 0;
     st.mClicked = false;
     st.mPutBack = "-";
     st.mPrevX = only.x;
@@ -367,8 +388,34 @@ inline void measure_end(const TouchState &st, long long nowMs)
         << " tail=" << (st.mTailStartMs >= 0 ? std::to_string(nowMs - st.mTailStartMs) + "ms" : std::string("-"))
         << " resume=" << (st.mResumeMs >= 0 ? std::to_string(st.mResumeMs) + "ms/" + st.mResumeBy : std::string("-"))
         << " cursor_tail=" << st.mCursorTail
+        << " jumps=" << st.mJumps
+        << " max_jump=" << st.mMaxJump
         << " moved=" << (st.sessionMoved ? "yes" : "no")
         << " tap=" << (st.mClicked ? "click" : "no"));
+}
+
+// The one finger's recent path, oldest first, as " -<ms ago>:<x>,<y>".
+inline std::string path_text(const TouchState &st, long long nowMs)
+{
+    std::string s;
+    for (int i = st.pathCount; i >= 1; --i) {
+        const TouchState::PathPoint &p =
+            st.path[(st.pathNext + TouchState::kPath - i) % TouchState::kPath];
+        s += " -" + std::to_string(nowMs - p.t) + ":" + std::to_string(p.x) + "," + std::to_string(p.y);
+    }
+    return s;
+}
+
+inline void path_add(TouchState &st, long long nowMs, const TouchPoint &p)
+{
+    if (st.pathCount > 0) {
+        const TouchState::PathPoint &last =
+            st.path[(st.pathNext + TouchState::kPath - 1) % TouchState::kPath];
+        if (last.x == p.x && last.y == p.y) return;
+    }
+    st.path[st.pathNext] = TouchState::PathPoint{nowMs, p.x, p.y};
+    st.pathNext = (st.pathNext + 1) % TouchState::kPath;
+    if (st.pathCount < TouchState::kPath) ++st.pathCount;
 }
 
 inline std::mutex g_touchMutex;
@@ -709,6 +756,14 @@ inline void step(const void *deviceKey, const std::string &section,
                 st.homeValid && st.movedCursor && nowMs - st.sessionStart <= kSecondFingerMs) {
                 put_back(st, st.homeX, st.homeY, nowMs, "second");
             }
+            // ⓘ MEASUREMENT: what the pad did as the second finger came down.
+            if (fingers >= 2 && st.sessionFingers < 2 && cursorOn) {
+                device_log::input(device_log::msg()
+                    << "[touch] second finger at +" << (nowMs - st.sessionStart)
+                    << "ms, first finger's path" << path_text(st, nowMs)
+                    << " | now #" << p1.id << " " << p1.x << "," << p1.y
+                    << " #" << p2.id << " " << p2.x << "," << p2.y);
+            }
             measure_track(st, fingers, p1, p2, nowMs);   // before the count updates
             measure_clock(st, lay, data, len, nowMs, false, kind);
             if (fingers > st.sessionMaxFingers) st.sessionMaxFingers = fingers;
@@ -770,6 +825,8 @@ inline void step(const void *deviceKey, const std::string &section,
             st.cursorId = only.id;
             st.lastX = only.x;
             st.lastY = only.y;
+            st.pathCount = 0;
+            st.pathNext = 0;
             // A finger has just lifted and this one stayed: it waits.
             if (st.sessionMaxFingers >= 2) {
                 st.tailLive = false;
@@ -815,7 +872,21 @@ inline void step(const void *deviceKey, const std::string &section,
             }
             const bool still = st.pressStill ||
                                (tapsOn && !st.cursorLive && (nowMs - st.sessionStart) <= kTapMaxMs);
+            const int step = travel_from(st.lastX, st.lastY, only);
             if (still) {
+                st.lastX = only.x;
+                st.lastY = only.y;
+                st.carryX = 0.0f;
+                st.carryY = 0.0f;
+            } else if (step > kJumpUnits) {
+                // ⭐ THE PAD LEAPT (see kJumpUnits): nothing moves, and the
+                // finger carries on from where the pad puts it now.
+                device_log::input(device_log::msg()
+                    << "[touch] leap of " << step << " units ignored at +"
+                    << (nowMs - st.sessionStart) << "ms, path" << path_text(st, nowMs)
+                    << " now " << only.x << "," << only.y);
+                ++st.mJumps;
+                if (step > st.mMaxJump) st.mMaxJump = step;
                 st.lastX = only.x;
                 st.lastY = only.y;
                 st.carryX = 0.0f;
@@ -843,6 +914,7 @@ inline void step(const void *deviceKey, const std::string &section,
                 }
             }
         }
+        path_add(st, nowMs, only);
     } else {
         st.cursorTracking = false;
         st.cursorId = -1;
