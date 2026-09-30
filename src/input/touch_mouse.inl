@@ -43,23 +43,43 @@ namespace ctm_touch_mouse {
 
 // Tap limits. A tap is a touch that ends quickly and barely moved -- both
 // bounds exist to keep an ordinary grip from clicking things.
-constexpr long long kTapMaxMs = 250;
-// ⭐ 100, UP FROM 15 (measured 2026-09-30 on a DualSense Edge). A real finger
-// rolls as it lands and lifts: 8 of 10 taps moved 23 to 84 units, every one
-// well inside the time limit, so at 15 they moved the cursor instead of
-// clicking. 100 clears the largest with room to spare.
+// ⭐ 400, UP FROM 250 (measured 2026-09-30 on a DualSense Edge): slow taps took
+// up to 390 ms, moving only 6 to 32 units, and failed on time alone.
+constexpr long long kTapMaxMs = 400;
+// ⭐ 100, UP FROM 15 (measured the same day). A real finger rolls as it lands
+// and lifts: 8 of 10 taps moved 23 to 84 units, so at 15 they moved the
+// cursor instead of clicking. 100 clears the largest with room to spare.
 constexpr int kTapSlopUnits = 100;
 
-// ⭐ A LONE FINGER THAT TRAVELS THIS FAR IS MOVING THE CURSOR, whatever else
-// could still happen, and stops waiting. Measured the same day: a scrolling
-// first finger had covered 132 units at most when its partner landed, and a
-// quick flick passes 300 within its first 15 ms or so.
-constexpr int kLongStrokeUnits = 300;
-
-// How long a lone finger waits for a second one when two fingers scroll. The
-// latest second finger measured landed 119 ms after the first. A setting,
-// touchpad_move_delay_ms; this is its default.
-constexpr int kMoveDelayDefaultMs = 150;
+// ⭐ THE CURSOR MOVES AT ONCE, AND IS PUT BACK INSTEAD (rhoquinn8217,
+// 2026-09-30). Holding every move back until a touch showed what it was made
+// the touchpad jump and feel unresponsive. So the cursor follows the finger
+// straight away, and a touch that turns out NOT to be a move puts the real
+// cursor back where it belongs:
+//   a tap           back to where the finger landed, then the click
+//   a late 2nd finger  back to where the first landed, then the scroll
+//   a press to drag back to a moment before the press, then the grab
+//
+// How far a finger may move before the cursor follows at all, while a tap is
+// still possible and again just after a press. The same 15 units the tap
+// guard used before 2026-09-30, so small rolls never even twitch the cursor.
+constexpr int kStillUnits = 15;
+// A second finger this soon after the first puts the cursor back: a scroll
+// that started late, not a move then a scroll. Latest measured: 125 ms.
+constexpr long long kSecondFingerMs = 200;
+// How long before a press the grab goes back to: where the cursor was before
+// the finger started pressing down. A starting value, to be read off the log.
+constexpr long long kPressLookbackMs = 100;
+// ⭐ BUT ONLY A PRESS FROM A FINGER THAT WAS NEARLY STILL (rhoquinn8217,
+// 2026-09-30): a press straight after a fast long move would otherwise go
+// back to somewhere along the move, which is not where anyone meant to grab.
+// A finger that travelled further than this in the lookback was moving on
+// purpose, and the grab happens where the cursor is. A starting value; the
+// press log line shows the travel.
+constexpr int kPressMaxBackUnits = 120;
+// After a put-back, check it again for this long, for movement that was
+// already on its way to Windows when it happened.
+constexpr long long kPutBackCheckMs = 40;
 
 // Pad units of two-finger travel per wheel tick, at scroll speed 100.
 constexpr int kScrollUnitsPerTick = 60;
@@ -92,15 +112,27 @@ struct TouchState {
     float carryX = 0.0f;
     float carryY = 0.0f;
 
-    // ⭐ THE HOLD (rhoquinn8217, 2026-09-30). A new touch keeps its cursor
-    // movement back until it shows what it is: a tap (discarded), a second
-    // finger arriving for a scroll (discarded), or a move (sent in one go, so
-    // nothing is lost). See step() for when each happens.
-    bool holding = false;
-    int holdX0 = 0;          // where the finger landed
-    int holdY0 = 0;
-    int32_t heldX = 0;       // cursor pixels kept back
-    int32_t heldY = 0;
+    // ⭐ PUTTING THE CURSOR BACK (see the constants above).
+    bool homeValid = false;       // the real cursor, read when the first finger landed
+    long homeX = 0;
+    long homeY = 0;
+    bool movedCursor = false;     // this touch has sent cursor movement
+    bool cursorLive = false;      // past kStillUnits: the cursor follows the finger
+    int stillX0 = 0;              // where the still distance is measured from
+    int stillY0 = 0;
+    bool pressStill = false;      // just pressed to drag: still until kStillUnits
+    int pressX0 = 0;              // where the finger was at the press
+    int pressY0 = 0;
+    long placeX = 0;              // where the cursor was last put back to
+    long placeY = 0;
+    long long checkUntil = 0;     // and when to stop checking it stayed there
+    // The real cursor's recent path while a finger is down, and the finger's,
+    // one sample every few ms, for "a moment before the press".
+    struct Sample { long long t; long cx; long cy; int fx; int fy; };
+    static constexpr int kSamples = 96;
+    Sample samples[kSamples] = {};
+    int sampleCount = 0;
+    int sampleNext = 0;
 
     // Scroll tracking (two fingers), on the average of both y positions.
     bool scrollTracking = false;
@@ -149,8 +181,13 @@ struct TouchState {
     long long mTailStartMs = -1;
     int mCursorTail = 0;
     bool mClicked = false;
-    // How the hold ended: tap, rest, second, stroke, moved, lift, drag, or -.
-    const char *mHoldEnd = "-";
+    // Which put-back this touch made: tap, second, press, or -.
+    const char *mPutBack = "-";
+    // The first finger's largest move between two reports, in pad units. A
+    // real finger covers little in one report; a big step is the pad jumping.
+    int mPrevX = 0;
+    int mPrevY = 0;
+    int mMaxStep = 0;
     // ⓘ The route, and the pad: which pad this was, how many reports the touch
     // arrived in and the longest wait between two of them on THIS PC's clock,
     // and how long the touch lasted on the PAD's own clock. A pad clock that
@@ -197,7 +234,10 @@ inline void measure_begin(TouchState &st, int fingers, const TouchPoint &only, l
     st.mTailStartMs = -1;
     st.mCursorTail = 0;
     st.mClicked = false;
-    st.mHoldEnd = "-";
+    st.mPutBack = "-";
+    st.mPrevX = only.x;
+    st.mPrevY = only.y;
+    st.mMaxStep = 0;
 }
 
 // Every report of a touch, the first included. ⓘ The DualSense stamps each
@@ -243,6 +283,10 @@ inline void measure_track(TouchState &st, int fingers, const TouchPoint &p1,
             st.mSecondMs = nowMs;
             st.mTravelAtSecond = t;
         } else if (first) {
+            const int step = travel_from(st.mPrevX, st.mPrevY, *first);
+            if (step > st.mMaxStep) st.mMaxStep = step;
+            st.mPrevX = first->x;
+            st.mPrevY = first->y;
             st.mLastAlone = t;
             if (t > st.mMaxAlone) st.mMaxAlone = t;
             const long long age = nowMs - st.sessionStart;
@@ -285,7 +329,8 @@ inline void measure_end(const TouchState &st, long long nowMs)
         << " reports=" << st.mReports
         << " pad_every=" << padEvery
         << " max_gap=" << st.mMaxGap << "ms"
-        << " hold=" << st.mHoldEnd
+        << " put_back=" << st.mPutBack
+        << " max_step=" << st.mMaxStep
         << " gap=" << (hadSecond ? std::to_string(st.mSecondMs - st.sessionStart) + "ms" : std::string("-"))
         << " travel_at_2nd=" << n(st.mTravelAtSecond)
         << " cursor_before_2nd=" << (hadSecond ? std::to_string(st.mCursorBeforeSecond) : std::string("-"))
@@ -341,6 +386,83 @@ inline void forget(const void *deviceKey)
         ctm_mouse_device::set_drag_for(deviceKey, 0x00);
     }
     g_touch.erase(deviceKey);
+}
+
+// ---- Putting the cursor back ------------------------------------------------
+
+inline void put_back(TouchState &st, long x, long y, long long nowMs, const char *why)
+{
+    // Movement not yet sent would land after the put-back and move it off again.
+    ctm_gyro_mouse::shared_mailbox().clear();
+    ctm_gyro_mouse::cursor_place(x, y);
+    st.placeX = x;
+    st.placeY = y;
+    st.checkUntil = nowMs + kPutBackCheckMs;
+    st.mPutBack = why;
+}
+
+inline void put_back_again(TouchState &st)
+{
+    long x = 0;
+    long y = 0;
+    if (ctm_gyro_mouse::cursor_read(&x, &y) && (x != st.placeX || y != st.placeY)) {
+        ctm_gyro_mouse::cursor_place(st.placeX, st.placeY);
+    }
+}
+
+// One sample every few ms of the real cursor and the finger, while a finger
+// is down.
+inline void remember(TouchState &st, long long nowMs, const TouchPoint &finger)
+{
+    if (st.sampleCount > 0) {
+        const int newest = (st.sampleNext + TouchState::kSamples - 1) % TouchState::kSamples;
+        if (nowMs - st.samples[newest].t < 4) return;
+    }
+    long cx = 0;
+    long cy = 0;
+    if (!ctm_gyro_mouse::cursor_read(&cx, &cy)) return;
+    st.samples[st.sampleNext] = TouchState::Sample{nowMs, cx, cy, finger.x, finger.y};
+    st.sampleNext = (st.sampleNext + 1) % TouchState::kSamples;
+    if (st.sampleCount < TouchState::kSamples) ++st.sampleCount;
+}
+
+// The newest sample at least agoMs old; for a touch younger than that, its
+// first sample, which is where it began.
+inline const TouchState::Sample *sample_before(const TouchState &st, long long nowMs, long long agoMs)
+{
+    const TouchState::Sample *oldest = nullptr;
+    for (int i = 0; i < st.sampleCount; ++i) {
+        const int idx = (st.sampleNext + TouchState::kSamples - 1 - i) % TouchState::kSamples;
+        if (nowMs - st.samples[idx].t >= agoMs) return &st.samples[idx];
+        oldest = &st.samples[idx];
+    }
+    return oldest;
+}
+
+// ⭐ A PRESS GOES BACK to where the cursor was kPressLookbackMs before it. The
+// log line is how that number gets set from a real hand: how far the finger
+// had moved in the 50, 100 and 200 ms before the click.
+inline void put_back_for_press(TouchState &st, long long nowMs, const TouchPoint &finger)
+{
+    const auto moved = [&](long long ago) {
+        const TouchState::Sample *b = sample_before(st, nowMs, ago);
+        return b == nullptr ? std::string("-") : std::to_string(travel_from(b->fx, b->fy, finger));
+    };
+    const TouchState::Sample *s = sample_before(st, nowMs, kPressLookbackMs);
+    long cx = 0;
+    long cy = 0;
+    const bool haveNow = ctm_gyro_mouse::cursor_read(&cx, &cy);
+    const int travel = s != nullptr ? travel_from(s->fx, s->fy, finger) : 0;
+    const bool fast = travel > kPressMaxBackUnits;
+    const bool goBack = s != nullptr && haveNow && !fast && (s->cx != cx || s->cy != cy);
+    device_log::input(device_log::msg()
+        << "[touch] press finger_moved 50ms=" << moved(50) << " 100ms=" << moved(100)
+        << " 200ms=" << moved(200) << " cursor_back="
+        << (goBack ? std::to_string(cx - s->cx) + "," + std::to_string(cy - s->cy) + "px"
+                   : std::string(fast ? "none (moving fast)" : "none")));
+    if (goBack) {
+        put_back(st, s->cx, s->cy, nowMs, "press");
+    }
 }
 
 // ⓘ `kind` names the pad in the log (ds5, ds5_edge); it changes nothing else.
@@ -419,13 +541,6 @@ inline void step(const void *deviceKey, const std::string &section,
     const bool tapsOn = !oneTap.empty() || !twoTap.empty();
     const bool dragOn = !dragTo.empty();
 
-    // ⭐ HOW LONG A LONE FINGER WAITS FOR A SECOND ONE, when two fingers scroll
-    // (rhoquinn8217, 2026-09-30, "a delay to register movement"). The wait keeps
-    // the movement back rather than dropping it. 0 is no wait at all.
-    int moveDelayMs = device_config_int(section.c_str(), "touchpad_move_delay_ms", kMoveDelayDefaultMs);
-    if (moveDelayMs < 0) moveDelayMs = 0;
-    if (moveDelayMs > 1000) moveDelayMs = 1000;
-
     std::lock_guard<std::mutex> lock(g_touchMutex);
     TouchState &st = g_touch[deviceKey];
 
@@ -461,20 +576,48 @@ inline void step(const void *deviceKey, const std::string &section,
         return;
     }
 
+    const TouchPoint p1 = read_point(data, static_cast<size_t>(lay.touch.finger1));
+    const TouchPoint p2 = read_point(data, static_cast<size_t>(lay.touch.finger2));
+    const int fingers = (p1.down ? 1 : 0) + (p2.down ? 1 : 0);
+    const TouchPoint &only = p1.down ? p1 : p2;   // meaningful when fingers == 1
+
+    // ⭐ A PUT-BACK IS CHECKED AGAIN FOR A MOMENT, for movement that was already
+    // on its way to Windows when it happened. ⓘ Nothing of this touch moves the
+    // cursor meanwhile: a tap has lifted, a scroll moves nothing, and a press
+    // stays still until the finger has clearly moved.
+    if (st.checkUntil != 0) {
+        if (nowMs > st.checkUntil) st.checkUntil = 0;
+        else put_back_again(st);
+    }
+
+    // The recent path, for a press to go back along.
+    if (cursorOn && fingers > 0) remember(st, nowMs, only);
+
     // ---- Drag ---------------------------------------------------------------
-    // Read before anything else so a drag survives whatever the cursor and tap
-    // paths decide to do with the same touch.
+    // Read before the tap and cursor paths so a drag survives whatever they
+    // decide to do with the same touch.
     const uint8_t dragMask = touch_action_mask(dragTo);
     if (dragOn && dragMask != 0) {
         const bool padPressed = ctm_rebind::touch_pressed(lay, data, len);
-        const TouchPoint d1 = read_point(data, static_cast<size_t>(lay.touch.finger1));
-        const TouchPoint d2 = read_point(data, static_cast<size_t>(lay.touch.finger2));
-        const bool anyFinger = d1.down || d2.down;
+        const bool anyFinger = fingers > 0;
 
         if (!st.dragging) {
             // Grab: the pad clicked in WITH a finger on it. A click with no
             // finger is an ordinary click and is left alone.
             if (padPressed && anyFinger) {
+                // ⭐ BACK TO A MOMENT BEFORE THE PRESS, THEN THE GRAB
+                // (rhoquinn8217, 2026-09-30): pressing the pad down rolls the
+                // finger, and the cursor slid off what was to be dragged. The pad
+                // reports only the click, not the pressing, so the grab goes back
+                // to where the cursor was before the pressing began. Then the
+                // cursor stays still until the finger has clearly moved, so the
+                // roll as the click bottoms out moves nothing either.
+                if (cursorOn) {
+                    put_back_for_press(st, nowMs, only);
+                    st.pressStill = true;
+                    st.pressX0 = only.x;
+                    st.pressY0 = only.y;
+                }
                 st.dragging = true;
                 ctm_mouse_device::set_drag_for(deviceKey, dragMask);
                 ctm_gyro_mouse_ensure_mouse_started();
@@ -491,11 +634,6 @@ inline void step(const void *deviceKey, const std::string &section,
         st.dragging = false;
         ctm_mouse_device::set_drag_for(deviceKey, 0x00);
     }
-
-    const TouchPoint p1 = read_point(data, static_cast<size_t>(lay.touch.finger1));
-    const TouchPoint p2 = read_point(data, static_cast<size_t>(lay.touch.finger2));
-    const int fingers = (p1.down ? 1 : 0) + (p2.down ? 1 : 0);
-    const TouchPoint &only = p1.down ? p1 : p2;   // meaningful when fingers == 1
 
     // ---- Tap session --------------------------------------------------------
     {
@@ -519,7 +657,21 @@ inline void step(const void *deviceKey, const std::string &section,
             st.sessionMoved = false;
             measure_begin(st, fingers, only, nowMs);
             measure_clock(st, lay, data, len, nowMs, true, kind);
+            // ⭐ WHERE THE CURSOR WAS AS THE TOUCH BEGAN, to go back to.
+            st.homeValid = cursorOn && fingers == 1 && ctm_gyro_mouse::cursor_read(&st.homeX, &st.homeY);
+            st.movedCursor = false;
+            st.cursorLive = false;
+            st.stillX0 = only.x;
+            st.stillY0 = only.y;
         } else if (fingers > 0) {
+            // ⭐ A SECOND FINGER SOON AFTER THE FIRST is a scroll that started
+            // late: the cursor goes back to where the first finger landed, and
+            // the scroll happens there. Later than kSecondFingerMs, it was a
+            // move and then a scroll, and the move stands.
+            if (fingers >= 2 && st.sessionFingers < 2 && scrollFingers == 2 && cursorOn &&
+                st.homeValid && st.movedCursor && nowMs - st.sessionStart <= kSecondFingerMs) {
+                put_back(st, st.homeX, st.homeY, nowMs, "second");
+            }
             measure_track(st, fingers, p1, p2, nowMs);   // before the count updates
             measure_clock(st, lay, data, len, nowMs, false, kind);
             if (fingers > st.sessionMaxFingers) st.sessionMaxFingers = fingers;
@@ -540,23 +692,6 @@ inline void step(const void *deviceKey, const std::string &section,
         } else if (st.sessionActive) {
             measure_clock(st, lay, data, len, nowMs, false, kind);
             const long long heldMs = nowMs - st.sessionStart;
-            // ⭐ A HOLD STILL RUNNING AT THE LIFT. A touch that never left the
-            // tap distance moved nothing, click or no click -- a slow tap is
-            // not a move. One that did leave it, but lifted before its wait was
-            // up, was a quick flick: send what it moved.
-            if (st.holding) {
-                if (tapsOn && !st.sessionMoved) {
-                    st.mHoldEnd = heldMs <= kTapMaxMs ? "tap" : "rest";
-                } else if (st.sessionMaxFingers < 2 && (st.heldX != 0 || st.heldY != 0)) {
-                    ctm_gyro_mouse::shared_mailbox().push(
-                        ctm_gyro_mouse::MouseDelta{st.heldX, st.heldY});
-                    ctm_gyro_mouse_ensure_mouse_started();
-                    measure_cursor(st, st.heldX, st.heldY);
-                    st.mHoldEnd = "lift";
-                }
-                st.holding = false;
-                st.heldX = st.heldY = 0;
-            }
             if (tapsOn && !st.sessionMoved && heldMs <= kTapMaxMs) {
                 // ⓘ Whichever of the two this tap was. A double click is still
                 // simply two taps, with no special case -- that has not changed.
@@ -566,6 +701,11 @@ inline void step(const void *deviceKey, const std::string &section,
                 const std::string &want = (st.sessionMaxFingers >= 2) ? twoTap : oneTap;
                 const uint8_t mask = touch_action_mask(want);
                 if (mask != 0) {
+                    // ⭐ A TAP CLICKS WHERE THE FINGER LANDED: if its roll moved
+                    // the cursor, the cursor goes back first.
+                    if (cursorOn && st.homeValid && st.movedCursor && st.sessionMaxFingers < 2) {
+                        put_back(st, st.homeX, st.homeY, nowMs, "tap");
+                    }
                     ctm_mouse_device::add_click(mask);
                     ctm_gyro_mouse_ensure_mouse_started();
                     st.mClicked = true;
@@ -576,6 +716,10 @@ inline void step(const void *deviceKey, const std::string &section,
             st.sessionMaxFingers = 0;
             st.sessionFingers = 0;
             st.sessionMoved = false;
+            st.homeValid = false;
+            st.pressStill = false;
+            st.sampleCount = 0;
+            st.sampleNext = 0;
         }
     }
 
@@ -588,17 +732,6 @@ inline void step(const void *deviceKey, const std::string &section,
             st.cursorId = only.id;
             st.lastX = only.x;
             st.lastY = only.y;
-            // ⭐ THE HOLD STARTS WITH A FRESH TOUCH, when anything could still
-            // claim it: a tap, or a second finger for a two-finger scroll. It
-            // replaces the tap guard of 2026-08-31, which let go the moment a
-            // finger passed 15 units -- so a scroll's first finger, or a tap's
-            // roll, moved the cursor. ⓘ A cursor-only config never holds and
-            // keeps zero-latency movement, as it always did.
-            st.holding = (tapsOn || scrollFingers == 2) && st.sessionMaxFingers < 2;
-            st.holdX0 = only.x;
-            st.holdY0 = only.y;
-            st.heldX = 0;
-            st.heldY = 0;
         } else if (st.sessionMaxFingers >= 2) {
             // ⭐ AFTER TWO FINGERS, NOTHING MOVES UNTIL EVERY FINGER HAS LIFTED
             // (measured 2026-09-30: 3 of 11 scrolls moved the cursor while one
@@ -609,62 +742,48 @@ inline void step(const void *deviceKey, const std::string &section,
             st.carryX = 0.0f;
             st.carryY = 0.0f;
         } else {
-            const int speed = device_config_int(section.c_str(), "touchpad_mouse_speed", 100);
-            const float scale = static_cast<float>(speed <= 0 ? 100 : speed) / 100.0f;
-            // ⭐ Carry the sub-pixel remainder, or slow precise movement rounds
-            // to zero forever -- the same lesson the gyro path learned.
-            const float fx = st.carryX + (only.x - st.lastX) * scale;
-            const float fy = st.carryY + (only.y - st.lastY) * scale;
-            const int32_t px = static_cast<int32_t>(fx);
-            const int32_t py = static_cast<int32_t>(fy);
-            st.carryX = fx - static_cast<float>(px);
-            st.carryY = fy - static_cast<float>(py);
-            st.lastX = only.x;
-            st.lastY = only.y;
-            if (st.holding) {
-                st.heldX += px;
-                st.heldY += py;
-                // ⭐ WHEN THE HOLD LETS GO, sending everything it kept, so the
-                // cursor catches up to the finger and nothing is lost:
-                //   stroke  the finger travelled kLongStrokeUnits: a move, at once
-                //   drag    the pad is pressed in: a drag is under way
-                //   moved   no tap is possible any more (past the tap distance or
-                //           the tap time) AND no second finger is coming (the
-                //           wait is over, or two-finger scroll is off)
-                const long long age = nowMs - st.sessionStart;
-                const bool tapPossible = tapsOn && !st.sessionMoved && age <= kTapMaxMs;
-                const bool secondPossible = scrollFingers == 2 && age < moveDelayMs;
-                const char *release = nullptr;
-                if (travel_from(st.holdX0, st.holdY0, only) >= kLongStrokeUnits) release = "stroke";
-                else if (st.dragging) release = "drag";
-                else if (!tapPossible && !secondPossible) release = "moved";
-                if (release != nullptr) {
-                    st.holding = false;
-                    st.mHoldEnd = release;
-                    if (st.heldX != 0 || st.heldY != 0) {
-                        ctm_gyro_mouse::shared_mailbox().push(
-                            ctm_gyro_mouse::MouseDelta{st.heldX, st.heldY});
-                        ctm_gyro_mouse_ensure_mouse_started();
-                        measure_cursor(st, st.heldX, st.heldY);
-                    }
-                    st.heldX = 0;
-                    st.heldY = 0;
+            // ⭐ STILL UNTIL THE FINGER HAS CLEARLY MOVED, while a tap is still
+            // possible and just after a press: the anchor follows the finger,
+            // so when it does move, movement flows from right there with no
+            // jump. kStillUnits is the tap guard's old 15 (2026-08-31). ⓘ A
+            // config with no taps moves at once, as it always did.
+            if (!st.cursorLive && travel_from(st.stillX0, st.stillY0, only) > kStillUnits) {
+                st.cursorLive = true;
+            }
+            if (st.pressStill && travel_from(st.pressX0, st.pressY0, only) > kStillUnits) {
+                st.pressStill = false;
+            }
+            const bool still = st.pressStill ||
+                               (tapsOn && !st.cursorLive && (nowMs - st.sessionStart) <= kTapMaxMs);
+            if (still) {
+                st.lastX = only.x;
+                st.lastY = only.y;
+                st.carryX = 0.0f;
+                st.carryY = 0.0f;
+            } else {
+                const int speed = device_config_int(section.c_str(), "touchpad_mouse_speed", 100);
+                const float scale = static_cast<float>(speed <= 0 ? 100 : speed) / 100.0f;
+                // ⭐ Carry the sub-pixel remainder, or slow precise movement rounds
+                // to zero forever -- the same lesson the gyro path learned.
+                const float fx = st.carryX + (only.x - st.lastX) * scale;
+                const float fy = st.carryY + (only.y - st.lastY) * scale;
+                const int32_t px = static_cast<int32_t>(fx);
+                const int32_t py = static_cast<int32_t>(fy);
+                st.carryX = fx - static_cast<float>(px);
+                st.carryY = fy - static_cast<float>(py);
+                st.lastX = only.x;
+                st.lastY = only.y;
+                if (px != 0 || py != 0) {
+                    ctm_gyro_mouse::shared_mailbox().push(
+                        ctm_gyro_mouse::MouseDelta{px, py});
+                    ctm_gyro_mouse_ensure_mouse_started();
+                    st.movedCursor = true;
+                    st.checkUntil = 0;   // the cursor is this touch's again
+                    measure_cursor(st, px, py);
                 }
-            } else if (px != 0 || py != 0) {
-                ctm_gyro_mouse::shared_mailbox().push(
-                    ctm_gyro_mouse::MouseDelta{px, py});
-                ctm_gyro_mouse_ensure_mouse_started();
-                measure_cursor(st, px, py);
             }
         }
     } else {
-        // ⭐ A SECOND FINGER LANDED WHILE THE FIRST WAS HELD: that was the start
-        // of a scroll, and what it moved goes with it. ⓘ A lift is settled
-        // above, at the end of the tap session, before this runs.
-        if (st.holding && fingers >= 2) st.mHoldEnd = "second";
-        st.holding = false;
-        st.heldX = 0;
-        st.heldY = 0;
         st.cursorTracking = false;
         st.cursorId = -1;
         st.carryX = 0.0f;

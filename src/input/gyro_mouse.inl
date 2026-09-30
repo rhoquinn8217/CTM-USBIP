@@ -548,6 +548,27 @@ inline void warp_cursor_to_centre()
     }
 }
 
+// ⭐ READ AND PUT BACK THE REAL CURSOR, for the touchpad (touch_mouse.inl):
+// a touch that turns out to be a tap, a scroll or a press puts the cursor
+// back where it was, rather than holding every move back to find out first.
+// Same reason as the recentre above: the synthetic mouse only sends relative
+// movement, and Windows' pointer acceleration would make a movement sent the
+// other way land somewhere else. ⓘ Both calls are in this process's DPI
+// space, so a read and a put-back always agree.
+inline bool cursor_read(long *x, long *y)
+{
+    POINT p;
+    if (!GetCursorPos(&p)) return false;
+    *x = p.x;
+    *y = p.y;
+    return true;
+}
+
+inline void cursor_place(long x, long y)
+{
+    SetCursorPos(static_cast<int>(x), static_cast<int>(y));
+}
+
 // ---- Per-device state ------------------------------------------------------
 //
 // One instance per bridged DS5 session. Holds the motion filter (calibration
@@ -895,6 +916,17 @@ public:
         *dx = static_cast<int8_t>(cx);
         *dy = static_cast<int8_t>(cy);
         return true;
+    }
+
+    // Drops movement not yet sent. ⓘ For the touchpad putting the cursor back:
+    // anything still waiting here would otherwise land after the put-back and
+    // move the cursor off again.
+    void clear()
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        pendingX_ = 0;
+        pendingY_ = 0;
+        hasPending_ = false;
     }
 
 private:
