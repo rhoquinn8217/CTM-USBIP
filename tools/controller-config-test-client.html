@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.33 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.34 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,13 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.34 Ten hints (T-248). The names hint is reworded and two are
+            added, all three in rhoquinn8217's words after seeing the
+            eight on screen: that this window opens whenever a device
+            is bridged, and that Quick mode is the way to switch
+            configs mid-game. The reworded one is the same length as
+            the one it replaces and the new two are a line each, so
+            none of them can push the footer past its two lines.
     2.66.33 An eighth hint: where a controller's name comes from, and
             that it is new on every connect (T-248, folded in from
             T-250). Shorter than hint 1, which already fits the two
@@ -3190,9 +3197,15 @@ var FOOTER_HINTS = [
   'From a keyboard: <b>Q</b> and <b>E</b> change controller, <b>P</b> moves ' +
   'this window, <b>R</b> resizes it.',
 
-  'Every bridged controller gets a name like <b>Titan</b> or <b>Wasabi</b>, so ' +
-  'you can say which one from across the room. It is a new name each time it ' +
-  'connects.'
+  // ⓘ The wording of this one and of the two after it is rhoquinn8217's
+  // own (2026-10-01), given after seeing the first eight on screen.
+  'Every bridged controller gets a name like <b>Titan</b> or <b>Wasabi</b>, a ' +
+  'quick identifier for multi-controller games. It is a new name each time it ' +
+  'connects.',
+
+  'This window opens whenever a device is <b>bridged</b>.',
+
+  'Use <b>Quick</b> mode mid-game to quick switch between controller configs.'
 ];
 
 // ⓘ Which hint is showing. Reset to 0 whenever the window opens, so the
@@ -8756,7 +8769,7 @@ function selfTest() {
   // ⓘ Rendering is not testable from here. The two-line reservation
   // (min-height:2.8em) is still measured by eye at Simple's width.
   {
-    ok('every hint is present', FOOTER_HINTS.length === 8,
+    ok('every hint is present', FOOTER_HINTS.length === 10,
        'got ' + FOOTER_HINTS.length);
     var allText = true, i;
     for (i = 0; i < FOOTER_HINTS.length; i++) {
