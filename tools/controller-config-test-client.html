@@ -28,6 +28,10 @@
             on both vocabularies -- "pad: (cross) / A" -- because a config
             is a file two people may read on two different pads, so
             picking one would be wrong half the time.
+            ⓘ The rebind list itself showed the raw button_circle until
+            2026-10-01: the labels were reachable only through
+            choiceLabel(), and that dropdown never called it. Found by
+            a hand test that needed names a person could see.
     2.66.24 Opening the mode selector no longer moves the footer about
             (T-243). pickerExpand sets position:fixed, so the box leaves
             the flow and the footer closes over the gap: .cbarText grew
@@ -4029,9 +4033,16 @@ function renderConfigEditor(hostId, configName, prefix, ordinal) {
             '<option value=""' + (String(shown) === '' ? ' selected' : '') +
             '>(not bound)</option>' +
             KEY_NAMES.map(function(k) {
+              // ⭐ choiceLabel, NOT the raw name: a pad button reads
+              // "pad: ○ / B" here, as it does in every other list.
+              // ⛔ It read button_circle until 2026-10-01. The label table
+              // existed and this dropdown never asked it, so the one list a
+              // remap is actually chosen from was the one without the names.
+              // ⓘ A key or a mouse action has no entry there and comes back
+              // as itself, so nothing else in the list changes.
               return '<option value="' + esc(k) + '"' +
                      (String(shown).toLowerCase() === k.toLowerCase() ? ' selected' : '') +
-                     '>' + esc(k) + '</option>';
+                     '>' + esc(choiceLabel(meta.key, k)) + '</option>';
             }).join('') + '</select>';
 
           // ⛔ THE BUTTONS THIS PAGE IS DRIVEN BY. Binding cross takes away the
