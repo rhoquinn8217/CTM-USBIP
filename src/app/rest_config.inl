@@ -483,6 +483,20 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
         return true;
     }
 
+    // ⭐ GET /favicon.ico -- the settings window's icon, which is the listener's
+    // own. A browser asks for this by itself; see favicon_response() for why it
+    // matters to a window that is not a web page to the person using it.
+    if (req.path == "/favicon.ico") {
+        if (req.method != "GET") {
+            *out = rest_error_response(405, "method not allowed", "Allow: GET, OPTIONS\r\n");
+            return true;
+        }
+        if (!ctm_ui_page::favicon_response(out)) {
+            *out = rest_error_response(404, "this build carries no icon");
+        }
+        return true;
+    }
+
     // GET /api/v1/devices
     if (req.path == "/api/v1/devices") {
         if (req.method != "GET") {

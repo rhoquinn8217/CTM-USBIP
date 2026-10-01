@@ -182,8 +182,27 @@ inline void thread_main()
         return (icon != nullptr && icon != (HICON)1) ? icon : nullptr;
     };
 
-    const wchar_t *iconSource = L"ddores.dll #108 (a controller)";
-    nid.hIcon = extract_system_icon(L"ddores.dll", 108);
+    // ⭐⭐ THE LISTENER'S OWN ICON FIRST (rhoquinn8217, 2026-10-01: *"update the
+    // window icon, the taskbar icon and the exe icon to the black bridge"*).
+    //
+    // ⓘ Everything above about ddores.dll is still true, and it is now the
+    // FALLBACK: a build with no icon resource gets the system gamepad, as before.
+    // ⚠️ The warning about 16 px applies to this one too. The .ico carries a
+    // frame drawn for that size (installer/make-icon-ds5.ps1 sharpens 16 to
+    // 48 px), which is the reason it holds up; a plain scale-down did not.
+    //
+    // ⓘ LoadImage at the small-icon size, not LoadIcon: LoadIcon answers with
+    // the 32 px frame and lets the shell shrink it, which throws that drawn
+    // 16 px frame away. Not LR_SHARED, so the handle is ours and is destroyed
+    // with the rest below.
+    const wchar_t *iconSource = L"the listener's own icon (the black bridge)";
+    nid.hIcon = static_cast<HICON>(LoadImageW(
+        GetModuleHandleW(nullptr), MAKEINTRESOURCEW(1), IMAGE_ICON,
+        GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR));
+    if (nid.hIcon == nullptr) {
+        nid.hIcon = extract_system_icon(L"ddores.dll", 108);
+        iconSource = L"ddores.dll #108 (a controller, the fallback)";
+    }
     if (nid.hIcon == nullptr) {
         nid.hIcon = extract_system_icon(L"joy.cpl", 0);
         iconSource = L"joy.cpl (a controller, the fallback)";

@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.30 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.35 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,13 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.35 The settings window wears the listener's icon. The page names
+            /favicon.ico, and the listener now answers it with the icon
+            built into the exe, so the window's title bar and its
+            taskbar button show the black bridge instead of the
+            browser's default.
+            ⓘ .31 to .34 are the hints branch and .25 the button remap
+            branch. Each is merged on its own, so they are skipped here.
     2.66.30 The virtual keyboard opens only while naming a config
             (T-247). reportField used to send editing=true for anything
             typeable, which is every setting's value box; it now asks
@@ -799,6 +806,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>DS5-USBIP Device Config</title>
+<!-- The window's icon. A browser draws an app window's title bar and
+     taskbar button from this, and the listener answers it with the icon
+     built into its own exe. ?v= makes a browser that cached the old
+     'no icon' answer ask again. -->
+<link rel="icon" href="/favicon.ico?v=1">
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }

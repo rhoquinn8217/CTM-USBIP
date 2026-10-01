@@ -70,4 +70,40 @@ inline std::string http_response()
     return out.str();
 }
 
+// ⭐⭐ THE SETTINGS WINDOW'S ICON (rhoquinn8217, 2026-10-01: *"update the
+// window icon, the taskbar icon and the exe icon to the black bridge"*).
+//
+// ⛔ THE WINDOW IS A BROWSER'S, SO THE EXE'S ICON NEVER REACHED IT. open_ui
+// starts Chrome or Edge with --app=, and a browser draws such a window's
+// title-bar and taskbar icon from the page's FAVICON. The listener answered
+// /favicon.ico with a 404, so the window wore the browser's default.
+//
+// ➡️ The .ico is linked into the exe a second time as raw bytes (RCDATA 101 in
+// app/ctm-usbip.rc) and handed back here. ONE FILE ON DISK feeds the exe, the
+// tray and this, so the three can never show three different bridges.
+//
+// ⓘ no-cache, not no-store: the browser may keep it but has to ask whether it
+// is still current, so a rebuilt icon shows up without anyone clearing a cache.
+inline const int kFaviconResourceId = 101;   // ⚠️ the same number as in the .rc
+
+inline bool favicon_response(std::string *out)
+{
+    HRSRC found = FindResourceW(nullptr, MAKEINTRESOURCEW(kFaviconResourceId), RT_RCDATA);
+    if (found == nullptr) return false;
+    HGLOBAL loaded = LoadResource(nullptr, found);
+    const void *bytes = (loaded != nullptr) ? LockResource(loaded) : nullptr;
+    const DWORD size = SizeofResource(nullptr, found);
+    if (bytes == nullptr || size == 0) return false;
+
+    std::ostringstream head;
+    head << "HTTP/1.1 200 OK\r\n"
+         << "Content-Type: image/x-icon\r\n"
+         << "Content-Length: " << size << "\r\n"
+         << "Cache-Control: no-cache\r\n"
+         << "Connection: close\r\n\r\n";
+    *out = head.str();
+    out->append(static_cast<const char *>(bytes), size);
+    return true;
+}
+
 } // namespace ctm_ui_page
