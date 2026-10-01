@@ -103,6 +103,10 @@ carry it; upstream's own history is unchanged.
 | 2026-09-24 | A keyboard can now drive the settings window fully. `Q` and `E` switch controller -- they existed only in `CONFIG_MODE_KEYS`, behind the three-modifier guard that tells a gated pad's keystroke from typing, so a bare `Q` reached nothing. `P` positions and `R` resizes, which a keyboard could not do at all: both were readable only from the pad's RAW report, so new `ui/position` and `ui/resize` routes call the same two functions the pad does (`snap_next`, `resize_next`) and cannot drift from it | `c1a49d0`, merge `61224dd` |
 | 2026-09-24 | The virtual keyboard opens only where you type FREE TEXT -- a config's name, the agent URL, the bearer token -- and not over a setting's value box, which the pad already steps through with `GP_EDITING`. ⚠️ Two mistakes are recorded with it because each was a different shape: the page's flag was too generous (any typeable field), and the listener's refusal keyed on the GATE rather than on the settings window being in front -- so with no pad gated the refusal was skipped entirely and a keyboard opened over anything | `4a1aeea`, `d6c9d2a`, `e1e05b1`, merge `61224dd` |
 | 2026-09-24 | ⛔ Landing on a tab no longer focuses a text field, which used to switch the page's keyboard off completely. `gpTab()` focused the first control on the pane and `#pane-overview`'s first control is the agent URL; a focused text field makes `typingInAField()` true, which stops arrows, Enter and every other key with no message. ⓘ Only reachable once a plain `Q` could drive `gpTab`. The text test is one shared function now, and `type === ''` counts -- `<input id="base">` has no type attribute at all | `a5688fc`, merge `61224dd` |
+| 2026-09-30 | The touchpad cursor moves at once, and is PUT BACK when a touch turns out not to be a move. A late second finger and a slow tap both used to move the cursor. Holding every move for 150 ms to see what the touch was fixed that and made the pad feel unresponsive, so it was dropped the same day. Now the real cursor is read as a finger lands and placed back with `SetCursorPos`: a tap clicks where the finger landed (taps measured on a DualSense Edge rolled 23 to 84 units and took up to 390 ms, so the tap limits went from 15 units and 250 ms to 100 and 400); a second finger within 200 ms goes back to where the first landed, and the scroll happens there; a press to drag goes back to where the cursor was 100 ms before it, unless the finger travelled over 120 units in that time. One `[touch] end` line per touch in `device.log` carries the numbers the limits were read from. | `4ace5c1`, `89dcdc4`, `b44c421` |
+| 2026-09-30 | A second finger coming down puts the cursor back to before the pad dragged the first one. For 30 to 75 ms before a DualSense Edge reports a second finger it moves the first finger's reported position toward it, sometimes across the whole pad, and can hand the first finger's touch id to the new one. A regular DualSense barely does: its largest put-back in one evening was 55 px against the Edge's 1,665 px. Nothing in a report says a finger is on its way, so the cursor goes back when it lands: to where it was 100 ms before, or to where the last scroll stroke left it if a finger lifted under 500 ms ago. ⛔ Ignoring any one-report step over 120 units was tried first and cut the fastest flicks short, whose real steps reached 188; the limit stays, at 300. Each landing logs the first finger's last ten positions and what the cursor was put back by. | `f378794`, `245eae5` |
+| 2026-09-30 | After a two-finger scroll, the finger left on the pad moves the cursor again without both lifting. It takes over once it has rested 30 ms and then moves, or after 150 ms if it is still sliding, so the slide as a scroll ends (measured at up to 113 ms and 588 px) still moves nothing. ⚠️ Only if the scroll had stopped before the other finger lifted: the fingers' midpoint moved under 30 units in the 100 ms before, or the scroll never sent the wheel. Lifted mid-stroke, the finger left behind holds until every finger is up or the next stroke lands, which is what holding one finger and scrolling with the other needs on an Edge, whose held finger is reported sliding toward the hovering one. | `2176f85`, `245eae5`, `ab45853` |
+| 2026-09-30 | Double taps land on one pixel. Windows makes a double-click only from two clicks within about 2 pixels. A tap whose roll moved the cursor was put back and clicked at once, while the roll's last movement was still queued for Windows, so the click could land a few pixels off: 31 of 36 double taps on an Edge had such a tap. That click now waits 30 ms for the put-back to settle, and a second tap within 500 ms and 16 px of a first clicks exactly on it. | `ab45853` |
 
 ## Files changed
 
@@ -113,7 +117,7 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
 ```
  .gitattributes                                |   48 +
  .gitignore                                    |   34 +-
- CHANGES.md                                    |  230 +
+ CHANGES.md                                    |  238 +
  LINK                                          |    0
  README.md                                     |   18 +
  app/ctm-usbip-tests.vcxproj                   |  108 +
@@ -178,7 +182,7 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  src/input/gyro_calibration.inl                |  168 +
  src/input/gyro_calibration_fetch.inl          |   99 +
  src/input/gyro_hold.inl                       |   48 +
- src/input/gyro_mouse.inl                      | 1053 +++
+ src/input/gyro_mouse.inl                      | 1085 +++
  src/input/keyboard_device.inl                 |  301 +
  src/input/mic_report.inl                      |   41 +
  src/input/mouse_device.inl                    |  304 +
@@ -187,7 +191,7 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  src/input/osk.inl                             |  222 +
  src/input/rebind.inl                          | 1277 ++++
  src/input/stick_mouse.inl                     |  471 ++
- src/input/touch_mouse.inl                     |  466 ++
+ src/input/touch_mouse.inl                     | 1213 ++++
  src/input/trigger_click.inl                   |  801 +++
  src/input/trigger_effect.inl                  |  630 ++
  src/log/capped_log.inl                        |  117 +
@@ -219,7 +223,7 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  tests/schema_json_test.cpp                    |  158 +
  tests/stick_mouse_test.cpp                    |  715 ++
  tests/tests_main.cpp                          |  117 +
- tests/touch_mouse_test.cpp                    |  749 +++
+ tests/touch_mouse_test.cpp                    | 1237 ++++
  tests/trigger_click_test.cpp                  |  835 +++
  tests/trigger_effect_test.cpp                 |  529 ++
  tests/units.h                                 |   54 +
@@ -230,5 +234,5 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  tools/device-config-panel.ps1                 |  303 +
  tools/osk-mockups.py                          |  103 +
  tools/start-ctm-usbip.bat                     |   67 +
- 119 files changed, 39020 insertions(+), 145 deletions(-)
+ 119 files changed, 40295 insertions(+), 145 deletions(-)
 ```
