@@ -550,9 +550,76 @@ int run_touch_mouse_tests()
         CTM_CHECK(g_pushCount > 0);            // the cursor did move, at once
         set_point(r, 0, false, 1, 384, 312);
         run_step(r, 180);
-        CTM_CHECK_EQ(g_clickCount, 1);
         CTM_CHECK_EQ(static_cast<int>(g_cursorX), 1000);   // and went back first
         CTM_CHECK_EQ(static_cast<int>(g_cursorY), 500);
+        CTM_CHECK_EQ(g_clickCount, 0);         // the click waits for that to settle
+        run_step(r, 215);
+        CTM_CHECK_EQ(g_clickCount, 1);
+        CTM_CHECK_EQ(static_cast<int>(g_cursorX), 1000);
+    }
+
+    section("touch: a double tap's second click lands exactly on the first");
+    {
+        // rhoquinn8217, 2026-09-30: "double tapping is very hard to do".
+        // Windows wants both clicks within about 2 pixels.
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_to_mouse"] = "true";
+        g_cfg["touchpad_tap_click"] = "true";
+        g_cursorX = 1000;
+        g_cursorY = 500;
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 300, 300);    // the first tap rolls
+        run_step(r, 0);
+        set_point(r, 0, true, 1, 350, 300);
+        run_step(r, 40);
+        set_point(r, 0, false, 1, 350, 300);
+        run_step(r, 80);
+        run_step(r, 115);
+        CTM_CHECK_EQ(g_clickCount, 1);
+        CTM_CHECK_EQ(static_cast<int>(g_cursorX), 1000);
+        g_cursorX = 1003;                      // movement that landed late
+        set_point(r, 0, true, 2, 310, 305);    // the second tap, still
+        run_step(r, 200);
+        set_point(r, 0, false, 2, 310, 305);
+        run_step(r, 260);
+        CTM_CHECK_EQ(static_cast<int>(g_cursorX), 1000);   // put on the first
+        CTM_CHECK_EQ(g_clickCount, 1);         // and waits
+        run_step(r, 295);
+        CTM_CHECK_EQ(g_clickCount, 2);
+        CTM_CHECK_EQ(static_cast<int>(g_cursorX), 1000);
+        CTM_CHECK_EQ(static_cast<int>(g_cursorY), 500);
+    }
+
+    section("touch: a tap too late or too far for a double tap clicks where it is");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_to_mouse"] = "true";
+        g_cfg["touchpad_tap_click"] = "true";
+        g_cursorX = 1000;
+        g_cursorY = 500;
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 300, 300);
+        run_step(r, 0);
+        set_point(r, 0, false, 1, 300, 300);
+        run_step(r, 80);
+        CTM_CHECK_EQ(g_clickCount, 1);         // still, so at once
+        g_cursorX = 1003;
+        set_point(r, 0, true, 2, 300, 300);    // 680 ms later
+        run_step(r, 700);
+        set_point(r, 0, false, 2, 300, 300);
+        run_step(r, 760);
+        CTM_CHECK_EQ(g_clickCount, 2);
+        CTM_CHECK_EQ(static_cast<int>(g_cursorX), 1003);
+        g_cursorX = 1040;                      // 37 px away, soon after
+        set_point(r, 0, true, 3, 300, 300);
+        run_step(r, 900);
+        set_point(r, 0, false, 3, 300, 300);
+        run_step(r, 960);
+        CTM_CHECK_EQ(g_clickCount, 3);
+        CTM_CHECK_EQ(static_cast<int>(g_cursorX), 1040);
+        CTM_CHECK_EQ(g_placeCount, 0);
     }
 
     section("touch: a slow tap under 400 ms still clicks");
@@ -730,7 +797,7 @@ int run_touch_mouse_tests()
         CTM_CHECK_EQ(static_cast<int>(g_pushedX), 40);   // from where it took over, no jump
     }
 
-    section("touch: a finger that keeps sliding after a scroll points after 150 ms, from where it is");
+    section("touch: a finger that keeps sliding after a scroll stopped points after 150 ms, from where it is");
     {
         reset_stubs();
         fresh_device();
@@ -743,10 +810,12 @@ int run_touch_mouse_tests()
         set_point(r, 0, true, 1, 400, 420);
         set_point(r, 1, true, 2, 600, 420);
         run_step(r, 50);
-        set_point(r, 1, false, 2, 600, 420);   // one finger lifts
-        run_step(r, 100);
+        run_step(r, 100);                      // the scroll stops
+        run_step(r, 180);
+        set_point(r, 1, false, 2, 600, 420);   // and one finger lifts
+        run_step(r, 200);
         int x = 400;
-        for (long long t = 110; t < 250; t += 10) {   // the other slides right
+        for (long long t = 210; t < 350; t += 10) {   // the other slides right
             x += 20;
             set_point(r, 0, true, 1, x, 420);
             run_step(r, t);
@@ -754,11 +823,11 @@ int run_touch_mouse_tests()
         CTM_CHECK_EQ(g_pushCount, 0);                 // not yet
         x += 20;
         set_point(r, 0, true, 1, x, 420);
-        run_step(r, 250);                             // 150 ms: it takes over here
+        run_step(r, 350);                             // 150 ms: it takes over here
         CTM_CHECK_EQ(g_pushCount, 0);
         x += 20;
         set_point(r, 0, true, 1, x, 420);
-        run_step(r, 260);
+        run_step(r, 360);
         CTM_CHECK_EQ(static_cast<int>(g_pushedX), 20);   // only what came after
     }
 
@@ -859,7 +928,7 @@ int run_touch_mouse_tests()
         CTM_CHECK_EQ(g_placeCount, 1);
     }
 
-    section("touch: a finger held between scroll strokes stays put, and the next stroke undoes the pad");
+    section("touch: a finger held between scroll strokes moves nothing, even as the pad drags it");
     {
         // rhoquinn8217, 2026-09-30: holding one finger and scrolling with the
         // other made the cursor jump.
@@ -891,13 +960,13 @@ int run_touch_mouse_tests()
         run_step(r, 308);
         set_point(r, 0, true, 1, 600, 500);
         run_step(r, 312);
-        CTM_CHECK(g_pushCount > 0);            // and that did move the cursor
+        CTM_CHECK_EQ(g_pushCount, 0);          // lifted mid-stroke: it holds
         set_point(r, 0, true, 1, 402, 600);    // the next stroke lands
         set_point(r, 1, true, 3, 1200, 300);
         run_step(r, 320);
-        CTM_CHECK_EQ(static_cast<int>(g_cursorX), 1000);   // back where the stroke left it
+        CTM_CHECK_EQ(static_cast<int>(g_cursorX), 1000);   // where the stroke left it
         CTM_CHECK_EQ(static_cast<int>(g_cursorY), 500);
-        CTM_CHECK_EQ(g_placeCount, 1);
+        CTM_CHECK_EQ(g_placeCount, 0);         // with nothing to put back
     }
 
     section("touch: a short scroll is not a two-finger tap");

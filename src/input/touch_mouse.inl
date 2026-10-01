@@ -116,6 +116,33 @@ constexpr long long kStrokeGapMs = 500;
 // this moves nothing, and the finger carries on from where the pad puts it.
 constexpr int kJumpUnits = 300;
 
+// ⭐ A TAP THAT WAS PUT BACK CLICKS A MOMENT LATER (2026-09-30). The movement a
+// tap's roll sent is queued for Windows a report at a time, and a put-back
+// cannot recall it, so a click sent at once could land a few pixels past where
+// the cursor was put. Windows makes a double-click only from two clicks within
+// about 2 pixels of each other, so double taps came out as two single clicks
+// (rhoquinn8217: "double tapping is very hard to do"): 31 of 36 double taps on
+// the Edge that day had a tap that rolled. Waiting this long lets that
+// movement land and be put back before the click goes.
+constexpr long long kClickSettleMs = 30;
+// ⭐ AND A SECOND TAP SOON AFTER A FIRST, NEAR IT, CLICKS EXACTLY ON IT, so
+// Windows gets the double-click it was meant to be. Windows' default
+// double-click time; "near" is a finger's roll, not a new target.
+constexpr long long kDoubleTapMs = 500;
+constexpr long kDoubleTapNearPx = 16;
+
+// ⭐ A FINGER LIFTED MID-STROKE IS PART OF THE SCROLL (2026-09-30). Between
+// strokes, the Edge reports the finger left behind sliding toward the other as
+// it hovers, by thousands of pixels over one long scroll, and that looks
+// exactly like pointing; the regular DualSense did not. So the finger left
+// behind points only if the scroll had stopped before the other lifted: the
+// fingers' midpoint moved less than kStrokeMovingUnits in the kStrokeLiftMs
+// before. Lifted mid-stroke, it moves nothing until every finger is up or the
+// next stroke lands. rhoquinn8217 agreed the cost: to point after scrolling,
+// stop for a moment before lifting one finger.
+constexpr long long kStrokeLiftMs = 100;
+constexpr int kStrokeMovingUnits = 30;
+
 // Pad units of two-finger travel per wheel tick, at scroll speed 100.
 constexpr int kScrollUnitsPerTick = 60;
 
@@ -179,6 +206,25 @@ struct TouchState {
     long strokeX = 0;
     long strokeY = 0;
     long long strokeEndMs = 0;
+    bool strokeHold = false;      // the other finger lifted mid-stroke (kStrokeLiftMs)
+    int strokeTicks = 0;          // wheel ticks since two fingers came down: a real scroll
+    // The fingers' midpoint while two scroll, one sample every few ms, to tell
+    // a finger lifted mid-stroke from one lifted after the scroll stopped.
+    struct ScrollSample { long long t; float y; };
+    static constexpr int kScrollSamples = 40;
+    ScrollSample scrollSamples[kScrollSamples] = {};
+    int scrollSampleCount = 0;
+    int scrollSampleNext = 0;
+
+    // ⭐ A CLICK WAITING FOR ITS PUT-BACK TO SETTLE (kClickSettleMs), and where
+    // the last tap clicked, for a double tap's second click (kDoubleTapMs).
+    uint8_t clickMask = 0;
+    long long clickAtMs = 0;
+    bool lastTapValid = false;
+    uint8_t lastTapMask = 0;
+    long lastTapX = 0;
+    long lastTapY = 0;
+    long long lastTapMs = 0;
 
     // ⓘ MEASUREMENT: the one finger's last few positions, each time it moved,
     // for a line about what the pad did just before a leap or a second finger.
@@ -602,7 +648,44 @@ inline void land_second(TouchState &st, long long nowMs, int scrollFingers,
     if (goBack) put_back(st, tx, ty, nowMs, why);
 }
 
+// ---- The click that waits ---------------------------------------------------
+
+inline void fire_click(TouchState &st)
+{
+    put_back_again(st);   // once more, so the click lands where it was put
+    ctm_mouse_device::add_click(st.clickMask);
+    ctm_gyro_mouse_ensure_mouse_started();
+    st.clickMask = 0;
+}
+
 // ---- The finger left behind -------------------------------------------------
+
+inline void scroll_remember(TouchState &st, long long nowMs, float y)
+{
+    if (st.scrollSampleCount > 0) {
+        const int newest = (st.scrollSampleNext + TouchState::kScrollSamples - 1) % TouchState::kScrollSamples;
+        if (nowMs - st.scrollSamples[newest].t < 4) return;
+    }
+    st.scrollSamples[st.scrollSampleNext] = TouchState::ScrollSample{nowMs, y};
+    st.scrollSampleNext = (st.scrollSampleNext + 1) % TouchState::kScrollSamples;
+    if (st.scrollSampleCount < TouchState::kScrollSamples) ++st.scrollSampleCount;
+}
+
+// How far the fingers' midpoint moved in the last windowMs while two scrolled.
+inline int scroll_travel(const TouchState &st, long long nowMs, long long windowMs)
+{
+    float lo = 0.0f;
+    float hi = 0.0f;
+    bool any = false;
+    for (int i = 0; i < st.scrollSampleCount; ++i) {
+        const TouchState::ScrollSample &s = st.scrollSamples[i];
+        if (nowMs - s.t > windowMs) continue;
+        if (!any || s.y < lo) lo = s.y;
+        if (!any || s.y > hi) hi = s.y;
+        any = true;
+    }
+    return any ? static_cast<int>(hi - lo) : 0;
+}
 
 inline void point_again(TouchState &st, long long nowMs, const char *why)
 {
@@ -696,6 +779,7 @@ inline void step(const void *deviceKey, const std::string &section,
     // clean rather than against a stale anchor.
     if (!cursorOn && !scrollOn && !tapsOn && !dragOn) {
         if (st.dragging) ctm_mouse_device::set_drag_for(deviceKey, 0x00);
+        if (st.clickMask != 0) fire_click(st);   // a tap already made
         st = TouchState();
         return;
     }
@@ -720,6 +804,7 @@ inline void step(const void *deviceKey, const std::string &section,
     // the gate closed -- which would arrive as one jump.
     if (!ctm_gyro_mouse::gate_open(gate, lay, data, len)) {
         if (st.dragging) ctm_mouse_device::set_drag_for(deviceKey, 0x00);
+        if (st.clickMask != 0) fire_click(st);   // a tap already made
         st = TouchState();
         return;
     }
@@ -736,6 +821,12 @@ inline void step(const void *deviceKey, const std::string &section,
     if (st.checkUntil != 0) {
         if (nowMs > st.checkUntil) st.checkUntil = 0;
         else put_back_again(st);
+    }
+
+    // ⭐ A CLICK THAT WAITED FOR ITS PUT-BACK (kClickSettleMs) goes now, or at
+    // once if a new touch begins first.
+    if (st.clickMask != 0 && (nowMs >= st.clickAtMs || (fingers > 0 && !st.sessionActive))) {
+        fire_click(st);
     }
 
     // The recent path, for a press to go back along.
@@ -813,6 +904,9 @@ inline void step(const void *deviceKey, const std::string &section,
             st.stillY0 = only.y;
             st.tailLive = false;
             st.strokeValid = false;
+            st.strokeHold = false;
+            st.scrollSampleCount = 0;
+            st.scrollSampleNext = 0;
         } else if (fingers > 0) {
             // ⭐ A SECOND FINGER SOON AFTER THE FIRST is a scroll that started
             // late: the cursor goes back to where the first finger landed, and
@@ -851,16 +945,54 @@ inline void step(const void *deviceKey, const std::string &section,
                 const std::string &want = (st.sessionMaxFingers >= 2) ? twoTap : oneTap;
                 const uint8_t mask = touch_action_mask(want);
                 if (mask != 0) {
-                    // ⭐ A TAP CLICKS WHERE THE FINGER LANDED: if its roll moved
-                    // the cursor, the cursor goes back first.
-                    if (cursorOn && st.homeValid && st.movedCursor && st.sessionMaxFingers < 2) {
-                        put_back(st, st.homeX, st.homeY, nowMs, "tap");
+                    // ⭐ WHERE THE CLICK LANDS: a double tap's second click
+                    // exactly on the first (kDoubleTapMs), and a tap whose roll
+                    // moved the cursor where the finger landed. Either way the
+                    // cursor is put there and the click waits for it to settle
+                    // (kClickSettleMs); a tap that moved nothing clicks at once.
+                    long cx = 0;
+                    long cy = 0;
+                    const bool haveNow = cursorOn && ctm_gyro_mouse::cursor_read(&cx, &cy);
+                    // ⚠️ Not called `near`: windef.h defines that away.
+                    const auto within = [](long a, long b) {
+                        return (a > b ? a - b : b - a) <= kDoubleTapNearPx;
+                    };
+                    const bool secondTap = cursorOn && st.lastTapValid && st.lastTapMask == mask &&
+                                           nowMs - st.lastTapMs <= kDoubleTapMs && st.homeValid &&
+                                           within(st.homeX, st.lastTapX) && within(st.homeY, st.lastTapY);
+                    const char *why = nullptr;
+                    long tx = cx;
+                    long ty = cy;
+                    if (secondTap) {
+                        why = "double";
+                        tx = st.lastTapX;
+                        ty = st.lastTapY;
+                    } else if (cursorOn && st.homeValid && st.movedCursor && st.sessionMaxFingers < 2) {
+                        why = "tap";
+                        tx = st.homeX;
+                        ty = st.homeY;
                     }
-                    ctm_mouse_device::add_click(mask);
-                    ctm_gyro_mouse_ensure_mouse_started();
+                    const bool place = why != nullptr &&
+                                       (st.movedCursor || !haveNow || cx != tx || cy != ty);
+                    if (place) {
+                        put_back(st, tx, ty, nowMs, why);
+                        st.clickMask = static_cast<uint8_t>(st.clickMask | mask);
+                        st.clickAtMs = nowMs + kClickSettleMs;
+                        if (st.checkUntil < st.clickAtMs + 10) st.checkUntil = st.clickAtMs + 10;
+                    } else {
+                        ctm_mouse_device::add_click(mask);
+                        ctm_gyro_mouse_ensure_mouse_started();
+                    }
+                    st.lastTapValid = place || haveNow;
+                    st.lastTapMask = mask;
+                    st.lastTapX = tx;
+                    st.lastTapY = ty;
+                    st.lastTapMs = nowMs;
                     st.mClicked = true;
                 }
             }
+            // A touch that was not a tap ends any double tap.
+            if (!st.mClicked) st.lastTapValid = false;
             measure_end(st, nowMs);
             st.sessionActive = false;
             st.sessionMaxFingers = 0;
@@ -870,6 +1002,9 @@ inline void step(const void *deviceKey, const std::string &section,
             st.pressStill = false;
             st.tailLive = false;
             st.strokeValid = false;
+            st.strokeHold = false;
+            st.scrollSampleCount = 0;
+            st.scrollSampleNext = 0;
             st.sampleCount = 0;
             st.sampleNext = 0;
         }
@@ -880,6 +1015,7 @@ inline void step(const void *deviceKey, const std::string &section,
         // ⭐ Re-anchor rather than jump: on a new touch (or a lift-and-retouch,
         // which the id change reveals), the first report only sets the anchor.
         if (!st.cursorTracking || st.cursorId != only.id) {
+            const bool fromTwo = !st.cursorTracking;
             st.cursorTracking = true;
             st.cursorId = only.id;
             st.lastX = only.x;
@@ -894,8 +1030,21 @@ inline void step(const void *deviceKey, const std::string &section,
                 st.restX = only.x;
                 st.restY = only.y;
                 st.restSince = nowMs;
-                st.strokeValid = ctm_gyro_mouse::cursor_read(&st.strokeX, &st.strokeY);
-                st.strokeEndMs = nowMs;
+                if (fromTwo) {
+                    st.strokeValid = ctm_gyro_mouse::cursor_read(&st.strokeX, &st.strokeY);
+                    st.strokeEndMs = nowMs;
+                    // ⭐ LIFTED MID-STROKE, OR AFTER THE SCROLL STOPPED (kStrokeLiftMs).
+                    // ⓘ Only after a real scroll, one that sent the wheel: a
+                    // second touch that scrolled nothing is not a stroke.
+                    const int moved = scroll_travel(st, nowMs, kStrokeLiftMs);
+                    st.strokeHold = scrollFingers == 2 && st.strokeTicks > 0 &&
+                                    moved >= kStrokeMovingUnits;
+                    device_log::input(device_log::msg()
+                        << "[touch] one finger left at +" << (nowMs - st.sessionStart)
+                        << "ms; the scroll moved " << moved << " units in the last "
+                        << kStrokeLiftMs << " ms after " << st.strokeTicks
+                        << " wheel ticks, so it " << (st.strokeHold ? "holds" : "can point"));
+                }
             }
         } else if (st.sessionMaxFingers >= 2 && !st.tailLive) {
             // ⭐ AFTER TWO FINGERS, THE FINGER LEFT BEHIND WAITS UNTIL IT IS
@@ -904,11 +1053,13 @@ inline void step(const void *deviceKey, const std::string &section,
             // moving the cursor, and stopped anyone pointing with it too.
             // ⓘ The anchor follows the finger meanwhile, so when it takes
             // over, movement flows from right there with no jump.
+            // ⭐ AND NOT AT ALL WHEN THE OTHER LIFTED MID-STROKE (kStrokeLiftMs):
+            // that finger is coming back for the next stroke.
             st.lastX = only.x;
             st.lastY = only.y;
             st.carryX = 0.0f;
             st.carryY = 0.0f;
-            if (travel_from(st.restX, st.restY, only) > kStillUnits) {
+            if (!st.strokeHold && travel_from(st.restX, st.restY, only) > kStillUnits) {
                 if (nowMs - st.restSince >= kTailRestMs) {
                     point_again(st, nowMs, "rest");   // it rested, and now it moves
                 } else {
@@ -919,7 +1070,7 @@ inline void step(const void *deviceKey, const std::string &section,
             }
             // By time only while it is still sliding: a finger at rest is
             // holding the pad, and takes over only when it moves.
-            if (!st.tailLive && nowMs - st.tailStart >= kTailMaxMs &&
+            if (!st.strokeHold && !st.tailLive && nowMs - st.tailStart >= kTailMaxMs &&
                 nowMs - st.restSince < kTailRestMs) {
                 point_again(st, nowMs, "time");
             }
@@ -990,10 +1141,12 @@ inline void step(const void *deviceKey, const std::string &section,
     // ---- Two fingers: scroll ------------------------------------------------
     if (scrollOn && fingers == scrollFingers) {
         const float avgY = (static_cast<float>(p1.y) + static_cast<float>(p2.y)) / 2.0f;
+        if (fingers == 2) scroll_remember(st, nowMs, avgY);   // for kStrokeLiftMs
         if (!st.scrollTracking) {
             st.scrollTracking = true;
             st.lastAvgY = avgY;
             st.scrollCarry = 0.0f;
+            st.strokeTicks = 0;
         } else {
             const int speed = device_config_int(section.c_str(), "touchpad_scroll_speed", 100);
             const float scale = static_cast<float>(speed <= 0 ? 100 : speed) / 100.0f;
@@ -1010,6 +1163,7 @@ inline void step(const void *deviceKey, const std::string &section,
                 ctm_mouse_device::add_wheel(natural ? ticks : -ticks);
                 ctm_gyro_mouse_ensure_mouse_started();
                 st.mScrollTicks += ticks < 0 ? -ticks : ticks;
+                st.strokeTicks += ticks < 0 ? -ticks : ticks;
                 // ⭐ A TOUCH THAT SCROLLED IS NOT A TAP. With the tap distance
                 // at 100, a short scroll could otherwise end inside it and
                 // right-click as it lifted.
