@@ -247,11 +247,12 @@ namespace config_move { inline void state_load(); }
 //
 // ⛔ NOTHING CALLED THEIR stop(). Each has a pump thread held in a global
 // std::thread, started the first time a pad that drives a mouse or a keyboard
-// is bridged. When the listener was told to stop, each pump saw the stop flag
-// and returned -- and a thread that has returned is still JOINABLE until
-// someone joins it. Destroying a joinable std::thread, which is what the end
-// of the program does to a global one, is std::terminate(), and that is
-// abort(). A debug build put up "Microsoft Visual C++ Runtime Library --
+// is bridged. When the listener was told to stop, the mouse's pump saw the
+// stop flag and returned -- and a thread that has returned is still JOINABLE
+// until someone joins it. The keyboard's pump never looks at that flag, so it
+// was simply still running. Destroying a joinable std::thread, which is what
+// the end of the program does to a global one, is std::terminate() either
+// way, and that is abort(). A debug build put up "Microsoft Visual C++ Runtime Library --
 // Debug Error! abort() has been called" and sat behind it, its settings window
 // and tray icon already gone and its sockets already closed.
 //
