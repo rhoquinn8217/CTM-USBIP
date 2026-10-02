@@ -83,6 +83,30 @@ public:
         static const std::vector<uint8_t> empty;
         return empty;
     }
+
+    // ⭐ The TV asked for the settings window on this session's device: the
+    // streaming overlay's DS5-USBIP button, CtmBridgeProtocol::MsgOpenConfig.
+    // The owner says what that means; a backend only passes it on.
+    //
+    // ⛔ IT IS CALLED ON THE BACKEND'S READ LOOP, so the owner must not open
+    // the window there. Showing it closes any open window, polls up to a
+    // second for it to go and then launches a browser, and the device's
+    // reports queue behind all of that (agent.inl says what that looks like).
+    //
+    // ⓘ Set before start() and never changed, so the loop reads it bare.
+    void set_open_config_callback(std::function<void()> cb)
+    {
+        openConfigCallback_ = std::move(cb);
+    }
+
+protected:
+    void fire_open_config_callback() const
+    {
+        if (openConfigCallback_) openConfigCallback_();
+    }
+
+private:
+    std::function<void()> openConfigCallback_;
 };
 
 static void append_usb_string_blob(std::vector<unsigned char> *out, const std::wstring &text)

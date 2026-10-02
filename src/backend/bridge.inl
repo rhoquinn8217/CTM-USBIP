@@ -18,7 +18,18 @@
         MsgEnum = 10,           // forwarded composite USB enumeration (puck)
         MsgIsoAudio = 11,       // raw PCM audio: CTM-USBIP -> aurora-tv for wired ISO passthrough
         MsgMicAudio = 12,       // raw PCM audio: aurora-tv -> CTM-USBIP, the controller microphone
+        MsgAudioHold = 13,      // aurora-tv -> CTM-USBIP: keep the audio block in outgoing reports; in the TV's list, not acted on here
+        MsgOpenConfig = 14,     // aurora-tv -> CTM-USBIP: open the settings window on this device (the overlay's DS5-USBIP button)
     };
+
+    // ⛔ THESE NUMBERS ARE ON THE WIRE. The TV keeps its own copy of this list
+    // (ctm-bridge-webos, src/shared/ctm_bridge_protocol.h, pinned there by
+    // tests/test_protocol_messages.c). Nothing checks the two against each
+    // other, and either end ignores a number it does not know, so a value
+    // that moved would fail nowhere: a feature would just stop. A number is
+    // never changed or reused; a new message takes the next one in both.
+    static_assert(MsgHello == 1 && MsgMicAudio == 12 && MsgAudioHold == 13 && MsgOpenConfig == 14,
+                  "bridge message numbers are fixed: see the note above");
 
 #pragma pack(push, 1)
     struct Header {
@@ -917,6 +928,10 @@ private:
                 if (!message.payload.empty()) {
                     mic_ring_push(this, message.payload.data(), message.payload.size());
                 }
+            } else if (message.header.type == CtmBridgeProtocol::MsgOpenConfig) {
+                // The TV's DS5-USBIP button. ⛔ This is the read loop: the
+                // owner's callback hands the opening to a thread of its own.
+                fire_open_config_callback();
             } else if (message.header.type == CtmBridgeProtocol::MsgLog ||
                        message.header.type == CtmBridgeProtocol::MsgError) {
                 std::string text(message.payload.begin(), message.payload.end());

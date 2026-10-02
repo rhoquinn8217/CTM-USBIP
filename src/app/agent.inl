@@ -238,6 +238,41 @@ static void bridge_session_worker(AgentBridgeSession *session)
         session->backend = std::move(backend);
     }
 
+    // ⭐⭐ THE TV'S DS5-USBIP BUTTON (rhoquinn8217, 2026-09-28: "a bridge opens
+    // the config window. Can we use the same mechanism?"). The TV asks, on
+    // this session's own connection, for what the ready path further down
+    // does by itself at a bridge: the settings window, on this device's tab.
+    // It works for anything that can be bridged. The chord a person presses
+    // for the same thing is read off a touchpad, so it cannot.
+    //
+    // ⛔⛔ ON ITS OWN THREAD, NEVER THE ONE THAT CALLS THIS. That is the
+    // session's read loop, and ctm_chord_show_ui closes any open window,
+    // polls up to a second for it to go, then launches a browser: the
+    // device's reports queue behind all of it and flush in a burst, which
+    // reads as every button firing over and over. The ready path says how
+    // that was found.
+    //
+    // ⛔ NOT WHEN THE WINDOW IS ALREADY IN FRONT, as for the chord and for a
+    // bridge: closing and reopening it would destroy what the person is
+    // doing to show them a tab they can reach in one press.
+    //
+    // ⓘ With or without --ui. That switch is the listener deciding to show
+    // itself; this is a person asking, as the chord is.
+    {
+        const std::string ordinal = session->ordinal;
+        backendPtr->set_open_config_callback([ordinal]() {
+            if (ctm_open_ui::window_has_foreground()) {
+                device_log::session_w() << L"TV asked for the settings window on "
+                           << widen_ascii(ordinal.c_str(), ordinal.size())
+                           << L": it is already in front, nothing to do";
+                return;
+            }
+            device_log::session_w() << L"TV asked for the settings window on "
+                       << widen_ascii(ordinal.c_str(), ordinal.size()) << L": opening it";
+            std::thread([ordinal]() { ctm_chord_show_ui(ordinal); }).detach();
+        });
+    }
+
     const std::shared_ptr<CtmUsbipDevice> device = session->device;
     if (!backendPtr->start([device](const uint8_t *data, size_t length, uint8_t endpoint) {
             device->on_physical_input(data, length, endpoint);

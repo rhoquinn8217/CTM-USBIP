@@ -554,6 +554,11 @@ private:
                         featureReplies_[message.header.request_id] = std::make_pair(ok, std::move(message.payload));
                     }
                     featureCv_.notify_all();
+                } else if (message.header.type == CtmBridgeProtocol::MsgOpenConfig) {
+                    // The TV's DS5-USBIP button: see bridge.inl. ⛔ This is the
+                    // service loop, so the owner's callback does not open
+                    // the window here either.
+                    fire_open_config_callback();
                 } else if (message.header.type == CtmBridgeProtocol::MsgLog ||
                            message.header.type == CtmBridgeProtocol::MsgError) {
                     std::string text(message.payload.begin(), message.payload.end());
