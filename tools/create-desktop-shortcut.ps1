@@ -13,15 +13,32 @@
 # one script that runs on someone else's machine with an unknown code page.
 # ---------------------------------------------------------------------------
 #
-# WHAT IT POINTS AT, AND WHY NOT THE EXE.
+# WHAT IT POINTS AT: THE EXE, THROUGH WINDOWS' CONSOLE HOST, WITH NO WINDOW.
 #
-# The shortcut targets start-ctm-usbip.bat rather than ctm-usbip.exe. The .bat
-# sets the working directory, checks that profiles\ and maps\ came with the
-# exe, and explains itself if they did not. A shortcut straight to the exe
-# would skip all of that, and a missing profiles folder makes the listener
-# start normally and then bridge nothing -- a confusing way to fail.
+# rhoquinn8217, 2026-10-01: "I don't want the terminal to be shown ... I want
+# to run it in the background and the tray icon to be the place where it is
+# closed."
 #
-# The icon still comes from the exe, so it does not look like a batch file.
+# The listener is a console program, so a shortcut straight to it, or to the
+# .bat beside it, opens a terminal window that has to stay open for as long
+# as the listener runs. The shortcut therefore runs
+#
+#     conhost.exe --headless "<this folder>\ctm-usbip.exe" agent 48054 --ui
+#
+# conhost.exe is the part of Windows that hosts every console program, and
+# --headless tells it to host this one with no window. Nothing flashes up,
+# and what is left on screen is the DS5-USBIP icon in the tray.
+#
+# IT USED TO POINT AT start-ctm-usbip.bat, because the .bat checks that
+# profiles\ came with the exe and explains itself if it did not. A batch file
+# cannot run without a console window, so that check is made HERE instead,
+# when the shortcut is created: a missing profiles folder makes the listener
+# start normally and then bridge nothing -- a confusing way to fail, and with
+# no window there would be nowhere to say so.
+#
+# The working directory is set on the shortcut itself. The exe reads its
+# configs and writes its logs in the folder it is STARTED in, not beside
+# itself.
 
 [CmdletBinding()]
 param(
@@ -58,7 +75,8 @@ if ([string]::IsNullOrWhiteSpace($FolderPath)) { $FolderPath = $PSScriptRoot }
 $here = (Resolve-Path -LiteralPath $FolderPath).ProviderPath
 
 $exe      = Join-Path $here 'ctm-usbip.exe'
-$launcher = Join-Path $here 'start-ctm-usbip.bat'
+$profiles = Join-Path $here 'profiles\descriptors'
+$conhost  = Join-Path $env:SystemRoot 'System32\conhost.exe'
 
 if (-not (Test-Path -LiteralPath $exe)) {
     Write-Host ''
@@ -73,13 +91,27 @@ if (-not (Test-Path -LiteralPath $exe)) {
     exit 1
 }
 
-if (-not (Test-Path -LiteralPath $launcher)) {
+if (-not (Test-Path -LiteralPath $profiles)) {
     Write-Host ''
-    Write-Host 'ERROR: start-ctm-usbip.bat is not in this folder.' -ForegroundColor Red
+    Write-Host 'ERROR: the profiles folder is not in this folder.' -ForegroundColor Red
     Write-Host ''
-    Write-Host "  looked in: $here"
+    Write-Host "  looked for: $profiles"
     Write-Host ''
-    Write-Host '  That file is what the shortcut runs. Extract the whole zip.'
+    Write-Host '  Extract the whole zip and keep the folder together. Without'
+    Write-Host '  profiles the listener starts normally and cannot bridge anything,'
+    Write-Host '  and a shortcut that runs it with no window would never say so.'
+    Write-Host ''
+    exit 1
+}
+
+if (-not (Test-Path -LiteralPath $conhost)) {
+    Write-Host ''
+    Write-Host 'ERROR: this Windows has no conhost.exe where it is expected.' -ForegroundColor Red
+    Write-Host ''
+    Write-Host "  looked for: $conhost"
+    Write-Host ''
+    Write-Host '  That is what runs the listener with no window. You can still start'
+    Write-Host "  DS5-USBIP by double-clicking start-ctm-usbip.bat in $here"
     Write-Host ''
     exit 1
 }
@@ -104,10 +136,13 @@ $replacing = Test-Path -LiteralPath $linkPath
 
 $shell = New-Object -ComObject WScript.Shell
 $link = $shell.CreateShortcut($linkPath)
-$link.TargetPath       = $launcher
+$link.TargetPath       = $conhost
+# Quoted, because the folder may have spaces in it. The exe's own arguments
+# follow it unquoted.
+$link.Arguments        = '--headless "' + $exe + '" agent 48054 --ui'
 $link.WorkingDirectory = $here
 $link.IconLocation     = "$exe,0"
-$link.Description      = 'Start the DS5-USBIP listener and open its settings page'
+$link.Description      = 'Start DS5-USBIP in the background and open its settings page'
 $link.Save()
 
 # Release the COM object rather than waiting for the garbage collector: the
@@ -130,8 +165,12 @@ if ($replacing) {
 }
 Write-Host ''
 Write-Host "  shortcut   $linkPath"
-Write-Host "  runs       $launcher"
+Write-Host "  runs       $exe agent 48054 --ui"
 Write-Host "  starts in  $here"
+Write-Host ''
+Write-Host '  It runs in the background: no window opens and none stays.'
+Write-Host '  Look for the DS5-USBIP icon in the tray, by the clock. Click it for'
+Write-Host '  the settings page, and choose Quit there to close it.'
 Write-Host ''
 Write-Host '  IF YOU MOVE OR RENAME THIS FOLDER, THE SHORTCUT STOPS WORKING.' -ForegroundColor Yellow
 Write-Host ''
