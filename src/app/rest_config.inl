@@ -76,6 +76,11 @@ static std::string rest_device_json(const RestDeviceView &d)
     // (rhoquinn8217, 2026-09-13: never "hid" where anything better is known).
     out += ",\"product\":\"" + rest_json_escape(d.product) + "\"";
     out += ",\"device_type\":\"" + rest_json_escape(d.deviceType) + "\"";
+    // ⭐ What the device is LISTED by, worked out here and nowhere else
+    // (device_names.inl). The page shows this, and the tray icon's menu shows
+    // the same words because it asks the same function.
+    out += ",\"label\":\"" +
+           rest_json_escape(device_names::label(d.kind, d.product, d.deviceType)) + "\"";
     // ⭐ Only when the pad actually said. Absent means the page draws nothing;
     // it must never be able to read a missing battery as an empty one.
     if (d.batteryPercent >= 0) {
@@ -806,7 +811,7 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
         // ⭐ CLOSE: Circle, in Simple or Quick. The window ENDS -- it does not
         // hide behind the game (rhoquinn8217, 2026-09-09, reversing that
         // morning's park). The ways back are the chord and the tray icon's
-        // "Open settings", and the listener remembers the layout, the size,
+        // "Open Controller Config", and the listener remembers the layout, the size,
         // the place and the controller, so the next one comes back as this
         // one left. ⓘ WM_CLOSE through close_existing(), which matches on the
         // [ctm-app] marker and so can only ever reach our own window; the

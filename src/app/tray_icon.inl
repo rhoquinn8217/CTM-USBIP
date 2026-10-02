@@ -17,6 +17,9 @@
 #pragma once
 
 #pragma comment(lib, "shell32.lib")
+#pragma comment(lib, "shcore.lib")     // the scale of the display the menu opens on
+
+#include <shellscalingapi.h>
 
 namespace ctm_tray {
 
@@ -31,6 +34,14 @@ inline const UINT WM_CTM_TRAY = WM_APP + 20;
 inline const UINT kIdToggle   = 1;
 inline const UINT kIdSettings = 2;
 inline const UINT kIdQuit     = 3;
+// ⓘ The title's line. It cannot be chosen, so this never comes back.
+inline const UINT kIdHeader   = 10;
+// ⓘ One id for each line of the Controllers list, in the order it was read as
+// the menu opened, and one for each layout. More devices than this are not
+// listed; nobody has bridged a tenth as many.
+inline const UINT   kIdDeviceFirst = 100;
+inline const size_t kMaxListed     = 64;
+inline const UINT   kIdModeFirst   = 200;
 
 // ⭐⭐ THE ICON GOES NOW (rhoquinn8217, 2026-10-01: *"I want to run it in the
 // background and the tray icon to be the place where it is closed."*).
@@ -67,24 +78,239 @@ inline void toggle_keyboard()
     else                        ctm_overlay::show();
 }
 
+// ⓘ A nickname and the name the TV sent are UTF-8; a menu takes UTF-16.
+inline std::wstring widen(const std::string &utf8)
+{
+    if (utf8.empty()) return std::wstring();
+    const int n = MultiByteToWideChar(CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()),
+                                      nullptr, 0);
+    if (n <= 0) return std::wstring();
+    std::wstring out(static_cast<size_t>(n), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()), &out[0], n);
+    return out;
+}
+
+// The scale of the display the menu is about to open on. ⓘ The tray's own
+// window is never shown and sits on the first display, so asking IT would
+// size the title for the wrong screen whenever the taskbar is on another.
+inline UINT dpi_at(POINT pt)
+{
+    const HMONITOR monitor = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+    UINT dx = 96, dy = 96;
+    if (FAILED(GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &dx, &dy)) || dx == 0) return 96;
+    return dx;
+}
+
+// ⭐⭐ THE TITLE AND THE COUNT ARE A PICTURE, AND THAT IS NOT A SHORTCUT.
+//
+// A Windows menu draws every line in one font, so a title in a larger one has
+// to be drawn by us (rhoquinn8217, 2026-10-02: *"Add a Title "DS5-USBIP" at
+// the top in larger font. Directly underneath, regular font with "<x>
+// controllers connected""*).
+//
+// ⛔ THE DOCUMENTED WAY COSTS THE WHOLE MENU ITS LOOKS. One owner-drawn line
+// and Windows draws ALL of the menu in the old flat grey style with the blue
+// bar, while its side menus stay as they are now. Seen side by side in a
+// throwaway program before any of this was written.
+// ⛔ AND hbmpItem PUTS THE PICTURE IN THE ICON COLUMN, so every other line's
+// text then begins to the right of it.
+// ➡️ A picture given as the line's own content (an old-style bitmap item)
+// keeps the menu as Windows draws it today, and sits where a line's text sits.
+//
+// ⓘ 32 bits with its own transparency and the text in the menu's text colour,
+// so it lies on whatever the menu's background turns out to be.
+// ⓘ Windows draws it a little lighter than the lines under it, as it draws
+// any line that cannot be chosen. A title that could be chosen would light up
+// under the pointer and do nothing when clicked.
+inline HBITMAP header_picture(const std::wstring &count, UINT dpi)
+{
+    NONCLIENTMETRICSW metrics = {};
+    metrics.cbSize = sizeof(metrics);
+    if (!SystemParametersInfoForDpi(SPI_GETNONCLIENTMETRICS, sizeof(metrics), &metrics, 0, dpi)) {
+        return nullptr;
+    }
+    // ⓘ Grey-scale smoothing, so that one channel of what GDI draws IS how
+    // much of each pixel the letter covers. ClearType's coloured edges cannot
+    // be turned into a transparency.
+    LOGFONTW countFace = metrics.lfMenuFont;
+    countFace.lfQuality = ANTIALIASED_QUALITY;
+    LOGFONTW titleFace = countFace;
+    titleFace.lfHeight = MulDiv(titleFace.lfHeight, 140, 100);
+    titleFace.lfWeight = FW_SEMIBOLD;
+    const HFONT titleFont = CreateFontIndirectW(&titleFace);
+    const HFONT countFont = CreateFontIndirectW(&countFace);
+    if (titleFont == nullptr || countFont == nullptr) {
+        if (titleFont != nullptr) DeleteObject(titleFont);
+        if (countFont != nullptr) DeleteObject(countFont);
+        return nullptr;
+    }
+
+    const HDC screen = GetDC(nullptr);
+    const HDC dc = CreateCompatibleDC(screen);
+    const std::wstring title = tray_menu::kTitle;
+    SIZE titleSize = {}, countSize = {};
+    HGDIOBJ oldFont = SelectObject(dc, titleFont);
+    GetTextExtentPoint32W(dc, title.c_str(), static_cast<int>(title.size()), &titleSize);
+    SelectObject(dc, countFont);
+    GetTextExtentPoint32W(dc, count.c_str(), static_cast<int>(count.size()), &countSize);
+
+    // ⓘ Nothing on the left: the menu already indents a line's content, and
+    // the title should begin where the lines under it begin.
+    const int above = MulDiv(2, dpi, 96);
+    const int between = MulDiv(2, dpi, 96);
+    const int below = MulDiv(4, dpi, 96);
+    const int width = (titleSize.cx > countSize.cx ? titleSize.cx : countSize.cx) + MulDiv(8, dpi, 96);
+    const int height = above + titleSize.cy + between + countSize.cy + below;
+
+    BITMAPINFO info = {};
+    info.bmiHeader.biSize = sizeof(info.bmiHeader);
+    info.bmiHeader.biWidth = width;
+    info.bmiHeader.biHeight = -height;          // top row first
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    void *bits = nullptr;
+    const HBITMAP picture = CreateDIBSection(screen, &info, DIB_RGB_COLORS, &bits, nullptr, 0);
+    if (picture != nullptr && bits != nullptr) {
+        const HGDIOBJ oldPicture = SelectObject(dc, picture);
+        RECT all = { 0, 0, width, height };
+        FillRect(dc, &all, static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
+        SetBkMode(dc, TRANSPARENT);
+        SetTextColor(dc, RGB(255, 255, 255));
+        SelectObject(dc, titleFont);
+        TextOutW(dc, 0, above, title.c_str(), static_cast<int>(title.size()));
+        SelectObject(dc, countFont);
+        TextOutW(dc, 0, above + titleSize.cy + between, count.c_str(), static_cast<int>(count.size()));
+        GdiFlush();
+
+        // White on black is the coverage. Turn it into the menu's text colour
+        // at that much opacity, with the colour already multiplied through,
+        // which is the form Windows blends.
+        const COLORREF ink = GetSysColor(COLOR_MENUTEXT);
+        auto *px = static_cast<unsigned char *>(bits);
+        for (int i = 0; i < width * height; ++i) {
+            const unsigned cover = px[i * 4 + 1];
+            px[i * 4 + 0] = static_cast<unsigned char>(GetBValue(ink) * cover / 255);
+            px[i * 4 + 1] = static_cast<unsigned char>(GetGValue(ink) * cover / 255);
+            px[i * 4 + 2] = static_cast<unsigned char>(GetRValue(ink) * cover / 255);
+            px[i * 4 + 3] = static_cast<unsigned char>(cover);
+        }
+        SelectObject(dc, oldPicture);
+    }
+    SelectObject(dc, oldFont);
+    DeleteDC(dc);
+    ReleaseDC(nullptr, screen);
+    DeleteObject(titleFont);
+    DeleteObject(countFont);
+    return picture;
+}
+
+// ⭐ THE CONFIG WINDOW'S LAYOUT, CHANGED FROM THE MENU.
+//
+// The listener holds which layout that window is in, and a window asks for it
+// as it opens. So a change made here is: write it down, and if a window is
+// open, replace it with one that will ask.
+//
+// ⛔⛔ THE OLD WINDOW GOES FIRST, AND IS GONE BEFORE THE LAYOUT IS WRITTEN.
+// On its way out a window has its place and size read, and they are filed
+// under whichever layout is current at that moment. Written the other way
+// round, Advanced's size would be filed as a size someone had dragged Quick
+// to, and Quick would then open as large as Advanced.
+//
+// ⓘ With no window open, none is opened. The padlock marks the layout the
+// window opens in, and that is what has been changed.
+inline void change_layout(int index)
+{
+    if (index < 0 || index >= tray_menu::kModeCount) return;
+    bool compact = false, quick = false;
+    std::string ordinal;
+    const bool known = ui_view_get(&compact, &quick, &ordinal);
+    if (tray_menu::mode_index(known, compact, quick) == index) return;   // it is in that one
+
+    const bool wasOpen = ui_close_window();
+    if (wasOpen) {
+        int waited = 0;
+        for (; waited < 80; ++waited) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(25));
+            if (!ctm_open_ui::window_exists()) break;
+        }
+        device_log::input_w() << L"tray: waited " << (waited * 25)
+                              << L"ms for the config window to go before changing its layout";
+    }
+    const tray_menu::Mode &mode = tray_menu::kModes[index];
+    ui_view_set(mode.compact, mode.quick, false);
+    device_log::session_w() << L"tray: the config window's layout is " << mode.name << L" now"
+                            << (wasOpen ? L", and the window is being opened again in it"
+                                        : L"; no window was open, so the next one opens in it");
+    if (wasOpen) ctm_chord_show_ui(ordinal);
+}
+
 inline void show_menu(HWND hwnd)
 {
     HMENU menu = CreatePopupMenu();
     if (menu == nullptr) return;
 
-    // ⭐ Settings FIRST (T-163). With Circle closing that window rather than
-    // hiding it, this menu is the way back to it, and it is what a click is
-    // most often for now that a click opens a menu at all.
-    AppendMenuW(menu, MF_STRING, kIdSettings, L"Open settings");
-    AppendMenuW(menu, MF_STRING, kIdToggle,
-                ctm_overlay::visible() ? L"Hide keyboard" : L"Show keyboard");
-    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    // ⓘ "Quit", not "Exit" (rhoquinn8217, 2026-10-01). It ends the whole
-    // program, settings window included, and that is the word for it.
-    AppendMenuW(menu, MF_STRING, kIdQuit, L"Quit");
-
     POINT pt;
     GetCursorPos(&pt);
+
+    // ⭐ READ AS THE MENU OPENS. The menu is built afresh on every click, so
+    // the count and the list are what is true at this moment and need no
+    // keeping up to date.
+    const std::vector<RestDeviceView> devices = rest_collect_devices();
+    const size_t listed = devices.size() < kMaxListed ? devices.size() : kMaxListed;
+
+    // ---- The title, and how many are connected ------------------------------
+    // ⓘ The count is of the lines the list below will show, so the two cannot
+    // disagree.
+    const std::wstring count = tray_menu::count_line(listed);
+    const HBITMAP header = header_picture(count, dpi_at(pt));
+    if (header != nullptr) {
+        AppendMenuW(menu, MF_BITMAP | MF_DISABLED, kIdHeader, reinterpret_cast<LPCWSTR>(header));
+    } else {
+        // ⓘ No picture to be had: the same two lines in the menu's own font.
+        // Smaller than asked for, and still there.
+        AppendMenuW(menu, MF_STRING | MF_DISABLED, kIdHeader, tray_menu::kTitle);
+        AppendMenuW(menu, MF_STRING | MF_DISABLED, kIdHeader, count.c_str());
+    }
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+
+    // ---- Controllers: a line each, and choosing one opens the window on it ---
+    // ⓘ Every bridged device is here, a keyboard or a mouse included: it is
+    // the list the settings page shows.
+    const HMENU list = CreatePopupMenu();
+    for (size_t i = 0; i < listed; ++i) {
+        const RestDeviceView &d = devices[i];
+        const std::string line = tray_menu::device_line(
+            d.nickname, device_names::label(d.kind, d.product, d.deviceType),
+            d.batteryPercent, d.batteryState);
+        AppendMenuW(list, MF_STRING, kIdDeviceFirst + static_cast<UINT>(i), widen(line).c_str());
+    }
+    // ⓘ Greyed with nothing bridged, and then it opens no side menu.
+    AppendMenuW(menu, MF_POPUP | (listed == 0 ? MF_GRAYED : 0u),
+                reinterpret_cast<UINT_PTR>(list), tray_menu::kControllers);
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+
+    // ---- The config window and the keyboard ---------------------------------
+    // ⭐ With Circle closing that window rather than hiding it, this menu is the
+    // way back to it.
+    AppendMenuW(menu, MF_STRING, kIdSettings, tray_menu::kOpenConfig);
+    AppendMenuW(menu, MF_STRING, kIdToggle, tray_menu::keyboard_line(ctm_overlay::visible()));
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+
+    // ---- Config Mode: the window's layout, the padlock on the one it is in ---
+    bool compact = false, quick = false;
+    const bool known = ui_view_get(&compact, &quick, nullptr);
+    const int current = tray_menu::mode_index(known, compact, quick);
+    const HMENU modes = CreatePopupMenu();
+    for (int i = 0; i < tray_menu::kModeCount; ++i) {
+        AppendMenuW(modes, MF_STRING, kIdModeFirst + static_cast<UINT>(i),
+                    tray_menu::mode_line(i, current).c_str());
+    }
+    AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(modes), tray_menu::kConfigMode);
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+
+    // ⓘ "Quit", not "Exit" (rhoquinn8217, 2026-10-01). It ends the whole
+    // program, settings window included, and that is the word for it.
+    AppendMenuW(menu, MF_STRING, kIdQuit, tray_menu::kQuit);
 
     // ⛔ THE FOREGROUND DANCE. A popup menu will not close when you click away
     // unless its owner is the foreground window, and it will not become the
@@ -92,11 +318,26 @@ inline void show_menu(HWND hwnd)
     // afterwards is what lets the menu tidy itself up. This is the documented
     // workaround, not a hack of ours.
     SetForegroundWindow(hwnd);
-    const int chosen = (int)TrackPopupMenu(
+    const UINT chosen = static_cast<UINT>(TrackPopupMenu(
         menu, TPM_RIGHTBUTTON | TPM_RETURNCMD | TPM_NONOTIFY,
-        pt.x, pt.y, 0, hwnd, nullptr);
+        pt.x, pt.y, 0, hwnd, nullptr));
     PostMessageW(hwnd, WM_NULL, 0, 0);
+    // ⓘ Takes the two side menus with it. The picture is ours to let go of.
     DestroyMenu(menu);
+    if (header != nullptr) DeleteObject(header);
+
+    if (chosen >= kIdDeviceFirst && chosen < kIdDeviceFirst + listed) {
+        // ⭐ The same call the pad's own chord makes: the window opens on that
+        // controller's tab.
+        const RestDeviceView &d = devices[chosen - kIdDeviceFirst];
+        device_log::session_w() << L"tray: opening the config window on " << widen(d.ordinal);
+        ctm_chord_show_ui(d.ordinal);
+        return;
+    }
+    if (chosen >= kIdModeFirst && chosen < kIdModeFirst + static_cast<UINT>(tray_menu::kModeCount)) {
+        change_layout(static_cast<int>(chosen - kIdModeFirst));
+        return;
+    }
 
     switch (chosen) {
     case kIdToggle:
@@ -258,14 +499,14 @@ inline void thread_main()
         iconSource = L"the stock application icon";
     }
     // ⓘ The tip names what a click DOES now that a click opens the menu: the
-    // three things on it.
+    // things on it, in the order they come.
     // ⛔ PLAIN ASCII. It had a long dash in it, and hovering over the icon
     // showed three odd characters where the dash was meant to be. This file
     // has no byte-order mark and the build did not say its sources were
     // UTF-8, so the compiler took the dash's three bytes for three
     // characters. Text a person reads does not need a dash that depends on
     // how the file happened to be saved.
-    wcscpy_s(nid.szTip, L"DS5-USBIP: click for settings, the keyboard or Quit");
+    wcscpy_s(nid.szTip, L"DS5-USBIP: click for controllers, config, the keyboard or Quit");
     Shell_NotifyIconW(NIM_ADD, &nid);
     device_log::session_w() << L"tray: icon added, from " << iconSource;
 
