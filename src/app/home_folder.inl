@@ -11,9 +11,21 @@
 // whoever went through the script.
 //
 // ⭐ HOME IS THE NEAREST FOLDER, AT OR ABOVE THE EXE, THAT HOLDS THE PROFILES.
-// In a release that is the exe's own folder. In a working checkout the exe is
-// in out\x64\Debug and the profiles are three levels up, at the root, which is
-// where the configs and the page have always been.
+// In a release that is the exe's own folder.
+//
+// ⛔⛔ EXCEPT IN A BUILD'S OUTPUT FOLDER, WHICH SAYS WHERE ITS HOME IS. A
+// working checkout keeps its configs, its log and the settings page at its
+// ROOT, and the exe three folders below, in out\x64\Debug. The first version
+// of this rule expected to find no profiles down there and to walk up to the
+// root. It found them: the build copies the profiles beside the exe, so the
+// output folder passed as a home, and a double-clicked listener read seven
+// stale configs there and wrote its log there while the person's own configs
+// sat at the root. Nothing said so; it was seen in where the log had gone.
+// ➡️ So the build leaves one line beside the exe, in home-folder.txt, naming
+// the root, and the exe goes where that points. A release has no such file.
+// ⓘ Not guessed from the folder's name or from what else is in it: a release
+// staged inside a checkout sits three folders below the same root, beside
+// profiles of its own, and has to stay its own home.
 //
 // ⭐ Pure on purpose -- no Windows call, no file -- so the test binary includes
 // it as it is. The caller says what "holds the profiles" means.
@@ -56,6 +68,30 @@ inline std::wstring parent_of(const std::wstring &folder)
     if (slash == 2 && here[1] == L':') return here.substr(0, 3);
     if (slash == 0) return here.substr(0, 1);
     return here.substr(0, slash);
+}
+
+// ⭐ The file a build leaves beside the exe, and what its one line names.
+// A path that is not absolute is taken from the exe's folder, so the file a
+// build writes says `..\..\..` and still holds when the checkout is moved.
+// ⓘ Returned as written, joined but not tidied: the caller asks Windows for
+// the folder it means, and whether it exists. Empty when the line says nothing.
+constexpr const wchar_t *kPointerFile = L"home-folder.txt";
+
+inline std::wstring pointed_at(const std::wstring &exeFolder, const std::wstring &line)
+{
+    // The first line only, without the spaces, quotes or line end around it.
+    std::wstring path = line.substr(0, line.find_first_of(L"\r\n"));
+    const auto blank = [](wchar_t c) { return c == L' ' || c == L'\t' || c == L'"'; };
+    while (!path.empty() && blank(path.back())) path.pop_back();
+    size_t first = 0;
+    while (first < path.size() && blank(path[first])) ++first;
+    path = path.substr(first);
+    if (path.empty()) return std::wstring();
+
+    const bool hasDrive = path.size() >= 2 && path[1] == L':';
+    const bool fromRoot = path[0] == L'\\' || path[0] == L'/';
+    if (hasDrive || fromRoot) return path;
+    return trimmed(exeFolder) + L"\\" + path;
 }
 
 // The nearest folder at or above `exeFolder` that `holdsProfiles` accepts,

@@ -156,6 +156,14 @@ Copy-Item -Force -Path (Join-Path $Root 'profiles\descriptors\xbox_gip_usb.profi
 Copy-Item -Force -Path (Join-Path $Root 'maps\xbox_gip_usb_over_xbox_bt.map') -Destination (Join-Path $out 'maps\xbox_gip_usb_over_xbox_bt.map')
 Copy-Item -Force -Path (Join-Path $Root 'third_party\ffmpeg\x64\release\bin\*.dll') -Destination $out
 
+# Where this build's exe keeps its config, its log and the settings page: the
+# root of the checkout, three folders up, where they have always been. The exe
+# looks for its home beside itself first, and the profiles copied above would
+# make THIS folder pass for one. A release is staged without this file and is
+# its own home. Relative, so it still holds when the checkout is moved.
+[System.IO.File]::WriteAllText((Join-Path $out 'home-folder.txt'), "..\..\..`r`n",
+                               (New-Object System.Text.ASCIIEncoding))
+
 Write-Host "Built: $(Join-Path $out 'ctm-usbip.exe')"
 
 if ($WithUsbDisplay) {

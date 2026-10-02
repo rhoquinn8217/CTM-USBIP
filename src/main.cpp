@@ -434,6 +434,10 @@ void ctm_chord_show_ui(const std::string &ordinal)
 // against another folder's configs. It has to exist and is otherwise taken at
 // its word; the profiles and maps are still found beside the exe.
 //
+// ⓘ Then the file a build leaves beside the exe (home_folder.inl says why a
+// build's output folder cannot be taken for a home). A file that names a
+// folder which is not there is passed over, and the log says it was.
+//
 // Returns false, having said why, when there is nowhere to run from.
 bool settle_home(const std::wstring &asked)
 {
@@ -441,21 +445,43 @@ bool settle_home(const std::wstring &asked)
         const DWORD attrs = GetFileAttributesW(path.c_str());
         return attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY) != 0;
     };
+    // ⓘ The folder Windows means by a path: `..` worked out, slashes one way.
+    const auto full = [](const std::wstring &path) {
+        wchar_t buffer[MAX_PATH] = {};
+        const DWORD len = GetFullPathNameW(path.c_str(), ARRAYSIZE(buffer), buffer, nullptr);
+        return (len == 0 || len >= ARRAYSIZE(buffer)) ? path : std::wstring(buffer);
+    };
     const std::wstring exeFolder = module_directory();
 
     std::wstring home;
+    std::wstring passedOver;
     if (!asked.empty()) {
         if (!is_folder(asked)) {
             start_report::failed(L"DS5-USBIP cannot start: --home names a folder that does not exist.\n\n" + asked);
             return false;
         }
-        home = asked;
+        home = full(asked);
         home_folder::g_chosen_how = L"named with --home";
-    } else {
+    }
+    if (home.empty()) {
+        const std::wstring pointerPath = exeFolder + L"\\" + home_folder::kPointerFile;
+        std::wifstream pointer(pointerPath.c_str());
+        std::wstring line;
+        if (pointer && std::getline(pointer, line)) {
+            const std::wstring named = home_folder::pointed_at(exeFolder, line);
+            if (!named.empty() && is_folder(named)) {
+                home = full(named);
+                home_folder::g_chosen_how = std::wstring(L"named by ") + home_folder::kPointerFile + L" beside the exe";
+            } else if (!named.empty()) {
+                passedOver = std::wstring(L"; ") + home_folder::kPointerFile + L" beside the exe names a folder that is not there: " + named;
+            }
+        }
+    }
+    if (home.empty()) {
         home = home_folder::find(exeFolder, [&is_folder](const std::wstring &folder) {
             return is_folder(folder + L"\\profiles\\descriptors");
         });
-        home_folder::g_chosen_how = L"found from the exe, not from where it was started";
+        home_folder::g_chosen_how = L"found from the exe, not from where it was started" + passedOver;
     }
 
     if (home.empty()) {

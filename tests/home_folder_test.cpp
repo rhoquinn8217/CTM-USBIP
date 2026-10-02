@@ -120,6 +120,35 @@ int run_home_folder_tests()
         CTM_CHECK_EQ(narrow(parent_of(L"C:/repos/listener/out")), std::string("C:/repos/listener"));
     }
 
+    section("home: a build's output folder says where its home is, and the exe goes there");
+    {
+        using home_folder::pointed_at;
+        const std::wstring out = L"C:\\repos\\listener\\out\\x64\\Debug";
+        // ⭐ What a build writes: three folders up, from the exe's own folder.
+        // ⓘ Joined, not tidied. Windows works the `..` out when it is asked for
+        // the folder, and the caller asks.
+        CTM_CHECK_EQ(narrow(pointed_at(out, L"..\\..\\..")),
+                     std::string("C:\\repos\\listener\\out\\x64\\Debug\\..\\..\\.."));
+        // As the file really arrives: with its line end, and only its first line.
+        CTM_CHECK_EQ(narrow(pointed_at(out, L"..\\..\\..\r\n")),
+                     std::string("C:\\repos\\listener\\out\\x64\\Debug\\..\\..\\.."));
+        CTM_CHECK_EQ(narrow(pointed_at(out, L"..\\..\\..\nsomething else")),
+                     std::string("C:\\repos\\listener\\out\\x64\\Debug\\..\\..\\.."));
+        // A whole path is taken as it stands, wherever the exe is.
+        CTM_CHECK_EQ(narrow(pointed_at(out, L"D:\\my configs")), std::string("D:\\my configs"));
+        CTM_CHECK_EQ(narrow(pointed_at(out, L"\\\\server\\share\\configs")),
+                     std::string("\\\\server\\share\\configs"));
+        // ⓘ Quotes and stray spaces around it are a person editing the file.
+        CTM_CHECK_EQ(narrow(pointed_at(out, L"  \"D:\\my configs\"  ")), std::string("D:\\my configs"));
+        // ⛔ A file that says nothing names nothing: the exe then looks for its
+        // home the ordinary way, and does not take "" for the folder it is in.
+        CTM_CHECK(pointed_at(out, L"").empty());
+        CTM_CHECK(pointed_at(out, L"   \r\n").empty());
+        CTM_CHECK(pointed_at(out, L"\r\n..\\..\\..").empty());
+        // ⓘ A trailing slash on the exe's folder does not double up.
+        CTM_CHECK_EQ(narrow(pointed_at(out + L"\\", L"..")), narrow(out) + "\\..");
+    }
+
     section("home: the folder above");
     {
         CTM_CHECK_EQ(narrow(parent_of(L"C:\\a\\b")), std::string("C:\\a"));

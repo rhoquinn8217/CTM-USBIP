@@ -93,8 +93,8 @@ static void print_usage()
         << L"  (--enet selects the additive ENet/UDP transport on the same port; without it the TCP transport is used.)\n"
         << L"  (--rest serves an HTTP/JSON control API, loopback-only unless --rest-lan; see docs/rest_api.md.)\n"
         << L"  (agent: --ui opens the settings page and puts the icon in the tray, where Quit closes it.\n"
-        << L"   Its config, configs, log and settings live in the nearest folder at or above the exe that holds\n"
-        << L"   profiles\\descriptors, wherever it is started from; --home names another folder instead.)\n"
+        << L"   Its config, configs, log and settings live beside the exe, wherever it is started from. A build's exe\n"
+        << L"   has home-folder.txt beside it, naming the checkout's root instead; --home names any other folder.)\n"
         << L"  (agent: --verbose logs everything, sampling the lines that fire on every report; --verbose-reports logs every one.\n"
         << L"   device.log is capped at 20 MB, with the previous 20 MB kept in device.log.1.)\n";
 }
