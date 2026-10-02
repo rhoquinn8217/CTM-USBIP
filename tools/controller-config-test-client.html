@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.37 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.38 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,14 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.38 The page no longer works out what a device is called. Which
+            model a kind names, and whether it came over USB or
+            Bluetooth, was a table in this page; the tray icon's menu
+            lists the devices too, so the table moved into the listener
+            and each device now arrives with its `label`. The page shows
+            that and keeps no table of its own. The two hints that told
+            you to choose "Open settings" on the tray icon say "Open
+            Controller Config", which is what that line is called now.
     2.66.37 The hints say what the tray icon is for. A new one, shown
             second: DS5-USBIP keeps running in the background when this
             window is closed, and Quit on the tray icon is what stops
@@ -2617,47 +2625,20 @@ function transportOf(sessionKind) {
   return '';
 }
 
-// ⭐ The product a session kind names, for labels -- or '' for one this page
-// does not know, which then shows its own kind string as before.
-// ⛔ Every label used to say "DualSense" unless the kind was an Edge, so a
-// bridged DualShock 4 was shown by its raw kind string, ds4_usb.
-function productOf(kind) {
-  if (kind === 'ds5e_usb' || kind === 'ds5_edge') return 'DualSense Edge';
-  if (kind === 'ds5' || kind === 'ds5_usb') return 'DualSense';
-  if (kind === 'ds4' || kind === 'ds4_usb') return 'DualShock 4';
-  if (kind === 'xbox') return 'Xbox Controller';
-  return '';
-}
-
-// ⭐⭐ NEVER "hid" WHERE ANYTHING BETTER IS KNOWN (rhoquinn8217, 2026-09-13):
-// the model name first, then what sort of device it is, and the raw kind last.
-// ⓘ A kind this page names above keeps that name; this is for the rest -- a Pro
-// Controller, a GameSir, a keyboard dongle -- which all used to read "hid".
-// Both come from the listener: `product` is the name the TV sent, `device_type`
-// is read off the report descriptor.
-function modelOrType(d) {
-  if (d.product) return d.product;
-  if (d.device_type) return d.device_type.charAt(0).toUpperCase() + d.device_type.slice(1);
-  return '';
-}
-
-// ⓘ Short form for the tab, where a full "DualSense (Bluetooth)" alongside a
-// name makes the label long enough to wrap.
+// ⭐⭐ WHAT A DEVICE IS CALLED COMES FROM THE LISTENER NOW (`label`, in each
+// device of /api/v1/devices): "DualSense (USB)", "DualShock 4 (BT)", "Xbox
+// Controller", and for anything else the model name the TV sent, then the
+// sort of device it is, then the raw kind.
+//
+// ⛔ THIS PAGE USED TO WORK THAT OUT ITSELF, in four functions here. The tray
+// icon's menu lists the devices as well and belongs to the listener, and two
+// tables naming one thing drift apart, so there is one, in the listener
+// (device_names.inl), and this asks for its answer.
+// ⓘ The rest of the line is only for a listener older than the label: the
+// page on disk can be newer than the exe it is served by, for as long as it
+// takes to build.
 function deviceLabelShort(d) {
-  var base = productOf(d.kind);
-  if (d.kind === 'ds5' || d.kind === 'ds4') return base + ' (BT)';
-  if (d.kind === 'ds5_usb' || d.kind === 'ds5e_usb' || d.kind === 'ds4_usb') return base + ' (USB)';
-  return base || modelOrType(d) || d.kind || 'controller';
-}
-
-function deviceLabel(d) {
-  var base = productOf(d.kind);
-  // ⓘ transportOf() is also asked elsewhere about DualSense audio, so a DS4's
-  // transport is named here rather than taught to it.
-  var how = transportOf(d.kind) ||
-            (d.kind === 'ds4' ? 'Bluetooth' : (d.kind === 'ds4_usb' ? 'USB' : ''));
-  if (base && how) return base + ' (' + how + ')';
-  return base || modelOrType(d) || d.kind || 'controller';
+  return d.label || d.product || d.kind || 'controller';
 }
 
 // ⭐⭐ TWO LEGENDS, ONE PER PAD FAMILY (T-240, rhoquinn8217: *"Legend based
@@ -3221,7 +3202,7 @@ function noteInputSource(what) {
 var FOOTER_HINTS = [
   'To bring this window back: <b>hold two fingers on the touchpad and press ' +
   'Options</b> (DS5/DS4 only), or click the tray icon and choose ' +
-  '<b>Open settings</b>.',
+  '<b>Open Controller Config</b>.',
 
   'DS5-USBIP keeps running in the <b>background</b> when this window is ' +
   'closed. To stop it, click the <b>tray icon</b> by the clock and choose ' +
@@ -3230,8 +3211,9 @@ var FOOTER_HINTS = [
   'Hold <b>☰</b> and move the <b>left stick</b> to drag this window. Tap it ' +
   'instead and the window steps between three spots.',
 
-  'Click the <b>tray icon</b> and choose <b>Open settings</b> to bring back ' +
-  'this window. You can also open the DS5-USBIP virtual keyboard from there.',
+  'Click the <b>tray icon</b> and choose <b>Open Controller Config</b> to ' +
+  'bring back this window. You can also open the DS5-USBIP virtual keyboard ' +
+  'from there.',
 
   'Give a pad a <b>stick, gyro or touchpad to mouse</b> preset and it drives ' +
   'this PC with no mouse or keyboard. <b>Square</b> opens the DS5-USBIP ' +
@@ -8821,7 +8803,7 @@ function selfTest() {
   // 2. Every function the page calls exists. Deleting a block that sits just
   //    above its caller has happened three times.
   ['renderTabs','buildDevicePane','setStickyHead','paintStickyHead','measureSticky',
-   'nameFor','deviceLabel','deviceLabelShort','settingsKindOf',
+   'nameFor','deviceLabelShort','settingsKindOf',
    'askConfirm','confirmYes','confirmNo','whoIs','setAutoLink','claimAutoLink',
    'stopAutoLink','archive','unlink','renameConfig','copyConfigFor','createFromPreset','presetCancel','openPresetInfo','closePresetInfo','renameKey','loadConfigs','loadDevices',
    'openConfig','applyPick','newConfigFor','preserveScroll','setDown','gpCollect'
