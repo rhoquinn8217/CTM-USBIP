@@ -44,6 +44,11 @@
     <ClCompile>
       <WarningLevel>Level4</WarningLevel>
       <LanguageStandard>stdcpp17</LanguageStandard>
+      <!-- The sources are UTF-8, and most have no byte-order mark. Without
+           this the compiler reads an unmarked file in the machine's own code
+           page, and a wide string holding one character outside ASCII comes
+           out as two or three wrong ones. The tray icon's tooltip did. -->
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <AdditionalIncludeDirectories>..\include;..\third_party;..\third_party\enet\include;..\third_party\vcpkg\installed\x64-windows-static\include;..\third_party\ffmpeg\x64\release\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>UNICODE;_UNICODE;NOMINMAX;_WINSOCK_DEPRECATED_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -59,6 +64,8 @@
     <ClCompile>
       <WarningLevel>Level4</WarningLevel>
       <LanguageStandard>stdcpp17</LanguageStandard>
+      <!-- UTF-8 sources: see the Debug settings above. -->
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <AdditionalIncludeDirectories>..\include;..\third_party;..\third_party\enet\include;..\third_party\vcpkg\installed\x64-windows-static\include;..\third_party\ffmpeg\x64\release\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>UNICODE;_UNICODE;NOMINMAX;NDEBUG;_WINSOCK_DEPRECATED_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
