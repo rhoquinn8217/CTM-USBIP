@@ -39,6 +39,16 @@ uint8_t g_dragMask = 0;
 std::map<const void *, uint8_t> g_dragFor;
 int g_clickCount = 0;
 int g_ensureCalls = 0;
+// ⓘ What a gesture that is not a mouse button reached for: a key tapped, a key
+// held (per pad, as the keyboard keeps it), and an on-screen keyboard toggled.
+int g_pulseCount = 0;
+uint8_t g_pulseModifier = 0;
+uint8_t g_pulseUsage = 0;
+std::map<const void *, std::pair<uint8_t, std::vector<uint8_t>>> g_touchKeys;
+int g_ensureKeyboardCalls = 0;
+int g_oskCount = 0;
+int g_oskButton = 0;
+int g_oskProgram = -1;
 // ⓘ A stand-in for the real cursor: movement pushed moves it, as delivery to
 // Windows would, and the touchpad's put-back reads and sets it.
 long g_cursorX = 0;
@@ -61,6 +71,14 @@ void reset_stubs()
     g_dragFor.clear();
     g_clickCount = 0;
     g_ensureCalls = 0;
+    g_pulseCount = 0;
+    g_pulseModifier = 0;
+    g_pulseUsage = 0;
+    g_touchKeys.clear();
+    g_ensureKeyboardCalls = 0;
+    g_oskCount = 0;
+    g_oskButton = 0;
+    g_oskProgram = -1;
 }
 
 } // namespace
@@ -200,27 +218,41 @@ inline void set_drag_for(const void *deviceKey, uint8_t mask)
 }
 } // namespace ctm_mouse_device
 
-// ⓘ A STAND-IN, like the Gate one above. touch_mouse.inl asks the rebinder
-// how to read a binding value since T-242, and rebind.inl cannot be included
-// by this binary -- so the mapping it needs is restated here, matching the
-// real one in rebind.inl. ⚠️ It folds case, because the config reader
-// lowercases every value and a comparison that does not silently never
-// matches, which rebind.inl records happening three times.
-namespace ctm_rebind {
-enum MouseAction { kMouseNone = 0, kMouseLeft, kMouseRight, kMouseMiddle,
-                   kMouseWheelUp, kMouseWheelDown };
-inline MouseAction mouse_action_for(const std::string &code)
+// ⓘ NO STAND-IN FOR READING A BINDING'S VALUE ANY MORE. The mouse names were
+// restated here while the real ones lived in rebind.inl, which this binary
+// cannot include. They are in binding_names.inl now, which touch_mouse.inl
+// includes for itself, so the gestures below are read by the real reader.
+
+// ⓘ The keyboard, for a gesture bound to a key: a tap asks for one press, the
+// pad pressed in holds a level of its own.
+namespace ctm_keyboard_device {
+namespace {   // internal linkage, same reason as above
+inline void pulse_key(uint8_t modifier, uint8_t usage)
 {
-    std::string want;
-    for (char c : code) want.push_back(static_cast<char>(tolower(static_cast<unsigned char>(c))));
-    if (want == "mouseleft")      return kMouseLeft;
-    if (want == "mouseright")     return kMouseRight;
-    if (want == "mousemiddle")    return kMouseMiddle;
-    if (want == "mousewheelup")   return kMouseWheelUp;
-    if (want == "mousewheeldown") return kMouseWheelDown;
-    return kMouseNone;
+    g_pulseModifier = modifier;
+    g_pulseUsage = usage;
+    ++g_pulseCount;
 }
-}  // namespace ctm_rebind
+inline void set_touch_keys_for(const void *deviceKey, uint8_t modifiers,
+                               const uint8_t *keys, size_t count)
+{
+    if (modifiers == 0 && (keys == nullptr || count == 0)) {
+        g_touchKeys.erase(deviceKey);
+        return;
+    }
+    auto &slot = g_touchKeys[deviceKey];
+    slot.first = modifiers;
+    slot.second.assign(keys, keys + (keys ? count : 0));
+}
+}
+} // namespace ctm_keyboard_device
+static void ctm_rebind_ensure_keyboard_started() { ++g_ensureKeyboardCalls; }
+static void ctm_osk_toggle(const std::string &, int button, int program)
+{
+    g_oskButton = button;
+    g_oskProgram = program;
+    ++g_oskCount;
+}
 
 #include "input/touch_mouse.inl"
 
@@ -1231,6 +1263,391 @@ int run_touch_mouse_tests()
         r[7] = static_cast<uint8_t>(r[7] | 0x02);   // the pad pressed in
         ds4_step(r, 8);
         CTM_CHECK_EQ(g_dragMask, 1);
+    }
+
+    // ---- A gesture that is not a mouse button --------------------------------
+    //
+    // ⭐ WHAT THESE PROTECT. The three gesture settings take any value a
+    // button's remap takes. Each kind has its own way of being pressed and its
+    // own way of being let go, and the checks below ask for both halves.
+    //
+    // WHAT THEY CANNOT DO. They stop at the stand-ins: that a key is released
+    // by the keyboard's pump is key_pulse_test's, and that the rebinder
+    // presses the button it is told about is not tested anywhere here.
+
+    section("touch: a tap bound to a key presses that key once, and clicks nothing");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_one_finger_tap"] = "Enter";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 300, 300);
+        run_step(r, 0);
+        CTM_CHECK_EQ(g_pulseCount, 0);          // not while the finger is down
+        set_point(r, 0, false, 1, 300, 300);
+        run_step(r, 100);
+        CTM_CHECK_EQ(g_pulseCount, 1);
+        CTM_CHECK_EQ(static_cast<int>(g_pulseUsage), 0x28);
+        CTM_CHECK_EQ(static_cast<int>(g_pulseModifier), 0);
+        CTM_CHECK(g_ensureKeyboardCalls > 0);   // or the press goes nowhere
+        CTM_CHECK_EQ(g_clickCount, 0);
+        // ⓘ And only once: the reports that follow the lift add nothing.
+        run_step(r, 108);
+        run_step(r, 116);
+        CTM_CHECK_EQ(g_pulseCount, 1);
+    }
+
+    section("touch: the two-finger tap has its own key, and a modifier is a key");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_one_finger_tap"] = "Enter";
+        g_cfg["touchpad_two_finger_tap"] = "ShiftLeft";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 300, 300);
+        run_step(r, 0);
+        set_point(r, 1, true, 2, 400, 300);
+        run_step(r, 30);
+        set_point(r, 0, false, 1, 300, 300);
+        set_point(r, 1, false, 2, 400, 300);
+        run_step(r, 110);
+        CTM_CHECK_EQ(g_pulseCount, 1);
+        CTM_CHECK_EQ(static_cast<int>(g_pulseModifier), 0x02);
+        CTM_CHECK_EQ(static_cast<int>(g_pulseUsage), 0);
+    }
+
+    section("touch: a key name as the config reader hands it back, lowercased, still presses");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_one_finger_tap"] = "arrowup";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 300, 300);
+        run_step(r, 0);
+        set_point(r, 0, false, 1, 300, 300);
+        run_step(r, 100);
+        CTM_CHECK_EQ(g_pulseCount, 1);
+        CTM_CHECK_EQ(static_cast<int>(g_pulseUsage), 0x52);
+    }
+
+    section("touch: a tap bound to a pad button presses it for a moment, then lets go");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_one_finger_tap"] = "button_cross";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 300, 300);
+        run_step(r, 0);
+        CTM_CHECK_EQ(pad_press::shared().pressed(kDev, 50), 0u);
+        set_point(r, 0, false, 1, 300, 300);
+        run_step(r, 100);
+        // ⓘ Standard index 0 is Cross. What the rebinder would be told, report
+        // by report, as the clock moves on.
+        CTM_CHECK_EQ(pad_press::shared().pressed(kDev, 100), 1u);
+        CTM_CHECK_EQ(pad_press::shared().pressed(kDev, 100 + pad_press::kTapHoldMs - 1), 1u);
+        CTM_CHECK_EQ(pad_press::shared().pressed(kDev, 100 + pad_press::kTapHoldMs), 0u);
+        CTM_CHECK_EQ(g_clickCount, 0);
+        CTM_CHECK_EQ(g_pulseCount, 0);
+    }
+
+    section("touch: a tap bound to an on-screen keyboard toggles it, with no button reserved");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_two_finger_tap"] = "KeyboardDS5_USBIP";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 300, 300);
+        set_point(r, 1, true, 2, 400, 300);
+        run_step(r, 0);
+        set_point(r, 0, false, 1, 300, 300);
+        set_point(r, 1, false, 2, 400, 300);
+        run_step(r, 90);
+        CTM_CHECK_EQ(g_oskCount, 1);
+        CTM_CHECK_EQ(g_oskProgram, static_cast<int>(binding::kOskOurs));
+        // ⓘ -1: a button that opens the keyboard is kept for closing it, and a
+        // tap is not a button.
+        CTM_CHECK_EQ(g_oskButton, -1);
+        // ⭐ The same tap again is the other half of the toggle.
+        set_point(r, 0, true, 3, 300, 300);
+        set_point(r, 1, true, 4, 400, 300);
+        run_step(r, 600);
+        set_point(r, 0, false, 3, 300, 300);
+        set_point(r, 1, false, 4, 400, 300);
+        run_step(r, 690);
+        CTM_CHECK_EQ(g_oskCount, 2);
+    }
+
+    section("touch: a tap bound to the wheel is one click of it, and not a button");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_one_finger_tap"] = "MouseWheelUp";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 300, 300);
+        run_step(r, 0);
+        set_point(r, 0, false, 1, 300, 300);
+        run_step(r, 100);
+        CTM_CHECK_EQ(g_wheelSum, 1);
+        CTM_CHECK_EQ(g_clickCount, 0);
+    }
+
+    section("touch: a name nothing knows does nothing, and so does a pad button that does not exist");
+    {
+        const char *nothing[] = { "banana", "button_nosuch", "button_", "x" };
+        for (const char *value : nothing) {
+            reset_stubs();
+            fresh_device();
+            g_cfg["touchpad_one_finger_tap"] = value;
+            auto r = rest_report();
+            set_point(r, 0, true, 1, 300, 300);
+            run_step(r, 0);
+            set_point(r, 0, false, 1, 300, 300);
+            run_step(r, 100);
+            CTM_CHECK_EQ(g_clickCount, 0);
+            CTM_CHECK_EQ(g_pulseCount, 0);
+            CTM_CHECK_EQ(g_oskCount, 0);
+            CTM_CHECK_EQ(g_wheelSum, 0);
+            CTM_CHECK_EQ(pad_press::shared().pressed(kDev, 100), 0u);
+        }
+    }
+
+    section("touch: while the pad drives the settings page, only the mouse acts");
+    {
+        // ⛔ A button's remaps stand down there, so a pad with Cross bound to a
+        // key can still press "select". A tap that typed into the page, or
+        // pressed a button into it, would be the same fault by another route.
+        const char *standsDown[] = { "Enter", "button_cross", "KeyboardSteam" };
+        for (const char *value : standsDown) {
+            reset_stubs();
+            fresh_device();
+            g_configModeEffective = true;
+            g_cfg["touchpad_one_finger_tap"] = value;
+            auto r = rest_report();
+            set_point(r, 0, true, 1, 300, 300);
+            run_step(r, 0);
+            set_point(r, 0, false, 1, 300, 300);
+            run_step(r, 100);
+            CTM_CHECK_EQ(g_pulseCount, 0);
+            CTM_CHECK_EQ(g_oskCount, 0);
+            CTM_CHECK_EQ(pad_press::shared().pressed(kDev, 100), 0u);
+        }
+        // ⭐ The click carries on: it is how the touchpad drives the page.
+        reset_stubs();
+        fresh_device();
+        g_configModeEffective = true;
+        g_cfg["touchpad_one_finger_tap"] = "MouseLeft";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 300, 300);
+        run_step(r, 0);
+        set_point(r, 0, false, 1, 300, 300);
+        run_step(r, 100);
+        CTM_CHECK_EQ(g_clickCount, 1);
+    }
+
+    section("touch: the pad pressed in holds a key until the last finger leaves");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_press_touch_drag"] = "KeyW";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 300, 300);
+        run_step(r, 0);
+        CTM_CHECK(g_touchKeys.find(kDev) == g_touchKeys.end());   // a touch is not a press
+        r[10] = static_cast<uint8_t>(r[10] | 0x02);   // the pad pressed in
+        run_step(r, 8);
+        CTM_CHECK(g_touchKeys.find(kDev) != g_touchKeys.end());
+        CTM_CHECK_EQ(static_cast<int>(g_touchKeys[kDev].second.size()), 1);
+        CTM_CHECK_EQ(static_cast<int>(g_touchKeys[kDev].second[0]), 0x1A);
+        CTM_CHECK_EQ(static_cast<int>(g_touchKeys[kDev].first), 0);
+        CTM_CHECK(g_ensureKeyboardCalls > 0);
+        // ⭐ THE CLICK CAN GO AND THE KEY STAYS, as a drag does.
+        r[10] = static_cast<uint8_t>(r[10] & ~0x02);
+        run_step(r, 40);
+        CTM_CHECK(g_touchKeys.find(kDev) != g_touchKeys.end());
+        // ⓘ It ends when the FINGER leaves.
+        set_point(r, 0, false, 1, 300, 300);
+        run_step(r, 80);
+        CTM_CHECK(g_touchKeys.find(kDev) == g_touchKeys.end());
+        // ⓘ No mouse button and no tapped key were involved.
+        CTM_CHECK_EQ(static_cast<int>(g_dragMask), 0);
+        CTM_CHECK_EQ(g_pulseCount, 0);
+    }
+
+    section("touch: the pad pressed in holds a modifier the same way");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_press_touch_drag"] = "ShiftLeft";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 300, 300);
+        r[10] = static_cast<uint8_t>(r[10] | 0x02);
+        run_step(r, 0);
+        CTM_CHECK(g_touchKeys.find(kDev) != g_touchKeys.end());
+        CTM_CHECK_EQ(static_cast<int>(g_touchKeys[kDev].first), 0x02);
+        CTM_CHECK_EQ(static_cast<int>(g_touchKeys[kDev].second.size()), 0);
+        set_point(r, 0, false, 1, 300, 300);
+        run_step(r, 50);
+        CTM_CHECK(g_touchKeys.find(kDev) == g_touchKeys.end());
+    }
+
+    section("touch: the pad pressed in holds a pad button until the last finger leaves");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_press_touch_drag"] = "button_r2";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 300, 300);
+        r[10] = static_cast<uint8_t>(r[10] | 0x02);
+        run_step(r, 0);
+        const uint32_t r2 = 1u << ctm_rebind::kBtnR2;
+        CTM_CHECK_EQ(pad_press::shared().pressed(kDev, 0), r2);
+        // ⓘ A hold, not a tap: the clock does not end it.
+        r[10] = static_cast<uint8_t>(r[10] & ~0x02);
+        run_step(r, 5000);
+        CTM_CHECK_EQ(pad_press::shared().pressed(kDev, 5000), r2);
+        set_point(r, 0, false, 1, 300, 300);
+        run_step(r, 5008);
+        CTM_CHECK_EQ(pad_press::shared().pressed(kDev, 5008), 0u);
+    }
+
+    section("touch: the pad pressed in toggles an on-screen keyboard once per press");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_press_touch_drag"] = "KeyboardWindows";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 300, 300);
+        r[10] = static_cast<uint8_t>(r[10] | 0x02);
+        run_step(r, 0);
+        CTM_CHECK_EQ(g_oskCount, 1);
+        CTM_CHECK_EQ(g_oskProgram, static_cast<int>(binding::kOskWindows));
+        // ⛔ NOT ONCE PER REPORT. Held in for a second at 250 a second it would
+        // open and close the keyboard two hundred and fifty times.
+        for (int i = 1; i <= 250; ++i) run_step(r, i * 4);
+        CTM_CHECK_EQ(g_oskCount, 1);
+        // ⓘ And not again as the click is let go with the finger still down.
+        r[10] = static_cast<uint8_t>(r[10] & ~0x02);
+        run_step(r, 1010);
+        r[10] = static_cast<uint8_t>(r[10] | 0x02);
+        run_step(r, 1020);
+        CTM_CHECK_EQ(g_oskCount, 1);
+        // A new press, after every finger has left, is the next toggle.
+        r[10] = static_cast<uint8_t>(r[10] & ~0x02);
+        set_point(r, 0, false, 1, 300, 300);
+        run_step(r, 1100);
+        set_point(r, 0, true, 2, 300, 300);
+        r[10] = static_cast<uint8_t>(r[10] | 0x02);
+        run_step(r, 1500);
+        CTM_CHECK_EQ(g_oskCount, 2);
+    }
+
+    section("touch: what the press took hold of is what it lets go, whatever the setting says by then");
+    {
+        // ⛔ The setting can be changed with the pad still held in. A key
+        // pressed under the old value must be the key that comes back up, or
+        // it stays down with nothing left that knows about it.
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_press_touch_drag"] = "KeyW";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 300, 300);
+        r[10] = static_cast<uint8_t>(r[10] | 0x02);
+        run_step(r, 0);
+        CTM_CHECK(g_touchKeys.find(kDev) != g_touchKeys.end());
+        g_cfg["touchpad_press_touch_drag"] = "button_cross";   // changed mid-press
+        run_step(r, 8);
+        // ⓘ Still the key: a press is one thing from start to finish.
+        CTM_CHECK(g_touchKeys.find(kDev) != g_touchKeys.end());
+        CTM_CHECK_EQ(pad_press::shared().pressed(kDev, 8), 0u);
+        set_point(r, 0, false, 1, 300, 300);
+        run_step(r, 50);
+        CTM_CHECK(g_touchKeys.find(kDev) == g_touchKeys.end());
+        CTM_CHECK_EQ(pad_press::shared().pressed(kDev, 50), 0u);
+    }
+
+    section("touch: the setting cleared mid-press lets go at once");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_press_touch_drag"] = "button_cross";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 300, 300);
+        r[10] = static_cast<uint8_t>(r[10] | 0x02);
+        run_step(r, 0);
+        CTM_CHECK_EQ(pad_press::shared().pressed(kDev, 0), 1u);
+        g_cfg.erase("touchpad_press_touch_drag");
+        run_step(r, 8);                        // finger still down, pad still in
+        CTM_CHECK_EQ(pad_press::shared().pressed(kDev, 8), 0u);
+    }
+
+    section("touch: a gate that shuts mid-press lets go");
+    {
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_press_touch_drag"] = "KeyW";
+        g_cfg["touchpad_to_mouse_gate"] = "L2";
+        auto r = rest_report();
+        r[5] = 200;                            // L2 pulled: the gate is open
+        set_point(r, 0, true, 1, 300, 300);
+        r[10] = static_cast<uint8_t>(r[10] | 0x02);
+        run_step(r, 0);
+        CTM_CHECK(g_touchKeys.find(kDev) != g_touchKeys.end());
+        r[5] = 0;                              // L2 let go, finger still down
+        run_step(r, 8);
+        CTM_CHECK(g_touchKeys.find(kDev) == g_touchKeys.end());
+    }
+
+    section("touch: a pad that goes away mid-press leaves nothing held");
+    {
+        const char *held[] = { "KeyW", "button_cross", "MouseLeft" };
+        for (const char *value : held) {
+            reset_stubs();
+            fresh_device();
+            g_cfg["touchpad_press_touch_drag"] = value;
+            auto r = rest_report();
+            set_point(r, 0, true, 1, 300, 300);
+            r[10] = static_cast<uint8_t>(r[10] | 0x02);
+            run_step(r, 0);
+            ctm_touch_mouse::forget(kDev);     // unbridged with the pad held in
+            CTM_CHECK(g_touchKeys.find(kDev) == g_touchKeys.end());
+            CTM_CHECK_EQ(pad_press::shared().pressed(kDev, 1), 0u);
+            CTM_CHECK_EQ(static_cast<int>(g_dragMask), 0);
+        }
+        // ⓘ And a button a tap had down goes with the pad as well.
+        reset_stubs();
+        fresh_device();
+        g_cfg["touchpad_one_finger_tap"] = "button_cross";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 300, 300);
+        run_step(r, 0);
+        set_point(r, 0, false, 1, 300, 300);
+        run_step(r, 100);
+        CTM_CHECK_EQ(pad_press::shared().pressed(kDev, 101), 1u);
+        ctm_touch_mouse::forget(kDev);
+        CTM_CHECK_EQ(pad_press::shared().pressed(kDev, 102), 0u);
+    }
+
+    section("touch: while the pad drives the settings page, a press takes hold of nothing but the mouse");
+    {
+        reset_stubs();
+        fresh_device();
+        g_configModeEffective = true;
+        g_cfg["touchpad_press_touch_drag"] = "KeyW";
+        auto r = rest_report();
+        set_point(r, 0, true, 1, 300, 300);
+        r[10] = static_cast<uint8_t>(r[10] | 0x02);
+        run_step(r, 0);
+        CTM_CHECK(g_touchKeys.find(kDev) == g_touchKeys.end());
+        // ⭐ A drag still works there.
+        reset_stubs();
+        fresh_device();
+        g_configModeEffective = true;
+        g_cfg["touchpad_press_touch_drag"] = "MouseLeft";
+        r = rest_report();
+        set_point(r, 0, true, 1, 300, 300);
+        r[10] = static_cast<uint8_t>(r[10] | 0x02);
+        run_step(r, 0);
+        CTM_CHECK_EQ(static_cast<int>(g_dragMask), 0x01);
     }
 
     return 0;

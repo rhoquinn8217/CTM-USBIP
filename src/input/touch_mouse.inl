@@ -6,10 +6,18 @@
 //   a quick tap  clicks: one finger = left, two fingers = right, the Apple
 //                trackpad convention; double-click is just tapping twice
 //
+// ⭐ A TAP, AND THE PAD PRESSED IN, DO WHATEVER THEIR SETTING NAMES. A click is
+// the usual choice and what the lines above describe; each of the three takes
+// any value a button's remap takes -- a key, another button on the pad, an
+// on-screen keyboard, a wheel click.
+//
 // ⭐ READ-ONLY, like the gyro hook. The controller report is never modified, so
 // games keep seeing the touchpad exactly as before and this cannot regress
 // anything. Everything feeds the SAME synthetic mouse the gyro drives -- one
 // emit point, however many sources.
+// ⓘ Still read-only now that a gesture can press a button on the pad: it SAYS
+// which button (pad_press.inl) and the rebinder, the one place that writes the
+// report, presses it.
 //
 // ⭐ ABSENT = OFF, per the project's config rule. With no touchpad_* keys set,
 // every path below returns without touching any shared state.
@@ -35,9 +43,16 @@
 // ⓘ Relies on its includer (main.cpp) for: device_config_*, device_input_pad_for,
 // device_settings_section, ctm_rebind_config_mode_effective, the gyro mailbox,
 // ctm_mouse_device, and ctm_gyro_mouse_ensure_mouse_started -- the same pattern
-// as gyro_mouse.inl and rebind.inl.
+// as gyro_mouse.inl and rebind.inl. And, for a gesture that is not a mouse
+// button: ctm_keyboard_device, ctm_rebind_ensure_keyboard_started and
+// ctm_osk_toggle.
 
 #pragma once
+
+// ⓘ The two pure ones it can include for itself: what a binding's value names,
+// and the buttons a gesture is pressing.
+#include "binding_names.inl"
+#include "pad_press.inl"
 
 namespace ctm_touch_mouse {
 
@@ -252,6 +267,10 @@ struct TouchState {
     // guess; a physical click is not. Three-finger drag is not available to us
     // at all -- the pad reports two touch points.
     bool dragging = false;
+    // ⭐ WHAT THE PRESS TOOK HOLD OF, kept so the letting go matches it. The
+    // setting can change while the pad is still held in, and a key pressed
+    // under the old value has to be the key that comes back up.
+    binding::Target holdTarget;
 
     bool sessionActive = false;
     long long sessionStart = 0;
@@ -288,6 +307,8 @@ struct TouchState {
     int mJumps = 0;
     int mMaxJump = 0;
     bool mClicked = false;
+    // What a tap did, for the log line: click, key, button, keyboard, wheel.
+    const char *mTap = "no";
     // Which put-back this touch made: tap, second, press, or -.
     const char *mPutBack = "-";
     // The first finger's largest move between two reports, in pad units. A
@@ -345,6 +366,7 @@ inline void measure_begin(TouchState &st, int fingers, const TouchPoint &only, l
     st.mJumps = 0;
     st.mMaxJump = 0;
     st.mClicked = false;
+    st.mTap = "no";
     st.mPutBack = "-";
     st.mPrevX = only.x;
     st.mPrevY = only.y;
@@ -457,7 +479,7 @@ inline void measure_end(const TouchState &st, long long nowMs)
         << " jumps=" << st.mJumps
         << " max_jump=" << st.mMaxJump
         << " moved=" << (st.sessionMoved ? "yes" : "no")
-        << " tap=" << (st.mClicked ? "click" : "no"));
+        << " tap=" << st.mTap);
 }
 
 // The one finger's recent path, oldest first, as " -<ms ago>:<x>,<y>".
@@ -487,28 +509,127 @@ inline void path_add(TouchState &st, long long nowMs, const TouchPoint &p)
 inline std::mutex g_touchMutex;
 inline std::map<const void *, TouchState> g_touch;
 
-// ⭐ A GESTURE'S ACTION, FROM THE SAME VALUE SPACE A REBIND USES (T-242).
-// ⓘ mouse_action_for() folds case itself, which matters: the config reader
-// lowercases every value, and rebind.inl records three bindings that silently
+// ⭐ A GESTURE'S ACTION, FROM THE SAME VALUE SPACE A REBIND USES.
+// rhoquinn8217, 2026-09-21: *"toucpad tap, 1 finger tap and 2 finger tap
+// should be remappable to mouse buttons and keyboard inputs and controller
+// inputs including keyboard openers"*.
+// ⓘ binding::parse() reads the value, and folds case itself, which matters:
+// the config reader lowercases every value, and three bindings once silently
 // never matched because a comparison did not.
 //
-// ⛔⛔ MOUSE BUTTONS ONLY, FOR NOW, AND THE REASON IS NOT LAZINESS. A
-// keyboard key would have to go through ctm_keyboard_device::set_state_for(),
-// which is keyed per DEVICE and rewritten by the rebinder on every report --
-// so a key set from here would be overwritten within 4 ms. Making a tap type a
-// letter means merging these gestures into the rebinder's own key-state
-// computation, which is a change to its model rather than a call. T-242 carries
-// that as the remaining half.
-// ⓘ A wheel value maps to nothing here and reads as "no action" rather than
-// as left click, because silently doing the wrong thing is worse.
-inline uint8_t touch_action_mask(const std::string &code)
+// ⛔⛔ MOUSE BUTTONS ONLY, UNTIL 2026-10-02, AND THE REASON WAS REAL. The
+// keyboard's keys are a per-pad level the rebinder rewrites on every report,
+// so a key set from here was overwritten within 4 ms. And a tap HOLDS NOTHING:
+// by the time it is known to be a tap the finger has lifted, so there is no
+// moment at which anything lets a key go.
+// ➡️ So each kind of thing has its own way in, none of them the rebinder's
+// slot: a level of its own on the keyboard for a key the pad HOLDS, a press
+// the keyboard's pump releases by its own clock for a key that is TAPPED
+// (key_pulse.inl), and for a pad button a note the rebinder reads as it writes
+// the report (pad_press.inl).
+
+// ⛔ ONLY THE MOUSE WORKS WHILE THE PAD IS DRIVING THE SETTINGS PAGE. A button's
+// remaps stand down there, so that a pad with Cross bound to a key can still
+// press "select"; a tap that typed a key or pressed a button into the page
+// would be the same fault by another route. ⓘ The cursor and its clicks carry
+// on, because they are how the touchpad drives the page.
+inline bool acts_now(const binding::Target &target)
 {
-    switch (ctm_rebind::mouse_action_for(code)) {
-        case ctm_rebind::kMouseLeft:   return 0x01;
-        case ctm_rebind::kMouseRight:  return 0x02;
-        case ctm_rebind::kMouseMiddle: return 0x04;
-        default:                       return 0x00;
+    if (target.kind == binding::kNone) return false;
+    if (target.kind == binding::kMouseButton || target.kind == binding::kMouseWheel) return true;
+    return !ctm_rebind_config_mode_effective();
+}
+
+// A tap that is not a mouse button. ⓘ A mouse button is a click, and a click
+// has to land where the finger meant, so it has its own path below.
+// Returns what it did, for the log line.
+inline const char *tap_other(const void *deviceKey, const std::string &section,
+                             const binding::Target &target, long long nowMs)
+{
+    switch (target.kind) {
+        case binding::kMouseWheel:
+            // ⓘ One click of the wheel for one tap, as one press of a button gives.
+            ctm_mouse_device::add_wheel(target.wheel);
+            ctm_gyro_mouse_ensure_mouse_started();
+            return "wheel";
+        case binding::kKey:
+            // ⭐ Down and up again by the keyboard's own clock, not this path's.
+            ctm_keyboard_device::pulse_key(target.modifier, target.usage);
+            ctm_rebind_ensure_keyboard_started();
+            return "key";
+        case binding::kPadButton:
+            pad_press::shared().tap(deviceKey, target.button, nowMs);
+            return "button";
+        case binding::kOsk:
+            // ⓘ -1: no button opened it, so none is reserved for closing it.
+            // The same tap again closes it, as the same button would.
+            ctm_osk_toggle(section, -1, target.osk);
+            return "keyboard";
+        default:
+            return "no";
     }
+}
+
+// The pad pressed in with a finger on it: take hold of what the setting names.
+inline void hold_begin(const void *deviceKey, const std::string &section,
+                       const binding::Target &target)
+{
+    switch (target.kind) {
+        case binding::kMouseButton:
+            ctm_mouse_device::set_drag_for(deviceKey, target.mouseMask);
+            ctm_gyro_mouse_ensure_mouse_started();
+            break;
+        case binding::kMouseWheel:
+            // ⓘ Not something that can be held: one click per press.
+            ctm_mouse_device::add_wheel(target.wheel);
+            ctm_gyro_mouse_ensure_mouse_started();
+            break;
+        case binding::kKey: {
+            const uint8_t key = target.usage;
+            ctm_keyboard_device::set_touch_keys_for(deviceKey, target.modifier,
+                                                    &key, key != 0 ? 1 : 0);
+            ctm_rebind_ensure_keyboard_started();
+            break;
+        }
+        case binding::kPadButton:
+            pad_press::shared().hold(deviceKey, target.button);
+            break;
+        case binding::kOsk:
+            // ⓘ Once per press, like a button bound to one.
+            ctm_osk_toggle(section, -1, target.osk);
+            break;
+        default:
+            break;
+    }
+}
+
+// ...and let go of exactly that, whatever the setting says by now.
+inline void hold_end(const void *deviceKey, const binding::Target &target)
+{
+    switch (target.kind) {
+        case binding::kMouseButton:
+            ctm_mouse_device::set_drag_for(deviceKey, 0x00);
+            break;
+        case binding::kKey:
+            ctm_keyboard_device::set_touch_keys_for(deviceKey, 0, nullptr, 0);
+            break;
+        case binding::kPadButton:
+            pad_press::shared().release(deviceKey, target.button);
+            break;
+        default:
+            break;   // a wheel click and a keyboard toggle left nothing held
+    }
+}
+
+// ⛔ NOTHING IS LEFT HELD. Every way out of a press comes through here: the
+// last finger leaving, the setting or the gate turned off under it, the pad
+// going away.
+inline void drop_hold(TouchState &st, const void *deviceKey)
+{
+    if (!st.dragging) return;
+    st.dragging = false;
+    hold_end(deviceKey, st.holdTarget);
+    st.holdTarget = binding::Target();
 }
 
 inline void forget(const void *deviceKey)
@@ -520,10 +641,11 @@ inline void forget(const void *deviceKey)
     // ⓘ ITS OWN drag only: the level is kept per pad (mouse_held.inl), so a drag
     // another pad is holding carries on. The device's stop() also releases every
     // mouse button this pad holds; this lets the drag go with its own state.
-    if (it != g_touch.end() && it->second.dragging) {
-        ctm_mouse_device::set_drag_for(deviceKey, 0x00);
-    }
+    // ⓘ And the same for a key or a pad button the press was holding.
+    if (it != g_touch.end()) drop_hold(it->second, deviceKey);
     g_touch.erase(deviceKey);
+    // ⓘ A button a tap had down goes with the pad too.
+    pad_press::shared().forget(deviceKey);
 }
 
 // ---- Putting the cursor back ------------------------------------------------
@@ -778,7 +900,7 @@ inline void step(const void *deviceKey, const std::string &section,
     // ⭐ Everything off: keep no state, so turning a feature on later starts
     // clean rather than against a stale anchor.
     if (!cursorOn && !scrollOn && !tapsOn && !dragOn) {
-        if (st.dragging) ctm_mouse_device::set_drag_for(deviceKey, 0x00);
+        drop_hold(st, deviceKey);
         if (st.clickMask != 0) fire_click(st);   // a tap already made
         st = TouchState();
         return;
@@ -803,7 +925,7 @@ inline void step(const void *deviceKey, const std::string &section,
     // anchor rather than measuring movement against where a finger was before
     // the gate closed -- which would arrive as one jump.
     if (!ctm_gyro_mouse::gate_open(gate, lay, data, len)) {
-        if (st.dragging) ctm_mouse_device::set_drag_for(deviceKey, 0x00);
+        drop_hold(st, deviceKey);
         if (st.clickMask != 0) fire_click(st);   // a tap already made
         st = TouchState();
         return;
@@ -835,15 +957,18 @@ inline void step(const void *deviceKey, const std::string &section,
     // ---- Drag ---------------------------------------------------------------
     // Read before the tap and cursor paths so a drag survives whatever they
     // decide to do with the same touch.
-    const uint8_t dragMask = touch_action_mask(dragTo);
-    if (dragOn && dragMask != 0) {
+    // ⭐ WHAT THE PRESS HOLDS IS THE SETTING'S TO SAY: a mouse button is a
+    // drag, and a key or a pad button is that key or button kept down, for the
+    // same length of time -- from the press until no finger is left.
+    const binding::Target dragTarget = binding::parse(dragTo);
+    if (dragOn && dragTarget.kind != binding::kNone) {
         const bool padPressed = ctm_rebind::touch_pressed(lay, data, len);
         const bool anyFinger = fingers > 0;
 
         if (!st.dragging) {
             // Grab: the pad clicked in WITH a finger on it. A click with no
             // finger is an ordinary click and is left alone.
-            if (padPressed && anyFinger) {
+            if (padPressed && anyFinger && acts_now(dragTarget)) {
                 // ⭐ BACK TO A MOMENT BEFORE THE PRESS, THEN THE GRAB
                 // (rhoquinn8217, 2026-09-30): pressing the pad down rolls the
                 // finger, and the cursor slid off what was to be dragged. The pad
@@ -858,20 +983,18 @@ inline void step(const void *deviceKey, const std::string &section,
                     st.pressY0 = only.y;
                 }
                 st.dragging = true;
-                ctm_mouse_device::set_drag_for(deviceKey, dragMask);
-                ctm_gyro_mouse_ensure_mouse_started();
+                st.holdTarget = dragTarget;
+                hold_begin(deviceKey, section, st.holdTarget);
             }
         } else if (!anyFinger) {
             // Drop: every finger has left the pad. ⓘ NOT when the click is
             // released -- holding a button down for the length of a drag is
             // the thing this exists to avoid.
-            st.dragging = false;
-            ctm_mouse_device::set_drag_for(deviceKey, 0x00);
+            drop_hold(st, deviceKey);
         }
     } else if (st.dragging) {
         // Turned off mid-drag: never leave the button held.
-        st.dragging = false;
-        ctm_mouse_device::set_drag_for(deviceKey, 0x00);
+        drop_hold(st, deviceKey);
     }
 
     // ---- Tap session --------------------------------------------------------
@@ -943,7 +1066,9 @@ inline void step(const void *deviceKey, const std::string &section,
                 // falling back to the other one: "two-finger tap does nothing"
                 // has to be sayable, and it is said by leaving it blank.
                 const std::string &want = (st.sessionMaxFingers >= 2) ? twoTap : oneTap;
-                const uint8_t mask = touch_action_mask(want);
+                const binding::Target tapTarget = binding::parse(want);
+                const uint8_t mask =
+                    tapTarget.kind == binding::kMouseButton ? tapTarget.mouseMask : 0;
                 if (mask != 0) {
                     // ⭐ WHERE THE CLICK LANDS: a double tap's second click
                     // exactly on the first (kDoubleTapMs), and a tap whose roll
@@ -989,6 +1114,14 @@ inline void step(const void *deviceKey, const std::string &section,
                     st.lastTapY = ty;
                     st.lastTapMs = nowMs;
                     st.mClicked = true;
+                    st.mTap = "click";
+                } else if (acts_now(tapTarget)) {
+                    // ⭐ ANYTHING ELSE A BINDING CAN NAME: a key, a button on the
+                    // pad, an on-screen keyboard, a wheel click.
+                    // ⓘ No put-back and no settling wait. Those exist so that a
+                    // click lands where the finger meant, and none of these
+                    // lands anywhere.
+                    st.mTap = tap_other(deviceKey, section, tapTarget, nowMs);
                 }
             }
             // A touch that was not a tap ends any double tap.

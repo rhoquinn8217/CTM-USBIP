@@ -15,6 +15,10 @@
 
 #pragma once
 
+// ⓘ Outside the namespace, like every include here. A key that is tapped
+// rather than held: pressed, then released by the clock.
+#include "key_pulse.inl"
+
 namespace ctm_keyboard_device {
 
 // Matches the endpoint the profile declares.
@@ -71,6 +75,18 @@ inline std::map<const void *, std::pair<uint8_t, std::vector<uint8_t>>> g_perDev
 // mouse device's separate drag and trigger levels.
 inline std::map<const void *, std::pair<uint8_t, std::vector<uint8_t>>> g_triggerHeld;
 
+// ⭐ A THIRD LEVEL, for a key the touchpad holds: the pad pressed in, and kept
+// down for as long as a finger stays on it. Its own slot for the reason the
+// trigger has one -- each writer replaces its slot whole, so two writers in one
+// slot would erase each other.
+inline std::map<const void *, std::pair<uint8_t, std::vector<uint8_t>>> g_touchHeld;
+
+// ⭐ AND ONE THING THAT IS NOT A LEVEL: a key that is TAPPED. Nothing holds it,
+// so nothing can let go of it; the pump below brings it up again by its own
+// clock. ⓘ One queue for the keyboard, not one per pad: a tap is over in a
+// moment, and the keyboard is one device to Windows.
+inline key_pulse::Pulses g_pulses;
+
 inline void set_state_locked_from_devices();
 
 // ⓘ The device-aware entry point. Anything with a controller in hand uses this;
@@ -95,6 +111,7 @@ inline void forget_device(const void *deviceKey)
     std::lock_guard<std::mutex> lock(g_stateMutex);
     g_perDevice.erase(deviceKey);
     g_triggerHeld.erase(deviceKey);
+    g_touchHeld.erase(deviceKey);
     set_state_locked_from_devices();
 }
 
@@ -109,6 +126,29 @@ inline void set_trigger_keys_for(const void *deviceKey, uint8_t modifiers,
         slot.second.assign(keys, keys + (keys ? count : 0));
         set_state_locked_from_devices();
     }
+}
+
+// The touchpad's own level: a key held by the pad pressed in. Same shape again.
+// ⓘ Nothing held is no entry at all, so a pad that never uses this keeps none.
+inline void set_touch_keys_for(const void *deviceKey, uint8_t modifiers,
+                               const uint8_t *keys, size_t count)
+{
+    std::lock_guard<std::mutex> lock(g_stateMutex);
+    if (modifiers == 0 && (keys == nullptr || count == 0)) {
+        g_touchHeld.erase(deviceKey);
+    } else {
+        auto &slot = g_touchHeld[deviceKey];
+        slot.first = modifiers;
+        slot.second.assign(keys, keys + (keys ? count : 0));
+    }
+    set_state_locked_from_devices();
+}
+
+// One press and release of a key, for a tap. ⓘ Only queued here: the pump
+// takes it within a few milliseconds, holds it down and brings it back up.
+inline void pulse_key(uint8_t modifier, uint8_t usage)
+{
+    g_pulses.add(modifier, usage);
 }
 
 inline void set_state(uint8_t modifiers, const uint8_t *keys, size_t count)
@@ -151,7 +191,7 @@ inline void set_state_locked_from_devices()
     uint8_t mods = 0;
     uint8_t merged[6] = {0, 0, 0, 0, 0, 0};
     size_t n = 0;
-    for (const auto *table : { &g_perDevice, &g_triggerHeld }) {
+    for (const auto *table : { &g_perDevice, &g_triggerHeld, &g_touchHeld }) {
         for (const auto &entry : *table) {
             mods = static_cast<uint8_t>(mods | entry.second.first);
             for (uint8_t k : entry.second.second) {
@@ -161,6 +201,14 @@ inline void set_state_locked_from_devices()
                 if (!already) merged[n++] = k;
             }
         }
+    }
+    // ⭐ And the key a tap has down this moment, if there is one.
+    const key_pulse::Key tapped = g_pulses.down();
+    mods = static_cast<uint8_t>(mods | tapped.modifier);
+    if (tapped.usage != 0 && n < 6) {
+        bool already = false;
+        for (size_t i = 0; i < n; ++i) if (merged[i] == tapped.usage) already = true;
+        if (!already) merged[n++] = tapped.usage;
     }
     bool changed = (g_modifiers != mods);
     g_modifiers = mods;
@@ -183,9 +231,23 @@ inline void release_all()
     set_state(0, nullptr, 0);
 }
 
+inline long long pump_now_ms()
+{
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
 inline void pump_loop()
 {
     while (g_running.load()) {
+        // ⭐ A TAPPED KEY GOES DOWN, AND COMES BACK UP, HERE: by this thread's
+        // clock and nobody's report. ⛔ Not on the pad's path. A release that
+        // waited for the pad's next report would never come from a pad that
+        // had just been unplugged, and the key would stay down at the host.
+        if (g_pulses.step(pump_now_ms())) {
+            std::lock_guard<std::mutex> lock(g_stateMutex);
+            set_state_locked_from_devices();
+        }
         if (!g_dirty.exchange(false, std::memory_order_relaxed)) {
             // ⓘ Nothing changed. A HID keyboard does not need to repeat itself:
             // the host holds the last report until a new one arrives, so a
@@ -286,6 +348,9 @@ inline void stop()
     if (g_pump.joinable()) {
         g_pump.join();
     }
+    // ⓘ Nothing steps a tapped key once the pump has gone, so none is left
+    // waiting for a keyboard that starts again later.
+    g_pulses.clear();
     std::lock_guard<std::mutex> lock(g_mutex);
     g_device.reset();
     g_started.store(false);

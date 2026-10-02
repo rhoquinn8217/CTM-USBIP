@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.35 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.36 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,13 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.36 The touchpad's tap and press take everything a button's
+            remap takes. The three gesture rows offered three mouse
+            buttons; they are the picker a remap row has now, so a tap
+            can be a key, a button on the pad, an on-screen keyboard or
+            a wheel click, and the pad pressed in can hold a key or a
+            button. A pad button reads "pad: ○ / B" there, as it does
+            in every other list.
     2.66.35 The settings window wears the listener's icon. The page names
             /favicon.ico, and the listener now answers it with the icon
             built into the exe, so the window's title bar and its
@@ -3128,17 +3135,32 @@ var GATE_BUTTON_EXTRA = {
 // the gyro is on all the time and the button is what stops it. The hint used to
 // sit on the button row's blank as "(no button — always)"; rhoquinn8217 moved
 // it here, where it explains the type rather than the absence of a button.
-// ⓘ T-242: the touchpad gestures take a mouse action, and "(blank)" on one
-// of those rows means that gesture does nothing -- not "off by default".
+// ⓘ The touchpad's gestures. "(blank)" on one of these rows means that
+// gesture does nothing -- not "off by default".
 var TOUCH_ACTION_KEYS = {
   touchpad_one_finger_tap: 1, touchpad_two_finger_tap: 1, touchpad_press_touch_drag: 1
 };
+// ⓘ The words for what these rows had before they took the whole list. A
+// value with no entry here reads as it does on a remap row.
 var TOUCH_ACTION_LABELS = {
   '': 'does nothing',
   MouseLeft: 'left click',
   MouseRight: 'right click',
-  MouseMiddle: 'middle click'
+  MouseMiddle: 'middle click',
+  // ⓘ The wheel is in the list these rows take now, and reads as its
+  // neighbours do rather than as the config spells it. One click of it a tap.
+  MouseWheelUp: 'wheel up',
+  MouseWheelDown: 'wheel down'
 };
+
+// ⭐ WHICH ROWS TAKE A BINDING'S VALUE: a numbered remap, and the three
+// touchpad gestures. They share one list -- keys, mouse actions, on-screen
+// keyboards, pad buttons -- and so one picker.
+// ⚠️ A NUMBERED rebind only. 'rebind_debug' also starts with 'rebind_'
+// and is a bool; the prefix test alone once turned it into a key picker.
+function isBindingKey(key) {
+  return /^rebind_\d+$/.test(key || '') || !!TOUCH_ACTION_KEYS[key];
+}
 
 // ⭐⭐ THE THIRD LEGEND: A REAL KEYBOARD (T-247, rhoquinn8217, 2026-09-24:
 // *"I want the legend to change based on whether it's a playstation
@@ -3345,8 +3367,10 @@ function choiceLabel(key, value) {
   if (key === 'gyro_to_mouse_gate_type') {
     return GATE_TYPE_LABELS[value] !== undefined ? GATE_TYPE_LABELS[value] : value;
   }
-  if (TOUCH_ACTION_KEYS[key]) {
-    return TOUCH_ACTION_LABELS[value] !== undefined ? TOUCH_ACTION_LABELS[value] : value;
+  // ⓘ Only the values those rows have words of their own for. Anything else
+  // falls through, so a pad button on a gesture row reads "pad: ○ / B" too.
+  if (TOUCH_ACTION_KEYS[key] && TOUCH_ACTION_LABELS[value] !== undefined) {
+    return TOUCH_ACTION_LABELS[value];
   }
   // ⭐ T-242: a pad button reads the same wherever it is offered, so this is
   // asked before the per-row cases below rather than inside any one of them.
@@ -4331,10 +4355,13 @@ function renderConfigEditor(hostId, configName, prefix, ordinal) {
         // ⓘ A trigger needs no special case here: it is bound by its ordinary
         // remap like every other button, and only a separate switch decides
         // whether pulling it steadies the cursor.
-        if (meta.key && /^rebind_\d+$/.test(meta.key) && KEY_NAMES.length) {
+        // ⭐ The touchpad's gestures take the same list, so they get the same
+        // picker (isBindingKey). Their blank says what it does, as it did.
+        if (meta.key && isBindingKey(meta.key) && KEY_NAMES.length) {
           control = '<select id="' + id + '"' + onchange + dis + '>' +
             '<option value=""' + (String(shown) === '' ? ' selected' : '') +
-            '>(not bound)</option>' +
+            '>' + (TOUCH_ACTION_KEYS[meta.key] ? esc(TOUCH_ACTION_LABELS['']) : '(not bound)') +
+            '</option>' +
             KEY_NAMES.map(function(k) {
               // ⭐ choiceLabel, NOT the raw name: a pad button reads
               // "pad: ○ / B" here, as it does in every other list.

@@ -13,123 +13,14 @@
 // ⓘ Outside the namespace: this file opens ctm_rebind itself, and including it
 // inside would nest a second one.
 #include "button_layout.inl"
+// ⓘ What a binding's value can name -- keys, mouse actions, the on-screen
+// keyboards, pad buttons -- and the one function that reads a value. The names
+// lived here until the touchpad's gestures needed the same list.
+#include "binding_names.inl"
+// ⓘ Buttons a touchpad gesture is pressing; apply() below presses them.
+#include "pad_press.inl"
 
 namespace ctm_rebind {
-
-// ---- Key names --------------------------------------------------------------
-//
-// ⭐ KeyboardEvent.code, the W3C names browsers already use. The page speaks it
-// natively, so "press the key you want" is a few lines -- and there is no
-// cross-tool convention to copy, because the GUI remappers store numeric codes
-// and never make you type a name.
-//
-// ⓘ Values are USB HID usage IDs, which is what a boot keyboard report carries.
-struct KeyName { const char *code; uint8_t usage; uint8_t modifier; };
-
-inline const KeyName kKeys[] = {
-    {"KeyA",0x04,0},{"KeyB",0x05,0},{"KeyC",0x06,0},{"KeyD",0x07,0},
-    {"KeyE",0x08,0},{"KeyF",0x09,0},{"KeyG",0x0A,0},{"KeyH",0x0B,0},
-    {"KeyI",0x0C,0},{"KeyJ",0x0D,0},{"KeyK",0x0E,0},{"KeyL",0x0F,0},
-    {"KeyM",0x10,0},{"KeyN",0x11,0},{"KeyO",0x12,0},{"KeyP",0x13,0},
-    {"KeyQ",0x14,0},{"KeyR",0x15,0},{"KeyS",0x16,0},{"KeyT",0x17,0},
-    {"KeyU",0x18,0},{"KeyV",0x19,0},{"KeyW",0x1A,0},{"KeyX",0x1B,0},
-    {"KeyY",0x1C,0},{"KeyZ",0x1D,0},
-    {"Digit1",0x1E,0},{"Digit2",0x1F,0},{"Digit3",0x20,0},{"Digit4",0x21,0},
-    {"Digit5",0x22,0},{"Digit6",0x23,0},{"Digit7",0x24,0},{"Digit8",0x25,0},
-    {"Digit9",0x26,0},{"Digit0",0x27,0},
-    {"Enter",0x28,0},{"Escape",0x29,0},{"Backspace",0x2A,0},{"Tab",0x2B,0},
-    {"Space",0x2C,0},{"Minus",0x2D,0},{"Equal",0x2E,0},
-    {"BracketLeft",0x2F,0},{"BracketRight",0x30,0},{"Backslash",0x31,0},
-    {"Semicolon",0x33,0},{"Quote",0x34,0},{"Backquote",0x35,0},
-    {"Comma",0x36,0},{"Period",0x37,0},{"Slash",0x38,0},{"CapsLock",0x39,0},
-    {"F1",0x3A,0},{"F2",0x3B,0},{"F3",0x3C,0},{"F4",0x3D,0},
-    {"F5",0x3E,0},{"F6",0x3F,0},{"F7",0x40,0},{"F8",0x41,0},
-    {"F9",0x42,0},{"F10",0x43,0},{"F11",0x44,0},{"F12",0x45,0},
-    {"Insert",0x49,0},{"Home",0x4A,0},{"PageUp",0x4B,0},
-    {"Delete",0x4C,0},{"End",0x4D,0},{"PageDown",0x4E,0},
-    {"ArrowRight",0x4F,0},{"ArrowLeft",0x50,0},
-    {"ArrowDown",0x51,0},{"ArrowUp",0x52,0},
-    {"Numpad0",0x62,0},{"Numpad1",0x59,0},{"Numpad2",0x5A,0},
-    {"Numpad3",0x5B,0},{"Numpad4",0x5C,0},{"Numpad5",0x5D,0},
-    {"Numpad6",0x5E,0},{"Numpad7",0x5F,0},{"Numpad8",0x60,0},
-    {"Numpad9",0x61,0},{"NumpadEnter",0x58,0},
-    // ⭐ F13-F24 have official virtual-key constants and Microsoft has
-    // deliberately left them unassigned, so nothing else claims them. That is
-    // what makes them right for keys the settings page defines itself.
-    {"F13",0x68,0},{"F14",0x69,0},{"F15",0x6A,0},{"F16",0x6B,0},
-    {"F17",0x6C,0},{"F18",0x6D,0},{"F19",0x6E,0},{"F20",0x6F,0},
-    {"F21",0x70,0},{"F22",0x71,0},{"F23",0x72,0},{"F24",0x73,0},
-    // ⓘ Modifiers are a BIT in report byte 0, not a key slot -- usage 0 marks
-    // that, and the modifier field carries the bit.
-    {"ControlLeft",0,0x01},{"ShiftLeft",0,0x02},{"AltLeft",0,0x04},
-    {"MetaLeft",0,0x08},{"ControlRight",0,0x10},{"ShiftRight",0,0x20},
-    {"AltRight",0,0x40},{"MetaRight",0,0x80},
-};
-
-// ⛔ CASE-INSENSITIVE, because device_config_str LOWERCASES what it returns.
-//
-// KeyboardEvent.code names are mixed case -- KeyR, ArrowUp, ShiftLeft -- so a
-// literal comparison never matched and every rebind silently did nothing. The
-// config layer's lowercasing is fine for hex and for words like "touchpad";
-// it is not fine for a vocabulary that carries meaning in its capitals.
-// ⭐ Mouse targets. Not keys, so they are handled separately -- the device is a
-// different one and the wheel is a delta rather than a state.
-//
-// ⓘ The virtual mouse already declares three buttons and a signed wheel byte,
-// so nothing about that device changes.
-enum MouseAction { kMouseNone = 0, kMouseLeft, kMouseRight, kMouseMiddle,
-                   kMouseWheelUp, kMouseWheelDown };
-
-inline MouseAction mouse_action_for(const std::string &code)
-{
-    std::string want;
-    for (char c : code) want.push_back(static_cast<char>(tolower(static_cast<unsigned char>(c))));
-    if (want == "mouseleft")      return kMouseLeft;
-    if (want == "mouseright")     return kMouseRight;
-    if (want == "mousemiddle")    return kMouseMiddle;
-    if (want == "mousewheelup")   return kMouseWheelUp;
-    if (want == "mousewheeldown") return kMouseWheelDown;
-    return kMouseNone;
-}
-
-// ⛔⛔ THE CONFIG READER LOWERCASES VALUES. Every comparison against a binding
-// name must fold case, or it silently never matches -- which is exactly what
-// happened to the three keyboard bindings on 2026-09-03: the config held
-// "KeyboardDS5_USBIP", the reader returned "keyboardds5_usbip", and the button
-// did nothing at all.
-//
-// ⓘ The old single OSKeyboard check worked only because someone had added an
-// "oskeyboard" alias beside it. That alias WAS this bug, already met once and
-// papered over rather than named.
-inline bool code_is(const std::string &code, const char *name)
-{
-    if (code.size() != strlen(name)) return false;
-    for (size_t i = 0; i < code.size(); ++i) {
-        const char a = code[i];
-        const char b = name[i];
-        const char la = (a >= 'A' && a <= 'Z') ? static_cast<char>(a - 'A' + 'a') : a;
-        const char lb = (b >= 'A' && b <= 'Z') ? static_cast<char>(b - 'A' + 'a') : b;
-        if (la != lb) return false;
-    }
-    return true;
-}
-
-inline const KeyName *key_for(const std::string &code)
-{
-    if (code.empty()) return nullptr;
-    std::string want;
-    want.reserve(code.size());
-    for (char c : code) want.push_back(static_cast<char>(tolower(static_cast<unsigned char>(c))));
-
-    for (const KeyName &k : kKeys) {
-        std::string have;
-        for (const char *p = k.code; *p; ++p) {
-            have.push_back(static_cast<char>(tolower(static_cast<unsigned char>(*p))));
-        }
-        if (want == have) return &k;
-    }
-    return nullptr;
-}
 
 // ---- Turbo ------------------------------------------------------------------
 //
@@ -715,11 +606,7 @@ inline void apply(const void *deviceKey,
                 // window next takes focus, so the next visit says it again.
                 const std::string sqCode =
                     device_config_str(gateSection.c_str(), "rebind_2");
-                if (!g_saidKeyboardRefused &&
-                    (code_is(sqCode, "KeyboardDS5_USBIP") ||
-                     code_is(sqCode, "OSKeyboard") ||
-                     code_is(sqCode, "KeyboardSteam") ||
-                     code_is(sqCode, "KeyboardWindows"))) {
+                if (!g_saidKeyboardRefused && binding::osk_program_for(sqCode) >= 0) {
                     g_saidKeyboardRefused = true;
                     ctm_ui_notify(
                         "DS5-USBIP Virtual keyboard opens only while naming "
@@ -850,10 +737,7 @@ inline void apply(const void *deviceKey,
             char kn[32];
             snprintf(kn, sizeof(kn), "rebind_%d", i);
             const std::string c = device_config_str(gateSection.c_str(), kn);
-            const int which =
-                code_is(c, "KeyboardSteam")     ? 0 :
-                code_is(c, "KeyboardWindows")   ? 1 :
-                (code_is(c, "KeyboardDS5_USBIP") || code_is(c, "OSKeyboard")) ? 2 : -1;
+            const int which = binding::osk_program_for(c);
             // ⓘ From the snapshot taken before the wipe, not from the report.
             const bool now = gatePressed[i];
 
@@ -1048,22 +932,16 @@ inline void apply(const void *deviceKey,
         // keyboard to confuse it with; this does.
         // 🔗 `button_index_for` in button_layout.inl is the one vocabulary,
         // shared with `gyro_to_mouse_gate_button`.
-        if (code.size() > 7) {
-            std::string low;
-            low.reserve(code.size());
-            for (char c : code) {
-                low.push_back(static_cast<char>((c >= 'A' && c <= 'Z') ? c - 'A' + 'a' : c));
+        // ⓘ Read by binding_names.inl, which a touchpad gesture asks too.
+        const int target = binding::pad_button_for(code);
+        if (target != binding::kNotAPadButton) {
+            // ⓘ An unknown name binds to nothing, like an unknown key name
+            // below -- it must not fall through and be read as a keystroke.
+            if (target >= 0 && active) {
+                pressAfter[target] = true;
+                anyPressAfter = true;
             }
-            if (low.compare(0, 7, "button_") == 0) {
-                const int target = button_index_for(low.substr(7));
-                // ⓘ An unknown name binds to nothing, like an unknown key name
-                // below -- it must not fall through and be read as a keystroke.
-                if (target >= 0 && active) {
-                    pressAfter[target] = true;
-                    anyPressAfter = true;
-                }
-                continue;
-            }
+            continue;
         }
 
         // ⭐ The on-screen keyboard, before the mouse and key paths: it is
@@ -1073,10 +951,7 @@ inline void apply(const void *deviceKey,
         // alias for our own so configs written before the split keep working --
         // it was the only one that could mean anything else, and it meant
         // whatever osk_program said.
-        const int oskWhich =
-            code_is(code, "KeyboardSteam")     ? 0 :
-            code_is(code, "KeyboardWindows")   ? 1 :
-            (code_is(code, "KeyboardDS5_USBIP") || code_is(code, "OSKeyboard")) ? 2 : -1;
+        const int oskWhich = binding::osk_program_for(code);
         if (oskWhich >= 0) {
             static std::map<std::pair<const void *, int>, bool> oskHeld;
             const bool wasHeld = oskHeld[{deviceKey, i}];
@@ -1123,6 +998,20 @@ inline void apply(const void *deviceKey,
         for (int i = 0; i < kButtonCount; ++i) {
             if (pressAfter[i]) set_button(*layout, data, len, i);
         }
+    }
+
+    // ⭐ AND THE BUTTONS A TOUCHPAD GESTURE IS PRESSING (pad_press.inl): a tap
+    // bound to a button, down for a moment, or the pad pressed in and bound to
+    // one, down while a finger stays on it. After the loop for the same reason
+    // as the block above: a press made inside it would be wiped by the clear
+    // of a button visited later.
+    // ⓘ They are not run through the remaps above. A gesture bound to Cross
+    // presses Cross, whatever Cross itself is bound to.
+    // ⓘ Nothing to undo: when the gesture lets go, or a tap's time is up, the
+    // next report simply arrives without it.
+    const uint32_t touchPressed = pad_press::shared().pressed(deviceKey, now_ms());
+    for (int i = 0; touchPressed != 0 && i < kButtonCount; ++i) {
+        if ((touchPressed & (1u << i)) != 0) set_button(*layout, data, len, i);
     }
 
     if (anyBound) {

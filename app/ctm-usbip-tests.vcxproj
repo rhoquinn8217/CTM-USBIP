@@ -99,6 +99,9 @@
     <ClCompile Include="..\tests\product_version_test.cpp" />
     <ClCompile Include="..\tests\device_type_test.cpp" />
     <ClCompile Include="..\tests\window_size_rule_test.cpp" />
+    <ClCompile Include="..\tests\binding_names_test.cpp" />
+    <ClCompile Include="..\tests\key_pulse_test.cpp" />
+    <ClCompile Include="..\tests\pad_press_test.cpp" />
     <ClCompile Include="..\tests\tests_main.cpp" />
   </ItemGroup>
   <ItemGroup>
