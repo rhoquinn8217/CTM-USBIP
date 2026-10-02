@@ -149,7 +149,8 @@ cannot follow the folder afterwards. Running it again replaces the old one.
 
 To watch it instead, with its log on screen, type this at a command prompt
 in this folder. The prompt comes straight back and the listener's lines follow
-in the same window. The tray icon's Quit ends it:
+in the same window. Ctrl+C in that window ends it, and so does closing the
+window or choosing Quit from the tray icon:
 
     ctm-usbip.exe agent --ui --verbose
 
