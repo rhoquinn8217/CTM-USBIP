@@ -520,7 +520,9 @@ int wmain(int argc, wchar_t **argv)
                 // ⭐ The icon comes with --ui. It is the only way to reach the
                 // on-screen keyboard without a bridged controller, which is
                 // the whole reason it exists.
-                ctm_tray::start();
+                // ⛔ It is STARTED further down, though, once this process
+                // knows it is the listener. See there for what starting it
+                // here left behind.
             } else if (arg == L"--overlay-test") {
                 // ⓘ TEMPORARY, and named so. Step one of the overlay keyboard
                 // is a window with the right styles and a placeholder inside;
@@ -584,6 +586,19 @@ int wmain(int argc, wchar_t **argv)
                            << L" -- left it alone\n";
                 return 0;
             }
+
+            // ⭐⭐ THE TRAY ICON STARTS HERE, once this process knows it IS the
+            // listener (2026-10-01).
+            //
+            // ⛔ It used to start where --ui is read, above, so a second copy
+            // run only to bring the settings page forward started one too.
+            // That copy has just returned, a few lines up, and nothing took
+            // its icon away: the tray showed two until the pointer passed
+            // over the dead one. And that second copy is not rare. With no
+            // console window, a double-click on the shortcut is how someone
+            // asks for the settings page back, and one evening's log has
+            // eight of them in twenty-five minutes.
+            ctm_tray::start();
 
             // ⭐ Nobody else is running, so any window out there is stale.
             if (ctm_open_ui::close_existing()) {
