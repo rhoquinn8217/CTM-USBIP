@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.30 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.34 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,48 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.34 Ten hints (T-248). The names hint is reworded and two are
+            added, all three in rhoquinn8217's words after seeing the
+            eight on screen: that this window opens whenever a device
+            is bridged, and that Quick mode is the way to switch
+            configs mid-game. The reworded one is the same length as
+            the one it replaces and the new two are a line each, so
+            none of them can push the footer past its two lines.
+    2.66.33 An eighth hint: where a controller's name comes from, and
+            that it is new on every connect (T-248, folded in from
+            T-250). Shorter than hint 1, which already fits the two
+            lines the footer reserves.
+    2.66.32 The hint is clickable and the timer is slower (T-248).
+            A click goes to the next one, which needed the step split
+            out from the timer's guards: clicking means the pointer is
+            ON the hint, and that is exactly what pauses the timer, so
+            routing a click through the same path would have done
+            nothing at all and said nothing about it.
+            .cinfo is also a DRAG surface from T-237, so a press means
+            drag when the pointer travels and next-hint when it does
+            not, with 4px of slop for a hand letting go. The drag runs
+            in the listener, which cannot tell the page whether the
+            window moved, so the page measures the pointer itself.
+            The timer goes to 30s, which it can afford now that a click
+            advances it: its only job is to make sure a second hint is
+            ever seen.
+    2.66.31 Simple's footer line rotates through hints (T-248). Seven of
+            them: the original "how do I get this window back" text,
+            which stays in the cycle and leads on every open, plus the
+            window drag, the tray icon, the mouse presets, where your
+            controllers are going, dragging by empty space, and the
+            keyboard's Q/E/P/R.
+            .cinfo reserves TWO LINES whether it needs them or not. The
+            hints are different lengths -- the first wraps to two lines
+            at Simple's width and the rest fit on one -- so without it
+            the footer resized on every rotation: measured 32px vs 16px,
+            the bar 69 vs 53, and Close stepping 438 to 446. That is the
+            same 8px shift T-243 was filed to stop, arriving by a new
+            route.
+            It rotates slowly, stops while the pointer rests on it, and
+            never while a picker is expanded -- paintCompact already
+            refuses to repaint then. Simple only; Quick's short footer
+            has no .cinfo and Advanced has none at all.
     2.66.30 The virtual keyboard opens only while naming a config
             (T-247). reportField used to send editing=true for anything
             typeable, which is every setting's value box; it now asks
@@ -1105,7 +1147,22 @@
      and capital, against every background it sits on. */
   .cmode { color:#ffd166; font-weight:700; letter-spacing:.08em;
     text-transform:uppercase; margin-right:0.7em; }
-  #compactBox .cinfo { font-size:2.3vh; color:#c8c9ce; text-align:center; line-height:1.4;
+  /* ⛔⛔ TWO LINES ALWAYS RESERVED (T-248). The hints are different lengths
+     -- the "bring this window back" one wraps to two lines at Simple's width
+     and the rest fit on one -- so without this the footer RESIZES on every
+     rotation. Measured 2026-09-24 at 1238x498: `.cinfo` 32px vs 16px, `.cbar`
+     69px vs 53px, and the Close button stepping between y=438 and y=446.
+     ⭐ That is the same 8px shift T-243 was filed to stop, arriving by a new
+     route. 🔗 T-243, and the spacer in pickerExpand.
+     ⓘ In `em`, so it follows the vh font size rather than fixing a pixel
+     height that would be wrong at another window size. 1.4 is the
+     line-height below, so 2.8em is exactly two lines. */
+  /* ⓘ It cycles on a click (T-248), so it says so. ⚠️ It is ALSO a drag
+     surface -- a press that travels moves the window instead -- which is why
+     the cursor is a pointer rather than a move arrow: the click is the thing
+     you would not otherwise guess at. */
+  #compactBox .cinfo { cursor:pointer; min-height:2.8em;
+                       font-size:2.3vh; color:#c8c9ce; text-align:center; line-height:1.4;
     max-width:80vw; }
   #compactBox .cinfo b { color:#e8e8ea; }
   /* ⭐ The footer's two corners: Configurator bottom-left, Close bottom-right,
@@ -3100,6 +3157,127 @@ function noteInputSource(what) {
   if (COMPACT) paintCompact();
   gpPaint();
 }
+
+// ⭐⭐ THE FOOTER'S HINTS (T-248, rhoquinn8217). Simple's `.cinfo` line was
+// one fixed sentence; it rotates now.
+//
+// ⛔ SIMPLE ONLY, said twice: *"no tips or hints in advance mode or quick
+// mode. Tips and hints go where this text originally was."* Quick's footer is
+// the short branch and has no `.cinfo`; Advanced has none at all. Nothing but
+// the long branch is touched.
+//
+// ⚠️ HINT 0 IS THE ONE THAT ANSWERS "how do I get this window back", which
+// is the question someone has when the window is already GONE. It stays in the
+// cycle -- *"I still want this text part of the cycle"* -- and is shown FIRST
+// on every open, so a freshly opened window leads with it.
+//
+// ⓘ `<b>` is allowed and nothing here is user text, so there is nothing to
+// escape. 🔗 The same reasoning as the legend a few lines above.
+var FOOTER_HINTS = [
+  'To bring this window back: <b>hold two fingers on the touchpad and press ' +
+  'Options</b> (DS5/DS4 only), or right-click the tray icon and choose ' +
+  '<b>Open settings</b>.',
+
+  'Hold <b>☰</b> and move the <b>left stick</b> to drag this window. Tap it ' +
+  'instead and the window steps between three spots.',
+
+  'Click the <b>taskbar icon</b> and choose <b>Open settings</b> to bring back ' +
+  'this window. You can also open the DS5-USBIP virtual keyboard from there.',
+
+  'Give a pad a <b>stick, gyro or touchpad to mouse</b> preset and it drives ' +
+  'this PC with no mouse or keyboard. <b>Square</b> opens the DS5-USBIP ' +
+  'virtual keyboard.',
+
+  "Bridged controllers don't reach the <b>game</b> while this window is open. " +
+  'However, when the window is open, the buttons will always follow the ' +
+  '<b>legend</b>.',
+
+  'Drag this window by <b>any empty part of it</b>, not just the title bar.',
+
+  'From a keyboard: <b>Q</b> and <b>E</b> change controller, <b>P</b> moves ' +
+  'this window, <b>R</b> resizes it.',
+
+  // ⓘ The wording of this one and of the two after it is rhoquinn8217's
+  // own (2026-10-01), given after seeing the first eight on screen.
+  'Every bridged controller gets a name like <b>Titan</b> or <b>Wasabi</b>, a ' +
+  'quick identifier for multi-controller games. It is a new name each time it ' +
+  'connects.',
+
+  'This window opens whenever a device is <b>bridged</b>.',
+
+  'Use <b>Quick</b> mode mid-game to quick switch between controller configs.'
+];
+
+// ⓘ Which hint is showing. Reset to 0 whenever the window opens, so the
+// "how do I get this back" hint leads.
+var HINT_AT = 0;
+var HINT_TIMER = null;
+var HINT_HELD = false;     // true while the pointer rests on the hint
+
+// ⛔⛔ SLOW, AND IT STOPS WHEN YOU LOOK AT IT. This footer is read WHILE
+// configuring, and text that changes under a reader is worse than text that
+// sits still.
+// ⭐ 30s (rhoquinn8217, 2026-09-24: *"longer interval to wait between
+// tips"*). ⓘ It can afford to be slow now that a CLICK advances it: someone
+// who wants the next one does not have to wait for the timer, so the timer's
+// only job is to make sure a second hint is ever seen at all.
+var HINT_EVERY_MS = 30000;
+
+// ⭐ THE STEP ITSELF, with no guards on it. A CLICK must always work:
+// clicking means the pointer is ON the hint, which is exactly what pauses the
+// timer -- so routing a click through hintNext() below would do nothing at
+// all, silently.
+function hintAdvance() {
+  if (!COMPACT || QUICK) return;
+  HINT_AT = (HINT_AT + 1) % FOOTER_HINTS.length;
+  var el = document.querySelector('#compactBox .cinfo');
+  if (el) el.innerHTML = FOOTER_HINTS[HINT_AT];
+}
+
+// ⓘ The TIMER's path, which is the one that must hold back.
+function hintNext() {
+  // ⛔ NOT WHILE A PICKER IS OPEN. paintCompact already refuses to repaint
+  // then -- a repaint would close the list under someone's hand -- so a
+  // rotation would either be lost or fight it.
+  if (GP_SELECTING) return;
+  if (HINT_HELD) return;
+  hintAdvance();
+}
+
+// ⭐⭐ A CLICK GOES TO THE NEXT HINT (rhoquinn8217, 2026-09-24).
+//
+// ⛔⛔ BUT `.cinfo` IS ALREADY A DRAG SURFACE. T-237 made any empty part of
+// the window draggable, and this div is empty space by that test -- so a press
+// here starts a window drag. A press must therefore mean DRAG when the pointer
+// travels and NEXT HINT when it does not, which is how a draggable-but-
+// clickable thing behaves everywhere else.
+// ⓘ The drag runs in the LISTENER, so the page cannot ask it whether the
+// window moved. It measures the pointer itself instead.
+// ⓘ 4px of slop: a hand resting on a mouse moves a pixel or two on the way
+// to letting go, and that should still count as a click.
+var HINT_DOWN = null;
+var HINT_SLOP = 4;
+
+function hintPressed(ev) {
+  HINT_DOWN = { x: ev.clientX, y: ev.clientY };
+}
+
+function hintReleased(ev) {
+  if (!HINT_DOWN) return;
+  var moved = Math.abs(ev.clientX - HINT_DOWN.x) + Math.abs(ev.clientY - HINT_DOWN.y);
+  HINT_DOWN = null;
+  if (moved > HINT_SLOP) return;          // that was a drag, not a click
+  hintAdvance();
+  // ⓘ Restart the clock, so a hint you just asked for does not vanish a
+  // moment later because the timer happened to be nearly up.
+  hintStart();
+}
+
+function hintStart() {
+  if (HINT_TIMER) clearInterval(HINT_TIMER);
+  HINT_TIMER = setInterval(hintNext, HINT_EVERY_MS);
+}
+hintStart();
 
 var GATE_TYPE_LABELS = {
   '': 'off',
@@ -7743,9 +7921,10 @@ function paintCompact() {
             LG.dpad + ' move | ' +
             LG.position + ' position | ' + LG.resize + ' resize | ' +
             LG.close + ' to close</div>' +
-            '<div class="cinfo">To bring this window back: <b>hold two fingers on the touchpad ' +
-            'and press Options</b> (DS5/DS4 only), or right-click the tray icon and choose ' +
-            '<b>Open settings</b>.</div>' +
+            '<div class="cinfo" title="Click for the next tip" ' +
+            'onmouseenter="HINT_HELD = true" onmouseleave="HINT_HELD = false" ' +
+            'onmousedown="hintPressed(event)" onmouseup="hintReleased(event)">' +
+            FOOTER_HINTS[HINT_AT] + '</div>' +
             '</div>' + modePickerHtml('cselMode') +
             '<button class="cclose" onclick="closeWindow()">Close</button></div>';
   }
@@ -8580,6 +8759,32 @@ function selfTest() {
     ok('an unknown device falls back to the ordinal',
        nameFor('ds5_usb_9') === 'ds5_usb_9');
     LAST_DEVICES = savedDevices;
+  }
+
+  // 🔗 T-248. The hints are a plain array of strings, and the one way this
+  // file has ACTUALLY broken before is an unescaped apostrophe truncating an
+  // array mid-literal -- which is why the nickname pool's S'more was checked
+  // for. A truncated FOOTER_HINTS would not throw; it would silently rotate
+  // through fewer hints, and nothing on screen would say so.
+  // ⓘ Rendering is not testable from here. The two-line reservation
+  // (min-height:2.8em) is still measured by eye at Simple's width.
+  {
+    ok('every hint is present', FOOTER_HINTS.length === 10,
+       'got ' + FOOTER_HINTS.length);
+    var allText = true, i;
+    for (i = 0; i < FOOTER_HINTS.length; i++) {
+      if (typeof FOOTER_HINTS[i] !== 'string' || FOOTER_HINTS[i].length === 0) {
+        allText = false;
+      }
+    }
+    ok('no hint is empty or a non-string', allText);
+
+    // The rotation must return to the first hint and not run off the end.
+    var savedAt = HINT_AT;
+    HINT_AT = FOOTER_HINTS.length - 1;
+    HINT_AT = (HINT_AT + 1) % FOOTER_HINTS.length;
+    ok('the rotation wraps to the first hint', HINT_AT === 0, 'got ' + HINT_AT);
+    HINT_AT = savedAt;
   }
 
   // 4. ⭐ THE BIG ONE. renderTabs with real-shaped devices, which is what every
