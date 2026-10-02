@@ -51,6 +51,9 @@
 namespace {
 
 #include "app/common.inl"
+#include "app/console_attach.inl"   // the parent's console, when the exe was typed into one
+#include "app/start_report.inl"     // how a listener that could not start says so
+#include "app/home_folder.inl"      // which folder the config, the log and the page live in
 #include "usb/descriptors.inl"
 #include "audio/reservoir.inl"
 #include "map/diagnostics.inl"
@@ -415,10 +418,84 @@ void ctm_chord_show_ui(const std::string &ordinal)
     ctm_open_ui::raise_when_ready(true);
 
 }
+
+// ⭐⭐ THE LISTENER'S HOME, SETTLED BEFORE ANYTHING IS READ OR WRITTEN.
+//
+// The config, the configs folder, the log, the window's state and the settings
+// page on disk are all opened by a relative path. This makes the folder they
+// resolve in the one home_folder.inl finds from the exe, and no longer the
+// folder the listener happened to be started from.
+//
+// ⛔ BEFORE THE FIRST LOG LINE. The log is opened once, at its first write,
+// wherever the working directory is at that moment; a line written before
+// this ran would pin the whole run's log to the wrong folder.
+//
+// ⓘ `asked` is --home: a folder named on purpose, for running one build
+// against another folder's configs. It has to exist and is otherwise taken at
+// its word; the profiles and maps are still found beside the exe.
+//
+// Returns false, having said why, when there is nowhere to run from.
+bool settle_home(const std::wstring &asked)
+{
+    const auto is_folder = [](const std::wstring &path) {
+        const DWORD attrs = GetFileAttributesW(path.c_str());
+        return attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY) != 0;
+    };
+    const std::wstring exeFolder = module_directory();
+
+    std::wstring home;
+    if (!asked.empty()) {
+        if (!is_folder(asked)) {
+            start_report::failed(L"DS5-USBIP cannot start: --home names a folder that does not exist.\n\n" + asked);
+            return false;
+        }
+        home = asked;
+        home_folder::g_chosen_how = L"named with --home";
+    } else {
+        home = home_folder::find(exeFolder, [&is_folder](const std::wstring &folder) {
+            return is_folder(folder + L"\\profiles\\descriptors");
+        });
+        home_folder::g_chosen_how = L"found from the exe, not from where it was started";
+    }
+
+    if (home.empty()) {
+        // ⓘ An installed layout keeps its profiles under %ProgramData%, which
+        // find_relative_asset looks in first. Then the exe's own folder is home.
+        if (file_exists(find_relative_asset(L"profiles\\descriptors\\ds5_composite.profile"))) {
+            home = exeFolder;
+        } else {
+            // ⛔ WITHOUT ITS PROFILES THE LISTENER STARTS NORMALLY AND BRIDGES
+            // NOTHING, which is a confusing way to fail however it was started.
+            // A launcher script used to make this check; with no script in
+            // front of the exe, the exe makes it.
+            start_report::failed(
+                L"DS5-USBIP cannot start: the profiles folder is missing.\n\n"
+                L"ctm-usbip.exe needs its profiles and maps folders beside it. "
+                L"Extract the whole zip, keep the folder together, and start it again.\n\n"
+                L"Looked beside: " + exeFolder);
+            return false;
+        }
+    }
+
+    if (!SetCurrentDirectoryW(home.c_str())) {
+        start_report::failed(last_error_message(L"DS5-USBIP cannot start: its folder could not be entered") +
+                             L"\n\n" + home);
+        return false;
+    }
+    return true;
+}
 } // namespace
 
 int wmain(int argc, wchar_t **argv)
 {
+    // ⭐⭐ FIRST: IS ANYBODY READING WHAT THIS PRINTS? (console_attach.inl.)
+    // The exe is a Windows program, so it is given no console. Typed into a
+    // terminal it borrows that terminal's; handed a pipe or a file by a script
+    // it writes there; double-clicked, it has neither, and says what it has to
+    // say with a message box instead.
+    const console_attach::Result console = console_attach::attach_to_parent();
+    start_report::g_someone_reads = console.someone_reads();
+
     // ⭐⭐ TELL WINDOWS WE UNDERSTAND HIGH-DPI, before any window exists.
     //
     // ⚠️ Without this the process gets VIRTUALISED screen metrics: on a 4K
@@ -441,6 +518,21 @@ int wmain(int argc, wchar_t **argv)
     if (!enetGuard.ok) {
         std::wcerr << L"enet_initialize failed\n";
         return 2;
+    }
+    // ⭐⭐ DOUBLE-CLICKED, IT IS THE LISTENER. No arguments and nobody reading
+    // is a double-click on the exe, or a shortcut straight to it: the one way
+    // most people will ever start it. That used to print the usage into a
+    // console that flashed and vanished, which looked like a crash, and a
+    // launcher script existed to supply `agent --ui` instead.
+    // ⛔ ONLY WHEN NOBODY IS READING. Typed into a terminal with no arguments,
+    // or run bare by a script, it still prints the usage: someone asked what
+    // it takes.
+    wchar_t agentWord[] = L"agent";
+    wchar_t uiWord[] = L"--ui";
+    wchar_t *doubleClicked[] = { argc > 0 ? argv[0] : agentWord, agentWord, uiWord };
+    if (argc < 2 && !console.someone_reads()) {
+        argc = 3;
+        argv = doubleClicked;
     }
     if (argc < 2) {
         print_usage();
@@ -529,10 +621,25 @@ int wmain(int argc, wchar_t **argv)
             print_usage();
             return 2;
         }
+        // ⭐ HOME BEFORE THE FLAGS, because a flag may log and the first log
+        // line fixes where the log is (settle_home, above). --home is the one
+        // flag that has to be read first, so it is looked for here.
+        {
+            std::wstring homeAsked;
+            for (int i = argIndex; i + 1 < argc; ++i) {
+                if (std::wstring(argv[i]) == L"--home") homeAsked = argv[i + 1];
+            }
+            if (!settle_home(homeAsked)) {
+                start_report::show_if_unseen(L"DS5-USBIP");
+                return 3;
+            }
+        }
         for (int i = argIndex; i < argc; ++i) {
             const std::wstring arg = argv[i];
             if (arg == L"--enet") {
                 g_use_enet.store(true);
+            } else if (arg == L"--home" && i + 1 < argc) {
+                ++i;   // already taken, above
             } else if (arg == L"--rest" && i + 1 < argc) {
                 unsigned long value = 0;
                 if (!parse_uint_arg(argv[++i], 65535, &value) || value < 1024) {
@@ -658,6 +765,12 @@ int wmain(int argc, wchar_t **argv)
         const int rc = run_agent(static_cast<uint16_t>(port));
         // ⓘ The settings window can outlive the listener. Its icons cannot.
         window_icon::stop();
+        // ⛔ A START THAT FAILED SAYS SO, even with no terminal to say it in
+        // (start_report.inl). ⓘ Nothing to show after a run that ended well.
+        if (rc != 0) {
+            ctm_tray::stop();
+            start_report::show_if_unseen(L"DS5-USBIP");
+        }
         return rc;
     }
 

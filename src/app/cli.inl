@@ -48,7 +48,13 @@ static bool run_usbip_attach_to(const std::wstring &remote, const std::wstring &
     if (ctm_verbose_logs()) {
         device_log::usb_w() << L"running: " << command;
     }
-    if (!CreateProcessW(nullptr, mutableCommand.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) {
+    // ⛔ NO WINDOW FOR IT WHEN THIS PROGRAM HAS NO CONSOLE. usbip.exe is a
+    // console program, and a console program started by one that has no console
+    // is given a new one, window and all: one would flash up at every attach,
+    // which is every bridge. ⓘ With a console here it shares ours, as before,
+    // so its own lines still appear when the listener is watched in a terminal.
+    const DWORD attachFlags = console_attach::g_has_console ? 0 : CREATE_NO_WINDOW;
+    if (!CreateProcessW(nullptr, mutableCommand.data(), nullptr, nullptr, FALSE, attachFlags, nullptr, nullptr, &si, &pi)) {
         std::wcerr << last_error_message(L"CreateProcess usbip attach failed") << L"\n";
         return false;
     }
@@ -76,7 +82,8 @@ static void print_usage()
         << L"  ctm-usbip bt <index> [--no-attach] [--profile auto|<file>] [--map <file>] [--busid <id>] [--audio-latency <byte>] [--audio-block <byte>] [--usbip-port <port>]\n"
         << L"  ctm-usbip list-bt | list-hid                 (JSON device inventory for GUI front-ends)\n"
         << L"  ctm-usbip bridge <listen-port> [--enet] [--no-attach] [--profile auto|<file>] [--map <file>] [--busid <id>] [--audio-latency <byte>] [--audio-block <byte>]\n"
-        << L"  ctm-usbip agent [control-port] [--enet] [--rest <port>] [--rest-lan] [--rest-token <token>]\n"
+        << L"  ctm-usbip                                    (double-clicked, or from a shortcut: the same as  agent --ui)\n"
+        << L"  ctm-usbip agent [control-port] [--ui] [--home <folder>] [--enet] [--rest <port>] [--rest-lan] [--rest-token <token>]\n"
         << L"  ctm-usbip install [control-port] [--enet] [--rest <port>] [--rest-lan] [--rest-token <token>]\n"
         << L"                                               (register + start the Windows service)\n"
         << L"  ctm-usbip uninstall                          (stop + remove the Windows service)\n"
@@ -85,6 +92,9 @@ static void print_usage()
         << L"  ctm-usbip version\n"
         << L"  (--enet selects the additive ENet/UDP transport on the same port; without it the TCP transport is used.)\n"
         << L"  (--rest serves an HTTP/JSON control API, loopback-only unless --rest-lan; see docs/rest_api.md.)\n"
+        << L"  (agent: --ui opens the settings page and puts the icon in the tray, where Quit closes it.\n"
+        << L"   Its config, configs, log and settings live in the nearest folder at or above the exe that holds\n"
+        << L"   profiles\\descriptors, wherever it is started from; --home names another folder instead.)\n"
         << L"  (agent: --verbose logs everything, sampling the lines that fire on every report; --verbose-reports logs every one.\n"
         << L"   device.log is capped at 20 MB, with the previous 20 MB kept in device.log.1.)\n";
 }

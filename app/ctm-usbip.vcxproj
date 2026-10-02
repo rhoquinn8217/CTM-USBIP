@@ -51,7 +51,8 @@
     <Link>
       <AdditionalLibraryDirectories>..\third_party\vcpkg\installed\x64-windows-static\debug\lib;..\third_party\ffmpeg\x64\release\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>setupapi.lib;hid.lib;cfgmgr32.lib;advapi32.lib;opus.lib;avcodec.lib;avutil.lib;ws2_32.lib;winmm.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <SubSystem>Console</SubSystem>
+      <SubSystem>Windows</SubSystem>
+      <EntryPointSymbol>wmainCRTStartup</EntryPointSymbol>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -65,7 +66,8 @@
     <Link>
       <AdditionalLibraryDirectories>..\third_party\vcpkg\installed\x64-windows-static\lib;..\third_party\ffmpeg\x64\release\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>setupapi.lib;hid.lib;cfgmgr32.lib;advapi32.lib;opus.lib;avcodec.lib;avutil.lib;ws2_32.lib;winmm.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <SubSystem>Console</SubSystem>
+      <SubSystem>Windows</SubSystem>
+      <EntryPointSymbol>wmainCRTStartup</EntryPointSymbol>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>

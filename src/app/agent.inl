@@ -1004,14 +1004,16 @@ static int run_agent(uint16_t port)
                << L" agent starting";
     WSADATA data = {};
     if (WSAStartup(MAKEWORD(2, 2), &data) != 0) {
-        std::wcerr << wsa_error_message(L"WSAStartup failed") << L"\n";
+        start_report::failed(L"DS5-USBIP could not start: Windows networking did not come up.\n\n" +
+                             wsa_error_message(L"WSAStartup failed"));
         return 4;
     }
 
     SOCKET udp = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     SOCKET tcp = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (udp == INVALID_SOCKET || tcp == INVALID_SOCKET) {
-        std::wcerr << wsa_error_message(L"agent socket failed") << L"\n";
+        start_report::failed(L"DS5-USBIP could not start: no socket could be opened.\n\n" +
+                             wsa_error_message(L"agent socket failed"));
         WSACleanup();
         return 4;
     }
@@ -1027,7 +1029,11 @@ static int run_agent(uint16_t port)
     if (bind(udp, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) == SOCKET_ERROR ||
         bind(tcp, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) == SOCKET_ERROR ||
         listen(tcp, 8) == SOCKET_ERROR) {
-        std::wcerr << wsa_error_message(L"agent bind/listen failed") << L"\n";
+        // ⓘ The usual reason by far: something already has the port, and most
+        // often that is another copy of this program started without --ui.
+        const std::wstring why = wsa_error_message(L"agent bind/listen failed");
+        start_report::failed(L"DS5-USBIP could not start: port " + std::to_wstring(port) +
+                             L" is not free. Another copy may already be running; look for its icon in the tray.\n\n" + why);
         closesocket(udp);
         closesocket(tcp);
         WSACleanup();
@@ -1037,7 +1043,8 @@ static int run_agent(uint16_t port)
     g_agent_usbip_server = std::make_unique<CtmUsbipServer>();
     std::wstring usbipError;
     if (!g_agent_usbip_server->start(kDefaultUsbipPort, &usbipError)) {
-        std::wcerr << L"agent USB/IP server failed: " << usbipError << L"\n";
+        start_report::failed(L"DS5-USBIP could not start: its USB/IP server did not come up on port " +
+                             std::to_wstring(kDefaultUsbipPort) + L".\n\nagent USB/IP server failed: " + usbipError);
         closesocket(udp);
         closesocket(tcp);
         WSACleanup();
@@ -1052,7 +1059,8 @@ static int run_agent(uint16_t port)
         if (rest == INVALID_SOCKET) {
             // --rest was asked for explicitly; a silently missing API would be
             // worse than failing startup, and every other bind above is fatal.
-            std::wcerr << L"agent REST listener failed: " << restError << L"\n";
+            start_report::failed(L"DS5-USBIP could not start: the settings page's port, " +
+                                 std::to_wstring(g_rest_port) + L", is not free.\n\nagent REST listener failed: " + restError);
             g_agent_usbip_server->stop();
             g_agent_usbip_server.reset();
             closesocket(udp);
@@ -1073,8 +1081,13 @@ static int run_agent(uint16_t port)
         // file go" must be a grep of this line, never a theory.
         wchar_t cwd[MAX_PATH] = L"?";
         GetCurrentDirectoryW(MAX_PATH, cwd);
+        // ⓘ And HOW it came to be this folder (home_folder.inl): found from
+        // the exe, or named with --home. It used to be wherever the listener
+        // was started from, which is the question this line was added to answer.
         device_log::session_w() << L"working directory: " << cwd
-            << L" (configs/, logs and settings resolve here)";
+            << L" (configs/, logs and settings resolve here"
+            << (home_folder::g_chosen_how.empty() ? L"" : L"; ")
+            << home_folder::g_chosen_how << L")";
         // T-239: the window's place, size and layout, from the last run. Read
         // HERE because the line above is the one that settles what a relative
         // path means -- reading it earlier would resolve somewhere else.

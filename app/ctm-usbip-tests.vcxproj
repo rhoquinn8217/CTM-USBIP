@@ -99,6 +99,7 @@
     <ClCompile Include="..\tests\product_version_test.cpp" />
     <ClCompile Include="..\tests\device_type_test.cpp" />
     <ClCompile Include="..\tests\window_size_rule_test.cpp" />
+    <ClCompile Include="..\tests\home_folder_test.cpp" />
     <ClCompile Include="..\tests\tests_main.cpp" />
   </ItemGroup>
   <ItemGroup>
