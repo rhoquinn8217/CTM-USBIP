@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.38 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.39 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,14 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.39 Two things in Advanced. The Mode picker opens above the
+            notices: it lives in the footer, and the footer is drawn
+            under the notice strip that sits just above it, so the list
+            it unrolls upward went behind any notice that was up. While
+            a picker is open, whatever it sits in is raised with it. And
+            a controller with no config shows no section strip: picking
+            (no config), or Unlink, emptied the settings but left the
+            strip of section names standing with nothing behind them.
     2.66.38 The page no longer works out what a device is called. Which
             model a kind names, and whether it came over USB or
             Bluetooth, was a table in this page; the tray icon's menu
@@ -3996,6 +4004,15 @@ function buildDevicePane(d) {
     // its button becomes "Create and link" -- one field, one press, rather than
     // a second box saying the same thing a row lower.
     pane.innerHTML = '';
+    // ⭐ AND NO SECTION STRIP (rhoquinn8217, 2026-10-02: *"Hide settings
+    // section headers when no_config is selected or when unlink is
+    // selected"*). The strip is cached per tab and only ever rewritten by a
+    // render, and with no config nothing renders: so picking (no config), or
+    // Unlink, emptied the settings and left their section names standing with
+    // nothing behind them. Overview's editor clears its strip the same way.
+    // ⓘ Before setStickyHead, which measures the header with the strip in it.
+    SECT_BARS[d.ordinal] = '';
+    paintSectBar();
     setStickyHead(d.ordinal, head);
     return;
   }
@@ -5845,6 +5862,29 @@ function pickerExpand(el) {
   // ⚠️ Above the sticky header (z-index 40 there) and below the modal
   // overlays (99), which must still cover it.
   el.style.zIndex = '60';
+
+  // ⭐⭐ AND LIFT WHAT IT SITS IN (rhoquinn8217, 2026-10-02: *"mode selector
+  // in the advance view expands behind the notification bubbles"*).
+  // ⛔ A z-index only orders things that share a stacking context, and a box
+  // that is fixed or sticky with a z-index of its own makes one: everything
+  // inside it is drawn at THAT box's level, whatever its own number says.
+  // Advanced's footer, #gpbar, is fixed at 20, and the notice strip just above
+  // it is at 39 -- so the Mode picker, unrolling upward out of the footer, went
+  // under the strip, and its top row with it. The 60 above did nothing there.
+  // ➡️ Every such box around the list is raised to the list's level while it
+  // is open, and put back as it closes (pickerCollapse).
+  // ⓘ Once per opening: this runs again while the list is open, and a second
+  // pass would record the raised value as the one to put back.
+  if (!el._pickerLifted) {
+    el._pickerLifted = [];
+    for (var up = el.parentElement; up && up !== document.body; up = up.parentElement) {
+      var ucs = getComputedStyle(up);
+      if (ucs.position !== 'static' && ucs.zIndex !== 'auto') {
+        el._pickerLifted.push([up, up.style.zIndex]);
+        up.style.zIndex = '60';
+      }
+    }
+  }
 }
 
 // Undo all of it. ⛔ Clearing `size` alone would leave a fixed-positioned box
@@ -5864,6 +5904,11 @@ function pickerCollapse(el) {
   el.style.width = '';
   el.style.maxWidth = '';
   el.style.zIndex = '';
+  // The boxes it sat in go back to their own level (see pickerExpand).
+  if (el._pickerLifted) {
+    el._pickerLifted.forEach(function (pair) { pair[0].style.zIndex = pair[1]; });
+    el._pickerLifted = null;
+  }
 }
 
 function gpActivate() {
