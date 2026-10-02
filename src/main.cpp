@@ -114,6 +114,14 @@ void ui_drag_begin();
 // does them from its raw report; these are the same calls behind a route.
 void ui_position_tap();
 void ui_size_next();
+// ⭐ THE SETTINGS WINDOW GOES: its place and size are read while it is still
+// there, then it is asked to close. ONE implementation for the page's own
+// Close, the tray's Quit and the listener stopping, so the three cannot drift
+// apart. Answers whether there was a window to close.
+bool ui_close_window();
+// ⭐ The tray icon goes. For the agent's way out, which is included long
+// before the tray is; the tray's own Quit does it for itself.
+void tray_icon_remove();
 // ⓘ The chord calls this from the input path; the REST endpoint calls it too.
 // ⓘ Takes the controller that ran the chord, so the window can come up on its
 // tab. Empty means "no particular one" -- the REST spawn path has no controller
@@ -294,6 +302,19 @@ void ui_position_tap()
 void ui_size_next()
 {
     config_move::size_next();
+}
+bool ui_close_window()
+{
+    // ⓘ FIRST, while the window is still there: this is the one moment that
+    // catches a window someone dragged by its title bar.
+    config_move::remember_pos_now();
+    // ⓘ WM_CLOSE through close_existing(), which matches on the [ctm-app]
+    // marker and so can only ever reach our own window.
+    return ctm_open_ui::close_existing();
+}
+void tray_icon_remove()
+{
+    ctm_tray::remove_icon();
 }
 
 

@@ -812,10 +812,9 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
         // [ctm-app] marker and so can only ever reach our own window; the
         // page's teardown beacon releases the gate on the way out.
         if (what == "close") {
-            // ⓘ FIRST, while the window is still there: this is the one moment
-            // that catches a window someone dragged by its title bar.
-            ui_view_remember_pos();
-            const bool ok = ctm_open_ui::close_existing();
+            // ⓘ The last look at the window and the close are ONE call, the
+            // same one the tray's Quit and the listener stopping make.
+            const bool ok = ui_close_window();
             *out = rest_http_response(200, ok ? R"({"ok":true})" : R"({"ok":false})");
             return true;
         }

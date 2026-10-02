@@ -30,7 +30,33 @@ inline const UINT WM_CTM_TRAY = WM_APP + 20;
 // ⓘ Menu ids. Kept small and local; nothing else uses this window.
 inline const UINT kIdToggle   = 1;
 inline const UINT kIdSettings = 2;
-inline const UINT kIdExit     = 3;
+inline const UINT kIdQuit     = 3;
+
+// ⭐⭐ THE ICON GOES NOW (rhoquinn8217, 2026-10-01: *"I want to run it in the
+// background and the tray icon to be the place where it is closed."*).
+//
+// ⛔ NOTHING REMOVED IT ON THE WAY OUT. The icon was deleted only by this
+// thread's own teardown, which the agent never reaches: it sets the stop flag
+// and the process ends. Windows then leaves the picture in the tray until the
+// pointer next passes over it, and with no console window any more that
+// picture is the ONLY sign the program is running. A sign that outlives the
+// program is a lie someone clicks on.
+//
+// ⓘ From ANY thread: the icon is named by its window and its id, and the
+// shell takes the request from whoever sends it. Asking twice is harmless,
+// the second answer is simply "there is none".
+inline void remove_icon()
+{
+    const HWND hwnd = g_hwnd;
+    if (hwnd == nullptr) return;
+    NOTIFYICONDATAW nid = {};
+    nid.cbSize = sizeof(nid);
+    nid.hWnd = hwnd;
+    nid.uID = 1;                 // ⚠️ the id thread_main adds it under
+    if (Shell_NotifyIconW(NIM_DELETE, &nid)) {
+        device_log::session_w() << L"tray: icon removed, the listener is stopping";
+    }
+}
 
 inline void toggle_keyboard()
 {
@@ -53,7 +79,9 @@ inline void show_menu(HWND hwnd)
     AppendMenuW(menu, MF_STRING, kIdToggle,
                 ctm_overlay::visible() ? L"Hide keyboard" : L"Show keyboard");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(menu, MF_STRING, kIdExit, L"Exit");
+    // ⓘ "Quit", not "Exit" (rhoquinn8217, 2026-10-01). It ends the whole
+    // program, settings window included, and that is the word for it.
+    AppendMenuW(menu, MF_STRING, kIdQuit, L"Quit");
 
     POINT pt;
     GetCursorPos(&pt);
@@ -78,11 +106,23 @@ inline void show_menu(HWND hwnd)
         // ⓘ The same path the chord takes, with no controller in hand.
         ctm_chord_show_ui(std::string());
         break;
-    case kIdExit:
+    case kIdQuit:
+        // ⭐⭐ QUIT TAKES THE SETTINGS WINDOW WITH IT (rhoquinn8217, 2026-10-01:
+        // *"I want to change exit to Quit and I want that also to close the
+        // DS5-USBIP config window."*). It read Exit and left that window
+        // open, showing a page with no listener behind it.
+        //
+        // ⓘ Closed HERE as well as where the listener stops (agent.inl),
+        // because here is where someone is looking: the window goes the
+        // moment they choose Quit, not a second later when the agent's loop
+        // next comes round.
+        ui_close_window();
         // ⛔ THE SAME FLAG CTRL+C SETS, not an exit. Bridged controllers get
         // torn down properly; killing the process would leave them attached
         // with nothing driving them.
         g_stop.store(true);
+        // ⭐ And the icon with it, at once. See remove_icon().
+        remove_icon();
         break;
     default:
         break;

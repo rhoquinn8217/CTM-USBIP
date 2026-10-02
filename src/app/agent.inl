@@ -1146,6 +1146,21 @@ static int run_agent(uint16_t port)
         }
     }
 
+    // ⭐ THE SETTINGS WINDOW GOES WHEN THE LISTENER GOES, whichever way it was
+    // stopped: the tray's Quit, Ctrl+C, or its console window being closed. A
+    // page with no listener behind it can only say that it cannot reach one.
+    // ⓘ Before the sockets close and the bridges come down, so the window is
+    // gone at once rather than after the teardown.
+    // ⛔ Only past the loop, so only a listener that actually RAN gets here. One
+    // that failed to start has returned above, and the window it would find
+    // belongs to the listener that is running.
+    // ⓘ A listener that is KILLED runs none of this; the next start clears
+    // what is left (main.cpp, "any window out there is stale").
+    ui_close_window();
+    // ⭐ And the tray icon, for the same reason and at the same moment: it is
+    // the sign that the listener is running, and from here on it is not.
+    tray_icon_remove();
+
     if (rest != INVALID_SOCKET) {
         closesocket(rest);
     }
