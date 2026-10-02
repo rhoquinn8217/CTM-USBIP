@@ -107,6 +107,7 @@ carry it; upstream's own history is unchanged.
 | 2026-09-30 | A second finger coming down puts the cursor back to before the pad dragged the first one. For 30 to 75 ms before a DualSense Edge reports a second finger it moves the first finger's reported position toward it, sometimes across the whole pad, and can hand the first finger's touch id to the new one. A regular DualSense barely does: its largest put-back in one evening was 55 px against the Edge's 1,665 px. Nothing in a report says a finger is on its way, so the cursor goes back when it lands: to where it was 100 ms before, or to where the last scroll stroke left it if a finger lifted under 500 ms ago. ⛔ Ignoring any one-report step over 120 units was tried first and cut the fastest flicks short, whose real steps reached 188; the limit stays, at 300. Each landing logs the first finger's last ten positions and what the cursor was put back by. | `f378794`, `245eae5` |
 | 2026-09-30 | After a two-finger scroll, the finger left on the pad moves the cursor again without both lifting. It takes over once it has rested 30 ms and then moves, or after 150 ms if it is still sliding, so the slide as a scroll ends (measured at up to 113 ms and 588 px) still moves nothing. ⚠️ Only if the scroll had stopped before the other finger lifted: the fingers' midpoint moved under 30 units in the 100 ms before, or the scroll never sent the wheel. Lifted mid-stroke, the finger left behind holds until every finger is up or the next stroke lands, which is what holding one finger and scrolling with the other needs on an Edge, whose held finger is reported sliding toward the hovering one. | `2176f85`, `245eae5`, `ab45853` |
 | 2026-09-30 | Double taps land on one pixel. Windows makes a double-click only from two clicks within about 2 pixels. A tap whose roll moved the cursor was put back and clicked at once, while the roll's last movement was still queued for Windows, so the click could land a few pixels off: 31 of 36 double taps on an Edge had such a tap. That click now waits 30 ms for the put-back to settle, and a second tap within 500 ms and 16 px of a first clicks exactly on it. | `ab45853` |
+| 2026-10-01 | The TV can ask for the settings window on a bridged device. Added message type `MsgOpenConfig = 14`, sent by the TV app's streaming overlay on that device's own connection; the listener opens the window on that device's tab, which is what it already does by itself when a device is bridged. It serves any device that can be bridged: the chord that opens the window is read off a touchpad, so a device without one had no way to ask. The window is opened on a thread of its own, never on the session's read loop, where the wait for an old window to close would hold up the device's reports; and a request that finds the window already in front is logged and does nothing. `MsgAudioHold = 13` is listed as well, so the list matches the TV's. | `442b374` |
 
 ## Files changed
 
@@ -117,7 +118,7 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
 ```
  .gitattributes                                |   48 +
  .gitignore                                    |   34 +-
- CHANGES.md                                    |  238 +
+ CHANGES.md                                    |  239 +
  LINK                                          |    0
  README.md                                     |   18 +
  app/ctm-usbip-tests.vcxproj                   |  108 +
@@ -140,7 +141,7 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  profiles/descriptors/virtual_keyboard.profile |   74 +
  profiles/descriptors/virtual_mouse.profile    |   59 +
  release.ps1                                   |  152 +
- src/app/agent.inl                             |  570 +-
+ src/app/agent.inl                             |  605 +-
  src/app/agent_session_sweep.inl               |  320 +
  src/app/cli.inl                               |   24 +-
  src/app/common.inl                            |   32 +
@@ -168,9 +169,9 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  src/audio/mic_ring.inl                        |  202 +
  src/audio/pcm_amplitude_log.inl               |  162 +
  src/audio/rumble_floor.inl                    |   58 +
- src/backend/backend.inl                       |   29 +
- src/backend/bridge.inl                        |  256 +-
- src/backend/bridge_enet.inl                   |   35 +-
+ src/backend/backend.inl                       |   53 +
+ src/backend/bridge.inl                        |  271 +-
+ src/backend/bridge_enet.inl                   |   40 +-
  src/backend/bt.inl                            |   16 +-
  src/config/config_presets.inl                 |  452 ++
  src/config/config_store.inl                   |  820 +++
@@ -234,5 +235,5 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  tools/device-config-panel.ps1                 |  303 +
  tools/osk-mockups.py                          |  103 +
  tools/start-ctm-usbip.bat                     |   67 +
- 119 files changed, 40295 insertions(+), 145 deletions(-)
+ 119 files changed, 40375 insertions(+), 145 deletions(-)
 ```
