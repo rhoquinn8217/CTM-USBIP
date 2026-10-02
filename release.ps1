@@ -41,7 +41,62 @@ if (-not $Version) {
 }
 
 $stage = Join-Path $Root "out\release\DS5-USBIP-$Version"
-if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
+
+# ⛔⛔ THE FOLDER THIS STAGES INTO MAY BE A COPY SOMEBODY RUNS, WITH THEIR
+# CONFIGS IN IT. The exe keeps its configs, its log and its window's place
+# beside itself, so a release folder that has been started once is a home.
+# This script used to delete the folder and stage afresh, and on 2026-10-02
+# that took a config made in it two hours before. Nothing said so: it showed
+# only in a listing taken beforehand for another reason.
+#
+# ➡️ So the old folder is set ASIDE rather than deleted, the new one is staged
+# and zipped CLEAN, and then everything the release does not ship goes back in.
+#
+# ⓘ After the zip, never before. The zip is what gets published, and a log or
+# a config in it would publish a person's controller serials and their paths.
+# ⓘ "Everything the release does not ship", not a list of the files the exe is
+# known to write. A list goes stale the day the exe writes one more, and what
+# that costs is somebody's settings. What this rule costs is a file an older
+# release shipped lingering beside the new ones, and the known ones are named.
+# ⓘ A release that FAILS puts the folder back exactly as it found it (the trap
+# below). A half-staged folder with no exe in it is somebody's shortcut that
+# no longer starts.
+$aside = "$stage.previous"
+$retired = @('start-ctm-usbip.bat')    # shipped once and not any more: not put back
+$staging = $false
+
+# ⛔ Not while it is running from there. Windows will not let a running exe be
+# replaced, and finding that out half way through is how a folder gets left in
+# pieces.
+$running = @(Get-CimInstance Win32_Process -Filter "Name='ctm-usbip.exe'" |
+             Where-Object { $_.ExecutablePath -and
+                            $_.ExecutablePath.StartsWith("$stage\", [System.StringComparison]::OrdinalIgnoreCase) })
+if ($running.Count -gt 0) {
+    throw "DS5-USBIP is running from $stage -- choose Quit from its tray icon, then run this again"
+}
+# ⛔ Never deleted to get out of the way: it is the only copy of whatever an
+# earlier run had set aside and did not get to put back.
+if ((Test-Path -LiteralPath $aside) -and (Test-Path -LiteralPath $stage)) {
+    throw "an earlier run stopped part way, and what it had set aside is still in $aside -- move anything you want to keep from there into $stage, remove $aside, then run this again"
+}
+
+trap {
+    # ⓘ Only between the folder being set aside and the zip being made. Before
+    # that nothing has been touched; after it the person's files are on their
+    # way back in, and undoing would take them along.
+    if ($staging) {
+        Write-Host ''
+        Write-Host "release FAILED -- putting $stage back as it was" -ForegroundColor Red
+        if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
+        if (Test-Path -LiteralPath $aside) { Move-Item -LiteralPath $aside -Destination $stage }
+    }
+    break
+}
+
+# ⓘ One rename, so it either happens or it does not. $staging is set AFTER it:
+# were the rename to fail, the trap must not take the folder for a new one.
+if (Test-Path -LiteralPath $stage) { Move-Item -LiteralPath $stage -Destination $aside }
+$staging = $true
 New-Item -ItemType Directory -Force -Path $stage | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $stage 'profiles\descriptors') | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $stage 'maps') | Out-Null
@@ -171,4 +226,30 @@ Write-Host ''
 Write-Host "$profiles profile(s), $maps map(s)" -ForegroundColor DarkGray
 if ($profiles -eq 0 -or $maps -eq 0) {
     throw 'no profiles or no maps were staged -- the listener could not bridge anything'
+}
+
+# ⭐ The zip is made and listed. Now what the person had goes back into the
+# folder: everything that was in it and is not something this release ships.
+# ⛔ From here a failure undoes NOTHING. Whatever has not been put back yet is
+# still in the set-aside folder, and the next run will refuse to delete it.
+$staging = $false
+if (Test-Path -LiteralPath $aside) {
+    $kept = New-Object System.Collections.Generic.List[string]
+    foreach ($file in @(Get-ChildItem -LiteralPath $aside -Recurse -File -Force)) {
+        $inFolder = $file.FullName.Substring($aside.Length + 1)
+        if ($retired -contains $inFolder) { continue }
+        $back = Join-Path $stage $inFolder
+        if (Test-Path -LiteralPath $back) { continue }     # shipped: the new one stands
+        $backDir = Split-Path -Parent $back
+        if (-not (Test-Path -LiteralPath $backDir)) { New-Item -ItemType Directory -Force -Path $backDir | Out-Null }
+        Move-Item -LiteralPath $file.FullName -Destination $back
+        $kept.Add($inFolder)
+    }
+    # What is left in there is the previous release's own files, superseded.
+    Remove-Item -LiteralPath $aside -Recurse -Force
+    if ($kept.Count -gt 0) {
+        Write-Host ''
+        Write-Host 'kept from the folder that was here, and NOT in the zip:' -ForegroundColor Green
+        foreach ($name in $kept) { Write-Host "  $name" }
+    }
 }
