@@ -2,8 +2,8 @@
 //
 // ⭐ WHAT THE MENU IS (rhoquinn8217, 2026-10-02, in their order):
 //
-//     DS5-USBIP                      a title, larger
-//     2 controllers connected        and a count under it
+//     DS5-USBIP                      a title, larger and bold; choosing it
+//     2 controllers connected        closes the menu. A count under it
 //     ----------------------------
 //     Controllers                >   one line each; choosing one opens the
 //     ----------------------------   config window on that controller

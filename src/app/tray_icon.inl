@@ -34,7 +34,7 @@ inline const UINT WM_CTM_TRAY = WM_APP + 20;
 inline const UINT kIdToggle   = 1;
 inline const UINT kIdSettings = 2;
 inline const UINT kIdQuit     = 3;
-// ⓘ The title's line. It cannot be chosen, so this never comes back.
+// ⓘ The title's line. Choosing it closes the menu and does nothing else.
 inline const UINT kIdHeader   = 10;
 // ⓘ One id for each line of the Controllers list, in the order it was read as
 // the menu opened, and one for each layout. More devices than this are not
@@ -118,10 +118,21 @@ inline UINT dpi_at(POINT pt)
 // keeps the menu as Windows draws it today, and sits where a line's text sits.
 //
 // ⓘ 32 bits with its own transparency and the text in the menu's text colour,
-// so it lies on whatever the menu's background turns out to be.
-// ⓘ Windows draws it a little lighter than the lines under it, as it draws
-// any line that cannot be chosen. A title that could be chosen would light up
-// under the pointer and do nothing when clicked.
+// so it lies on whatever the menu's background turns out to be, the highlight
+// under the pointer included.
+//
+// ⭐ BLACK AND BOLD, ON A LINE THAT CAN BE CLICKED (rhoquinn8217, on seeing the
+// first one: *"Make the title clickable and when it is clicked, close it. The
+// Text on the title also looks dark gray and a low res enough that it's
+// noticible. Make it black bolded."*). Both complaints had one cause and one
+// more beside it:
+// - ⛔ a line that CANNOT be chosen is drawn by Windows at about two thirds
+//   strength, pictures included, so black came out dark grey. A line that can
+//   be chosen is drawn as given. Choosing it closes the menu and nothing else.
+// - ⛔ grey-scale smoothing made the letters soft and the count heavier than
+//   the menu's own lines beside it. Drawn with ClearType and the three
+//   channels averaged into one coverage, the count matches the weight of the
+//   line under it. Four renderings were photographed side by side first.
 inline HBITMAP header_picture(const std::wstring &count, UINT dpi)
 {
     NONCLIENTMETRICSW metrics = {};
@@ -129,14 +140,15 @@ inline HBITMAP header_picture(const std::wstring &count, UINT dpi)
     if (!SystemParametersInfoForDpi(SPI_GETNONCLIENTMETRICS, sizeof(metrics), &metrics, 0, dpi)) {
         return nullptr;
     }
-    // ⓘ Grey-scale smoothing, so that one channel of what GDI draws IS how
-    // much of each pixel the letter covers. ClearType's coloured edges cannot
-    // be turned into a transparency.
+    // ⓘ ClearType, drawn white on black. Each channel is then how much of
+    // one third of the pixel the letter covers, and their mean is how much of
+    // the whole pixel: a transparency. The coloured edges are given up, the
+    // sharper stems are kept.
     LOGFONTW countFace = metrics.lfMenuFont;
-    countFace.lfQuality = ANTIALIASED_QUALITY;
+    countFace.lfQuality = CLEARTYPE_QUALITY;
     LOGFONTW titleFace = countFace;
     titleFace.lfHeight = MulDiv(titleFace.lfHeight, 140, 100);
-    titleFace.lfWeight = FW_SEMIBOLD;
+    titleFace.lfWeight = FW_BOLD;
     const HFONT titleFont = CreateFontIndirectW(&titleFace);
     const HFONT countFont = CreateFontIndirectW(&countFace);
     if (titleFont == nullptr || countFont == nullptr) {
@@ -188,7 +200,7 @@ inline HBITMAP header_picture(const std::wstring &count, UINT dpi)
         const COLORREF ink = GetSysColor(COLOR_MENUTEXT);
         auto *px = static_cast<unsigned char *>(bits);
         for (int i = 0; i < width * height; ++i) {
-            const unsigned cover = px[i * 4 + 1];
+            const unsigned cover = (px[i * 4 + 0] + px[i * 4 + 1] + px[i * 4 + 2]) / 3u;
             px[i * 4 + 0] = static_cast<unsigned char>(GetBValue(ink) * cover / 255);
             px[i * 4 + 1] = static_cast<unsigned char>(GetGValue(ink) * cover / 255);
             px[i * 4 + 2] = static_cast<unsigned char>(GetRValue(ink) * cover / 255);
@@ -263,13 +275,14 @@ inline void show_menu(HWND hwnd)
     // disagree.
     const std::wstring count = tray_menu::count_line(listed);
     const HBITMAP header = header_picture(count, dpi_at(pt));
+    // ⓘ Not switched off: see header_picture() for what that did to it.
     if (header != nullptr) {
-        AppendMenuW(menu, MF_BITMAP | MF_DISABLED, kIdHeader, reinterpret_cast<LPCWSTR>(header));
+        AppendMenuW(menu, MF_BITMAP, kIdHeader, reinterpret_cast<LPCWSTR>(header));
     } else {
         // ⓘ No picture to be had: the same two lines in the menu's own font.
         // Smaller than asked for, and still there.
-        AppendMenuW(menu, MF_STRING | MF_DISABLED, kIdHeader, tray_menu::kTitle);
-        AppendMenuW(menu, MF_STRING | MF_DISABLED, kIdHeader, count.c_str());
+        AppendMenuW(menu, MF_STRING, kIdHeader, tray_menu::kTitle);
+        AppendMenuW(menu, MF_STRING, kIdHeader, count.c_str());
     }
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
 
@@ -340,6 +353,9 @@ inline void show_menu(HWND hwnd)
     }
 
     switch (chosen) {
+    case kIdHeader:
+        // ⭐ The title: the menu has closed, and that is all it does.
+        break;
     case kIdToggle:
         toggle_keyboard();
         break;
