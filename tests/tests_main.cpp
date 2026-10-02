@@ -36,6 +36,9 @@ int run_capped_log_tests();
 int run_product_version_tests();
 int run_device_type_tests();
 int run_window_size_rule_tests();
+int run_binding_names_tests();
+int run_key_pulse_tests();
+int run_pad_press_tests();
 
 // ⛔⛔ THE TEST BINARY RUNS FROM THE SAME DIRECTORY AS THE AGENT.
 //
@@ -84,6 +87,8 @@ int main(int argc, char **argv)
     // ⛔ Here too, and for the same reason: it reads src/app/rest_config.inl
     // from the repo, which the scratch directory below is not.
     run_schema_json_tests();
+    // ⛔ And here: its last section reads the list of names out of the same file.
+    run_binding_names_tests();
 
     if (!enter_scratch()) {
         std::fprintf(stderr, "could not create the scratch directory -- "
@@ -117,5 +122,7 @@ int main(int argc, char **argv)
     run_product_version_tests();
     run_device_type_tests();
     run_window_size_rule_tests();
+    run_key_pulse_tests();
+    run_pad_press_tests();
     return ctmtest::summary();
 }
