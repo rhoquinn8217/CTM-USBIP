@@ -10,6 +10,13 @@
 // Application icon (lowest ID becomes the icon Explorer/taskbar show for the exe).
 1 ICON "ctm-usbip.ico"
 
+// The same file a second time, as raw bytes the listener can hand out. The
+// settings page runs in a browser window, and a browser draws that window's
+// title-bar and taskbar icon from the page's favicon -- so the exe serves its
+// own icon back over HTTP (GET /favicon.ico, in src/app/ui_page.inl).
+// 101 is named there too, as kFaviconResourceId. Keep the two in step.
+101 RCDATA "ctm-usbip.ico"
+
 VS_VERSION_INFO VERSIONINFO
 FILEVERSION    CTM_VERSION_MAJOR, CTM_VERSION_MINOR, CTM_VERSION_PATCH, CTM_VERSION_BUILD
 PRODUCTVERSION PRODUCT_VERSION_MAJOR, PRODUCT_VERSION_MINOR, PRODUCT_VERSION_PATCH, 0
