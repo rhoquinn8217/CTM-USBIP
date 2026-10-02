@@ -257,8 +257,15 @@ inline void thread_main()
         nid.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
         iconSource = L"the stock application icon";
     }
-    // ⓘ The tip names what a click DOES now that a click opens the menu.
-    wcscpy_s(nid.szTip, L"DS5-USBIP — click for settings or the keyboard");
+    // ⓘ The tip names what a click DOES now that a click opens the menu: the
+    // three things on it.
+    // ⛔ PLAIN ASCII. It had a long dash in it, and hovering over the icon
+    // showed three odd characters where the dash was meant to be. This file
+    // has no byte-order mark and the build did not say its sources were
+    // UTF-8, so the compiler took the dash's three bytes for three
+    // characters. Text a person reads does not need a dash that depends on
+    // how the file happened to be saved.
+    wcscpy_s(nid.szTip, L"DS5-USBIP: click for settings, the keyboard or Quit");
     Shell_NotifyIconW(NIM_ADD, &nid);
     device_log::session_w() << L"tray: icon added, from " << iconSource;
 
