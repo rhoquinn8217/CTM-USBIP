@@ -37,6 +37,7 @@ int run_product_version_tests();
 int run_device_type_tests();
 int run_window_size_rule_tests();
 int run_home_folder_tests();
+int run_stop_wait_tests();
 
 // ⛔⛔ THE TEST BINARY RUNS FROM THE SAME DIRECTORY AS THE AGENT.
 //
@@ -119,5 +120,6 @@ int main(int argc, char **argv)
     run_device_type_tests();
     run_window_size_rule_tests();
     run_home_folder_tests();
+    run_stop_wait_tests();
     return ctmtest::summary();
 }

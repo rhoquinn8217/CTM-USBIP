@@ -100,6 +100,7 @@
     <ClCompile Include="..\tests\device_type_test.cpp" />
     <ClCompile Include="..\tests\window_size_rule_test.cpp" />
     <ClCompile Include="..\tests\home_folder_test.cpp" />
+    <ClCompile Include="..\tests\stop_wait_test.cpp" />
     <ClCompile Include="..\tests\tests_main.cpp" />
   </ItemGroup>
   <ItemGroup>

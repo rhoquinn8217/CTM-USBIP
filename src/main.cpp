@@ -50,6 +50,7 @@
 
 namespace {
 
+#include "app/stop_wait.inl"        // a closing console waits here for the stop to finish; pure
 #include "app/common.inl"
 #include "app/console_attach.inl"   // the parent's console, when the exe was typed into one
 #include "app/start_report.inl"     // how a listener that could not start says so
@@ -521,6 +522,15 @@ int wmain(int argc, wchar_t **argv)
     // say with a message box instead.
     const console_attach::Result console = console_attach::attach_to_parent();
     start_report::g_someone_reads = console.someone_reads();
+
+    // ⭐ HOWEVER THIS FUNCTION IS LEFT, a console that is closing is told the
+    // program has finished stopping, and stops holding Windows off
+    // (stop_wait.inl).
+    // ⓘ Declared before everything that has to be undone on the way out, so
+    // that it is the last of them to go.
+    struct StoppedNow {
+        ~StoppedNow() { stop_wait::shared().done(); }
+    } stoppedNow;
 
     // ⭐⭐ TELL WINDOWS WE UNDERSTAND HIGH-DPI, before any window exists.
     //
