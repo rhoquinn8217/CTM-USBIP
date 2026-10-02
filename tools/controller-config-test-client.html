@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.35 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.37 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,16 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.37 The hints say what the tray icon is for. A new one, shown
+            second: DS5-USBIP keeps running in the background when this
+            window is closed, and Quit on the tray icon is what stops
+            it. Nothing said either, and with no terminal window the
+            icon is the only sign it is still there. The two hints that
+            already named the icon disagreed -- one said right-click
+            the tray icon, the other click the taskbar icon -- and both
+            say "click the tray icon" now, which is what its own tooltip
+            says and what either button does. Eleven hints.
+            ⓘ .36 is the gesture remap branch, merged on its own.
     2.66.35 The settings window wears the listener's icon. The page names
             /favicon.ico, and the listener now answers it with the icon
             built into the exe, so the window's title bar and its
@@ -3194,17 +3204,33 @@ function noteInputSource(what) {
 // cycle -- *"I still want this text part of the cycle"* -- and is shown FIRST
 // on every open, so a freshly opened window leads with it.
 //
+// ⭐ HINT 1 IS THE ONE THAT SAYS THE LISTENER IS STILL THERE. It runs in the
+// background with no window of its own, so closing this window stops nothing,
+// and Quit on the tray icon is the only thing that does. Second, so it is the
+// first one a click or the timer brings: it is the thing nobody could guess.
+// ⛔ A hint of its own, not a longer hint 0, which has its two lines full.
+//
+// ⛔ ONE NAME AND ONE GESTURE FOR THE ICON: "click the tray icon". Two hints
+// named it and disagreed -- right-click the tray icon, click the taskbar icon.
+// It is in the notification area, which is the tray; the taskbar button is the
+// settings window's own. Either mouse button opens its menu, and its tooltip
+// says "click".
+//
 // ⓘ `<b>` is allowed and nothing here is user text, so there is nothing to
 // escape. 🔗 The same reasoning as the legend a few lines above.
 var FOOTER_HINTS = [
   'To bring this window back: <b>hold two fingers on the touchpad and press ' +
-  'Options</b> (DS5/DS4 only), or right-click the tray icon and choose ' +
+  'Options</b> (DS5/DS4 only), or click the tray icon and choose ' +
   '<b>Open settings</b>.',
+
+  'DS5-USBIP keeps running in the <b>background</b> when this window is ' +
+  'closed. To stop it, click the <b>tray icon</b> by the clock and choose ' +
+  '<b>Quit</b>.',
 
   'Hold <b>☰</b> and move the <b>left stick</b> to drag this window. Tap it ' +
   'instead and the window steps between three spots.',
 
-  'Click the <b>taskbar icon</b> and choose <b>Open settings</b> to bring back ' +
+  'Click the <b>tray icon</b> and choose <b>Open settings</b> to bring back ' +
   'this window. You can also open the DS5-USBIP virtual keyboard from there.',
 
   'Give a pad a <b>stick, gyro or touchpad to mouse</b> preset and it drives ' +
@@ -8830,7 +8856,7 @@ function selfTest() {
   // ⓘ Rendering is not testable from here. The two-line reservation
   // (min-height:2.8em) is still measured by eye at Simple's width.
   {
-    ok('every hint is present', FOOTER_HINTS.length === 10,
+    ok('every hint is present', FOOTER_HINTS.length === 11,
        'got ' + FOOTER_HINTS.length);
     var allText = true, i;
     for (i = 0; i < FOOTER_HINTS.length; i++) {
