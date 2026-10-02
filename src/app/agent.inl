@@ -1122,6 +1122,9 @@ static int run_agent(uint16_t port)
     // ⓘ A listener that is KILLED runs none of this; the next start clears
     // what is left (main.cpp, "any window out there is stale").
     ui_close_window();
+    // ⭐ And the tray icon, for the same reason and at the same moment: it is
+    // the sign that the listener is running, and from here on it is not.
+    tray_icon_remove();
 
     if (rest != INVALID_SOCKET) {
         closesocket(rest);

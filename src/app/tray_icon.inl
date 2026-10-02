@@ -32,6 +32,32 @@ inline const UINT kIdToggle   = 1;
 inline const UINT kIdSettings = 2;
 inline const UINT kIdQuit     = 3;
 
+// ⭐⭐ THE ICON GOES NOW (rhoquinn8217, 2026-10-01: *"I want to run it in the
+// background and the tray icon to be the place where it is closed."*).
+//
+// ⛔ NOTHING REMOVED IT ON THE WAY OUT. The icon was deleted only by this
+// thread's own teardown, which the agent never reaches: it sets the stop flag
+// and the process ends. Windows then leaves the picture in the tray until the
+// pointer next passes over it, and with no console window any more that
+// picture is the ONLY sign the program is running. A sign that outlives the
+// program is a lie someone clicks on.
+//
+// ⓘ From ANY thread: the icon is named by its window and its id, and the
+// shell takes the request from whoever sends it. Asking twice is harmless,
+// the second answer is simply "there is none".
+inline void remove_icon()
+{
+    const HWND hwnd = g_hwnd;
+    if (hwnd == nullptr) return;
+    NOTIFYICONDATAW nid = {};
+    nid.cbSize = sizeof(nid);
+    nid.hWnd = hwnd;
+    nid.uID = 1;                 // ⚠️ the id thread_main adds it under
+    if (Shell_NotifyIconW(NIM_DELETE, &nid)) {
+        device_log::session_w() << L"tray: icon removed, the listener is stopping";
+    }
+}
+
 inline void toggle_keyboard()
 {
     // ⓘ Opened with no button, so the "the button that opened it also closes
@@ -95,6 +121,8 @@ inline void show_menu(HWND hwnd)
         // torn down properly; killing the process would leave them attached
         // with nothing driving them.
         g_stop.store(true);
+        // ⭐ And the icon with it, at once. See remove_icon().
+        remove_icon();
         break;
     default:
         break;

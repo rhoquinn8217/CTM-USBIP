@@ -119,6 +119,9 @@ void ui_size_next();
 // Close, the tray's Quit and the listener stopping, so the three cannot drift
 // apart. Answers whether there was a window to close.
 bool ui_close_window();
+// ⭐ The tray icon goes. For the agent's way out, which is included long
+// before the tray is; the tray's own Quit does it for itself.
+void tray_icon_remove();
 // ⓘ The chord calls this from the input path; the REST endpoint calls it too.
 // ⓘ Takes the controller that ran the chord, so the window can come up on its
 // tab. Empty means "no particular one" -- the REST spawn path has no controller
@@ -305,6 +308,10 @@ bool ui_close_window()
     // ⓘ WM_CLOSE through close_existing(), which matches on the [ctm-app]
     // marker and so can only ever reach our own window.
     return ctm_open_ui::close_existing();
+}
+void tray_icon_remove()
+{
+    ctm_tray::remove_icon();
 }
 
 
