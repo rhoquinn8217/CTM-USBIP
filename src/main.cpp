@@ -256,6 +256,9 @@ static bool ctm_window_steering(const void *deviceKey) { return window_move::ste
 // ⛔ AFTER osk.inl, which it calls to open the settings window, and after
 // overlay_window.inl, whose keyboard it toggles.
 #include "app/tray_icon.inl"       // the notification-area icon
+#include "app/window_icon_rule.inl" // the settings window's icon: which sizes, which window
+// ⛔ AFTER open_ui.inl, whose title marker says which window is ours.
+#include "app/window_icon.inl"     // ...and keeping them on a window the browser owns
 #include "app/rest_sessions.inl"
 #include "app/rest_config_sessions.inl"   // defines what rest_config.inl declares; needs agent.inl's sessions
 #include "app/service.inl"
@@ -572,8 +575,17 @@ int wmain(int argc, wchar_t **argv)
                 }
             }
             ctm_open_ui::g_ui_already_focused = false;
+            // ⭐ From here on this process IS the listener, so the settings
+            // window's taskbar icon is ours to keep sharp.
+            // ⛔ Not with the tray, at the flag: a second copy started only to
+            // bring the page forward has returned above, and icons it set
+            // would have died with it a moment later.
+            window_icon::start();
         }
-        return run_agent(static_cast<uint16_t>(port));
+        const int rc = run_agent(static_cast<uint16_t>(port));
+        // ⓘ The settings window can outlive the listener. Its icons cannot.
+        window_icon::stop();
+        return rc;
     }
 
     if (mode == L"service-run") {

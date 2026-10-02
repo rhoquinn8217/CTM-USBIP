@@ -27,6 +27,7 @@
 # away and the structure dominates. Compare bytes, not impressions.
 #
 # ➡️ RUN THIS, NOT make-icon.ps1, whenever the art or the treatment changes.
+# ➡️ RUN IT WITH -Check to ask whether the committed icon is still its own.
 # ---------------------------------------------------------------------------
 #
 # THE TREATMENT, and why it is not a plain inversion.
@@ -46,15 +47,41 @@
 # hard cut, because at 16 and 24px a cable is thinner than one pixel and
 # exists only as a partial value.
 
+# ⭐ -Check WRITES NOTHING. It builds the icon in memory and compares it with
+# the committed one, byte for byte, and exits 1 if they differ. That is the
+# whole of "a generated file must have a generator": the claim is only true
+# while this passes.
+param([switch]$Check)
+
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 
 $src = Join-Path $PSScriptRoot 'brand.png'
 $dst = Join-Path $PSScriptRoot '..\app\ctm-usbip.ico'
-$sizes = 16, 24, 32, 48, 64, 128, 256
+
+# ⭐⭐ ONE FRAME FOR EVERY SIZE WINDOWS ASKS FOR, at every stock display scale
+# from 100% to 300% (rhoquinn8217, 2026-10-01: *"use a higher resolution
+# icon. the one in the task bar looks blurry."*). Windows has a small icon,
+# 16 units, and a big one, 32 units, and a unit is one pixel at 100%:
+#
+#     scale    100  125  150  175  200  225  250  300
+#     small     16   20   24   28   32   36   40   48
+#     big       32   40   48   56   64   72   80   96
+#
+# ⛔ A SIZE MISSING HERE IS NOT AN ERROR ANYWHERE. Windows stretches the
+# nearest frame to fit and says nothing, so the icon is simply soft at that
+# one scale. Until that day this list was 16, 24, 32, 48, 64, 128, 256, which
+# is exact at 100, 150 and 200% and stretched at every other scale.
+# ⓘ src\app\window_icon_rule.inl works the same sizes out for the settings
+# window's taskbar icon, and its test carries this table. 128 and 256 are for
+# Explorer's large views.
+$sizes = 16, 20, 24, 28, 32, 36, 40, 48, 56, 64, 72, 80, 96, 128, 256
 
 # Sizes at or below this get the sharpened threshold; above it, the ramp.
-$sharpenUpTo = 48
+# ⓘ 56, not 48. The reason given above is "below 64px there are not enough
+# pixels", and 56 is below 64; it read 48 only while 48 was the last frame
+# before 64. No frame that existed before changes treatment.
+$sharpenUpTo = 56
 $thresholdLo = 0.45
 $thresholdHi = 0.65
 
@@ -160,6 +187,24 @@ for ($i = 0; $i -lt $sizes.Count; $i++) {
 }
 foreach ($f in $frames) { $bw.Write($f) }
 $bw.Flush()
-[System.IO.File]::WriteAllBytes((Join-Path $PSScriptRoot '..\app\ctm-usbip.ico'), $out.ToArray())
+$bytes = $out.ToArray()
 $out.Dispose()
+
+if ($Check) {
+    $have = [System.IO.File]::ReadAllBytes((Resolve-Path $dst).Path)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $made = [System.BitConverter]::ToString($sha.ComputeHash($bytes))
+    $kept = [System.BitConverter]::ToString($sha.ComputeHash($have))
+    $sha.Dispose()
+    if ($made -eq $kept) {
+        Write-Host "OK: the committed icon is what this script makes ($($bytes.Length) bytes, $($sizes.Count) sizes)"
+        exit 0
+    }
+    Write-Host "DRIFT: the committed icon is NOT what this script makes"
+    Write-Host "  committed  $($have.Length) bytes"
+    Write-Host "  this script $($bytes.Length) bytes"
+    exit 1
+}
+
+[System.IO.File]::WriteAllBytes((Join-Path $PSScriptRoot '..\app\ctm-usbip.ico'), $bytes)
 Write-Host "Wrote $((Resolve-Path $dst).Path) ($($sizes.Count) sizes, DS5 treatment)"

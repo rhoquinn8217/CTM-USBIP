@@ -188,8 +188,9 @@ inline void thread_main()
     // ⓘ Everything above about ddores.dll is still true, and it is now the
     // FALLBACK: a build with no icon resource gets the system gamepad, as before.
     // ⚠️ The warning about 16 px applies to this one too. The .ico carries a
-    // frame drawn for that size (installer/make-icon-ds5.ps1 sharpens 16 to
-    // 48 px), which is the reason it holds up; a plain scale-down did not.
+    // frame drawn for that size (installer/make-icon-ds5.ps1 sharpens every
+    // frame below 64 px), which is the reason it holds up; a plain scale-down
+    // did not.
     //
     // ⓘ LoadImage at the small-icon size, not LoadIcon: LoadIcon answers with
     // the 32 px frame and lets the shell shrink it, which throws that drawn

@@ -82,6 +82,11 @@ inline std::string http_response()
 // app/ctm-usbip.rc) and handed back here. ONE FILE ON DISK feeds the exe, the
 // tray and this, so the three can never show three different bridges.
 //
+// ⚠️ THIS REACHES THE TITLE BAR ONLY AS FAR AS A FAVICON CAN. A browser keeps
+// a favicon at favicon sizes and stretches it for anything bigger, so the
+// window's TASKBAR button came out blurred from this alone. That one is
+// handled in window_icon.inl, which gives the window its icons directly.
+//
 // ⓘ no-cache, not no-store: the browser may keep it but has to ask whether it
 // is still current, so a rebuilt icon shows up without anyone clearing a cache.
 inline const int kFaviconResourceId = 101;   // ⚠️ the same number as in the .rc
