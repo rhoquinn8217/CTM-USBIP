@@ -104,9 +104,21 @@ static bool ctm_log_report_line(uint64_t n)
 
 static BOOL WINAPI console_ctrl_handler(DWORD ctrlType)
 {
-    if (ctrlType == CTRL_C_EVENT || ctrlType == CTRL_BREAK_EVENT ||
-        ctrlType == CTRL_CLOSE_EVENT || ctrlType == CTRL_SHUTDOWN_EVENT) {
+    if (ctrlType == CTRL_C_EVENT || ctrlType == CTRL_BREAK_EVENT) {
         g_stop.store(true);
+        return TRUE;
+    }
+    if (ctrlType == CTRL_CLOSE_EVENT || ctrlType == CTRL_SHUTDOWN_EVENT) {
+        // ⛔⛔ THE CONSOLE IS GOING, AND WINDOWS ENDS THIS PROGRAM THE MOMENT
+        // THIS RETURNS (stop_wait.inl). So it does not return until the
+        // program has stopped: the settings window closed, the tray icon
+        // gone, the bridges and the synthetic devices brought down.
+        // ⓘ A stop that takes longer than Windows allows is cut off there, as
+        // every one was before this waited at all.
+        g_stop.store(true);
+        if (stop_wait::shared().until_done(stop_wait::kCloseWaitMs)) {
+            Sleep(stop_wait::kGraceMs);
+        }
         return TRUE;
     }
     return FALSE;

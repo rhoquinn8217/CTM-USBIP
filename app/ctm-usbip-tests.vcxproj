@@ -102,6 +102,8 @@
     <ClCompile Include="..\tests\binding_names_test.cpp" />
     <ClCompile Include="..\tests\key_pulse_test.cpp" />
     <ClCompile Include="..\tests\pad_press_test.cpp" />
+    <ClCompile Include="..\tests\home_folder_test.cpp" />
+    <ClCompile Include="..\tests\stop_wait_test.cpp" />
     <ClCompile Include="..\tests\tests_main.cpp" />
   </ItemGroup>
   <ItemGroup>
