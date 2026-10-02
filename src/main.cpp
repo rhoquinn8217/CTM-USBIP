@@ -228,6 +228,10 @@ void ctm_gyro_mouse_ensure_mouse_started();
 // ⓘ Same cycle, same shape: the keyboard device needs agent.inl's server and
 // asset helpers, while agent.inl needs only this one symbol from it.
 void ctm_rebind_ensure_keyboard_started();
+// ⭐ And the other end of both: the agent's way out stops the two synthetic
+// devices, and for the same reason cannot name them. Defined below, after
+// both devices, with what it looked like when nothing did this.
+void synthetic_devices_stop();
 // ⓘ And the same shape again (T-239): agent.inl reads the window's remembered
 // place the moment it has settled what a relative path means, and
 // config_move.inl is included well below because rebind.inl needs it there.
@@ -239,6 +243,37 @@ namespace config_move { inline void state_load(); }
 #include "app/agent.inl"
 #include "input/mouse_device.inl"      // needs g_agent_usbip_server, find_relative_asset, run_usbip_attach
 #include "input/keyboard_device.inl"   // same dependencies as the mouse above
+// ⭐⭐ BOTH SYNTHETIC DEVICES STOP ON THE WAY OUT (2026-10-01).
+//
+// ⛔ NOTHING CALLED THEIR stop(). Each has a pump thread held in a global
+// std::thread, started the first time a pad that drives a mouse or a keyboard
+// is bridged. When the listener was told to stop, each pump saw the stop flag
+// and returned -- and a thread that has returned is still JOINABLE until
+// someone joins it. Destroying a joinable std::thread, which is what the end
+// of the program does to a global one, is std::terminate(), and that is
+// abort(). A debug build put up "Microsoft Visual C++ Runtime Library --
+// Debug Error! abort() has been called" and sat behind it, its settings window
+// and tray icon already gone and its sockets already closed.
+//
+// ➡️ rhoquinn8217: *"sometimes I get this message. why, how can we avoid
+// it?"* Sometimes was every orderly stop after such a pad had been bridged,
+// and never one before. ⓘ Closing the console window never showed it:
+// Windows ends the process itself a few seconds later, box and all.
+//
+// ⓘ Defined here because agent.inl, which calls it, is included long
+// before either device.
+void synthetic_devices_stop()
+{
+    const bool mouse = ctm_mouse_device::g_started.load();
+    const bool keyboard = ctm_keyboard_device::g_started.load();
+    // ⓘ Both are safe to call on a device that never started.
+    ctm_mouse_device::stop();
+    ctm_keyboard_device::stop();
+    if (mouse || keyboard) {
+        device_log::input_w() << L"synthetic devices stopped on the way out (mouse="
+                              << (mouse ? 1 : 0) << L" keyboard=" << (keyboard ? 1 : 0) << L")";
+    }
+}
 // ⛔ AFTER keyboard_device.inl, which it types through, and BEFORE rebind.inl,
 //    which calls into it. Both directions matter: the overlay needs the
 //    keyboard to exist, and rebind needs the overlay to exist.
