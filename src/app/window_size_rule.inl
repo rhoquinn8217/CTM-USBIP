@@ -62,6 +62,34 @@ inline bool share_sane(int wThou, int hThou)
            hThou >= kShareMin && hThou <= kShareMax;
 }
 
+// ⭐⭐ A MINIMISED WINDOW HAS NO PLACE AND NO SIZE TO READ. Windows parks it at
+// -32000,-32000 and reports the size of the stub it would draw there (160x28
+// at 100%). Neither number is anything a person chose.
+//
+// ⛔ THE FAULT THIS IS HERE FOR (rhoquinn8217, 2026-10-01: *"why is the config
+// window start with 0x0 dimensions"*). The settings window is replaced on
+// every bridge, and it was minimised when a keyboard bridged. The last look
+// at it on the way out read the parked rectangle: the place became -32000,
+// which the clamp turned into the top-left corner, and the size became a
+// "dragged" 160x28. Every window after that opened as a sliver, and went on
+// doing so, because the sliver was what the next last look found.
+//
+// ⚠️ share_sane() DOES NOT CATCH IT. 160x28 on that display is 47 and 20
+// thousandths, and 20 is exactly the smallest share it allows.
+//
+// ⓘ The caller asks Windows whether the window is minimised and reads the
+// rectangle it will come back to instead. This is the second lock on the same
+// door: a rectangle parked out there is refused whatever anything else said.
+// ⓘ EITHER coordinate, not both. No real window can be that far out on
+// either axis, and a desktop reaching to -7680 for a monitor on the left is
+// nowhere near it.
+inline const int kParkedAt = -32000;
+
+inline bool is_parked(int x, int y)
+{
+    return x <= kParkedAt || y <= kParkedAt;
+}
+
 // Is this pixel size simply the preset it was already at?
 inline bool is_preset(int w, int h, int presetW, int presetH, int slop = kPresetSlop)
 {

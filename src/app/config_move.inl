@@ -118,7 +118,9 @@ inline void state_save();               // T-239: the place on disk, defined bel
 // measure it afterwards -- see place_exact below.
 inline void apply_size(HWND hwnd, int *outW = nullptr, int *outH = nullptr);
 // T-253: defined beside the size tables it has to compare against.
-inline void remember_size_now();
+// ⓘ Handed the rectangle rather than reading one: its caller has already
+// worked out which rectangle is the one a person left.
+inline void remember_size_now(const RECT &rc);
 inline void place_default(HWND hwnd);
 inline void place_exact(HWND hwnd, int x, int y);
 inline void place_exact(HWND hwnd, int x, int y, int w, int h);
@@ -247,18 +249,72 @@ inline bool last_custom_size(int *wThou, int *hThou)
     return true;
 }
 
+// ⭐⭐ THE WINDOW'S RECTANGLE AS SOMEONE LEFT IT, which is not always the one
+// it has now.
+//
+// ⛔ A MINIMISED WINDOW ANSWERS GetWindowRect WITH WHERE WINDOWS PARKED IT:
+// -32000,-32000, and the size of a stub. Remembering that put the next window
+// in the top-left corner as a sliver (see is_parked in window_size_rule.inl
+// for the day it happened). And a settings window is minimised OFTEN: it is
+// what someone does with it to get back to the game, and the next bridge
+// then closes that minimised window to open a new one.
+//
+// ➡️ So a minimised window is asked for the rectangle it will come back to,
+// which is what the person last saw and is the thing worth remembering.
+inline bool rect_as_left(HWND h, RECT *out)
+{
+    if (!IsIconic(h)) return GetWindowRect(h, out) != 0;
+
+    WINDOWPLACEMENT wp = {};
+    wp.length = sizeof(wp);
+    if (!GetWindowPlacement(h, &wp)) return false;
+    RECT rc = wp.rcNormalPosition;
+    // ⚠️ That rectangle is in WORKSPACE coordinates, which start at the
+    // work area's corner rather than the monitor's. The two are the same
+    // unless the taskbar is docked at the top or the left, and then they
+    // differ by exactly its thickness.
+    MONITORINFO mi = {};
+    mi.cbSize = sizeof(mi);
+    if (GetMonitorInfoW(MonitorFromRect(&rc, MONITOR_DEFAULTTONEAREST), &mi)) {
+        OffsetRect(&rc, mi.rcWork.left - mi.rcMonitor.left,
+                   mi.rcWork.top - mi.rcMonitor.top);
+    }
+    *out = rc;
+    return true;
+}
+
 // The window as it stands, dragged or not. Called while it still exists, on
 // the way out.
 inline void remember_pos_now()
 {
     HWND h = page_window();
     if (h == nullptr) return;
+    const bool minimised = IsIconic(h) != 0;
     RECT rc;
-    if (!GetWindowRect(h, &rc)) return;
+    if (!rect_as_left(h, &rc)) return;
+    // ⛔ THE SECOND LOCK. Whatever the lines above concluded, a rectangle
+    // parked where Windows keeps minimised windows is not a place, and the
+    // size that comes with it is not a size. Keeping what was remembered
+    // before is right; overwriting it with this is the fault.
+    if (ctm_window_size::is_parked((int)rc.left, (int)rc.top)) {
+        device_log::input(device_log::msg()
+            << "ui/pos-remember: refused " << (int)rc.left << "," << (int)rc.top
+            << " " << (int)(rc.right - rc.left) << "x" << (int)(rc.bottom - rc.top)
+            << " -- a minimised window's parking place, not a place");
+        return;
+    }
+    if (minimised) {
+        // ⓘ Said out loud, because the rectangle below is NOT the one the
+        // window has at this moment and a later reader will wonder why.
+        device_log::input(device_log::msg()
+            << "ui/pos-remember: the window is minimised -- read where it will come back to, "
+            << (int)rc.left << "," << (int)rc.top
+            << " " << (int)(rc.right - rc.left) << "x" << (int)(rc.bottom - rc.top));
+    }
     note_pos((int)rc.left, (int)rc.top);
     // ⭐ T-253: the same last look also catches a size someone dragged. ⓘ One
     // call site on purpose -- a separate one would drift from the place.
-    remember_size_now();
+    remember_size_now(rc);
 }
 
 inline void note_ordinal(const std::string &ordinal)
@@ -833,12 +889,11 @@ inline const SizeShare *size_table()
 //
 // ⓘ The tolerance is in PIXELS because that is what a person can see, and
 // because integer rounding through a share loses a pixel or two by itself.
-inline void remember_size_now()
+// ⛔ `rc` IS THE RECTANGLE SOMEONE LEFT, NOT ONE READ HERE. This used to call
+// GetWindowRect itself, and for a minimised window that is the stub Windows
+// parks off screen: 160x28, stored as a size a person had dragged to.
+inline void remember_size_now(const RECT &rc)
 {
-    HWND h = page_window();
-    if (h == nullptr) return;
-    RECT rc;
-    if (!GetWindowRect(h, &rc)) return;
     const RECT wa = work_area();
     const int waW = wa.right - wa.left;
     const int waH = wa.bottom - wa.top;

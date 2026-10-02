@@ -81,6 +81,34 @@ int run_window_size_rule_tests()
         CTM_CHECK(!share_sane(0, 0));
     }
 
+    section("window size: a minimised window's parking place is not a place");
+    {
+        // ⛔ WHAT WINDOWS REPORTS FOR A MINIMISED WINDOW, and what was
+        // remembered as a place and a size on 2026-10-01.
+        CTM_CHECK(is_parked(-32000, -32000));
+        // Either axis is enough: nothing real is that far out on one.
+        CTM_CHECK(is_parked(-32000, 191));
+        CTM_CHECK(is_parked(602, -32000));
+
+        // Real places, including the ones that look odd.
+        CTM_CHECK(!is_parked(602, 191));
+        CTM_CHECK(!is_parked(0, 0));
+        // A maximised window sits a few pixels outside its monitor.
+        CTM_CHECK(!is_parked(-11, -11));
+        // Two 4K monitors to the left of the primary, and one above.
+        CTM_CHECK(!is_parked(-7680, 0));
+        CTM_CHECK(!is_parked(100, -2160));
+
+        // ⚠️ AND WHY THIS RULE HAD TO EXIST: the sanity check on a stored
+        // size PASSES the stub. 160x28 on a 3440x1368 work area is 47 and 20
+        // thousandths, and 20 is the smallest share allowed. If this line
+        // ever fails, share_sane has been tightened and that is fine; what
+        // it must never be read as is the guard against a minimised window.
+        CTM_CHECK_EQ(to_thousandths(160, 3440), 47);
+        CTM_CHECK_EQ(to_thousandths(28, 1368), 20);
+        CTM_CHECK(share_sane(47, 20));
+    }
+
     section("window size: a preset, or a size a person chose");
     {
         // ⭐ THE DECISION THE WHOLE TICKET TURNS ON. Call a preset "custom" and
