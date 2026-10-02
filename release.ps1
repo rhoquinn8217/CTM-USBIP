@@ -83,12 +83,17 @@ DS5-USBIP $Version
 
 Start it: double-click start-ctm-usbip.bat
 
+It runs in the background. No window stays open: look for the DS5-USBIP icon
+in the tray, by the clock. Click it for the settings page or the on-screen
+keyboard, and choose Quit there to close it.
+
 Want it on your desktop? Double-click create-desktop-shortcut.bat once.
 It builds the shortcut from wherever this folder currently is, so MOVE THE
 FOLDER FIRST and then run it -- a Windows shortcut stores the full path and
 cannot follow the folder afterwards. Running it again replaces the old one.
 
-Or from a command prompt in this folder:
+To watch it instead, with its log on screen, run it from a command prompt
+in this folder. Ctrl+C or the tray icon's Quit ends it:
 
     ctm-usbip.exe agent 48054 --ui
 
@@ -107,7 +112,7 @@ step with the version you are running.
 
 What is in here, and what each part is for:
 
-    start-ctm-usbip.bat       starts it
+    start-ctm-usbip.bat       starts it, in the background
     create-desktop-shortcut.bat   puts a shortcut on your desktop
     ctm-usbip.exe             the listener
     *.dll                     ffmpeg, for audio
