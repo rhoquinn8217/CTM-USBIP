@@ -1165,6 +1165,10 @@ static int run_agent(uint16_t port)
         closesocket(rest);
     }
     stop_all_bridge_sessions();
+    // ⭐ The synthetic mouse and keyboard, BEFORE the server they are exported
+    // through. Their pump threads have to be joined here or the program cannot
+    // end: see synthetic_devices_stop() in main.cpp for what it did instead.
+    synthetic_devices_stop();
     if (g_agent_usbip_server) {
         g_agent_usbip_server->stop();
         g_agent_usbip_server.reset();
