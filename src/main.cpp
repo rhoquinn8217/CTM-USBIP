@@ -596,8 +596,9 @@ int wmain(int argc, wchar_t **argv)
             // its icon away: the tray showed two until the pointer passed
             // over the dead one. And that second copy is not rare. With no
             // console window, a double-click on the shortcut is how someone
-            // asks for the settings page back, and one evening's log has
-            // eight of them in twenty-five minutes.
+            // asks for the settings page back: one evening's log has five
+            // of them in nineteen minutes, and one of the five logged an
+            // icon of its own.
             ctm_tray::start();
 
             // ⭐ Nobody else is running, so any window out there is stale.
