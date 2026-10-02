@@ -313,44 +313,11 @@ inline int parse_gate_button(const std::string &raw)
     // ⛔ A press with no finger requirement: not offered, still read.
     if (v == "touchpad_click" || v == "click" || v == "touchpad_press") return kGateClickOnly;
 
-    struct Named { const char *name; int index; };
-    static const Named kNamed[] = {
-        { "face_down",  ctm_rebind::kBtnFaceDown  }, { "cross",    ctm_rebind::kBtnFaceDown  },
-        { "a",          ctm_rebind::kBtnFaceDown  },
-        { "face_right", ctm_rebind::kBtnFaceRight }, { "circle",   ctm_rebind::kBtnFaceRight },
-        { "b",          ctm_rebind::kBtnFaceRight },
-        { "face_left",  ctm_rebind::kBtnFaceLeft  }, { "square",   ctm_rebind::kBtnFaceLeft  },
-        { "x",          ctm_rebind::kBtnFaceLeft  },
-        { "face_up",    ctm_rebind::kBtnFaceUp    }, { "triangle", ctm_rebind::kBtnFaceUp    },
-        { "y",          ctm_rebind::kBtnFaceUp    },
-        { "l1",         ctm_rebind::kBtnL1        }, { "lb",       ctm_rebind::kBtnL1        },
-        { "r1",         ctm_rebind::kBtnR1        }, { "rb",       ctm_rebind::kBtnR1        },
-        { "l2",         ctm_rebind::kBtnL2        }, { "lt",       ctm_rebind::kBtnL2        },
-        { "r2",         ctm_rebind::kBtnR2        }, { "rt",       ctm_rebind::kBtnR2        },
-        { "select",     ctm_rebind::kBtnSelect    }, { "create",   ctm_rebind::kBtnSelect    },
-        { "view",       ctm_rebind::kBtnSelect    }, { "share",    ctm_rebind::kBtnSelect    },
-        { "start",      ctm_rebind::kBtnStart     }, { "options",  ctm_rebind::kBtnStart     },
-        { "menu",       ctm_rebind::kBtnStart     },
-        { "l3",         ctm_rebind::kBtnL3        }, { "r3",       ctm_rebind::kBtnR3        },
-        { "dpad_up",    ctm_rebind::kBtnDpadUp    }, { "dpad_down",  ctm_rebind::kBtnDpadDown  },
-        { "dpad_left",  ctm_rebind::kBtnDpadLeft  }, { "dpad_right", ctm_rebind::kBtnDpadRight },
-        { "home",       ctm_rebind::kBtnHome      }, { "ps",       ctm_rebind::kBtnHome      },
-        { "guide",      ctm_rebind::kBtnHome      },
-    };
-    for (const Named &n : kNamed) {
-        if (v == n.name) return n.index;
-    }
-
-    // A bare index, so the table can grow without this list growing with it.
-    bool digits = true;
-    for (char c : v) {
-        if (c < '0' || c > '9') { digits = false; break; }
-    }
-    if (digits) {
-        const int index = std::atoi(v.c_str());
-        if (index >= 0 && index < ctm_rebind::kButtonCount) return index;
-    }
-    return kGateNone;
+    // ⭐ EVERY REMAINING NAME IS A BUTTON, and the table for those lives in
+    // button_layout.inl so T-242's bindings and this gate read the SAME
+    // vocabulary. 🔗 `button_index_for`. ⓘ It also takes a bare index.
+    const int index = ctm_rebind::button_index_for(v);
+    return index >= 0 ? index : kGateNone;
 }
 
 // ⭐ THE NEW PAIR: a type and a button.

@@ -453,7 +453,11 @@ static std::string rest_keys_json()
 "ControlLeft","ShiftLeft","AltLeft","MetaLeft",
 "ControlRight","ShiftRight","AltRight","MetaRight",
 "MouseLeft","MouseRight","MouseMiddle","MouseWheelUp","MouseWheelDown",
-"KeyboardDS5_USBIP","KeyboardSteam","KeyboardWindows"
+"KeyboardDS5_USBIP","KeyboardSteam","KeyboardWindows",
+"button_cross","button_circle","button_square","button_triangle",
+"button_l1","button_r1","button_l2","button_r2","button_l3","button_r3",
+"button_dpad_up","button_dpad_down","button_dpad_left","button_dpad_right",
+"button_select","button_start","button_home"
 ]})CTMKEYS";
     return settings + pointers + pointers2 + names;
 }
