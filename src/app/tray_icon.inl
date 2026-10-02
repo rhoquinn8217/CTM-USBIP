@@ -30,7 +30,7 @@ inline const UINT WM_CTM_TRAY = WM_APP + 20;
 // ⓘ Menu ids. Kept small and local; nothing else uses this window.
 inline const UINT kIdToggle   = 1;
 inline const UINT kIdSettings = 2;
-inline const UINT kIdExit     = 3;
+inline const UINT kIdQuit     = 3;
 
 inline void toggle_keyboard()
 {
@@ -53,7 +53,9 @@ inline void show_menu(HWND hwnd)
     AppendMenuW(menu, MF_STRING, kIdToggle,
                 ctm_overlay::visible() ? L"Hide keyboard" : L"Show keyboard");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(menu, MF_STRING, kIdExit, L"Exit");
+    // ⓘ "Quit", not "Exit" (rhoquinn8217, 2026-10-01). It ends the whole
+    // program, settings window included, and that is the word for it.
+    AppendMenuW(menu, MF_STRING, kIdQuit, L"Quit");
 
     POINT pt;
     GetCursorPos(&pt);
@@ -78,7 +80,17 @@ inline void show_menu(HWND hwnd)
         // ⓘ The same path the chord takes, with no controller in hand.
         ctm_chord_show_ui(std::string());
         break;
-    case kIdExit:
+    case kIdQuit:
+        // ⭐⭐ QUIT TAKES THE SETTINGS WINDOW WITH IT (rhoquinn8217, 2026-10-01:
+        // *"I want to change exit to Quit and I want that also to close the
+        // DS5-USBIP config window."*). It read Exit and left that window
+        // open, showing a page with no listener behind it.
+        //
+        // ⓘ Closed HERE as well as where the listener stops (agent.inl),
+        // because here is where someone is looking: the window goes the
+        // moment they choose Quit, not a second later when the agent's loop
+        // next comes round.
+        ui_close_window();
         // ⛔ THE SAME FLAG CTRL+C SETS, not an exit. Bridged controllers get
         // torn down properly; killing the process would leave them attached
         // with nothing driving them.
