@@ -25,7 +25,7 @@
             notices: it lives in the footer, and the footer is drawn
             under the notice strip that sits just above it, so the list
             it unrolls upward went behind any notice that was up. While
-            a picker is open, whatever it sits in is raised with it. And
+            it is open, the footer is raised with it. And
             a controller with no config shows no section strip: picking
             (no config), or Unlink, emptied the settings but left the
             strip of section names standing with nothing behind them.
@@ -5871,19 +5871,20 @@ function pickerExpand(el) {
   // Advanced's footer, #gpbar, is fixed at 20, and the notice strip just above
   // it is at 39 -- so the Mode picker, unrolling upward out of the footer, went
   // under the strip, and its top row with it. The 60 above did nothing there.
-  // ➡️ Every such box around the list is raised to the list's level while it
-  // is open, and put back as it closes (pickerCollapse).
+  // ➡️ So the footer is raised to the list's level while it is open, and put
+  // back as it closes (pickerCollapse).
+  // ⛔ THE FOOTER ONLY, not every positioned box around a picker. In Simple
+  // and Quick the pickers sit in the sticky block, #stickyTop, which fills the
+  // window: raising that covered the notices for as long as a list was open,
+  // and a notice is meant never to be covered (measured in a test copy of
+  // this page). The footer is a thin bar under the strip, so raising it covers
+  // only the part of the strip the list itself crosses.
   // ⓘ Once per opening: this runs again while the list is open, and a second
   // pass would record the raised value as the one to put back.
-  if (!el._pickerLifted) {
-    el._pickerLifted = [];
-    for (var up = el.parentElement; up && up !== document.body; up = up.parentElement) {
-      var ucs = getComputedStyle(up);
-      if (ucs.position !== 'static' && ucs.zIndex !== 'auto') {
-        el._pickerLifted.push([up, up.style.zIndex]);
-        up.style.zIndex = '60';
-      }
-    }
+  var footer = el.closest ? el.closest('#gpbar') : null;
+  if (footer && !el._pickerLifted) {
+    el._pickerLifted = [[footer, footer.style.zIndex]];
+    footer.style.zIndex = '60';
   }
 }
 
