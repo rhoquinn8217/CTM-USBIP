@@ -56,19 +56,18 @@ Copy-Item -Force -Path (Join-Path $Root 'profiles\descriptors\*.profile') `
                  -Destination (Join-Path $stage 'profiles\descriptors')
 Copy-Item -Force -Path (Join-Path $Root 'maps\*.map') -Destination (Join-Path $stage 'maps')
 
-# ⭐ The launcher. Double-clicking the exe passes no arguments, so it prints
-# usage and exits -- a window flashes and vanishes, which reads as a crash.
-#
-# ⛔ Throws rather than copying quietly. A silent Copy-Item shipped a zip with
-# no launcher in it and nothing said so; the same reason profiles and maps are
-# checked below.
-$launcher = Join-Path $Root 'tools\start-ctm-usbip.bat'
-if (-not (Test-Path $launcher)) { throw "launcher missing: $launcher" }
-Copy-Item -Force -Path $launcher -Destination $stage
+# ⭐ NO LAUNCHER. There was one, start-ctm-usbip.bat, because a double-click
+# on the exe passed no arguments, printed the usage and exited: a window
+# flashed and vanished, which read as a crash. The exe is a Windows program
+# now and a double-click IS how it is started, so the script that stood in
+# front of it is gone.
 
-# The desktop-shortcut generator, both halves (T-249). The .bat is what the
-# user double-clicks, because Windows opens a double-clicked .ps1 in Notepad
-# rather than running it.
+# The desktop-shortcut generator, both halves. The .bat is what the user
+# double-clicks, because Windows opens a double-clicked .ps1 in Notepad rather
+# than running it.
+# ⛔ Throws rather than copying quietly. A silent Copy-Item once shipped a zip
+# with a file missing and nothing said so; the same reason profiles and maps
+# are checked below.
 foreach ($shortcutPart in @('tools\create-desktop-shortcut.bat',
                             'tools\create-desktop-shortcut.ps1')) {
     $shortcutFile = Join-Path $Root $shortcutPart
@@ -81,21 +80,23 @@ $readme = @"
 DS5-USBIP $Version
 ==================
 
-Start it: double-click start-ctm-usbip.bat
+Start it: double-click ctm-usbip.exe
 
-It runs in the background. No window stays open: look for the DS5-USBIP icon
+It runs in the background. No window opens for it: look for the DS5-USBIP icon
 in the tray, by the clock. Click it for the settings page or the on-screen
-keyboard, and choose Quit there to close it.
+keyboard, and choose Quit there to close it. Double-click the exe again while
+it is running and the settings page comes to the front.
 
 Want it on your desktop? Double-click create-desktop-shortcut.bat once.
 It builds the shortcut from wherever this folder currently is, so MOVE THE
 FOLDER FIRST and then run it -- a Windows shortcut stores the full path and
 cannot follow the folder afterwards. Running it again replaces the old one.
 
-To watch it instead, with its log on screen, run it from a command prompt
-in this folder. Ctrl+C or the tray icon's Quit ends it:
+To watch it instead, with its log on screen, type this at a command prompt
+in this folder. The prompt comes straight back and the listener's lines follow
+in the same window. The tray icon's Quit ends it:
 
-    ctm-usbip.exe agent 48054 --ui
+    ctm-usbip.exe agent --ui --verbose
 
 IMPORTANT: FIRST, install usbip-win2 0.9.77 from
 https://github.com/vadimgrn/usbip-win2/releases -- a separate project whose
@@ -104,7 +105,8 @@ starts normally and bridges nothing.
 
 Keep this folder together, somewhere writable -- Desktop or Documents, not
 Program Files. The exe finds profiles and maps beside itself, and creates its
-config and logs here as you use it.
+config and logs here as you use it, wherever it is started from. If the
+profiles folder is missing it says so and does not start.
 
 --ui opens the settings page in a browser window. The page is built into the
 exe and served by it, so there is no file to place and it cannot fall out of
@@ -112,17 +114,15 @@ step with the version you are running.
 
 What is in here, and what each part is for:
 
-    start-ctm-usbip.bat       starts it, in the background
-    create-desktop-shortcut.bat   puts a shortcut on your desktop
-    ctm-usbip.exe             the listener
+    ctm-usbip.exe             the listener: double-click it
+    create-desktop-shortcut.bat   puts a shortcut to it on your desktop
     *.dll                     ffmpeg, for audio
     profiles\descriptors\     what each controller looks like over USB
     maps\                     how its reports translate
 
 Profiles and maps are DATA, on purpose. Adding a controller means adding a
 file here, not rebuilding -- so keep the folders beside the exe. Without them
-the listener starts but cannot bridge anything, and says
-"Could not open descriptor profile".
+the listener says the profiles folder is missing and does not start.
 
 Two files are created next to the exe as you use it:
 

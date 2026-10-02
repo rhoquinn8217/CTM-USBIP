@@ -37,9 +37,9 @@ REM  It is not needed anyway: the .ps1 defaults -FolderPath to $PSScriptRoot,
 REM  which is its own directory WITHOUT the trailing backslash.
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0create-desktop-shortcut.ps1"
 
-REM  Always pauses. Unlike the launcher, this prints a result worth reading --
-REM  where the shortcut went, and the warning about moving the folder -- and a
-REM  double-clicked window would otherwise close before it could be read.
+REM  Always pauses. This prints a result worth reading -- where the shortcut
+REM  went, and the warning about moving the folder -- and a double-clicked
+REM  window would otherwise close before it could be read.
 echo.
 pause
 
