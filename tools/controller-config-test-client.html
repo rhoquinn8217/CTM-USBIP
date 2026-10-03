@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.48 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.49 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,9 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.49 Quick's legend leads with the shoulder keys, as Simple's does,
+            and they follow the input in hand: L1/R1, LB/RB or Q/E. (Its
+            window is half as wide again, which is the listener's.)
     2.66.48 The carousel's keys in Simple and Quick follow the input in
             hand, as the footer's legend does: L1 and R1 for a PlayStation
             pad, LB and RB for an Xbox one, Q and E from a keyboard.
@@ -1760,7 +1763,7 @@
 <div class="bar">
   <!-- ⓘ The same number as VERSION at the top of this file, by hand. It sat
        at 2.66.4 for thirty-four versions while VERSION moved on. -->
-  <span class="muted" style="font-size:12px">v2.66.48</span>
+  <span class="muted" style="font-size:12px">v2.66.49</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -8290,6 +8293,10 @@ function paintCompact() {
     // to the right -- the order here IS the order on screen.
     html += '<div class="cbar">' +
             '<div class="cbarText"><div class="clegend">' +
+            // ⓘ The shoulder keys first, as in Simple's (rhoquinn8217,
+            // 2026-10-02: *"Add L1/R1 LB/RB and Q/E in the quick mode legend
+            // also"*), following the input in hand like the ring's keys.
+            LG.shoulder + ' controller | ' +
             LG.position + ' position | ' + LG.resize + ' resize | ' +
             LG.close + ' close</div></div>' +
             modePickerHtml('cselMode') +

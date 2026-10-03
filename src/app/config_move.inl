@@ -102,13 +102,24 @@ inline std::atomic_bool g_compact{false};
 // and large, by rhoquinn8217's naming: the half-of-Simple heights, with an
 // eighth taken off the width.
 //
-//   medium  0.185 x 0.150   what the page opens Quick at
+//   medium  0.185 x 0.150   (until 2026-10-02; below)
 //   large   0.230 x 0.187
 // ⓘ A third shorter than first set (rhoquinn8217, 2026-09-09): the gap above
 // the footer was the window's, not the content's. The width went down a
 // quarter and back up a quarter the same evening, for a button in the
 // bottom-right corner.
-inline const SizeShare kQuickSizes[2] = { { 0.185, 0.150 }, { 0.230, 0.187 } };
+// ⭐ HALF AS WIDE AGAIN, AT THE WIDTH THEY DRAGGED IT TO (rhoquinn8217,
+// 2026-10-02: *"I want to increase the horizontal length of quick mode. The
+// current horizontal length is what I want. Scale the larger quick mode size
+// as well."*). The drag ended at 1067 x 313 on a work area 3840 wide, so
+// medium is 0.278 wide (1067 there, from 710), and large grows by the same
+// 1.5 times, 0.230 to 0.346 (1328, from 883). The heights are as they were:
+// the ask was the width, and a long model name on the line under the name
+// was what it had no room for.
+//
+//   medium  0.278 x 0.150   what the page opens Quick at
+//   large   0.346 x 0.187
+inline const SizeShare kQuickSizes[2] = { { 0.278, 0.150 }, { 0.346, 0.187 } };
 inline std::atomic_int  g_sizeQuick{0};
 inline std::atomic_bool g_quick{false};
 
