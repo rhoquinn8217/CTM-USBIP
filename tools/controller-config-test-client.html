@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.47 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.48 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,9 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.48 The carousel's keys in Simple and Quick follow the input in
+            hand, as the footer's legend does: L1 and R1 for a PlayStation
+            pad, LB and RB for an Xbox one, Q and E from a keyboard.
     2.66.47 One row per device in both tables, as on the tabs: its marks
             are every kind its parts are, its battery every part's gauge.
             And the marks follow the model name everywhere now: the tab's
@@ -1757,7 +1760,7 @@
 <div class="bar">
   <!-- ⓘ The same number as VERSION at the top of this file, by hand. It sat
        at 2.66.4 for thirty-four versions while VERSION moved on. -->
-  <span class="muted" style="font-size:12px">v2.66.47</span>
+  <span class="muted" style="font-size:12px">v2.66.48</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -2800,8 +2803,8 @@ function deviceLabelShort(d) {
 // rather than a guess.
 // ⓘ deviceIcons() takes several parts and shows each kind once, always in
 // this order, so one device that is a keyboard and a mouse reads ⌨️🖱️.
-var DEVICE_EMOJI = { controller: '🎮️', keyboard: '⌨️',
-                     mouse: '🖱️' };
+var DEVICE_EMOJI = { controller: '\ud83c\udfae\ufe0f', keyboard: '\u2328\ufe0f',
+                     mouse: '\ud83d\uddb1\ufe0f' };
 var DEVICE_EMOJI_ORDER = ['controller', 'keyboard', 'mouse'];
 function deviceTypeOf(d) {
   if (!d) return '';
@@ -8169,16 +8172,22 @@ function paintCompact() {
     };
     var slide = COMPACT_SLIDE > 0 ? ' slide-r' : COMPACT_SLIDE < 0 ? ' slide-l' : '';
     COMPACT_SLIDE = 0;
+    // ⭐ THE RING'S KEYS ARE THE ONES IN YOUR HAND (rhoquinn8217, 2026-10-02:
+    // *"for the carousel, L1 and R1 need to show for playsation controllers,
+    // to LB and RB for xbox controlers and Q and E from keyboard"*). The
+    // legend's own pair, so the ring and the footer follow the same last
+    // press, and repaint together when it changes.
+    var shoulder = String(LG.shoulder || 'L1/R1').split('/');
     // ⓘ Quick shows the whole ring too (rhoquinn8217, 2026-09-09): the kind
     // under the name, and the L1 and R1 neighbours with theirs.
     html += '<div class="ccar' + slide + '">' +
-            side(prev, 'l', '\u25c2 L1') +
+            side(prev, 'l', '\u25c2 ' + shoulder[0]) +
             '<div class="ccur"><div class="cname">' + esc(nameFor(d.ordinal)) +
             batteryTags(partsOf(d.ordinal)) + '</div>' +
             // ⓘ The marks follow the model name here too, as on the tabs.
             '<div class="ckind"><span class="cklabel">' + esc(deviceLabelShort(d)) + '</span>' +
             deviceIcons(partsOf(d.ordinal)) + '</div></div>' +
-            side(next, 'r', 'R1 \u25b8') +
+            side(next, 'r', shoulder[1] + ' \u25b8') +
             '</div>';
     if (!d.supports_config) {
       // ⛔ No Start on a device that takes no config (2.65.0). A keyboard or a
