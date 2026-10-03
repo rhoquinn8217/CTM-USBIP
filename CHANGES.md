@@ -120,6 +120,9 @@ carry it; upstream's own history is unchanged.
 | 2026-10-02 | The Simple view's hints say what the tray icon is for. A new one, shown second: DS5-USBIP keeps running in the background when the window is closed, and Quit on the tray icon stops it. The two hints that already named the icon said it two ways, and both say "click the tray icon" now. Eleven hints. The tray icon's tooltip showed three wrong characters where a long dash had been written, because the file has no byte-order mark and the build did not say its sources were UTF-8; the tooltip is plain text now, and both projects build with `/utf-8`. Page 2.66.37. | `92e82fc`, `d6a8655`, `84337a5` |
 | 2026-10-02 | The tray icon's menu has a title, a list of controllers and the window's layout. The title is DS5-USBIP in a larger bold face with the number of controllers connected under it, and clicking it closes the menu. Controllers opens a side menu with a line for each bridged device (its nickname, what it is, USB or Bluetooth, and its battery where it reports one); choosing a line opens the settings window on that controller. Config Mode opens a side menu with Advanced, Simple and Quick and a padlock on the one in use; choosing one changes the window's layout. `Open settings` is now `Open Controller Config`, and `Show keyboard` is `Open Virtual Keyboard`, which reads `Close Virtual Keyboard` while it is open. The devices API gives each device a `label` ("DualSense (BT)"), and the page shows that instead of working it out. Page 2.66.38. | `9e677ee`, `10d68ee`, `c0e15fb` |
 | 2026-10-02 | In the settings page's Advanced view the Mode picker opens on top of the notices. It lives in the footer, which was drawn under the notice strip just above it, so the list it unrolls upward went behind any notice that was up; while the list is open the footer is raised with it, and put back as it closes. A controller with no config shows no section strip: picking (no config), or Unlink, emptied the settings and left the strip of section names standing. The Overview's small version label, which had stayed at 2.66.4 since 2026-09-19, reads the page's version again. Page 2.66.39. | `1a15c93`, `9e87016`, `72b382b` |
+| 2026-10-02 | The settings window says "device" where it said "controller", and a mark says what each device is: a pad, a keyboard or a mouse, as colour emoji, from the type the listener reads off the device's own descriptor. A DualSense, DS4 or Xbox pad from a listener too old to send the type is still a pad, and a device that says none of the three gets no mark. Page 2.66.42. | `83a9bba`, `a596f57`, `9c49dcb` |
+| 2026-10-02 | One tab and one row per device in the settings window, not one per part: parts the listener names alike are one device, with every kind they are in its marks (a receiver reads as keyboard and mouse) and every part's battery gauge, and a config set on its tab goes to every part that takes one. The marks follow the model name on the tab, in the rows and under Simple's and Quick's big name. The carousel's keys and Quick's legend name the input in hand (L1/R1, LB/RB or Q/E). Quick is half as wide again, at the width it was dragged to, in the listener's sizes and the page's own. A device with no serial reads "(no serial - auto_link disabled)", and one that takes no config "Configs can only be set for controllers." Page 2.66.50. | `c1c993e`, `320d6ea`, `d44bb1c`, `949a22e`, `a8174a0`, `4975c09`, `db67bff`, `b952a85` |
+| 2026-10-02 | Advanced cycles two window sizes, as Simple and Quick do: the smallest is gone, it did not work at 250% scaling, and a saved size from before is moved down one so the window opens where it was. Circle in Quick goes to Close rather than closing, as in Simple, and Circle or Escape in Advanced lands on Close in the footer. Down from Quick's auto link button lands on Close and up from Close on it; down from Simple's config picker lands on New. Page 2.66.51. | `4f286b6` |
 
 ## Files changed
 
@@ -130,7 +133,7 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
 ```
  .gitattributes                                |   48 +
  .gitignore                                    |   34 +-
- CHANGES.md                                    |  275 +
+ CHANGES.md                                    |  278 +
  LINK                                          |    0
  README.md                                     |   18 +
  app/ctm-usbip-tests.vcxproj                   |  124 +
@@ -159,7 +162,7 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  src/app/agent_session_sweep.inl               |  320 +
  src/app/cli.inl                               |   36 +-
  src/app/common.inl                            |   48 +-
- src/app/config_move.inl                       | 1079 +++
+ src/app/config_move.inl                       | 1112 +++
  src/app/console_attach.inl                    |   82 +
  src/app/device_capabilities.inl               |   75 +
  src/app/device_names.inl                      |   76 +
@@ -168,7 +171,7 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  src/app/nickname.inl                          |   90 +
  src/app/open_ui.inl                           |  489 ++
  src/app/overlay_window.inl                    | 1995 ++++++
- src/app/rest.inl                              |  760 +++
+ src/app/rest.inl                              |  760 ++
  src/app/rest_config.inl                       | 1231 ++++
  src/app/rest_config_sessions.inl              |  204 +
  src/app/rest_sessions.inl                     |   33 +
@@ -263,7 +266,7 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  tests/units.h                                 |   54 +
  tests/window_icon_rule_test.cpp               |   86 +
  tests/window_size_rule_test.cpp               |  129 +
- tools/controller-config-test-client.html      | 9074 +++++++++++++++++++++++++
+ tools/controller-config-test-client.html      | 9408 +++++++++++++++++++++++++
  tools/create-desktop-shortcut.bat             |   46 +
  tools/create-desktop-shortcut.ps1             |  148 +
  tools/device-config-panel-edge.bat            |    9 +
@@ -271,5 +274,5 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  tools/device-config-panel.bat                 |    4 +
  tools/device-config-panel.ps1                 |  303 +
  tools/osk-mockups.py                          |  103 +
- 143 files changed, 45569 insertions(+), 155 deletions(-)
+ 143 files changed, 45939 insertions(+), 155 deletions(-)
 ```
