@@ -15,6 +15,7 @@
 #include "harness.h"
 
 #include <string>
+#include <vector>
 
 #include "app/tray_menu.inl"
 
@@ -36,28 +37,43 @@ int run_tray_menu_tests()
     section("tray menu: the count under the title");
     {
         using tray_menu::count_line;
-        CTM_CHECK_EQ(narrow(count_line(0)), std::string("No controllers connected"));
-        // ⛔ One is not "1 controllers".
-        CTM_CHECK_EQ(narrow(count_line(1)), std::string("1 controller connected"));
-        CTM_CHECK_EQ(narrow(count_line(2)), std::string("2 controllers connected"));
-        CTM_CHECK_EQ(narrow(count_line(11)), std::string("11 controllers connected"));
+        CTM_CHECK_EQ(narrow(count_line(0)), std::string("No devices connected"));
+        // ⛔ One is not "1 devices".
+        CTM_CHECK_EQ(narrow(count_line(1)), std::string("1 device connected"));
+        CTM_CHECK_EQ(narrow(count_line(2)), std::string("2 devices connected"));
+        CTM_CHECK_EQ(narrow(count_line(11)), std::string("11 devices connected"));
     }
 
-    section("tray menu: a controller's line");
+    section("tray menu: the parts under one name are one device");
+    {
+        using tray_menu::group_by_name;
+        const std::vector<std::vector<size_t>> g =
+            group_by_name({ "Odin", "Titan", "Odin", "", "", "Odin" });
+        CTM_CHECK(g.size() == 4);
+        CTM_CHECK(g.size() == 4 && g[0] == (std::vector<size_t>{ 0, 2, 5 }));
+        CTM_CHECK(g.size() == 4 && g[1] == (std::vector<size_t>{ 1 }));
+        // ⓘ No name is no identity: each nameless part is a device of its own.
+        CTM_CHECK(g.size() == 4 && g[2] == (std::vector<size_t>{ 3 }));
+        CTM_CHECK(g.size() == 4 && g[3] == (std::vector<size_t>{ 4 }));
+        CTM_CHECK(group_by_name({}).empty());
+    }
+
+    section("tray menu: a device's line");
     {
         using tray_menu::device_line;
+        // ⓘ The device's name first, then the nickname (2026-10-02).
         CTM_CHECK_EQ(device_line("Kestrel", "DualSense (USB)", 85, "discharging"),
-                     std::string("Kestrel - DualSense (USB) - 85%"));
+                     std::string("DualSense (USB) - Kestrel - 85%"));
         CTM_CHECK_EQ(device_line("Combo", "DualSense (BT)", 40, "charging"),
-                     std::string("Combo - DualSense (BT) - 40%, charging"));
+                     std::string("DualSense (BT) - Combo - 40%, charging"));
         // ⛔ A pad that has not said is not a pad at zero: no battery at all.
         CTM_CHECK_EQ(device_line("Rhino", "Xbox Controller", -1, ""),
-                     std::string("Rhino - Xbox Controller"));
+                     std::string("Xbox Controller - Rhino"));
         // ⓘ And a pad that really is at zero says so.
         CTM_CHECK_EQ(device_line("Rhino", "DualSense (BT)", 0, "discharging"),
-                     std::string("Rhino - DualSense (BT) - 0%"));
+                     std::string("DualSense (BT) - Rhino - 0%"));
         CTM_CHECK_EQ(device_line("Zeus", "DualSense (USB)", 100, "full"),
-                     std::string("Zeus - DualSense (USB) - 100%"));
+                     std::string("DualSense (USB) - Zeus - 100%"));
         // A session that is still starting may have no nickname yet.
         CTM_CHECK_EQ(device_line("", "DualSense (USB)", 85, ""),
                      std::string("DualSense (USB) - 85%"));
@@ -133,7 +149,8 @@ int run_tray_menu_tests()
         // ⛔ The settings page's hints name the first of these, and the tool
         // every session quits the listener with finds the last by its words.
         CTM_CHECK_EQ(narrow(tray_menu::kOpenConfig), std::string("Open Controller Config"));
-        CTM_CHECK_EQ(narrow(tray_menu::kControllers), std::string("Controllers"));
+        // ⓘ The swap tool opens this side menu by its words.
+        CTM_CHECK_EQ(narrow(tray_menu::kDevices), std::string("Devices"));
         CTM_CHECK_EQ(narrow(tray_menu::kConfigMode), std::string("Config Mode"));
         CTM_CHECK_EQ(narrow(tray_menu::kTitle), std::string("DS5-USBIP"));
         CTM_CHECK_EQ(narrow(tray_menu::kQuit), std::string("Quit"));

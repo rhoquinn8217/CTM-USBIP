@@ -166,12 +166,33 @@ inline HBITMAP header_picture(const std::wstring &count, UINT dpi)
     SelectObject(dc, countFont);
     GetTextExtentPoint32W(dc, count.c_str(), static_cast<int>(count.size()), &countSize);
 
+    // ⛔⛔ NEVER NARROWER THAN THE MENU'S WIDEST LINE, OR IT IS A BLACK BOX
+    // (rhoquinn8217, 2026-10-02: *"the tray menu title is now a black box"*).
+    // A picture narrower than the menu's lines is drawn by Windows another
+    // way, one that ignores the transparency, and with the ink black and the
+    // rest clear that is solid black. "10 controllers connected" happened to
+    // be wide enough; "4 devices connected" is not. Measured in the skill's
+    // tools/menu-proto.cpp, this picture as it was against the same picture
+    // this wide: black in every state, then clean in every state, the
+    // pointer's own highlight showing through.
+    // ⓘ The lines are the main menu's, both of the keyboard's wordings among
+    // them, measured in the menu's font, which is the count's.
+    LONG widest = titleSize.cx > countSize.cx ? titleSize.cx : countSize.cx;
+    const std::wstring lines[] = {
+        tray_menu::kDevices, tray_menu::kOpenConfig, tray_menu::keyboard_line(false),
+        tray_menu::keyboard_line(true), tray_menu::kConfigMode, tray_menu::kQuit };
+    for (const std::wstring &line : lines) {
+        SIZE lineSize = {};
+        GetTextExtentPoint32W(dc, line.c_str(), static_cast<int>(line.size()), &lineSize);
+        if (lineSize.cx > widest) widest = lineSize.cx;
+    }
+
     // ⓘ Nothing on the left: the menu already indents a line's content, and
     // the title should begin where the lines under it begin.
     const int above = MulDiv(2, dpi, 96);
     const int between = MulDiv(2, dpi, 96);
     const int below = MulDiv(4, dpi, 96);
-    const int width = (titleSize.cx > countSize.cx ? titleSize.cx : countSize.cx) + MulDiv(8, dpi, 96);
+    const int width = static_cast<int>(widest) + MulDiv(8, dpi, 96);
     const int height = above + titleSize.cy + between + countSize.cy + below;
 
     BITMAPINFO info = {};
@@ -256,6 +277,31 @@ inline void change_layout(int index)
     if (wasOpen) ctm_chord_show_ui(ordinal);
 }
 
+// The part a device's line speaks for: the first that takes a config, else the
+// first -- the part the settings page leads that device's tab with, so the
+// line names what the tab names.
+inline size_t lead_part(const std::vector<RestDeviceView> &devices,
+                        const std::vector<size_t> &parts)
+{
+    for (size_t i : parts) {
+        if (config_store::kind_supports_config(devices[i].kind)) return i;
+    }
+    return parts.front();
+}
+
+// The part whose battery a device's line shows: the lead's when it reports
+// one, else the first part that does. A receiver's parts report none.
+inline size_t battery_part(const std::vector<RestDeviceView> &devices,
+                           const std::vector<size_t> &parts)
+{
+    const size_t lead = lead_part(devices, parts);
+    if (devices[lead].batteryPercent >= 0) return lead;
+    for (size_t i : parts) {
+        if (devices[i].batteryPercent >= 0) return i;
+    }
+    return lead;
+}
+
 inline void show_menu(HWND hwnd)
 {
     HMENU menu = CreatePopupMenu();
@@ -268,7 +314,12 @@ inline void show_menu(HWND hwnd)
     // the count and the list are what is true at this moment and need no
     // keeping up to date.
     const std::vector<RestDeviceView> devices = rest_collect_devices();
-    const size_t listed = devices.size() < kMaxListed ? devices.size() : kMaxListed;
+    // ⭐ ONE LINE PER DEVICE (rhoquinn8217, 2026-10-02): the parts under one
+    // nickname are one device here, as on the settings page's tabs.
+    std::vector<std::string> names;
+    for (const RestDeviceView &d : devices) names.push_back(d.nickname);
+    const std::vector<std::vector<size_t>> groups = tray_menu::group_by_name(names);
+    const size_t listed = groups.size() < kMaxListed ? groups.size() : kMaxListed;
 
     // ---- The title, and how many are connected ------------------------------
     // ⓘ The count is of the lines the list below will show, so the two cannot
@@ -286,20 +337,21 @@ inline void show_menu(HWND hwnd)
     }
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
 
-    // ---- Controllers: a line each, and choosing one opens the window on it ---
+    // ---- Devices: a line each, and choosing one opens the window on it ------
     // ⓘ Every bridged device is here, a keyboard or a mouse included: it is
-    // the list the settings page shows.
+    // the list the settings page's tabs show, one line per device.
     const HMENU list = CreatePopupMenu();
     for (size_t i = 0; i < listed; ++i) {
-        const RestDeviceView &d = devices[i];
+        const RestDeviceView &d = devices[lead_part(devices, groups[i])];
+        const RestDeviceView &b = devices[battery_part(devices, groups[i])];
         const std::string line = tray_menu::device_line(
             d.nickname, device_names::label(d.kind, d.product, d.deviceType),
-            d.batteryPercent, d.batteryState);
+            b.batteryPercent, b.batteryState);
         AppendMenuW(list, MF_STRING, kIdDeviceFirst + static_cast<UINT>(i), widen(line).c_str());
     }
     // ⓘ Greyed with nothing bridged, and then it opens no side menu.
     AppendMenuW(menu, MF_POPUP | (listed == 0 ? MF_GRAYED : 0u),
-                reinterpret_cast<UINT_PTR>(list), tray_menu::kControllers);
+                reinterpret_cast<UINT_PTR>(list), tray_menu::kDevices);
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
 
     // ---- The config window and the keyboard ---------------------------------
@@ -341,8 +393,8 @@ inline void show_menu(HWND hwnd)
 
     if (chosen >= kIdDeviceFirst && chosen < kIdDeviceFirst + listed) {
         // ⭐ The same call the pad's own chord makes: the window opens on that
-        // controller's tab.
-        const RestDeviceView &d = devices[chosen - kIdDeviceFirst];
+        // device's tab. ⓘ The page finds a device's tab from any of its parts.
+        const RestDeviceView &d = devices[lead_part(devices, groups[chosen - kIdDeviceFirst])];
         device_log::session_w() << L"tray: opening the config window on " << widen(d.ordinal);
         ctm_chord_show_ui(d.ordinal);
         return;

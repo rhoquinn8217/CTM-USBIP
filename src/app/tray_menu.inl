@@ -3,10 +3,10 @@
 // ⭐ WHAT THE MENU IS (rhoquinn8217, 2026-10-02, in their order):
 //
 //     DS5-USBIP                      a title, larger and bold; choosing it
-//     2 controllers connected        closes the menu. A count under it
+//     2 devices connected            closes the menu. A count under it
 //     ----------------------------
-//     Controllers                >   one line each; choosing one opens the
-//     ----------------------------   config window on that controller
+//     Devices                    >   one line per device; choosing one opens
+//     ----------------------------   the config window on that device
 //     Open Controller Config
 //     Open Virtual Keyboard
 //     ----------------------------
@@ -22,6 +22,12 @@
 // the settings page instead of the game -- so in code and in the log the
 // layout is always called the VIEW or the mode of the window, never that.
 //
+// ⭐ DEVICES, NOT CONTROLLERS, AND NOT THEIR PARTS (rhoquinn8217, 2026-10-02:
+// *"Multiple devices with the same name should count as 1 device in the tray
+// menu and there should only be 1 controller entry for that device"* and *"in
+// the tray menu change controllers to devices."*). A keyboard-and-mouse
+// receiver bridged as three parts was three lines and three in the count.
+//
 // ⭐ Pure on purpose -- no Windows call -- so the test binary includes it as it
 // is. tray_icon.inl builds the menu from these and does the drawing.
 
@@ -29,11 +35,12 @@
 
 #include <cstddef>
 #include <string>
+#include <vector>
 
 namespace tray_menu {
 
 inline const wchar_t *const kTitle = L"DS5-USBIP";
-inline const wchar_t *const kControllers = L"Controllers";
+inline const wchar_t *const kDevices = L"Devices";
 inline const wchar_t *const kOpenConfig = L"Open Controller Config";
 inline const wchar_t *const kConfigMode = L"Config Mode";
 inline const wchar_t *const kQuit = L"Quit";
@@ -43,13 +50,39 @@ inline const wchar_t *const kQuit = L"Quit";
 // own Mode picker puts on the mode the window is in.
 inline const wchar_t *const kPadlock = L"\U0001F512";
 
-// The line under the title. ⓘ It counts the lines the Controllers list will
-// show, so the two cannot disagree.
+// The line under the title. ⓘ It counts the lines the Devices list will show,
+// so the two cannot disagree.
 inline std::wstring count_line(size_t devices)
 {
-    if (devices == 0) return L"No controllers connected";
-    if (devices == 1) return L"1 controller connected";
-    return std::to_wstring(devices) + L" controllers connected";
+    if (devices == 0) return L"No devices connected";
+    if (devices == 1) return L"1 device connected";
+    return std::to_wstring(devices) + L" devices connected";
+}
+
+// ⭐ ONE DEVICE, HOWEVER MANY PARTS. The listener gives every part of one
+// physical device one nickname (same_device.inl), and the settings page puts
+// the parts under one name on one tab; the menu groups by the same thing, so
+// the two always agree on what a device is. A part with no name is a device
+// of its own: no name is no identity.
+// Returns the devices in the order each first appears, each as the indices of
+// its parts in `nicknames`.
+inline std::vector<std::vector<size_t>> group_by_name(const std::vector<std::string> &nicknames)
+{
+    std::vector<std::vector<size_t>> groups;
+    for (size_t i = 0; i < nicknames.size(); ++i) {
+        bool joined = false;
+        if (!nicknames[i].empty()) {
+            for (std::vector<size_t> &g : groups) {
+                if (nicknames[g.front()] == nicknames[i]) {
+                    g.push_back(i);
+                    joined = true;
+                    break;
+                }
+            }
+        }
+        if (!joined) groups.push_back(std::vector<size_t>{ i });
+    }
+    return groups;
 }
 
 // The keyboard's line says what choosing it will DO, so it changes with the
@@ -71,14 +104,16 @@ inline std::string battery_words(int percent, const std::string &state)
     return words;
 }
 
-// One controller's line: its nickname, what it is and how it is connected,
-// and its battery when it has said. "Kestrel - DualSense (USB) - 85%".
+// One device's line: what it is and how it is connected, then its nickname,
+// and its battery when it has said. "DualSense (USB) - Kestrel - 85%"
+// (rhoquinn8217, 2026-10-02: *"put Device name first then then the
+// nickname"*; it had led with the nickname).
 // ⓘ `label` is device_names::label(), which already carries USB or BT.
 inline std::string device_line(const std::string &nickname, const std::string &label,
                                int batteryPercent, const std::string &batteryState)
 {
-    std::string line = nickname;
-    if (!label.empty()) line += (line.empty() ? "" : " - ") + label;
+    std::string line = label;
+    if (!nickname.empty()) line += (line.empty() ? "" : " - ") + nickname;
     const std::string battery = battery_words(batteryPercent, batteryState);
     if (!battery.empty()) line += (line.empty() ? "" : " - ") + battery;
     return line;
