@@ -373,13 +373,11 @@ inline const Key kRow4[] = {
 //   - esc is a half key in the corner, tab and backspace are half keys, and
 //     del is a half key right of p;
 //   - fn turns the whole top row, esc to backspace, into F1 to F12, and
-//     twenty-two letters into the symbols the face has no key for. The seven
-//     named sit near their usual places: , . ? at the right of the bottom
-//     row, ; : ' " at the right of the home row. / \ | are on i o p, where
-//     rhoquinn8217 put them. The rest by reason: ` ~ by the corner, where a
-//     full keyboard has them; - _ = + along the top letter row; the brackets
-//     in open-close pairs down the left, [ ] { } on the home row and < > on
-//     the bottom. u, g, c and v stay letters.
+//     twenty-two letters into the symbols the face has no key for, placed at
+//     rhoquinn8217's word: , . ? at the right of the bottom row with < >
+//     beside them; ; : ' " at the right of the home row, with ~ on g; - _ = +
+//     / \ | along the right of the top letter row, r to p; ` on q, by the
+//     corner; [ ] { } on the home row's left. w, e, z and x stay letters.
 // ⓘ The halves pay for each other, so the top two rows line up key for key:
 // down from 1 is q, from 2 is w, from backspace is del.
 // ⛔ THE SHIFTED SYMBOLS WERE MISSING HERE (rhoquinn8217, 2026-09-04). Every
@@ -399,12 +397,12 @@ inline constexpr Key kSub0[] = {
 inline constexpr Key kSub1[] = {
     { L"tab", nullptr, 0x2b, 0, KK_NORMAL, 0.5f },
     { L"q", nullptr, 0x14, 0, KK_NORMAL, 1.0f, L"`", 0x35, 0 },
-    { L"w", nullptr, 0x1a, 0, KK_NORMAL, 1.0f, L"~", 0x35, KBD_SHIFT },
-    { L"e", nullptr, 0x08, 0, KK_NORMAL, 1.0f, L"-", 0x2d, 0 },
-    { L"r", nullptr, 0x15, 0, KK_NORMAL, 1.0f, L"_", 0x2d, KBD_SHIFT },
-    { L"t", nullptr, 0x17, 0, KK_NORMAL, 1.0f, L"=", 0x2e, 0 },
-    { L"y", nullptr, 0x1c, 0, KK_NORMAL, 1.0f, L"+", 0x2e, KBD_SHIFT },
-    { L"u", nullptr, 0x18, 0, KK_NORMAL, 1.0f },
+    { L"w", nullptr, 0x1a, 0, KK_NORMAL, 1.0f },
+    { L"e", nullptr, 0x08, 0, KK_NORMAL, 1.0f },
+    { L"r", nullptr, 0x15, 0, KK_NORMAL, 1.0f, L"-", 0x2d, 0 },
+    { L"t", nullptr, 0x17, 0, KK_NORMAL, 1.0f, L"_", 0x2d, KBD_SHIFT },
+    { L"y", nullptr, 0x1c, 0, KK_NORMAL, 1.0f, L"=", 0x2e, 0 },
+    { L"u", nullptr, 0x18, 0, KK_NORMAL, 1.0f, L"+", 0x2e, KBD_SHIFT },
     { L"i", nullptr, 0x0c, 0, KK_NORMAL, 1.0f, L"/", 0x38, 0 },
     { L"o", nullptr, 0x12, 0, KK_NORMAL, 1.0f, L"\\", 0x31, 0 },
     { L"p", nullptr, 0x13, 0, KK_NORMAL, 1.0f, L"|", 0x31, KBD_SHIFT },
@@ -416,7 +414,7 @@ inline const Key kSub2[] = {
     { L"s", nullptr, 0x16, 0, KK_NORMAL, 1.0f, L"]", 0x30, 0 },
     { L"d", nullptr, 0x07, 0, KK_NORMAL, 1.0f, L"{", 0x2f, KBD_SHIFT },
     { L"f", nullptr, 0x09, 0, KK_NORMAL, 1.0f, L"}", 0x30, KBD_SHIFT },
-    { L"g", nullptr, 0x0a, 0, KK_NORMAL, 1.0f },
+    { L"g", nullptr, 0x0a, 0, KK_NORMAL, 1.0f, L"~", 0x35, KBD_SHIFT },
     { L"h", nullptr, 0x0b, 0, KK_NORMAL, 1.0f, L";", 0x33, 0 },
     { L"j", nullptr, 0x0d, 0, KK_NORMAL, 1.0f, L":", 0x33, KBD_SHIFT },
     { L"k", nullptr, 0x0e, 0, KK_NORMAL, 1.0f, L"'", 0x34, 0 },
@@ -425,10 +423,10 @@ inline const Key kSub2[] = {
 };
 inline const Key kSub3[] = {
     { L"shift", nullptr, 0, KBD_SHIFT, KK_MOD, 1.0f },
-    { L"z", nullptr, 0x1d, 0, KK_NORMAL, 1.0f, L"<", 0x36, KBD_SHIFT },
-    { L"x", nullptr, 0x1b, 0, KK_NORMAL, 1.0f, L">", 0x37, KBD_SHIFT },
-    { L"c", nullptr, 0x06, 0, KK_NORMAL, 1.0f },
-    { L"v", nullptr, 0x19, 0, KK_NORMAL, 1.0f },
+    { L"z", nullptr, 0x1d, 0, KK_NORMAL, 1.0f },
+    { L"x", nullptr, 0x1b, 0, KK_NORMAL, 1.0f },
+    { L"c", nullptr, 0x06, 0, KK_NORMAL, 1.0f, L"<", 0x36, KBD_SHIFT },
+    { L"v", nullptr, 0x19, 0, KK_NORMAL, 1.0f, L">", 0x37, KBD_SHIFT },
     { L"b", nullptr, 0x05, 0, KK_NORMAL, 1.0f, L",", 0x36, 0 },
     { L"n", nullptr, 0x11, 0, KK_NORMAL, 1.0f, L".", 0x37, 0 },
     { L"m", nullptr, 0x10, 0, KK_NORMAL, 1.0f, L"?", 0x38, KBD_SHIFT },
