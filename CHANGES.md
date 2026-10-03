@@ -119,6 +119,7 @@ carry it; upstream's own history is unchanged.
 | 2026-10-02 | The exe starts by itself, and `start-ctm-usbip.bat` is gone. It is a Windows program, so nothing opens a terminal for it: double-clicked, or from a shortcut straight to it, it is `agent --ui`; typed into a terminal it borrows that terminal's console, and with no arguments there it still prints the usage. Its folder is found from the exe rather than from where it was started: the exe's own folder when the profiles are beside it, the checkout that a build's `home-folder.txt` names, or `--home <folder>`. If the profiles are missing it says so, in a message box when nobody is reading its output, and does not start. Closing the terminal a listener was typed into stops it properly, as Ctrl+C always had. `release.ps1` keeps what a person had in the release folder: the old folder is set aside, the new one is staged and zipped clean, and everything the release does not ship is moved back afterwards; it refuses to run while the listener is running from that folder. | `34ac43e`, `c2ec6c9`, `23c0070`, `fa5b048`, `d683622`, `306801d` |
 | 2026-10-02 | The Simple view's hints say what the tray icon is for. A new one, shown second: DS5-USBIP keeps running in the background when the window is closed, and Quit on the tray icon stops it. The two hints that already named the icon said it two ways, and both say "click the tray icon" now. Eleven hints. The tray icon's tooltip showed three wrong characters where a long dash had been written, because the file has no byte-order mark and the build did not say its sources were UTF-8; the tooltip is plain text now, and both projects build with `/utf-8`. Page 2.66.37. | `92e82fc`, `d6a8655`, `84337a5` |
 | 2026-10-02 | The tray icon's menu has a title, a list of controllers and the window's layout. The title is DS5-USBIP in a larger bold face with the number of controllers connected under it, and clicking it closes the menu. Controllers opens a side menu with a line for each bridged device (its nickname, what it is, USB or Bluetooth, and its battery where it reports one); choosing a line opens the settings window on that controller. Config Mode opens a side menu with Advanced, Simple and Quick and a padlock on the one in use; choosing one changes the window's layout. `Open settings` is now `Open Controller Config`, and `Show keyboard` is `Open Virtual Keyboard`, which reads `Close Virtual Keyboard` while it is open. The devices API gives each device a `label` ("DualSense (BT)"), and the page shows that instead of working it out. Page 2.66.38. | `9e677ee`, `10d68ee`, `c0e15fb` |
+| 2026-10-02 | In the settings page's Advanced view the Mode picker opens on top of the notices. It lives in the footer, which was drawn under the notice strip just above it, so the list it unrolls upward went behind any notice that was up; while the list is open the footer is raised with it, and put back as it closes. A controller with no config shows no section strip: picking (no config), or Unlink, emptied the settings and left the strip of section names standing. The Overview's small version label, which had stayed at 2.66.4 since 2026-09-19, reads the page's version again. Page 2.66.39. | `1a15c93`, `9e87016`, `72b382b` |
 
 ## Files changed
 
@@ -129,7 +130,7 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
 ```
  .gitattributes                                |   48 +
  .gitignore                                    |   34 +-
- CHANGES.md                                    |  274 +
+ CHANGES.md                                    |  275 +
  LINK                                          |    0
  README.md                                     |   18 +
  app/ctm-usbip-tests.vcxproj                   |  124 +
@@ -262,7 +263,7 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  tests/units.h                                 |   54 +
  tests/window_icon_rule_test.cpp               |   86 +
  tests/window_size_rule_test.cpp               |  129 +
- tools/controller-config-test-client.html      | 9026 +++++++++++++++++++++++++
+ tools/controller-config-test-client.html      | 9074 +++++++++++++++++++++++++
  tools/create-desktop-shortcut.bat             |   46 +
  tools/create-desktop-shortcut.ps1             |  148 +
  tools/device-config-panel-edge.bat            |    9 +
@@ -270,5 +271,5 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  tools/device-config-panel.bat                 |    4 +
  tools/device-config-panel.ps1                 |  303 +
  tools/osk-mockups.py                          |  103 +
- 143 files changed, 45520 insertions(+), 155 deletions(-)
+ 143 files changed, 45569 insertions(+), 155 deletions(-)
 ```
