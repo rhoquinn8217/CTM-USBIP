@@ -202,6 +202,82 @@ inline int overlay_y(int height)
     return g_atTop.load() ? 80 : (screenH - height - 80);
 }
 
+// ⭐⭐ THE KEYBOARD REMEMBERS ITS FACE, SIZE AND PLACE (rhoquinn8217,
+// 2026-10-03: "We need to have mode, size and location memory for the virtual
+// keyboard"), across closing it and across restarts, as the config window
+// remembers its own.
+// ⓘ In keyboard-state.txt in the working directory, beside window-state.txt.
+// Its own file: config_move.inl rewrites that one whole with only its own
+// keys, so anything else in it would last until the window next moved. The
+// release script puts back every file it does not ship, so a restage keeps it.
+// ⓘ Written when the face or the size changes and when the keyboard closes;
+// read on the first opening. Disposable: delete it and the keyboard opens at
+// its defaults.
+// ⓘ The PLACE only once someone has chosen one -- dragged it, steered it, or
+// sent it to the top or the bottom. Never placed, it opens where it always
+// did, centred at the bottom, whatever the display.
+inline std::atomic_bool g_placedByHand{false};
+inline std::atomic_int g_placeX{0}, g_placeY{0};
+inline std::atomic_bool g_stateLoaded{false};
+
+inline const char *state_file() { return "keyboard-state.txt"; }
+
+inline void state_save()
+{
+    std::ostringstream out;
+    out << "# DS5-USBIP virtual keyboard state, written by overlay_window.inl.\n"
+        << "# Safe to delete: the keyboard then opens at its defaults.\n"
+        << "face = " << g_face.load() << "\n"
+        << "size = " << g_size.load() << "\n";
+    if (g_placedByHand.load())
+        out << "pos = " << g_placeX.load() << "," << g_placeY.load() << "\n";
+    // ⓘ Best effort and silent, as window-state.txt is: a read-only folder
+    // must not stop the keyboard working.
+    std::ofstream f(state_file(), std::ios::trunc);
+    if (f) f << out.str();
+}
+
+// ⚠️ Unknown keys and junk are skipped, not refused: the file is disposable,
+// and a keyboard that will not open because the file was edited is worse.
+inline void state_load()
+{
+    std::ifstream f(state_file());
+    if (!f) return;
+    std::string line;
+    while (std::getline(f, line)) {
+        if (line.empty() || line[0] == '#') continue;
+        const size_t eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        std::string key = line.substr(0, eq);
+        std::string val = line.substr(eq + 1);
+        auto trim = [](std::string &t) {
+            while (!t.empty() && (t.front() == ' ' || t.front() == '\t')) t.erase(t.begin());
+            while (!t.empty() && (t.back() == ' ' || t.back() == '\t' || t.back() == '\r')) t.pop_back();
+        };
+        trim(key);
+        trim(val);
+        if (key == "pos") {
+            const size_t comma = val.find(',');
+            if (comma == std::string::npos) continue;
+            g_placeX.store(std::atoi(val.substr(0, comma).c_str()));
+            g_placeY.store(std::atoi(val.substr(comma + 1).c_str()));
+            g_placedByHand.store(true);
+            continue;
+        }
+        const int v = std::atoi(val.c_str());
+        if (v < 0 || v > 2) continue;
+        if (key == "face") g_face.store(v);
+        else if (key == "size") g_size.store(v);
+    }
+}
+
+// ⓘ The size steps through its three, and is written down at once.
+inline void cycle_size()
+{
+    g_size.store((g_size.load() + 1) % 3);
+    state_save();
+}
+
 // ⭐ READ THROUGH THE PAD'S OWN LAYOUT (input/button_layout.inl), so a DS4 or an
 // Xbox pad drives the keyboard with its own bytes.
 //
@@ -697,7 +773,6 @@ inline int g_pressRow = -1, g_pressCol = -1;
 // has to stay with the key that is down rather than follow the halo.
 struct HeldKey { uint8_t usage; uint8_t mod; bool ownsShift; };
 inline std::map<const void *, HeldKey> heldKeyFor;
-inline const void *g_pasteHeld = nullptr;
 
 inline int mod_state(uint8_t bit)
 {
@@ -779,6 +854,12 @@ inline bool fn_key(const Key &k, int row, int col, FnKey *out)
 inline bool shift_showing()
 {
     return mod_state(KBD_SHIFT) != LATCH_OFF || g_shiftHeld.load();
+}
+
+// ⓘ Paste is ctrl+v; shift or fn makes it copy, ctrl+c.
+inline uint8_t paste_usage()
+{
+    return (shift_showing() || fn_showing()) ? 0x06 : 0x19;
 }
 
 // Where the highlight is, and where each key ended up on screen.
@@ -986,6 +1067,7 @@ inline void switch_face()
     const wchar_t *was = key_at(g_row, g_col).label;
     // ⓘ Cycles sub -> compact -> full -> sub. One button, three faces.
     g_face.store((g_face.load() + 1) % 3);
+    state_save();
     g_placed.clear(); g_placedW = 0;
     int fr = -1, fc = -1;
     for (int r = 0; r < kRowCount && fr < 0; ++r) {
@@ -1012,8 +1094,7 @@ inline void press_current(const void *who)
             // the key, so it says so rather than needing to be known.
             // ⓘ Not a keystroke: ctrl+v, sent as one. The only entry on the
             // face that is a combination rather than a key.
-            const bool asCopy = shift_showing() || fn_showing();
-            uint8_t pv[6] = { (uint8_t)(asCopy ? 0x06 : 0x19), 0, 0, 0, 0, 0 };
+            uint8_t pv[6] = { paste_usage(), 0, 0, 0, 0, 0 };
             ctm_keyboard_device::set_state_for(who, KBD_CTRL, pv, 1);
             return;
         }
@@ -1022,7 +1103,7 @@ inline void press_current(const void *who)
             if (g_hwnd != nullptr) PostMessageW(g_hwnd, WM_CTM_REPOSITION, 0, 0);
         }
         if (k.usage == ACT_SIZE) {
-            g_size.store((g_size.load() + 1) % 3);
+            cycle_size();
             if (g_hwnd != nullptr) PostMessageW(g_hwnd, WM_CTM_RESIZE, 0, 0);
         }
         if (k.usage == ACT_LAYOUT) switch_face();
@@ -1493,6 +1574,7 @@ inline LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     // ⓘ Triangle's two positions still work; dragging is the free-form version
     // of the same thing, and neither cancels the other.
     case WM_EXITSIZEMOVE:
+        g_placedByHand.store(true);       // a drag chose its place
         return 0;
 
     case WM_MOUSEMOVE: {
@@ -1568,6 +1650,7 @@ inline LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         if (x > screenW - w / 3) x = screenW - w / 3;
         if (y > screenH - h / 3) y = screenH - h / 3;
         SetWindowPos(hwnd, HWND_TOPMOST, x, y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
+        g_placedByHand.store(true);       // steering chose its place
         return 0;
     }
 
@@ -1604,12 +1687,23 @@ inline LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         // shown that way: repositioning must never hand it focus.
         SetWindowPos(hwnd, HWND_TOPMOST, (GetSystemMetrics(SM_CXSCREEN) - w) / 2,
                      overlay_y(h), 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
+        g_placedByHand.store(true);       // top or bottom is a choice too
         return 0;
     }
-    case WM_DESTROY:
+    case WM_DESTROY: {
+        // ⭐ WHERE IT STOOD, IF SOMEONE CHOSE THAT, for the next opening.
+        // ⓘ Here rather than after the loop: WM_CLOSE's default handling
+        // destroys the window, and by the loop's end there is none to ask.
+        RECT rc;
+        if (g_placedByHand.load() && GetWindowRect(hwnd, &rc)) {
+            g_placeX.store(rc.left);
+            g_placeY.store(rc.top);
+        }
+        state_save();
         g_hwnd = nullptr;
         PostQuitMessage(0);
         return 0;
+    }
     default:
         break;
     }
@@ -1633,9 +1727,21 @@ inline void thread_main(int width, int height)
 
     // Centred, and at whichever end overlay_y says -- bottom to start with,
     // like a keyboard, and Triangle moves it to the top.
+    // ⭐ OR WHERE IT WAS LAST PUT (2026-10-03), kept on screen the way a nudge
+    // keeps it: a place remembered on one display must not strand it off
+    // another, and there is no title bar to pull it back by.
     const int screenW = GetSystemMetrics(SM_CXSCREEN);
-    const int x = (screenW - width) / 2;
-    const int y = overlay_y(height);
+    const int screenH = GetSystemMetrics(SM_CYSCREEN);
+    int x = (screenW - width) / 2;
+    int y = overlay_y(height);
+    if (g_placedByHand.load()) {
+        x = g_placeX.load();
+        y = g_placeY.load();
+        if (x < -width / 3) x = -width / 3;
+        if (y < 0) y = 0;
+        if (x > screenW - width / 3) x = screenW - width / 3;
+        if (y > screenH - height / 3) y = screenH - height / 3;
+    }
 
     // ⭐ THE STYLES ARE THE FEATURE.
     //   WS_EX_NOACTIVATE  -- clicking it never gives it focus
@@ -1933,7 +2039,7 @@ inline bool handle_report(const void *deviceKey, const ctm_rebind::Layout &lay,
         switch_face();               // the same thing the tab's \|/ key does
     }
     if (edge(deviceKey, 11, button_down(lay, data, len, 11))) {
-        g_size.store((g_size.load() + 1) % 3);
+        cycle_size();
         if (g_hwnd != nullptr) PostMessageW(g_hwnd, WM_CTM_RESIZE, 0, 0);
     }
 
@@ -1959,8 +2065,22 @@ inline bool handle_report(const void *deviceKey, const ctm_rebind::Layout &lay,
     // -- the layout button worked with a mouse and did nothing from the pad
     // (rhoquinn8217, 2026-09-02). The pad now presses the same way a click does.
     if (cross && k.kind == KK_ACTION && edge(deviceKey, 9, true)) {
-        press_current(deviceKey);
-        if (!visible()) return true;          // it may have closed itself
+        // ⛔⛔ PASTE IS HELD WITH CROSS, THROUGH THIS HANDLER'S OWN PUBLISH
+        // (rhoquinn8217, 2026-10-03: "copy and paste don't appear to work when
+        // done with the controller. Mouse works but controller doesn't").
+        // press_current() set ctrl+v for this pad, and the publish at the end
+        // of this same report set the pad's keys to none: Windows never saw
+        // it. A click holds it until the button comes up, which is why the
+        // mouse worked. ➡️ The chord is this pad's held key now, sent and
+        // released with Cross like any other.
+        if (k.usage == ACT_PASTE) {
+            heldKeyFor[deviceKey] = HeldKey{ paste_usage(), KBD_CTRL, true };
+            g_pressRow = g_row; g_pressCol = g_col;
+            invalidate();
+        } else {
+            press_current(deviceKey);
+            if (!visible()) return true;      // it may have closed itself
+        }
     } else if (!cross) {
         edge(deviceKey, 9, false);
     }
@@ -2031,6 +2151,8 @@ inline bool handle_report(const void *deviceKey, const ctm_rebind::Layout &lay,
             invalidate();
         }
         usage = held.usage;
+    } else if (cross && held.usage != 0) {
+        usage = held.usage;                   // paste, held with Cross
     } else if (!cross) {
         held = HeldKey{};
     }
@@ -2088,6 +2210,8 @@ inline bool handle_report(const void *deviceKey, const ctm_rebind::Layout &lay,
 
 inline void show(int width = 0, int height = 0, int openedByButton = -1)
 {
+    // ⓘ The remembered face and size first, so the window is made at them.
+    if (!g_stateLoaded.exchange(true)) state_load();
     if (width <= 0 || height <= 0) size_for(&width, &height);
     g_openedBy.store(openedByButton);
     // ⓘ Opened for the page when its window is the one in front, which is

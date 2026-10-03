@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.51 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.52 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,9 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.52 Simple's footer has a twelfth hint: this window and the
+            virtual keyboard keep their mode, size and location when
+            they are opened again.
     2.66.51 Circle in Quick goes to Close, as in Simple, and its legend says
             "to close". Down from Quick's auto button lands on Close and up
             from Close on the auto button; down from Simple's config picker
@@ -1772,7 +1775,7 @@
 <div class="bar">
   <!-- ⓘ The same number as VERSION at the top of this file, by hand. It sat
        at 2.66.4 for thirty-four versions while VERSION moved on. -->
-  <span class="muted" style="font-size:12px">v2.66.51</span>
+  <span class="muted" style="font-size:12px">v2.66.52</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -3446,7 +3449,12 @@ var FOOTER_HINTS = [
 
   'This window opens whenever a device is <b>bridged</b>.',
 
-  'Use <b>Quick</b> mode mid-game to quick switch between controller configs.'
+  'Use <b>Quick</b> mode mid-game to quick switch between controller configs.',
+
+  // ⓘ rhoquinn8217's (2026-10-03), once the keyboard kept its place as this
+  // window already did.
+  'This window and the DS5-USBIP virtual keyboard keep their <b>mode, size ' +
+  'and location</b> when they are re-opened.'
 ];
 
 // ⓘ Which hint is showing. Reset to 0 whenever the window opens, so the
@@ -9247,7 +9255,7 @@ function selfTest() {
   // ⓘ Rendering is not testable from here. The two-line reservation
   // (min-height:2.8em) is still measured by eye at Simple's width.
   {
-    ok('every hint is present', FOOTER_HINTS.length === 11,
+    ok('every hint is present', FOOTER_HINTS.length === 12,
        'got ' + FOOTER_HINTS.length);
     var allText = true, i;
     for (i = 0; i < FOOTER_HINTS.length; i++) {
