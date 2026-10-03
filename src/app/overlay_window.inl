@@ -372,14 +372,14 @@ inline const Key kRow4[] = {
 // (rhoquinn8217, 2026-10-02):
 //   - esc is a half key in the corner, tab and backspace are half keys, and
 //     del is a half key right of p;
-//   - fn turns twenty-two letters into the symbols the face has no key for.
-//     The seven named sit near their usual places: , . ? at the right of the
-//     bottom row, ; : ' " at the right of the home row. The rest by reason:
-//     ` ~ by the corner, where a full keyboard has them; - _ = + along the
-//     top letter row, with \ | at its right end as they usually are; the
-//     brackets in open-close pairs down the left, [ ] { } on the home row and
-//     < > on the bottom; / beside , . ? because it shares a key with ?.
-//     i and o stay F11 and F12, and g and c stay letters.
+//   - fn turns the whole top row, esc to backspace, into F1 to F12, and
+//     twenty-two letters into the symbols the face has no key for. The seven
+//     named sit near their usual places: , . ? at the right of the bottom
+//     row, ; : ' " at the right of the home row. / \ | are on i o p, where
+//     rhoquinn8217 put them. The rest by reason: ` ~ by the corner, where a
+//     full keyboard has them; - _ = + along the top letter row; the brackets
+//     in open-close pairs down the left, [ ] { } on the home row and < > on
+//     the bottom. u, g, c and v stay letters.
 // ⓘ The halves pay for each other, so the top two rows line up key for key:
 // down from 1 is q, from 2 is w, from backspace is del.
 // ⛔ THE SHIFTED SYMBOLS WERE MISSING HERE (rhoquinn8217, 2026-09-04). Every
@@ -388,13 +388,13 @@ inline const Key kRow4[] = {
 // the row simply did not respond. ⓘ Sub-compact has no punctuation row, which
 // makes these the only way to reach these symbols on that face.
 inline constexpr Key kSub0[] = {
-    { L"esc", nullptr, 0x29, 0, KK_NORMAL, 0.5f },
+    { L"esc", nullptr, 0x29, 0, KK_FN, 0.5f },
     { L"1", L"!", 0x1e, 0, KK_FN, 1.0f }, { L"2", L"@", 0x1f, 0, KK_FN, 1.0f },
     { L"3", L"#", 0x20, 0, KK_FN, 1.0f }, { L"4", L"$", 0x21, 0, KK_FN, 1.0f },
     { L"5", L"%", 0x22, 0, KK_FN, 1.0f }, { L"6", L"^", 0x23, 0, KK_FN, 1.0f },
     { L"7", L"&", 0x24, 0, KK_FN, 1.0f }, { L"8", L"*", 0x25, 0, KK_FN, 1.0f },
     { L"9", L"(", 0x26, 0, KK_FN, 1.0f }, { L"0", L")", 0x27, 0, KK_FN, 1.0f },
-    { L"\u232b", nullptr, 0x2a, 0, KK_NORMAL, 0.5f },
+    { L"\u232b", nullptr, 0x2a, 0, KK_FN, 0.5f },
 };
 inline constexpr Key kSub1[] = {
     { L"tab", nullptr, 0x2b, 0, KK_NORMAL, 0.5f },
@@ -404,8 +404,9 @@ inline constexpr Key kSub1[] = {
     { L"r", nullptr, 0x15, 0, KK_NORMAL, 1.0f, L"_", 0x2d, KBD_SHIFT },
     { L"t", nullptr, 0x17, 0, KK_NORMAL, 1.0f, L"=", 0x2e, 0 },
     { L"y", nullptr, 0x1c, 0, KK_NORMAL, 1.0f, L"+", 0x2e, KBD_SHIFT },
-    { L"u", nullptr, 0x18, 0, KK_NORMAL, 1.0f, L"\\", 0x31, 0 },
-    { L"i", nullptr, 0x0c, 0, KK_FN, 1.0f }, { L"o", nullptr, 0x12, 0, KK_FN, 1.0f },
+    { L"u", nullptr, 0x18, 0, KK_NORMAL, 1.0f },
+    { L"i", nullptr, 0x0c, 0, KK_NORMAL, 1.0f, L"/", 0x38, 0 },
+    { L"o", nullptr, 0x12, 0, KK_NORMAL, 1.0f, L"\\", 0x31, 0 },
     { L"p", nullptr, 0x13, 0, KK_NORMAL, 1.0f, L"|", 0x31, KBD_SHIFT },
     { L"del", nullptr, 0x4c, 0, KK_NORMAL, 0.5f },
 };
@@ -427,7 +428,7 @@ inline const Key kSub3[] = {
     { L"z", nullptr, 0x1d, 0, KK_NORMAL, 1.0f, L"<", 0x36, KBD_SHIFT },
     { L"x", nullptr, 0x1b, 0, KK_NORMAL, 1.0f, L">", 0x37, KBD_SHIFT },
     { L"c", nullptr, 0x06, 0, KK_NORMAL, 1.0f },
-    { L"v", nullptr, 0x19, 0, KK_NORMAL, 1.0f, L"/", 0x38, 0 },
+    { L"v", nullptr, 0x19, 0, KK_NORMAL, 1.0f },
     { L"b", nullptr, 0x05, 0, KK_NORMAL, 1.0f, L",", 0x36, 0 },
     { L"n", nullptr, 0x11, 0, KK_NORMAL, 1.0f, L".", 0x37, 0 },
     { L"m", nullptr, 0x10, 0, KK_NORMAL, 1.0f, L"?", 0x38, KBD_SHIFT },
@@ -701,6 +702,8 @@ inline uint8_t active_mods()
 // ⓘ MEASURED before changing it: every face keeps all its fn keys in row 0 and
 // none anywhere else, so this is identical for FULL and COMPACT and only
 // extends sub-compact, whose `i` and `o` continue the run as F11 and F12.
+// ⓘ Since 2026-10-03 sub-compact's run is its whole top row, esc to backspace,
+// so every face keeps its F keys on one row again.
 inline int fn_index(int row, int col)
 {
     int n = 0;
