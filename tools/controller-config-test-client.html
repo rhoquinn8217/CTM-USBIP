@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.49 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.50 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,10 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.50 The page sizes Quick on a switch at the listener's new width,
+            0.278 of the screen: 2.66.49 left it at 0.185, so a switch into
+            Quick opened at the old width while the resize button stepped
+            through the new ones.
     2.66.49 Quick's legend leads with the shoulder keys, as Simple's does,
             and they follow the input in hand: L1/R1, LB/RB or Q/E. (Its
             window is half as wide again, which is the listener's.)
@@ -1763,7 +1767,7 @@
 <div class="bar">
   <!-- ⓘ The same number as VERSION at the top of this file, by hand. It sat
        at 2.66.4 for thirty-four versions while VERSION moved on. -->
-  <span class="muted" style="font-size:12px">v2.66.49</span>
+  <span class="muted" style="font-size:12px">v2.66.50</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -6177,7 +6181,7 @@ function gpActivate() {
     // preference. `config_move.inl` gives Quick a size table of ITS OWN:
     //
     //     Simple  kCompactSizes  0.45  x 0.45  of the screen
-    //     Quick   kQuickSizes    0.185 x 0.150
+    //     Quick   kQuickSizes    0.278 x 0.150   (0.185 wide until 2026-10-02)
     //
     // ➡️ **Simple's window is THREE TIMES TALLER than Quick's.** So the
     // postcard reasoning was measured on Quick and never applied to Simple --
@@ -7719,10 +7723,14 @@ function compactSize() {
 }
 
 // ⓘ Quick's window: the smaller of its two sizes, which rhoquinn8217 named
-// medium and large (2026-09-09) -- the half-of-Simple heights, an eighth
-// off the width; the listener's table agrees.
+// medium and large (2026-09-09); the listener's table agrees.
+// ⭐ HALF AS WIDE AGAIN SINCE 2026-10-02, at the width they dragged it to
+// (kQuickSizes in config_move.inl says why). ⛔ This number and that table
+// are TWO PLACERS: a switch sizes the window here, the resize button there,
+// and 2.66.49 changed only the listener's, so a switch opened at the old
+// width.
 function quickSize() {
-  compactHome(Math.round(screen.availWidth * 0.185),
+  compactHome(Math.round(screen.availWidth * 0.278),
               Math.round(screen.availHeight * 0.15));
 }
 
