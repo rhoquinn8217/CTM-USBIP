@@ -123,6 +123,7 @@ carry it; upstream's own history is unchanged.
 | 2026-10-02 | The settings window says "device" where it said "controller", and a mark says what each device is: a pad, a keyboard or a mouse, as colour emoji, from the type the listener reads off the device's own descriptor. A DualSense, DS4 or Xbox pad from a listener too old to send the type is still a pad, and a device that says none of the three gets no mark. Page 2.66.42. | `83a9bba`, `a596f57`, `9c49dcb` |
 | 2026-10-02 | One tab and one row per device in the settings window, not one per part: parts the listener names alike are one device, with every kind they are in its marks (a receiver reads as keyboard and mouse) and every part's battery gauge, and a config set on its tab goes to every part that takes one. The marks follow the model name on the tab, in the rows and under Simple's and Quick's big name. The carousel's keys and Quick's legend name the input in hand (L1/R1, LB/RB or Q/E). Quick is half as wide again, at the width it was dragged to, in the listener's sizes and the page's own. A device with no serial reads "(no serial - auto_link disabled)", and one that takes no config "Configs can only be set for controllers." Page 2.66.50. | `c1c993e`, `320d6ea`, `d44bb1c`, `949a22e`, `a8174a0`, `4975c09`, `db67bff`, `b952a85` |
 | 2026-10-02 | Advanced cycles two window sizes, as Simple and Quick do: the smallest is gone, it did not work at 250% scaling, and a saved size from before is moved down one so the window opens where it was. Circle in Quick goes to Close rather than closing, as in Simple, and Circle or Escape in Advanced lands on Close in the footer. Down from Quick's auto link button lands on Close and up from Close on it; down from Simple's config picker lands on New. Page 2.66.51. | `4f286b6` |
+| 2026-10-02 | The tray icon's menu counts and lists devices, not their parts: the parts under one nickname are one device, as on the settings page's tabs, so four devices in ten parts read "4 devices connected" and are four lines. The side menu is "Devices", and a line leads with the device's name: "DualSense (USB) - Token - 100%". The title picture is never narrower than the menu's widest line; narrower, Windows drew it without its transparency, a black box. | `b9cb386`, `68e08dc`, `0d5bf94` |
 
 ## Files changed
 
@@ -133,7 +134,7 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
 ```
  .gitattributes                                |   48 +
  .gitignore                                    |   34 +-
- CHANGES.md                                    |  278 +
+ CHANGES.md                                    |  279 +
  LINK                                          |    0
  README.md                                     |   18 +
  app/ctm-usbip-tests.vcxproj                   |  124 +
@@ -180,8 +181,8 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  src/app/service.inl                           |   25 +-
  src/app/start_report.inl                      |   37 +
  src/app/stop_wait.inl                         |   74 +
- src/app/tray_icon.inl                         |  562 ++
- src/app/tray_menu.inl                         |  119 +
+ src/app/tray_icon.inl                         |  614 ++
+ src/app/tray_menu.inl                         |  154 +
  src/app/ui_page.inl                           |  114 +
  src/app/window_icon.inl                       |  242 +
  src/app/window_icon_rule.inl                  |   67 +
@@ -260,7 +261,7 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  tests/stop_wait_test.cpp                      |   93 +
  tests/tests_main.cpp                          |  136 +
  tests/touch_mouse_test.cpp                    | 1654 +++++
- tests/tray_menu_test.cpp                      |  143 +
+ tests/tray_menu_test.cpp                      |  160 +
  tests/trigger_click_test.cpp                  |  835 +++
  tests/trigger_effect_test.cpp                 |  529 ++
  tests/units.h                                 |   54 +
@@ -274,5 +275,5 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  tools/device-config-panel.bat                 |    4 +
  tools/device-config-panel.ps1                 |  303 +
  tools/osk-mockups.py                          |  103 +
- 143 files changed, 45939 insertions(+), 155 deletions(-)
+ 143 files changed, 46044 insertions(+), 155 deletions(-)
 ```
