@@ -1281,6 +1281,22 @@ inline void paint(HWND hwnd)
             SelectObject(dc, prev);
         }
 
+        // ⭐ AND WHAT FN GIVES, SMALL IN THE OPPOSITE CORNER (rhoquinn8217,
+        // 2026-10-03: "similar to how symbol keys are on the upper left of the
+        // number keys, I want Fn symbols keys on the lower right of the letter
+        // keys"). The same small grey as the shifted character, so the two
+        // read as one idea; lower right, so they can never collide.
+        // ⓘ Skipped while fn is showing, because then the big label IS the
+        // symbol -- the shifted character is skipped under shift the same way.
+        if (k.fnLabel != nullptr && !fnNow) {
+            RECT s = r;
+            s.right -= 5; s.bottom -= 2;
+            SetTextColor(dc, RGB(0x8b, 0x8d, 0x96));
+            HGDIOBJ prev = SelectObject(dc, small);
+            DrawTextW(dc, k.fnLabel, -1, &s, DT_RIGHT | DT_BOTTOM | DT_SINGLELINE | DT_NOPREFIX);
+            SelectObject(dc, prev);
+        }
+
         // ⭐ AND THE SHOULDER SHORTCUT, on the key it belongs to. Without this
         // the shoulders are folklore -- discoverable only by being told.
         const wchar_t *hint = k.kind == KK_SHOULDER_L1 ? L"L1"
