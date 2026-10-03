@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.45 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.46 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,10 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.46 In the tables' rows the marks follow the device's model name
+            ("DualSense (USB)"), not the nickname: the device's own table, a
+            row per part, and Overview's. The tabs and Simple's and Quick's
+            big name keep them on the name's line, after the gauge.
     2.66.45 The device marks follow the battery gauge where the gauge sits
             beside the name, in the tabs and on Simple's and Quick's big
             name; with no gauge they stay right after the name. The tables
@@ -1739,7 +1743,7 @@
 <div class="bar">
   <!-- ⓘ The same number as VERSION at the top of this file, by hand. It sat
        at 2.66.4 for thirty-four versions while VERSION moved on. -->
-  <span class="muted" style="font-size:12px">v2.66.45</span>
+  <span class="muted" style="font-size:12px">v2.66.46</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -4021,8 +4025,12 @@ function devHeadRow(p) {
              // ⭐ NICKNAME FIRST (rhoquinn8217, 2026-09-01): it is what a person
              // calls this controller, so it leads the row. ⓘ From the device
              // in hand, for the same reason as Overview's copy.
-             '<td>' + esc(p.nickname || nameFor(p.ordinal)) + deviceIcon(p) + '</td>' +
-             '<td>' + esc(deviceLabelShort(p)) + '</td>' +
+             '<td>' + esc(p.nickname || nameFor(p.ordinal)) + '</td>' +
+             // ⓘ In a row the marks follow the model name; on a tab they stay
+             // on the name's line (rhoquinn8217, 2026-10-02: *"next to the
+             // nick name in the tabs but next to the device name in the
+             // rows"*).
+             '<td>' + esc(deviceLabelShort(p)) + deviceIcon(p) + '</td>' +
              '<td>' + batteryCell(p) + '</td>' +
              '<td>' + serialCell + '</td>' +
              '<td>' + autoCell + '</td>' +
@@ -4943,8 +4951,9 @@ function loadDevices() {
               // BEFORE the device list is stored, so the lookup fell back to
               // the ordinal and Overview showed ds5_usb_1 while the controller
               // tab showed the name.
-              '<td>' + esc(dev.nickname || dev.ordinal) + deviceIcon(dev) + '</td>' +
-              '<td>' + esc(deviceLabelShort(dev)) + (dev.supports_config ? '' :
+              '<td>' + esc(dev.nickname || dev.ordinal) + '</td>' +
+              // ⓘ After the model name, as in the device's own table.
+              '<td>' + esc(deviceLabelShort(dev)) + deviceIcon(dev) + (dev.supports_config ? '' :
                   ' <span class="muted">(no config support)</span>') + '</td>' +
               '<td>' + batteryCell(dev) + '</td>' +
               '<td>' + serial + '</td>' +
