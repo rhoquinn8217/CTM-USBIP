@@ -58,21 +58,22 @@ int run_tray_menu_tests()
         CTM_CHECK(group_by_name({}).empty());
     }
 
-    section("tray menu: a controller's line");
+    section("tray menu: a device's line");
     {
         using tray_menu::device_line;
+        // ⓘ The device's name first, then the nickname (2026-10-02).
         CTM_CHECK_EQ(device_line("Kestrel", "DualSense (USB)", 85, "discharging"),
-                     std::string("Kestrel - DualSense (USB) - 85%"));
+                     std::string("DualSense (USB) - Kestrel - 85%"));
         CTM_CHECK_EQ(device_line("Combo", "DualSense (BT)", 40, "charging"),
-                     std::string("Combo - DualSense (BT) - 40%, charging"));
+                     std::string("DualSense (BT) - Combo - 40%, charging"));
         // ⛔ A pad that has not said is not a pad at zero: no battery at all.
         CTM_CHECK_EQ(device_line("Rhino", "Xbox Controller", -1, ""),
-                     std::string("Rhino - Xbox Controller"));
+                     std::string("Xbox Controller - Rhino"));
         // ⓘ And a pad that really is at zero says so.
         CTM_CHECK_EQ(device_line("Rhino", "DualSense (BT)", 0, "discharging"),
-                     std::string("Rhino - DualSense (BT) - 0%"));
+                     std::string("DualSense (BT) - Rhino - 0%"));
         CTM_CHECK_EQ(device_line("Zeus", "DualSense (USB)", 100, "full"),
-                     std::string("Zeus - DualSense (USB) - 100%"));
+                     std::string("DualSense (USB) - Zeus - 100%"));
         // A session that is still starting may have no nickname yet.
         CTM_CHECK_EQ(device_line("", "DualSense (USB)", 85, ""),
                      std::string("DualSense (USB) - 85%"));

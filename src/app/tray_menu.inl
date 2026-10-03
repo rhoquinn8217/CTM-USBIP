@@ -104,14 +104,16 @@ inline std::string battery_words(int percent, const std::string &state)
     return words;
 }
 
-// One device's line: its nickname, what it is and how it is connected,
-// and its battery when it has said. "Kestrel - DualSense (USB) - 85%".
+// One device's line: what it is and how it is connected, then its nickname,
+// and its battery when it has said. "DualSense (USB) - Kestrel - 85%"
+// (rhoquinn8217, 2026-10-02: *"put Device name first then then the
+// nickname"*; it had led with the nickname).
 // ⓘ `label` is device_names::label(), which already carries USB or BT.
 inline std::string device_line(const std::string &nickname, const std::string &label,
                                int batteryPercent, const std::string &batteryState)
 {
-    std::string line = nickname;
-    if (!label.empty()) line += (line.empty() ? "" : " - ") + label;
+    std::string line = label;
+    if (!nickname.empty()) line += (line.empty() ? "" : " - ") + nickname;
     const std::string battery = battery_words(batteryPercent, batteryState);
     if (!battery.empty()) line += (line.empty() ? "" : " - ") + battery;
     return line;
