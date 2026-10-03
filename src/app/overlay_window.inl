@@ -146,7 +146,7 @@ inline std::atomic_int g_face{FACE_COMPACT};
 // ⓘ 16.5 for FULL since the navigation column was added (2026-09-04): home,
 // end, page up, page down and close down the right-hand side, which is what
 // makes FULL a different keyboard rather than COMPACT plus three keys.
-inline constexpr float kColsSub = 11.0f, kColsCompact = 14.0f, kColsFull = 16.5f;
+inline constexpr float kColsSub = 10.0f, kColsCompact = 14.0f, kColsFull = 16.5f;
 
 inline float face_cols()
 {
@@ -363,89 +363,83 @@ inline const Key kRow4[] = {
 //
 // ⛔ The spacer is most of the width on purpose. It is the handle.
 // ⭐⭐ SUB-COMPACT (rhoquinn8217, 2026-09-02). Compact with every symbol and
-// punctuation mark taken out -- eleven columns of letters, digits and the keys
-// a controller cannot reach.
+// punctuation mark taken out -- letters, digits and the keys a controller
+// cannot reach.
 //
 // ⓘ For typing a name or a search term, where , . / [ ] \ ; ' are dead weight
 // and every column of them is a column of travel.
-// ⭐⭐ AND FN BRINGS THE SYMBOLS BACK, as a layer rather than as keys
-// (rhoquinn8217, 2026-10-02):
-//   - esc is a half key in the corner, tab and backspace are half keys, and
-//     del is a half key right of p;
-//   - fn turns the whole top row, esc to backspace, into F1 to F12, and
-//     twenty-two letters into the symbols the face has no key for, placed at
-//     rhoquinn8217's word: , . ? at the right of the bottom row with < >
-//     beside them; ; : ' " at the right of the home row, with ~ on g; - _ = +
-//     / \ | along the right of the top letter row, r to p; ` [ ] on q w e,
-//     by the corner; { } on d f. a, s, z and x stay letters.
-// ⓘ The halves pay for each other, so the top two rows line up key for key:
-// down from 1 is q, from 2 is w, from backspace is del.
+// ⭐⭐ TEN EQUAL COLUMNS, FOR A CONTROLLER (rhoquinn8217, 2026-10-03). It is
+// typed with a pad, so what the pad already does is not on it: backspace is
+// Square and close is Circle, and tab, esc and del went with the column they
+// stood in. The digits sit straight over q a z; space is three keys, with
+// paste after it; shift, up and fn end the bottom letter row.
+// ⭐⭐ AND FN BRINGS THE SYMBOLS BACK, as a layer rather than as keys:
+//   - 1 to 0 are F1 to F10, and q and w are F11 and F12;
+//   - twenty-two letters are the symbols the face has no key for, each as
+//     near as the grid allows to where a full keyboard has it around enter:
+//     ' " and ; : left of enter on h j k l, \ | above it on o p, - _ = + [ ]
+//     along the rest of the top letter row, , . / ? on v b n m with < > by
+//     them on x c, ` ~ on a s by the corner and { } on d f. g and z stay
+//     letters.
 // ⛔ THE SHIFTED SYMBOLS WERE MISSING HERE (rhoquinn8217, 2026-09-04). Every
 // digit had `nullptr` where FULL and COMPACT carry L"!" and the rest -- that
 // second field IS the shifted label, so shift had nothing to show or type and
 // the row simply did not respond. ⓘ Sub-compact has no punctuation row, which
 // makes these the only way to reach these symbols on that face.
 inline constexpr Key kSub0[] = {
-    { L"esc", nullptr, 0x29, 0, KK_FN, 0.5f },
     { L"1", L"!", 0x1e, 0, KK_FN, 1.0f }, { L"2", L"@", 0x1f, 0, KK_FN, 1.0f },
     { L"3", L"#", 0x20, 0, KK_FN, 1.0f }, { L"4", L"$", 0x21, 0, KK_FN, 1.0f },
     { L"5", L"%", 0x22, 0, KK_FN, 1.0f }, { L"6", L"^", 0x23, 0, KK_FN, 1.0f },
     { L"7", L"&", 0x24, 0, KK_FN, 1.0f }, { L"8", L"*", 0x25, 0, KK_FN, 1.0f },
     { L"9", L"(", 0x26, 0, KK_FN, 1.0f }, { L"0", L")", 0x27, 0, KK_FN, 1.0f },
-    { L"\u232b", nullptr, 0x2a, 0, KK_FN, 0.5f },
 };
 inline constexpr Key kSub1[] = {
-    { L"tab", nullptr, 0x2b, 0, KK_NORMAL, 0.5f },
-    { L"q", nullptr, 0x14, 0, KK_NORMAL, 1.0f, L"`", 0x35, 0 },
-    { L"w", nullptr, 0x1a, 0, KK_NORMAL, 1.0f, L"[", 0x2f, 0 },
-    { L"e", nullptr, 0x08, 0, KK_NORMAL, 1.0f, L"]", 0x30, 0 },
-    { L"r", nullptr, 0x15, 0, KK_NORMAL, 1.0f, L"-", 0x2d, 0 },
-    { L"t", nullptr, 0x17, 0, KK_NORMAL, 1.0f, L"_", 0x2d, KBD_SHIFT },
-    { L"y", nullptr, 0x1c, 0, KK_NORMAL, 1.0f, L"=", 0x2e, 0 },
-    { L"u", nullptr, 0x18, 0, KK_NORMAL, 1.0f, L"+", 0x2e, KBD_SHIFT },
-    { L"i", nullptr, 0x0c, 0, KK_NORMAL, 1.0f, L"/", 0x38, 0 },
+    { L"q", nullptr, 0x14, 0, KK_FN, 1.0f }, { L"w", nullptr, 0x1a, 0, KK_FN, 1.0f },
+    { L"e", nullptr, 0x08, 0, KK_NORMAL, 1.0f, L"-", 0x2d, 0 },
+    { L"r", nullptr, 0x15, 0, KK_NORMAL, 1.0f, L"_", 0x2d, KBD_SHIFT },
+    { L"t", nullptr, 0x17, 0, KK_NORMAL, 1.0f, L"=", 0x2e, 0 },
+    { L"y", nullptr, 0x1c, 0, KK_NORMAL, 1.0f, L"+", 0x2e, KBD_SHIFT },
+    { L"u", nullptr, 0x18, 0, KK_NORMAL, 1.0f, L"[", 0x2f, 0 },
+    { L"i", nullptr, 0x0c, 0, KK_NORMAL, 1.0f, L"]", 0x30, 0 },
     { L"o", nullptr, 0x12, 0, KK_NORMAL, 1.0f, L"\\", 0x31, 0 },
     { L"p", nullptr, 0x13, 0, KK_NORMAL, 1.0f, L"|", 0x31, KBD_SHIFT },
-    { L"del", nullptr, 0x4c, 0, KK_NORMAL, 0.5f },
 };
-inline const Key kSub2[] = {
-    { L"ctrl", nullptr, 0, KBD_CTRL, KK_MOD, 1.0f },
-    { L"a", nullptr, 0x04, 0, KK_NORMAL, 1.0f },
-    { L"s", nullptr, 0x16, 0, KK_NORMAL, 1.0f },
+inline constexpr Key kSub2[] = {
+    { L"a", nullptr, 0x04, 0, KK_NORMAL, 1.0f, L"`", 0x35, 0 },
+    { L"s", nullptr, 0x16, 0, KK_NORMAL, 1.0f, L"~", 0x35, KBD_SHIFT },
     { L"d", nullptr, 0x07, 0, KK_NORMAL, 1.0f, L"{", 0x2f, KBD_SHIFT },
     { L"f", nullptr, 0x09, 0, KK_NORMAL, 1.0f, L"}", 0x30, KBD_SHIFT },
-    { L"g", nullptr, 0x0a, 0, KK_NORMAL, 1.0f, L"~", 0x35, KBD_SHIFT },
+    { L"g", nullptr, 0x0a, 0, KK_NORMAL, 1.0f },
     { L"h", nullptr, 0x0b, 0, KK_NORMAL, 1.0f, L";", 0x33, 0 },
     { L"j", nullptr, 0x0d, 0, KK_NORMAL, 1.0f, L":", 0x33, KBD_SHIFT },
     { L"k", nullptr, 0x0e, 0, KK_NORMAL, 1.0f, L"'", 0x34, 0 },
     { L"l", nullptr, 0x0f, 0, KK_NORMAL, 1.0f, L"\"", 0x34, KBD_SHIFT },
     { L"enter", nullptr, 0x28, 0, KK_NORMAL, 1.0f },
 };
-inline const Key kSub3[] = {
-    { L"shift", nullptr, 0, KBD_SHIFT, KK_MOD, 1.0f },
+inline constexpr Key kSub3[] = {
     { L"z", nullptr, 0x1d, 0, KK_NORMAL, 1.0f },
-    { L"x", nullptr, 0x1b, 0, KK_NORMAL, 1.0f },
-    { L"c", nullptr, 0x06, 0, KK_NORMAL, 1.0f, L"<", 0x36, KBD_SHIFT },
-    { L"v", nullptr, 0x19, 0, KK_NORMAL, 1.0f, L">", 0x37, KBD_SHIFT },
-    { L"b", nullptr, 0x05, 0, KK_NORMAL, 1.0f, L",", 0x36, 0 },
-    { L"n", nullptr, 0x11, 0, KK_NORMAL, 1.0f, L".", 0x37, 0 },
+    { L"x", nullptr, 0x1b, 0, KK_NORMAL, 1.0f, L"<", 0x36, KBD_SHIFT },
+    { L"c", nullptr, 0x06, 0, KK_NORMAL, 1.0f, L">", 0x37, KBD_SHIFT },
+    { L"v", nullptr, 0x19, 0, KK_NORMAL, 1.0f, L",", 0x36, 0 },
+    { L"b", nullptr, 0x05, 0, KK_NORMAL, 1.0f, L".", 0x37, 0 },
+    { L"n", nullptr, 0x11, 0, KK_NORMAL, 1.0f, L"/", 0x38, 0 },
     { L"m", nullptr, 0x10, 0, KK_NORMAL, 1.0f, L"?", 0x38, KBD_SHIFT },
-    { L"\u2191", nullptr, 0x52, 0, KK_NORMAL, 1.0f },
     { L"shift", nullptr, 0, KBD_SHIFT, KK_MOD, 1.0f },
+    { L"\u2191", nullptr, 0x52, 0, KK_NORMAL, 1.0f },
     { L"fn", nullptr, 0, KBD_FN, KK_MOD, 1.0f },
 };
-inline const Key kSub4[] = {
-    { L"alt", nullptr, 0, KBD_ALT, KK_MOD, 1.0f },
+inline constexpr Key kSub4[] = {
+    { L"ctrl", nullptr, 0, KBD_CTRL, KK_MOD, 1.0f },
     { L"win", nullptr, 0, KBD_WIN, KK_MOD, 1.0f },
-    { L"space", nullptr, 0x2c, 0, KK_NORMAL, 4.0f },
+    { L"alt", nullptr, 0, KBD_ALT, KK_MOD, 1.0f },
+    { L"space", nullptr, 0x2c, 0, KK_NORMAL, 3.0f },
     { L"paste", L"copy", ACT_PASTE, 0, KK_ACTION, 1.0f },
     { L"\u2190", nullptr, 0x50, 0, KK_NORMAL, 1.0f },
     { L"\u2193", nullptr, 0x51, 0, KK_NORMAL, 1.0f },
     { L"\u2192", nullptr, 0x4f, 0, KK_NORMAL, 1.0f },
-    { L"\u2328\u2938", nullptr, ACT_CLOSE, 0, KK_ACTION, 1.0f },
 };
 inline constexpr Key kTabSub[] = {
-    { L"", nullptr, 0, 0, KK_SPACER, 7.67f },
+    { L"", nullptr, 0, 0, KK_SPACER, 6.67f },
     // ⭐ THE WAY OUT TO THE SETTINGS (T-225, was T-164). Leftmost of the
     // group on purpose: the three beside it reshape THIS keyboard and the x
     // shuts it, while this one leaves for somewhere else.
@@ -473,7 +467,7 @@ inline constexpr Key kTabCompact[] = {
 };
 
 // ⓘ One per face, because the grab area has to fill whatever width that face
-// is -- 11 units for Sub, 14 for Compact, 16.5 for Full (face_cols()). Only the
+// is -- 10 units for Sub, 14 for Compact, 16.5 for Full (face_cols()). Only the
 // spacer differs, and it is what the five action keys' 3.33 is subtracted from.
 // ⚠️ This said 15.5 for Full until 2026-09-19, after the navigation column
 // widened that face. A stale number HERE is what makes a row end ragged.
@@ -518,11 +512,14 @@ constexpr bool spans(float total, float cols)
 static_assert(spans(tab_span(kTabSub), kColsSub), "the Sub tab does not span its face");
 static_assert(spans(tab_span(kTabCompact), kColsCompact), "the Compact tab does not span its face");
 static_assert(spans(tab_span(kTabFull), kColsFull), "the Full tab does not span its face");
-// ⓘ And sub-compact's two rows with half keys, whose halves must pay for each
-// other: a row wider than the face becomes the widest, and every key on the
-// face shrinks to fit it while the tab ends short.
+// ⓘ And every sub-compact row, the face being a full grid: a row wider than
+// the face becomes the widest, and every key on the face shrinks to fit it
+// while the tab ends short.
 static_assert(spans(tab_span(kSub0), kColsSub), "the Sub digit row does not span its face");
 static_assert(spans(tab_span(kSub1), kColsSub), "the Sub q row does not span its face");
+static_assert(spans(tab_span(kSub2), kColsSub), "the Sub home row does not span its face");
+static_assert(spans(tab_span(kSub3), kColsSub), "the Sub bottom letter row does not span its face");
+static_assert(spans(tab_span(kSub4), kColsSub), "the Sub space row does not span its face");
 
 inline const Key kCompact0[] = {
     { L"`", L"~", 0x35, 0, KK_NORMAL, 1.0f },
@@ -700,8 +697,8 @@ inline uint8_t active_mods()
 // ⓘ MEASURED before changing it: every face keeps all its fn keys in row 0 and
 // none anywhere else, so this is identical for FULL and COMPACT and only
 // extends sub-compact, whose `i` and `o` continue the run as F11 and F12.
-// ⓘ Since 2026-10-03 sub-compact's run is its whole top row, esc to backspace,
-// so every face keeps its F keys on one row again.
+// ⓘ Since 2026-10-03 sub-compact's run is 1 to 0 and then q and w, as F11 and
+// F12: the face is ten columns, one short of a row of twelve.
 inline int fn_index(int row, int col)
 {
     int n = 0;
@@ -906,16 +903,8 @@ inline void move_v(int dir)
     // miss always fell LEFT, so no tie could be decided on purpose.
     const float anchor = key_left(g_row, g_col) + key_at(g_row, g_col).wide / 2.0f;
 
-    // ⭐⭐ ON SUB-COMPACT A TIE GOING DOWN TAKES THE RIGHT-HAND KEY
-    // (rhoquinn8217, 2026-10-02). Its half keys put the top two rows half a key
-    // out from the rest, so every key on the q row sits exactly between two
-    // below it -- and taking the left one walked 1, q, ctrl, shift where the
-    // note below asks for 1, q, a, z. Right on the way down and left on the
-    // way up is how a real keyboard's rows step.
-    // ⓘ Only there: on FULL the digits sit half a key RIGHT of the letters, and
-    // the left key is what puts 1 over q; on COMPACT the one tie is enter,
-    // whose key below is shift.
-    const bool tieGoesRight = (dir > 0 && g_face.load() == FACE_SUB);
+    // ⓘ A tie goes to the left-hand key. Sub-compact took the right one for the
+    // day it had half keys (2026-10-03); as an equal grid it has no ties.
 
     // ⛔ DISTANCE TO THE KEY, NOT TO ITS CENTRE. Measuring to centres broke on
     // the wide keys: space is nine units across, so its centre sits far to the
@@ -935,7 +924,7 @@ inline void move_v(int dir)
         float d = 0.0f;
         if (anchor < x0)      d = x0 - anchor;
         else if (anchor > x1) d = anchor - x1;
-        if (d < bestDist || (tieGoesRight && d == bestDist)) { bestDist = d; best = c; }
+        if (d < bestDist) { bestDist = d; best = c; }
     }
     g_row = next;
     g_col = best;
@@ -1330,7 +1319,7 @@ inline void paint(HWND hwnd)
         // unreadable at a distance.
         //
         // ⓘ Right-aligned in the SAME rectangle as the title, so it costs no
-        // layout: the tab's spacer is 8.34 columns even on the narrowest face,
+        // layout: the tab's spacer is 6.67 columns even on the narrowest face,
         // and the tab font fits roughly eleven characters per column.
         //
         // ⛔ The order is by how surprising each one is, not by button position:
@@ -1981,8 +1970,6 @@ inline bool handle_report(const void *deviceKey, const ctm_rebind::Layout &lay,
             // is the one face that already carries its own ` key. So the
             // substitution could only ever fire where a backtick sat two keys
             // away -- it changed a key under fn for no gain.
-            // ⓘ Sub-compact has an esc key too since 2026-10-03, a half key in
-            // the corner, with ` and ~ on fn among its symbols.
             FnKey fk;
             if (fn_showing() && fn_key(k, g_row, g_col, &fk))
                 held = HeldKey{ fk.usage, fk.mod, fk.ownsShift };
