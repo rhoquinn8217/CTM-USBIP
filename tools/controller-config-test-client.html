@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.41 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.42 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,10 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.42 The device marks are the colour emoji now, and they sit right
+            after the nickname rather than after the model name: in the
+            tabs, in both tables' nickname column, and on the big name in
+            Simple and Quick, the neighbours either side included.
     2.66.41 The device marks are drawn icons now, a pad, a keyboard and a
             mouse in one line weight and the text's own colour, and they
             follow the device's model name rather than its nickname: in
@@ -981,13 +985,12 @@
   /* Name on top, what it is underneath -- the name is for recognising the tab,
      the kind for confirming you are on the right one. */
   .tabs button .tabname { display:inline-block; }
-  /* ⭐ WHAT KIND OF DEVICE, AFTER ITS MODEL NAME (rhoquinn8217, 2026-10-02:
-     "4 drawn icons", and "Put it after the Device name"). Drawn in this page
-     rather than taken from a font: one line weight for all three, the text's
-     own colour, sharp at any size, and nothing to download. */
-  .devico { width:1.15em; height:1.15em; margin-left:0.35em; vertical-align:-0.2em;
-            fill:none; stroke:currentColor; stroke-width:1.9;
-            stroke-linecap:round; stroke-linejoin:round; }
+  /* ⭐ WHAT KIND OF DEVICE, RIGHT AFTER ITS NICKNAME (rhoquinn8217, 2026-10-02:
+     "change the icon again to set 2" -- the colour emoji -- and "move the
+     icon right after the nickname"). The emoji font is asked for by name, and
+     the U+FE0F after each mark asks for its colour form. */
+  .devemo { font-family:"Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif;
+            font-style:normal; font-weight:normal; margin-left:0.3em; letter-spacing:0.08em; }
   /* ⭐ The dot, the name and the gauge on ONE centred row (2026-09-18).
      ⛔ vertical-align:middle does not centre a badge beside text: it lines the
      badge's middle up with the BASELINE PLUS HALF THE X-HEIGHT, which sits below
@@ -1720,7 +1723,7 @@
 <div class="bar">
   <!-- ⓘ The same number as VERSION at the top of this file, by hand. It sat
        at 2.66.4 for thirty-four versions while VERSION moved on. -->
-  <span class="muted" style="font-size:12px">v2.66.41</span>
+  <span class="muted" style="font-size:12px">v2.66.42</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -2599,10 +2602,10 @@ function renderTabs(devices) {
             ' title="' + (d.ready ? 'ready' : 'starting or tearing down') + '"' +
             ' onclick="showTab(\'' + esc(d.ordinal) + '\')">' +
             '<span class="tabtop">' + dot +
-              '<span class="tabname">' + esc(nameFor(d.ordinal)) + '</span>' +
+              '<span class="tabname">' + esc(nameFor(d.ordinal)) + deviceIcon(d) + '</span>' +
               batteryTag(d) +
             '</span>' +
-            '<em class="tabkind">' + esc(deviceLabelShort(d)) + deviceIcon(d) + '</em>' +
+            '<em class="tabkind">' + esc(deviceLabelShort(d)) + '</em>' +
             '</button>';
   });
   // ⭐ THE EDITOR TAB (rhoquinn8217, 2026-09-01), last and pushed to the far
@@ -2679,34 +2682,38 @@ function deviceLabelShort(d) {
   return d.label || d.product || d.kind || 'controller';
 }
 
-// ⭐ A CONTROLLER, KEYBOARD OR MOUSE ICON AFTER A DEVICE'S MODEL NAME
-// (rhoquinn8217, 2026-10-02: *"Put a controller, keyboard or mouse character
-// symbol next the the device name"*, then, shown four kinds side by side:
-// *"4 drawn icons. Don't but the icon after the Nickname. Put it after the
-// Device name."*).
-// ⓘ Three small line drawings on a 24-unit grid, so they share one weight and
-// take the text's colour (.devico). From `device_type`, which the listener
-// reads off the device's own report descriptor. A DualSense, DS4 or Xbox pad
-// from a listener too old to send the type is still a pad; a device that says
-// none of the three gets no icon rather than a guess.
-// ⓘ Wherever the model name is shown: the tabs, both tables' device column,
-// and under the name in Simple and Quick, the neighbours either side included.
-var DEVICE_ICONS = {
-  controller: '<path d="M7.5 7h9a4.5 4.5 0 0 1 4.4 3.6l.9 4.6a2.4 2.4 0 0 1-4.1 2.1l-2.1-2H8.4l-2.1 2a2.4 2.4 0 0 1-4.1-2.1l.9-4.6A4.5 4.5 0 0 1 7.5 7z"/>' +
-              '<path d="M7.5 9.8v3.6M5.7 11.6h3.6M15.8 10.6h.01M17.9 12.7h.01"/>',
-  keyboard: '<rect x="2.5" y="6.5" width="19" height="11" rx="2"/>' +
-            '<path d="M6.5 10h.01M9.5 10h.01M12.5 10h.01M15.5 10h.01M18 10h.01M8 14h8"/>',
-  mouse: '<rect x="6.5" y="3" width="11" height="18" rx="5.5"/><path d="M12 6.5v3"/>'
-};
-function deviceIcon(d) {
+// ⭐ A CONTROLLER, KEYBOARD OR MOUSE MARK RIGHT AFTER A DEVICE'S NICKNAME
+// (rhoquinn8217, 2026-10-02, in three steps: *"Put a controller, keyboard or
+// mouse character symbol next the the device name"*; then, shown four kinds
+// side by side, drawn icons after the model name; then *"change the icon again
+// to set 2. I want to move the icon right after the nickname."* Set 2 was the
+// colour emoji.)
+// ⓘ From `device_type`, which the listener reads off the device's own report
+// descriptor. A DualSense, DS4 or Xbox pad from a listener too old to send the
+// type is still a pad; a device that says none of the three gets no mark
+// rather than a guess.
+// ⓘ deviceIcons() takes several parts and shows each kind once, always in
+// this order, so one device that is a keyboard and a mouse reads ⌨️🖱️.
+var DEVICE_EMOJI = { controller: '🎮️', keyboard: '⌨️',
+                     mouse: '🖱️' };
+var DEVICE_EMOJI_ORDER = ['controller', 'keyboard', 'mouse'];
+function deviceTypeOf(d) {
   if (!d) return '';
-  var type = d.device_type ||
-             (/^(ds5|ds4|xbox)/.test(d.kind || '') ? 'controller' : '');
-  var drawing = DEVICE_ICONS[type];
-  return drawing
-    ? '<svg class="devico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' + drawing + '</svg>'
-    : '';
+  return d.device_type ||
+         (/^(ds5|ds4|xbox)/.test(d.kind || '') ? 'controller' : '');
 }
+function deviceIcons(parts) {
+  var have = {};
+  (parts || []).forEach(function (d) {
+    var type = deviceTypeOf(d);
+    if (type) have[type] = true;
+  });
+  var marks = DEVICE_EMOJI_ORDER
+    .filter(function (type) { return have[type]; })
+    .map(function (type) { return DEVICE_EMOJI[type]; }).join('');
+  return marks ? '<span class="devemo" aria-hidden="true">' + marks + '</span>' : '';
+}
+function deviceIcon(d) { return deviceIcons(d ? [d] : []); }
 
 // ⭐⭐ TWO LEGENDS, ONE PER PAD FAMILY (T-240, rhoquinn8217: *"Legend based
 // on controller used. Two legends, one more xbox and one for playstation."*).
@@ -3920,8 +3927,8 @@ function buildDevicePane(d) {
              // ⭐ NICKNAME FIRST (rhoquinn8217, 2026-09-01): it is what a person
              // calls this controller, so it leads the row. ⓘ From the device
              // in hand, for the same reason as Overview's copy.
-             '<td>' + esc(d.nickname || nameFor(d.ordinal)) + '</td>' +
-             '<td>' + esc(deviceLabelShort(d)) + deviceIcon(d) + '</td>' +
+             '<td>' + esc(d.nickname || nameFor(d.ordinal)) + deviceIcon(d) + '</td>' +
+             '<td>' + esc(deviceLabelShort(d)) + '</td>' +
              '<td>' + batteryCell(d) + '</td>' +
              '<td>' + serialCell + '</td>' +
              '<td>' + autoCell + '</td>' +
@@ -4807,8 +4814,8 @@ function loadDevices() {
               // BEFORE the device list is stored, so the lookup fell back to
               // the ordinal and Overview showed ds5_usb_1 while the controller
               // tab showed the name.
-              '<td>' + esc(dev.nickname || dev.ordinal) + '</td>' +
-              '<td>' + esc(deviceLabelShort(dev)) + deviceIcon(dev) + (dev.supports_config ? '' :
+              '<td>' + esc(dev.nickname || dev.ordinal) + deviceIcon(dev) + '</td>' +
+              '<td>' + esc(deviceLabelShort(dev)) + (dev.supports_config ? '' :
                   ' <span class="muted">(no config support)</span>') + '</td>' +
               '<td>' + batteryCell(dev) + '</td>' +
               '<td>' + serial + '</td>' +
@@ -7990,8 +7997,8 @@ function paintCompact() {
                '<small>' + key + '</small></div>';
       }
       return '<div class="cside ' + cls + '" onclick="gpTab(' + (cls === 'l' ? -1 : 1) + ')">' +
-             '<small>' + key + '</small>' + esc(nameFor(ord)) +
-             (od ? '<div class="ckind">' + esc(deviceLabelShort(od)) + deviceIcon(od) + '</div>' : '') + '</div>';
+             '<small>' + key + '</small>' + esc(nameFor(ord)) + deviceIcon(od) +
+             (od ? '<div class="ckind">' + esc(deviceLabelShort(od)) + '</div>' : '') + '</div>';
     };
     var slide = COMPACT_SLIDE > 0 ? ' slide-r' : COMPACT_SLIDE < 0 ? ' slide-l' : '';
     COMPACT_SLIDE = 0;
@@ -7999,9 +8006,9 @@ function paintCompact() {
     // under the name, and the L1 and R1 neighbours with theirs.
     html += '<div class="ccar' + slide + '">' +
             side(prev, 'l', '\u25c2 L1') +
-            '<div class="ccur"><div class="cname">' + esc(nameFor(d.ordinal)) +
+            '<div class="ccur"><div class="cname">' + esc(nameFor(d.ordinal)) + deviceIcon(d) +
             batteryTag(d) + '</div>' +
-            '<div class="ckind">' + esc(deviceLabelShort(d)) + deviceIcon(d) + '</div></div>' +
+            '<div class="ckind">' + esc(deviceLabelShort(d)) + '</div></div>' +
             side(next, 'r', 'R1 \u25b8') +
             '</div>';
     if (!d.supports_config) {
