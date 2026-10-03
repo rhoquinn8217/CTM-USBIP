@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.52 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.53 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,11 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.53 Footer hints in rhoquinn8217's words: hint 5 says presets use
+            Square/X to open the virtual keyboard, hint 11 reads "quickly
+            switch", and hint 12 says the window and the keyboard open
+            again just as they were left. Hints 1 and 5 name the pad's
+            buttons by their symbols, as hint 3 already did.
     2.66.52 Simple's footer has a twelfth hint: this window and the
             virtual keyboard keep their mode, size and location when
             they are opened again.
@@ -1775,7 +1780,7 @@
 <div class="bar">
   <!-- ⓘ The same number as VERSION at the top of this file, by hand. It sat
        at 2.66.4 for thirty-four versions while VERSION moved on. -->
-  <span class="muted" style="font-size:12px">v2.66.52</span>
+  <span class="muted" style="font-size:12px">v2.66.53</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -3414,7 +3419,7 @@ function noteInputSource(what) {
 // escape. 🔗 The same reasoning as the legend a few lines above.
 var FOOTER_HINTS = [
   'To bring this window back: <b>hold two fingers on the touchpad and press ' +
-  'Options</b> (DS5/DS4 only), or click the tray icon and choose ' +
+  '☰</b> (DS5/DS4 only), or click the tray icon and choose ' +
   '<b>Open Controller Config</b>.',
 
   'DS5-USBIP keeps running in the <b>background</b> when this window is ' +
@@ -3429,8 +3434,8 @@ var FOOTER_HINTS = [
   'from there.',
 
   'Give a pad a <b>stick, gyro or touchpad to mouse</b> preset and it drives ' +
-  'this PC with no mouse or keyboard. <b>Square</b> opens the DS5-USBIP ' +
-  'virtual keyboard.',
+  'this PC with no mouse or keyboard. Presets use <b>□/X</b> to open the ' +
+  'DS5-USBIP virtual keyboard.',
 
   "Bridged controllers don't reach the <b>game</b> while this window is open. " +
   'However, when the window is open, the buttons will always follow the ' +
@@ -3449,12 +3454,12 @@ var FOOTER_HINTS = [
 
   'This window opens whenever a device is <b>bridged</b>.',
 
-  'Use <b>Quick</b> mode mid-game to quick switch between controller configs.',
+  'Use <b>Quick</b> mode mid-game to quickly switch between controller configs.',
 
   // ⓘ rhoquinn8217's (2026-10-03), once the keyboard kept its place as this
   // window already did.
-  'This window and the DS5-USBIP virtual keyboard keep their <b>mode, size ' +
-  'and location</b> when they are re-opened.'
+  'Close this window or the DS5-USBIP virtual keyboard and it <b>opens again ' +
+  'just as you left it</b>: same mode, size and place.'
 ];
 
 // ⓘ Which hint is showing. Reset to 0 whenever the window opens, so the
