@@ -124,6 +124,7 @@ carry it; upstream's own history is unchanged.
 | 2026-10-02 | One tab and one row per device in the settings window, not one per part: parts the listener names alike are one device, with every kind they are in its marks (a receiver reads as keyboard and mouse) and every part's battery gauge, and a config set on its tab goes to every part that takes one. The marks follow the model name on the tab, in the rows and under Simple's and Quick's big name. The carousel's keys and Quick's legend name the input in hand (L1/R1, LB/RB or Q/E). Quick is half as wide again, at the width it was dragged to, in the listener's sizes and the page's own. A device with no serial reads "(no serial - auto_link disabled)", and one that takes no config "Configs can only be set for controllers." Page 2.66.50. | `c1c993e`, `320d6ea`, `d44bb1c`, `949a22e`, `a8174a0`, `4975c09`, `db67bff`, `b952a85` |
 | 2026-10-02 | Advanced cycles two window sizes, as Simple and Quick do: the smallest is gone, it did not work at 250% scaling, and a saved size from before is moved down one so the window opens where it was. Circle in Quick goes to Close rather than closing, as in Simple, and Circle or Escape in Advanced lands on Close in the footer. Down from Quick's auto link button lands on Close and up from Close on it; down from Simple's config picker lands on New. Page 2.66.51. | `4f286b6` |
 | 2026-10-02 | The tray icon's menu counts and lists devices, not their parts: the parts under one nickname are one device, as on the settings page's tabs, so four devices in ten parts read "4 devices connected" and are four lines. The side menu is "Devices", and a line leads with the device's name: "DualSense (USB) - Token - 100%". The title picture is never narrower than the menu's widest line; narrower, Windows drew it without its transparency, a black box. | `b9cb386`, `68e08dc`, `0d5bf94` |
+| 2026-10-03 | The on-screen keyboard's sub-compact face is laid out for a controller: ten equal columns with no gaps, backspace and space side by side wearing the face button that does their job, and a fn layer with F1 to F12, the 22 symbols near where a full keyboard has them around enter, esc, tab, page up and down, del, home and copy. The legend and the button marks follow the pad that pressed last; opening the config window no longer closes the keyboard; paste and copy work from the pad; and the keyboard remembers its face, size and place. The settings page's Simple footer has a twelfth hint and three reworded, names the pad's buttons by their symbols, and its hint 8 follows the input in use. | `d57a9cf`, `5be42f5`, `9247539`, `99326a0`, `136b9ce`, `64270bc`, `f7366d7`, `2ad911f`, `10296d4`, `9f53768`, `41f4ece` |
 
 ## Files changed
 
@@ -134,7 +135,7 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
 ```
  .gitattributes                                |   48 +
  .gitignore                                    |   34 +-
- CHANGES.md                                    |  279 +
+ CHANGES.md                                    |  280 +
  LINK                                          |    0
  README.md                                     |   18 +
  app/ctm-usbip-tests.vcxproj                   |  124 +
@@ -171,9 +172,9 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  src/app/home_folder.inl                       |  110 +
  src/app/nickname.inl                          |   90 +
  src/app/open_ui.inl                           |  489 ++
- src/app/overlay_window.inl                    | 1995 ++++++
+ src/app/overlay_window.inl                    | 2263 ++++++
  src/app/rest.inl                              |  760 ++
- src/app/rest_config.inl                       | 1231 ++++
+ src/app/rest_config.inl                       | 1234 ++++
  src/app/rest_config_sessions.inl              |  204 +
  src/app/rest_sessions.inl                     |   33 +
  src/app/same_controller.inl                   |   38 +
@@ -218,16 +219,16 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  src/input/mouse_device.inl                    |  304 +
  src/input/mouse_exclusive.inl                 |  122 +
  src/input/mouse_held.inl                      |   99 +
- src/input/osk.inl                             |  222 +
+ src/input/osk.inl                             |  228 +
  src/input/pad_press.inl                       |  116 +
- src/input/rebind.inl                          | 1213 ++++
+ src/input/rebind.inl                          | 1227 ++++
  src/input/stick_mouse.inl                     |  471 ++
  src/input/touch_mouse.inl                     | 1346 ++++
  src/input/trigger_click.inl                   |  801 +++
  src/input/trigger_effect.inl                  |  630 ++
  src/log/capped_log.inl                        |  117 +
  src/log/device_log.inl                        |  233 +
- src/main.cpp                                  |  707 +-
+ src/main.cpp                                  |  713 +-
  src/map/runtime.cpp                           |   68 +-
  src/usbip/device.inl                          |  650 +-
  src/usbip/server.inl                          |   55 +-
@@ -267,7 +268,7 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  tests/units.h                                 |   54 +
  tests/window_icon_rule_test.cpp               |   86 +
  tests/window_size_rule_test.cpp               |  129 +
- tools/controller-config-test-client.html      | 9408 +++++++++++++++++++++++++
+ tools/controller-config-test-client.html      | 9452 +++++++++++++++++++++++++
  tools/create-desktop-shortcut.bat             |   46 +
  tools/create-desktop-shortcut.ps1             |  148 +
  tools/device-config-panel-edge.bat            |    9 +
@@ -275,5 +276,5 @@ upstream's release FFmpeg binaries replacing the repo's debug ones).
  tools/device-config-panel.bat                 |    4 +
  tools/device-config-panel.ps1                 |  303 +
  tools/osk-mockups.py                          |  103 +
- 143 files changed, 46044 insertions(+), 155 deletions(-)
+ 143 files changed, 46386 insertions(+), 155 deletions(-)
 ```
