@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.43 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.44 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,10 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.44 Two messages in rhoquinn8217's words: a device with no serial
+            reads "(no serial - auto_link disabled)" in both tables, and a
+            device that takes no config reads "Configs can only be set for
+            controllers." in Advanced, Simple and Quick.
     2.66.43 One tab per device, not one per part. A device the TV bridges
             as several parts (a receiver's keyboard and mouse, a pad with a
             keyboard half) had a tab for each, all with the same name; now
@@ -1730,7 +1734,7 @@
 <div class="bar">
   <!-- ⓘ The same number as VERSION at the top of this file, by hand. It sat
        at 2.66.4 for thirty-four versions while VERSION moved on. -->
-  <span class="muted" style="font-size:12px">v2.66.43</span>
+  <span class="muted" style="font-size:12px">v2.66.44</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -3975,7 +3979,9 @@ function devHeadRow(p) {
 
   var serialCell = p.serial
     ? '<code class="good">' + esc(p.serial) + '</code>'
-    : '<span class="warnc">(none reported — auto_link cannot work)</span>';
+    // ⓘ In their words (rhoquinn8217, 2026-10-02); it read "(none reported —
+    // auto_link cannot work)".
+    : '<span class="warnc">(no serial - auto_link disabled)</span>';
 
   // ⓘ "ready" is gone. A bridged controller that is not ready is a state you
   // see for a moment during setup, not something worth a permanent column.
@@ -4151,7 +4157,7 @@ function buildDevicePane(d) {
           (d.supports_config
             ? '<button onclick="newConfigFor(\'' + esc(d.ordinal) + '\')" ' +
               'title="create a new config and link it">New</button>'
-            : '<button disabled title="this device does not take a config">New</button>') +
+            : '<button disabled title="configs can only be set for controllers">New</button>') +
           (d.linked_config
             ? '<button onclick="renameConfig(\'' + esc(d.linked_config) + '\')" ' +
               'title="rename this config">Rename</button>' +
@@ -4161,7 +4167,7 @@ function buildDevicePane(d) {
             : '') +
           claimBtn + unlinkBtn +
           (!d.supports_config
-            ? ' <span class="muted">this device does not take a config</span>'
+            ? ' <span class="muted">Configs can only be set for controllers.</span>'
             : (usable.length ? '' : ' <span class="muted">no configs yet — press New</span>')) +
           // ⭐ Safe Edit Mode at the END of the config row, pushed right. It
           // governs what the pad may do to the settings below, so it belongs on
@@ -4887,7 +4893,8 @@ function loadDevices() {
       // if it is a real per-unit value, and that has never been observed.
       var serial = dev.serial
         ? '<code class="good">' + esc(dev.serial) + '</code>'
-        : '<span class="warnc">(none reported — auto_link cannot work)</span>';
+        // ⓘ The same words as the device's own table (rhoquinn8217, 2026-10-02).
+        : '<span class="warnc">(no serial - auto_link disabled)</span>';
       // ⭐ THE WHOLE ROW, not a 3px edge. A bar at the left was invisible unless
       // you already knew to look for it -- and the point is noticing at a
       // glance that a controller is there and working.
@@ -8129,8 +8136,10 @@ function paintCompact() {
       // ⛔ No Start on a device that takes no config (2.65.0). A keyboard or a
       // mouse bridged beside the controllers keeps its own software, and the
       // agent would refuse the link Start ends in.
-      html += '<div class="cempty">' + esc(deviceLabelShort(d)) +
-              ' does not take a config</div>';
+      // ⭐ IN THEIR WORDS (rhoquinn8217, 2026-10-02): it read "<device> does
+      // not take a config", which named the device and not what would take
+      // one.
+      html += '<div class="cempty">Configs can only be set for controllers.</div>';
     } else if (!usable.length) {
       // ⭐ The empty state is DELIBERATELY different: a first preset deserves
       // a button that looks like it will do something, not a footer button.
