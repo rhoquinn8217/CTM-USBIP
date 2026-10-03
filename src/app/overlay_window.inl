@@ -376,8 +376,8 @@ inline const Key kRow4[] = {
 //     twenty-two letters into the symbols the face has no key for, placed at
 //     rhoquinn8217's word: , . ? at the right of the bottom row with < >
 //     beside them; ; : ' " at the right of the home row, with ~ on g; - _ = +
-//     / \ | along the right of the top letter row, r to p; ` on q, by the
-//     corner; [ ] { } on the home row's left. w, e, z and x stay letters.
+//     / \ | along the right of the top letter row, r to p; ` [ ] on q w e,
+//     by the corner; { } on d f. a, s, z and x stay letters.
 // ⓘ The halves pay for each other, so the top two rows line up key for key:
 // down from 1 is q, from 2 is w, from backspace is del.
 // ⛔ THE SHIFTED SYMBOLS WERE MISSING HERE (rhoquinn8217, 2026-09-04). Every
@@ -397,8 +397,8 @@ inline constexpr Key kSub0[] = {
 inline constexpr Key kSub1[] = {
     { L"tab", nullptr, 0x2b, 0, KK_NORMAL, 0.5f },
     { L"q", nullptr, 0x14, 0, KK_NORMAL, 1.0f, L"`", 0x35, 0 },
-    { L"w", nullptr, 0x1a, 0, KK_NORMAL, 1.0f },
-    { L"e", nullptr, 0x08, 0, KK_NORMAL, 1.0f },
+    { L"w", nullptr, 0x1a, 0, KK_NORMAL, 1.0f, L"[", 0x2f, 0 },
+    { L"e", nullptr, 0x08, 0, KK_NORMAL, 1.0f, L"]", 0x30, 0 },
     { L"r", nullptr, 0x15, 0, KK_NORMAL, 1.0f, L"-", 0x2d, 0 },
     { L"t", nullptr, 0x17, 0, KK_NORMAL, 1.0f, L"_", 0x2d, KBD_SHIFT },
     { L"y", nullptr, 0x1c, 0, KK_NORMAL, 1.0f, L"=", 0x2e, 0 },
@@ -410,8 +410,8 @@ inline constexpr Key kSub1[] = {
 };
 inline const Key kSub2[] = {
     { L"ctrl", nullptr, 0, KBD_CTRL, KK_MOD, 1.0f },
-    { L"a", nullptr, 0x04, 0, KK_NORMAL, 1.0f, L"[", 0x2f, 0 },
-    { L"s", nullptr, 0x16, 0, KK_NORMAL, 1.0f, L"]", 0x30, 0 },
+    { L"a", nullptr, 0x04, 0, KK_NORMAL, 1.0f },
+    { L"s", nullptr, 0x16, 0, KK_NORMAL, 1.0f },
     { L"d", nullptr, 0x07, 0, KK_NORMAL, 1.0f, L"{", 0x2f, KBD_SHIFT },
     { L"f", nullptr, 0x09, 0, KK_NORMAL, 1.0f, L"}", 0x30, KBD_SHIFT },
     { L"g", nullptr, 0x0a, 0, KK_NORMAL, 1.0f, L"~", 0x35, KBD_SHIFT },
@@ -1281,21 +1281,10 @@ inline void paint(HWND hwnd)
             SelectObject(dc, prev);
         }
 
-        // ⭐ AND WHAT FN GIVES, SMALL IN THE OPPOSITE CORNER (rhoquinn8217,
-        // 2026-10-03: "similar to how symbol keys are on the upper left of the
-        // number keys, I want Fn symbols keys on the lower right of the letter
-        // keys"). The same small grey as the shifted character, so the two
-        // read as one idea; lower right, so they can never collide.
-        // ⓘ Skipped while fn is showing, because then the big label IS the
-        // symbol -- the shifted character is skipped under shift the same way.
-        if (k.fnLabel != nullptr && !fnNow) {
-            RECT s = r;
-            s.right -= 5; s.bottom -= 2;
-            SetTextColor(dc, RGB(0x8b, 0x8d, 0x96));
-            HGDIOBJ prev = SelectObject(dc, small);
-            DrawTextW(dc, k.fnLabel, -1, &s, DT_RIGHT | DT_BOTTOM | DT_SINGLELINE | DT_NOPREFIX);
-            SelectObject(dc, prev);
-        }
+        // ⛔ NO FN SYMBOL IN THE OTHER CORNER (rhoquinn8217, 2026-10-03). It
+        // was tried, small and grey in the lower right of each letter, and
+        // came out the same night: "the preview are too small and it make the
+        // keyboard messy". Holding R1 shows the layer instead.
 
         // ⭐ AND THE SHOULDER SHORTCUT, on the key it belongs to. Without this
         // the shoulders are folklore -- discoverable only by being told.
