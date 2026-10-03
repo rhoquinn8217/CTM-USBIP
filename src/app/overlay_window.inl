@@ -265,9 +265,9 @@ struct Key {
     KeyKind        kind;
     float          wide;
     // ⭐ WHAT FN MAKES OF THIS KEY, when it is not an F key (rhoquinn8217,
-    // 2026-10-02). Sub-compact has no symbol keys, so fn turns its corner key
-    // into esc and twenty of its letters into the symbols it lacks. Null leaves
-    // the key alone under fn.
+    // 2026-10-02). Sub-compact has no symbol keys, so fn turns twenty-two of
+    // its letters into the symbols it lacks. Null leaves the key alone under
+    // fn.
     // ⓘ The key sends exactly this, its own shift included or not, so it types
     // what it shows whatever shift is doing.
     const wchar_t *fnLabel = nullptr;
@@ -370,13 +370,16 @@ inline const Key kRow4[] = {
 // and every column of them is a column of travel.
 // ⭐⭐ AND FN BRINGS THE SYMBOLS BACK, as a layer rather than as keys
 // (rhoquinn8217, 2026-10-02):
-//   - the backtick is back, as a half key in the corner, and is esc while fn
-//     is on: the face has no esc key of its own;
-//   - tab and backspace are half keys, and del is a half key right of p;
-//   - fn turns twenty letters into the twenty symbols the face has no key
-//     for, each beside its keycap partner -- the plain one, then its shifted
-//     one -- in a full keyboard's order. i and o stay F11 and F12, and u, p,
-//     l and m stay letters.
+//   - esc is a half key in the corner, tab and backspace are half keys, and
+//     del is a half key right of p;
+//   - fn turns twenty-two letters into the symbols the face has no key for.
+//     The seven named sit near their usual places: , . ? at the right of the
+//     bottom row, ; : ' " at the right of the home row. The rest by reason:
+//     ` ~ by the corner, where a full keyboard has them; - _ = + along the
+//     top letter row, with \ | at its right end as they usually are; the
+//     brackets in open-close pairs down the left, [ ] { } on the home row and
+//     < > on the bottom; / beside , . ? because it shares a key with ?.
+//     i and o stay F11 and F12, and g and c stay letters.
 // ⓘ The halves pay for each other, so the top two rows line up key for key:
 // down from 1 is q, from 2 is w, from backspace is del.
 // ⛔ THE SHIFTED SYMBOLS WERE MISSING HERE (rhoquinn8217, 2026-09-04). Every
@@ -385,7 +388,7 @@ inline const Key kRow4[] = {
 // the row simply did not respond. ⓘ Sub-compact has no punctuation row, which
 // makes these the only way to reach these symbols on that face.
 inline constexpr Key kSub0[] = {
-    { L"`", L"~", 0x35, 0, KK_NORMAL, 0.5f, L"esc", 0x29, 0 },
+    { L"esc", nullptr, 0x29, 0, KK_NORMAL, 0.5f },
     { L"1", L"!", 0x1e, 0, KK_FN, 1.0f }, { L"2", L"@", 0x1f, 0, KK_FN, 1.0f },
     { L"3", L"#", 0x20, 0, KK_FN, 1.0f }, { L"4", L"$", 0x21, 0, KK_FN, 1.0f },
     { L"5", L"%", 0x22, 0, KK_FN, 1.0f }, { L"6", L"^", 0x23, 0, KK_FN, 1.0f },
@@ -395,39 +398,39 @@ inline constexpr Key kSub0[] = {
 };
 inline constexpr Key kSub1[] = {
     { L"tab", nullptr, 0x2b, 0, KK_NORMAL, 0.5f },
-    { L"q", nullptr, 0x14, 0, KK_NORMAL, 1.0f, L"-", 0x2d, 0 },
-    { L"w", nullptr, 0x1a, 0, KK_NORMAL, 1.0f, L"_", 0x2d, KBD_SHIFT },
-    { L"e", nullptr, 0x08, 0, KK_NORMAL, 1.0f, L"=", 0x2e, 0 },
-    { L"r", nullptr, 0x15, 0, KK_NORMAL, 1.0f, L"+", 0x2e, KBD_SHIFT },
-    { L"t", nullptr, 0x17, 0, KK_NORMAL, 1.0f, L"\\", 0x31, 0 },
-    { L"y", nullptr, 0x1c, 0, KK_NORMAL, 1.0f, L"|", 0x31, KBD_SHIFT },
-    { L"u", nullptr, 0x18, 0, KK_NORMAL, 1.0f },
+    { L"q", nullptr, 0x14, 0, KK_NORMAL, 1.0f, L"`", 0x35, 0 },
+    { L"w", nullptr, 0x1a, 0, KK_NORMAL, 1.0f, L"~", 0x35, KBD_SHIFT },
+    { L"e", nullptr, 0x08, 0, KK_NORMAL, 1.0f, L"-", 0x2d, 0 },
+    { L"r", nullptr, 0x15, 0, KK_NORMAL, 1.0f, L"_", 0x2d, KBD_SHIFT },
+    { L"t", nullptr, 0x17, 0, KK_NORMAL, 1.0f, L"=", 0x2e, 0 },
+    { L"y", nullptr, 0x1c, 0, KK_NORMAL, 1.0f, L"+", 0x2e, KBD_SHIFT },
+    { L"u", nullptr, 0x18, 0, KK_NORMAL, 1.0f, L"\\", 0x31, 0 },
     { L"i", nullptr, 0x0c, 0, KK_FN, 1.0f }, { L"o", nullptr, 0x12, 0, KK_FN, 1.0f },
-    { L"p", nullptr, 0x13, 0, KK_NORMAL, 1.0f },
+    { L"p", nullptr, 0x13, 0, KK_NORMAL, 1.0f, L"|", 0x31, KBD_SHIFT },
     { L"del", nullptr, 0x4c, 0, KK_NORMAL, 0.5f },
 };
 inline const Key kSub2[] = {
     { L"ctrl", nullptr, 0, KBD_CTRL, KK_MOD, 1.0f },
     { L"a", nullptr, 0x04, 0, KK_NORMAL, 1.0f, L"[", 0x2f, 0 },
-    { L"s", nullptr, 0x16, 0, KK_NORMAL, 1.0f, L"{", 0x2f, KBD_SHIFT },
-    { L"d", nullptr, 0x07, 0, KK_NORMAL, 1.0f, L"]", 0x30, 0 },
+    { L"s", nullptr, 0x16, 0, KK_NORMAL, 1.0f, L"]", 0x30, 0 },
+    { L"d", nullptr, 0x07, 0, KK_NORMAL, 1.0f, L"{", 0x2f, KBD_SHIFT },
     { L"f", nullptr, 0x09, 0, KK_NORMAL, 1.0f, L"}", 0x30, KBD_SHIFT },
-    { L"g", nullptr, 0x0a, 0, KK_NORMAL, 1.0f, L";", 0x33, 0 },
-    { L"h", nullptr, 0x0b, 0, KK_NORMAL, 1.0f, L":", 0x33, KBD_SHIFT },
-    { L"j", nullptr, 0x0d, 0, KK_NORMAL, 1.0f, L"'", 0x34, 0 },
-    { L"k", nullptr, 0x0e, 0, KK_NORMAL, 1.0f, L"\"", 0x34, KBD_SHIFT },
-    { L"l", nullptr, 0x0f, 0, KK_NORMAL, 1.0f },
+    { L"g", nullptr, 0x0a, 0, KK_NORMAL, 1.0f },
+    { L"h", nullptr, 0x0b, 0, KK_NORMAL, 1.0f, L";", 0x33, 0 },
+    { L"j", nullptr, 0x0d, 0, KK_NORMAL, 1.0f, L":", 0x33, KBD_SHIFT },
+    { L"k", nullptr, 0x0e, 0, KK_NORMAL, 1.0f, L"'", 0x34, 0 },
+    { L"l", nullptr, 0x0f, 0, KK_NORMAL, 1.0f, L"\"", 0x34, KBD_SHIFT },
     { L"enter", nullptr, 0x28, 0, KK_NORMAL, 1.0f },
 };
 inline const Key kSub3[] = {
     { L"shift", nullptr, 0, KBD_SHIFT, KK_MOD, 1.0f },
-    { L"z", nullptr, 0x1d, 0, KK_NORMAL, 1.0f, L",", 0x36, 0 },
-    { L"x", nullptr, 0x1b, 0, KK_NORMAL, 1.0f, L"<", 0x36, KBD_SHIFT },
-    { L"c", nullptr, 0x06, 0, KK_NORMAL, 1.0f, L".", 0x37, 0 },
-    { L"v", nullptr, 0x19, 0, KK_NORMAL, 1.0f, L">", 0x37, KBD_SHIFT },
-    { L"b", nullptr, 0x05, 0, KK_NORMAL, 1.0f, L"/", 0x38, 0 },
-    { L"n", nullptr, 0x11, 0, KK_NORMAL, 1.0f, L"?", 0x38, KBD_SHIFT },
-    { L"m", nullptr, 0x10, 0, KK_NORMAL, 1.0f },
+    { L"z", nullptr, 0x1d, 0, KK_NORMAL, 1.0f, L"<", 0x36, KBD_SHIFT },
+    { L"x", nullptr, 0x1b, 0, KK_NORMAL, 1.0f, L">", 0x37, KBD_SHIFT },
+    { L"c", nullptr, 0x06, 0, KK_NORMAL, 1.0f },
+    { L"v", nullptr, 0x19, 0, KK_NORMAL, 1.0f, L"/", 0x38, 0 },
+    { L"b", nullptr, 0x05, 0, KK_NORMAL, 1.0f, L",", 0x36, 0 },
+    { L"n", nullptr, 0x11, 0, KK_NORMAL, 1.0f, L".", 0x37, 0 },
+    { L"m", nullptr, 0x10, 0, KK_NORMAL, 1.0f, L"?", 0x38, KBD_SHIFT },
     { L"\u2191", nullptr, 0x52, 0, KK_NORMAL, 1.0f },
     { L"shift", nullptr, 0, KBD_SHIFT, KK_MOD, 1.0f },
     { L"fn", nullptr, 0, KBD_FN, KK_MOD, 1.0f },
@@ -722,8 +725,8 @@ inline bool fn_showing()
 // to exactly that.
 //
 // ⓘ An F key first, counted along the face by fn_index(); then a key that
-// names its own fn layer, the corner key and sub-compact's symbols. Anything
-// else fn leaves alone, and this returns false.
+// names its own fn layer, sub-compact's symbols. Anything else fn leaves
+// alone, and this returns false.
 // ⓘ ownsShift: an F key passes shift through (shift+F1 is a real chord); a
 // symbol replaces it with its own, so it types what it shows.
 struct FnKey { const wchar_t *label; uint8_t usage; uint8_t mod; bool ownsShift; };
@@ -1972,9 +1975,8 @@ inline bool handle_report(const void *deviceKey, const ctm_rebind::Layout &lay,
             // is the one face that already carries its own ` key. So the
             // substitution could only ever fire where a backtick sat two keys
             // away -- it changed a key under fn for no gain.
-            // ⓘ Sub-compact's corner key goes the other way, and was asked for:
-            // a backtick that is esc under fn, on the face with no esc key
-            // (rhoquinn8217, 2026-10-02).
+            // ⓘ Sub-compact has an esc key too since 2026-10-03, a half key in
+            // the corner, with ` and ~ on fn among its symbols.
             FnKey fk;
             if (fn_showing() && fn_key(k, g_row, g_col, &fk))
                 held = HeldKey{ fk.usage, fk.mod, fk.ownsShift };
