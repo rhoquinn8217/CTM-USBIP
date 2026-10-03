@@ -166,12 +166,33 @@ inline HBITMAP header_picture(const std::wstring &count, UINT dpi)
     SelectObject(dc, countFont);
     GetTextExtentPoint32W(dc, count.c_str(), static_cast<int>(count.size()), &countSize);
 
+    // ⛔⛔ NEVER NARROWER THAN THE MENU'S WIDEST LINE, OR IT IS A BLACK BOX
+    // (rhoquinn8217, 2026-10-02: *"the tray menu title is now a black box"*).
+    // A picture narrower than the menu's lines is drawn by Windows another
+    // way, one that ignores the transparency, and with the ink black and the
+    // rest clear that is solid black. "10 controllers connected" happened to
+    // be wide enough; "4 devices connected" is not. Measured in the skill's
+    // tools/menu-proto.cpp, this picture as it was against the same picture
+    // this wide: black in every state, then clean in every state, the
+    // pointer's own highlight showing through.
+    // ⓘ The lines are the main menu's, both of the keyboard's wordings among
+    // them, measured in the menu's font, which is the count's.
+    LONG widest = titleSize.cx > countSize.cx ? titleSize.cx : countSize.cx;
+    const std::wstring lines[] = {
+        tray_menu::kDevices, tray_menu::kOpenConfig, tray_menu::keyboard_line(false),
+        tray_menu::keyboard_line(true), tray_menu::kConfigMode, tray_menu::kQuit };
+    for (const std::wstring &line : lines) {
+        SIZE lineSize = {};
+        GetTextExtentPoint32W(dc, line.c_str(), static_cast<int>(line.size()), &lineSize);
+        if (lineSize.cx > widest) widest = lineSize.cx;
+    }
+
     // ⓘ Nothing on the left: the menu already indents a line's content, and
     // the title should begin where the lines under it begin.
     const int above = MulDiv(2, dpi, 96);
     const int between = MulDiv(2, dpi, 96);
     const int below = MulDiv(4, dpi, 96);
-    const int width = (titleSize.cx > countSize.cx ? titleSize.cx : countSize.cx) + MulDiv(8, dpi, 96);
+    const int width = static_cast<int>(widest) + MulDiv(8, dpi, 96);
     const int height = above + titleSize.cy + between + countSize.cy + below;
 
     BITMAPINFO info = {};
