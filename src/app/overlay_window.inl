@@ -238,13 +238,12 @@ inline bool button_down(const ctm_rebind::Layout &lay, const uint8_t *data, size
 // ⓘ KK_SHOULDER_* only changes what is PRINTED on the key -- the shortcut
 // itself is read from the pad directly. Steam prints them the same way, and it
 // is what turns a shoulder shortcut from folklore into something visible.
-// ⓘ KK_ESC is the backtick that becomes esc while L2 is held.
 // ⛔ DT_NOPREFIX ON EVERY LABEL. DrawTextW treats & as an accelerator marker:
 // it swallows the ampersand and underlines the next character instead, so the
 // shifted 7 simply never appeared (rhoquinn8217, 2026-09-02).
 // ⓘ KK_SPACER is not a key at all: it is the part of the tab you GRAB. It
 // draws as bare frame and the highlight skips straight over it.
-enum KeyKind { KK_NORMAL, KK_MOD, KK_FN, KK_ACTION, KK_ESC, KK_SPACER,
+enum KeyKind { KK_NORMAL, KK_MOD, KK_FN, KK_ACTION, KK_SPACER,
                KK_SHOULDER_L1, KK_SHOULDER_R1, KK_SHOULDER_R2 };
 
 // What a KK_ACTION key does, carried in the usage field, which is unused there.
@@ -265,6 +264,15 @@ struct Key {
                               // like " can exist without latching shift.
     KeyKind        kind;
     float          wide;
+    // ⭐ WHAT FN MAKES OF THIS KEY, when it is not an F key (rhoquinn8217,
+    // 2026-10-02). Sub-compact has no symbol keys, so fn turns its corner key
+    // into esc and twenty of its letters into the symbols it lacks. Null leaves
+    // the key alone under fn.
+    // ⓘ The key sends exactly this, its own shift included or not, so it types
+    // what it shows whatever shift is doing.
+    const wchar_t *fnLabel = nullptr;
+    uint8_t        fnUsage = 0;
+    uint8_t        fnMod   = 0;
 };
 
 // Modifier bits as a HID keyboard reports them: left ctrl, shift, alt, GUI.
@@ -355,46 +363,70 @@ inline const Key kRow4[] = {
 //
 // ⛔ The spacer is most of the width on purpose. It is the handle.
 // ⭐⭐ SUB-COMPACT (rhoquinn8217, 2026-09-02). Compact with every symbol and
-// punctuation mark taken out, backtick included -- eleven columns of letters,
-// digits and the keys a controller cannot reach.
+// punctuation mark taken out -- eleven columns of letters, digits and the keys
+// a controller cannot reach.
 //
 // ⓘ For typing a name or a search term, where , . / [ ] \ ; ' are dead weight
 // and every column of them is a column of travel.
+// ⭐⭐ AND FN BRINGS THE SYMBOLS BACK, as a layer rather than as keys
+// (rhoquinn8217, 2026-10-02):
+//   - the backtick is back, as a half key in the corner, and is esc while fn
+//     is on: the face has no esc key of its own;
+//   - tab and backspace are half keys, and del is a half key right of p;
+//   - fn turns twenty letters into the twenty symbols the face has no key
+//     for, each beside its keycap partner -- the plain one, then its shifted
+//     one -- in a full keyboard's order. i and o stay F11 and F12, and u, p,
+//     l and m stay letters.
+// ⓘ The halves pay for each other, so the top two rows line up key for key:
+// down from 1 is q, from 2 is w, from backspace is del.
 // ⛔ THE SHIFTED SYMBOLS WERE MISSING HERE (rhoquinn8217, 2026-09-04). Every
 // digit had `nullptr` where FULL and COMPACT carry L"!" and the rest -- that
 // second field IS the shifted label, so shift had nothing to show or type and
 // the row simply did not respond. ⓘ Sub-compact has no punctuation row, which
 // makes these the only way to reach these symbols on that face.
-inline const Key kSub0[] = {
+inline constexpr Key kSub0[] = {
+    { L"`", L"~", 0x35, 0, KK_NORMAL, 0.5f, L"esc", 0x29, 0 },
     { L"1", L"!", 0x1e, 0, KK_FN, 1.0f }, { L"2", L"@", 0x1f, 0, KK_FN, 1.0f },
     { L"3", L"#", 0x20, 0, KK_FN, 1.0f }, { L"4", L"$", 0x21, 0, KK_FN, 1.0f },
     { L"5", L"%", 0x22, 0, KK_FN, 1.0f }, { L"6", L"^", 0x23, 0, KK_FN, 1.0f },
     { L"7", L"&", 0x24, 0, KK_FN, 1.0f }, { L"8", L"*", 0x25, 0, KK_FN, 1.0f },
     { L"9", L"(", 0x26, 0, KK_FN, 1.0f }, { L"0", L")", 0x27, 0, KK_FN, 1.0f },
-    { L"\u232b", nullptr, 0x2a, 0, KK_NORMAL, 1.0f },
+    { L"\u232b", nullptr, 0x2a, 0, KK_NORMAL, 0.5f },
 };
-inline const Key kSub1[] = {
-    { L"tab", nullptr, 0x2b, 0, KK_NORMAL, 1.0f },
-    { L"q", nullptr, 0x14, 0, KK_NORMAL, 1.0f }, { L"w", nullptr, 0x1a, 0, KK_NORMAL, 1.0f },
-    { L"e", nullptr, 0x08, 0, KK_NORMAL, 1.0f }, { L"r", nullptr, 0x15, 0, KK_NORMAL, 1.0f },
-    { L"t", nullptr, 0x17, 0, KK_NORMAL, 1.0f }, { L"y", nullptr, 0x1c, 0, KK_NORMAL, 1.0f },
-    { L"u", nullptr, 0x18, 0, KK_NORMAL, 1.0f }, { L"i", nullptr, 0x0c, 0, KK_FN, 1.0f },
-    { L"o", nullptr, 0x12, 0, KK_FN, 1.0f }, { L"p", nullptr, 0x13, 0, KK_NORMAL, 1.0f },
+inline constexpr Key kSub1[] = {
+    { L"tab", nullptr, 0x2b, 0, KK_NORMAL, 0.5f },
+    { L"q", nullptr, 0x14, 0, KK_NORMAL, 1.0f, L"-", 0x2d, 0 },
+    { L"w", nullptr, 0x1a, 0, KK_NORMAL, 1.0f, L"_", 0x2d, KBD_SHIFT },
+    { L"e", nullptr, 0x08, 0, KK_NORMAL, 1.0f, L"=", 0x2e, 0 },
+    { L"r", nullptr, 0x15, 0, KK_NORMAL, 1.0f, L"+", 0x2e, KBD_SHIFT },
+    { L"t", nullptr, 0x17, 0, KK_NORMAL, 1.0f, L"\\", 0x31, 0 },
+    { L"y", nullptr, 0x1c, 0, KK_NORMAL, 1.0f, L"|", 0x31, KBD_SHIFT },
+    { L"u", nullptr, 0x18, 0, KK_NORMAL, 1.0f },
+    { L"i", nullptr, 0x0c, 0, KK_FN, 1.0f }, { L"o", nullptr, 0x12, 0, KK_FN, 1.0f },
+    { L"p", nullptr, 0x13, 0, KK_NORMAL, 1.0f },
+    { L"del", nullptr, 0x4c, 0, KK_NORMAL, 0.5f },
 };
 inline const Key kSub2[] = {
     { L"ctrl", nullptr, 0, KBD_CTRL, KK_MOD, 1.0f },
-    { L"a", nullptr, 0x04, 0, KK_NORMAL, 1.0f }, { L"s", nullptr, 0x16, 0, KK_NORMAL, 1.0f },
-    { L"d", nullptr, 0x07, 0, KK_NORMAL, 1.0f }, { L"f", nullptr, 0x09, 0, KK_NORMAL, 1.0f },
-    { L"g", nullptr, 0x0a, 0, KK_NORMAL, 1.0f }, { L"h", nullptr, 0x0b, 0, KK_NORMAL, 1.0f },
-    { L"j", nullptr, 0x0d, 0, KK_NORMAL, 1.0f }, { L"k", nullptr, 0x0e, 0, KK_NORMAL, 1.0f },
+    { L"a", nullptr, 0x04, 0, KK_NORMAL, 1.0f, L"[", 0x2f, 0 },
+    { L"s", nullptr, 0x16, 0, KK_NORMAL, 1.0f, L"{", 0x2f, KBD_SHIFT },
+    { L"d", nullptr, 0x07, 0, KK_NORMAL, 1.0f, L"]", 0x30, 0 },
+    { L"f", nullptr, 0x09, 0, KK_NORMAL, 1.0f, L"}", 0x30, KBD_SHIFT },
+    { L"g", nullptr, 0x0a, 0, KK_NORMAL, 1.0f, L";", 0x33, 0 },
+    { L"h", nullptr, 0x0b, 0, KK_NORMAL, 1.0f, L":", 0x33, KBD_SHIFT },
+    { L"j", nullptr, 0x0d, 0, KK_NORMAL, 1.0f, L"'", 0x34, 0 },
+    { L"k", nullptr, 0x0e, 0, KK_NORMAL, 1.0f, L"\"", 0x34, KBD_SHIFT },
     { L"l", nullptr, 0x0f, 0, KK_NORMAL, 1.0f },
     { L"enter", nullptr, 0x28, 0, KK_NORMAL, 1.0f },
 };
 inline const Key kSub3[] = {
     { L"shift", nullptr, 0, KBD_SHIFT, KK_MOD, 1.0f },
-    { L"z", nullptr, 0x1d, 0, KK_NORMAL, 1.0f }, { L"x", nullptr, 0x1b, 0, KK_NORMAL, 1.0f },
-    { L"c", nullptr, 0x06, 0, KK_NORMAL, 1.0f }, { L"v", nullptr, 0x19, 0, KK_NORMAL, 1.0f },
-    { L"b", nullptr, 0x05, 0, KK_NORMAL, 1.0f }, { L"n", nullptr, 0x11, 0, KK_NORMAL, 1.0f },
+    { L"z", nullptr, 0x1d, 0, KK_NORMAL, 1.0f, L",", 0x36, 0 },
+    { L"x", nullptr, 0x1b, 0, KK_NORMAL, 1.0f, L"<", 0x36, KBD_SHIFT },
+    { L"c", nullptr, 0x06, 0, KK_NORMAL, 1.0f, L".", 0x37, 0 },
+    { L"v", nullptr, 0x19, 0, KK_NORMAL, 1.0f, L">", 0x37, KBD_SHIFT },
+    { L"b", nullptr, 0x05, 0, KK_NORMAL, 1.0f, L"/", 0x38, 0 },
+    { L"n", nullptr, 0x11, 0, KK_NORMAL, 1.0f, L"?", 0x38, KBD_SHIFT },
     { L"m", nullptr, 0x10, 0, KK_NORMAL, 1.0f },
     { L"\u2191", nullptr, 0x52, 0, KK_NORMAL, 1.0f },
     { L"shift", nullptr, 0, KBD_SHIFT, KK_MOD, 1.0f },
@@ -484,6 +516,11 @@ constexpr bool spans(float total, float cols)
 static_assert(spans(tab_span(kTabSub), kColsSub), "the Sub tab does not span its face");
 static_assert(spans(tab_span(kTabCompact), kColsCompact), "the Compact tab does not span its face");
 static_assert(spans(tab_span(kTabFull), kColsFull), "the Full tab does not span its face");
+// ⓘ And sub-compact's two rows with half keys, whose halves must pay for each
+// other: a row wider than the face becomes the widest, and every key on the
+// face shrinks to fit it while the tab ends short.
+static_assert(spans(tab_span(kSub0), kColsSub), "the Sub digit row does not span its face");
+static_assert(spans(tab_span(kSub1), kColsSub), "the Sub q row does not span its face");
 
 inline const Key kCompact0[] = {
     { L"`", L"~", 0x35, 0, KK_NORMAL, 1.0f },
@@ -624,7 +661,10 @@ inline int g_pressRow = -1, g_pressCol = -1;
 // Cross is released -- so moving the halo mid-press cannot change what is being
 // typed. ⭐ Per device: two pads share this keyboard by design, and a single
 // value would let one pad's press decide the other's key.
-inline std::map<const void *, uint8_t> heldUsageFor;
+// ⓘ With what fn made of it: a symbol on fn carries its own shift, and that
+// has to stay with the key that is down rather than follow the halo.
+struct HeldKey { uint8_t usage; uint8_t mod; bool ownsShift; };
+inline std::map<const void *, HeldKey> heldKeyFor;
 inline const void *g_pasteHeld = nullptr;
 
 inline int mod_state(uint8_t bit)
@@ -676,6 +716,32 @@ inline bool fn_showing()
     return g_fnHeld.load() || mod_state(KBD_FN) != LATCH_OFF;
 }
 
+// ⭐ WHAT FN MAKES OF A KEY, decided once for the mouse, the pad and the
+// drawing. ⚠️ Each of the three carried its own copy of the F-key rule, and a
+// rule in three places drifts: this file's notes count four build cycles lost
+// to exactly that.
+//
+// ⓘ An F key first, counted along the face by fn_index(); then a key that
+// names its own fn layer, the corner key and sub-compact's symbols. Anything
+// else fn leaves alone, and this returns false.
+// ⓘ ownsShift: an F key passes shift through (shift+F1 is a real chord); a
+// symbol replaces it with its own, so it types what it shows.
+struct FnKey { const wchar_t *label; uint8_t usage; uint8_t mod; bool ownsShift; };
+inline bool fn_key(const Key &k, int row, int col, FnKey *out)
+{
+    if (k.kind == KK_FN) {
+        const int idx = fn_index(row, col);
+        if (idx < 0 || idx >= 12) return false;
+        *out = FnKey{ kFnLabels[idx], kFnUsages[idx], 0, false };
+        return true;
+    }
+    if (k.fnLabel != nullptr) {
+        *out = FnKey{ k.fnLabel, k.fnUsage, k.fnMod, true };
+        return true;
+    }
+    return false;
+}
+
 inline bool shift_showing()
 {
     return mod_state(KBD_SHIFT) != LATCH_OFF || g_shiftHeld.load();
@@ -683,7 +749,6 @@ inline bool shift_showing()
 
 // Where the highlight is, and where each key ended up on screen.
 inline int g_row = 1, g_col = 1;
-inline int g_anchorX = 0;          // see move_v
 
 struct Placed { RECT r; int row, col; };
 inline std::vector<Placed> g_placed;
@@ -750,12 +815,6 @@ inline void layout(int w, int h)
     }
 }
 
-inline const Placed *placed_of(int row, int col)
-{
-    for (const Placed &p : g_placed) if (p.row == row && p.col == col) return &p;
-    return nullptr;
-}
-
 // ⭐⭐ THE MOUSE DRIVES IT TOO, always -- not as a mode.
 //
 // ⛔ rhoquinn8217, 2026-09-02: switching between a mouse and a controller is a
@@ -800,6 +859,15 @@ inline bool is_key(int row, int col)
     return rows_now()[row].keys[col].kind != KK_SPACER;
 }
 
+// ⓘ Where a key starts in the TABLE, in key widths from the left edge. The
+// walk measures in these rather than in pixels.
+inline float key_left(int row, int col)
+{
+    float x = 0.0f;
+    for (int c = 0; c < col; ++c) x += rows_now()[row].keys[c].wide;
+    return x;
+}
+
 inline void move_h(int dir)
 {
     const int n = rows_now()[g_row].count;
@@ -809,8 +877,6 @@ inline void move_h(int dir)
         g_col = (g_col + dir + n) % n;
         if (is_key(g_row, g_col)) break;
     }
-    const Placed *p = placed_of(g_row, g_col);
-    if (p) g_anchorX = (p->r.left + p->r.right) / 2;
     invalidate();
 }
 
@@ -820,28 +886,52 @@ inline void move_h(int dir)
 // the next. Nearest-by-centre is what makes pressing up from shift land on
 // ctrl, which is what a person expects from looking at it.
 //
-// ⚠️ AND IT REMEMBERS THE COLUMN IT STARTED FROM. Nearest-above and
-// nearest-below are not symmetric: up from v then down again could land on c
-// rather than v, which feels broken even though each step was right. The
-// anchor is set by SIDEWAYS moves only, so a run of up-and-down keeps its line.
+// ⚠️ It used to REMEMBER the column it started from, set by sideways moves
+// only, so a run of up-and-down kept its line. The diagonal note below ended
+// that -- every landing moved the anchor -- so the anchor was always the key
+// you were on, except twice: straight after opening, when it sat at the left
+// edge, and after a face change, when it held the last face's pixels. ➡️ It
+// is measured from the key you are on now, and there is nothing to store.
 inline void move_v(int dir)
 {
     const int next = g_row + dir;
     if (next < 0 || next >= kRowCount) return;       // clamped: rows are few
 
+    // ⭐ IN THE TABLE'S UNITS, NOT PIXELS (2026-10-02). Rounding every key to
+    // pixels turned a key exactly between two into a near miss, and the near
+    // miss always fell LEFT, so no tie could be decided on purpose.
+    const float anchor = key_left(g_row, g_col) + key_at(g_row, g_col).wide / 2.0f;
+
+    // ⭐⭐ ON SUB-COMPACT A TIE GOING DOWN TAKES THE RIGHT-HAND KEY
+    // (rhoquinn8217, 2026-10-02). Its half keys put the top two rows half a key
+    // out from the rest, so every key on the q row sits exactly between two
+    // below it -- and taking the left one walked 1, q, ctrl, shift where the
+    // note below asks for 1, q, a, z. Right on the way down and left on the
+    // way up is how a real keyboard's rows step.
+    // ⓘ Only there: on FULL the digits sit half a key RIGHT of the letters, and
+    // the left key is what puts 1 over q; on COMPACT the one tie is enter,
+    // whose key below is shift.
+    const bool tieGoesRight = (dir > 0 && g_face.load() == FACE_SUB);
+
     // ⛔ DISTANCE TO THE KEY, NOT TO ITS CENTRE. Measuring to centres broke on
     // the wide keys: space is nine units across, so its centre sits far to the
     // right and pressing down from z landed on win -- even though z is
     // directly above the space bar. A key you are standing over is zero away.
-    int best = 0, bestDist = 1 << 30;
+    // ⓘ MEASURED against the pixel walk at twelve window sizes (2026-10-02):
+    // COMPACT and FULL land where they did, except going down from the tab's
+    // ⚙ and ↗. Those buttons are thirds of a key written as 0.67, so their
+    // middles sit 0.005 off a boundary, and the pixel walk settled them by
+    // rounding -- one key at some window sizes, its neighbour at others. Now it
+    // is always the key under the button's middle.
+    int best = 0;
+    float bestDist = 1.0e9f;
     for (int c = 0; c < rows_now()[next].count; ++c) {
         if (!is_key(next, c)) continue;          // never land on the grab area
-        const Placed *p = placed_of(next, c);
-        if (!p) continue;
-        int d = 0;
-        if (g_anchorX < p->r.left)       d = p->r.left - g_anchorX;
-        else if (g_anchorX > p->r.right) d = g_anchorX - p->r.right;
-        if (d < bestDist) { bestDist = d; best = c; }
+        const float x0 = key_left(next, c), x1 = x0 + key_at(next, c).wide;
+        float d = 0.0f;
+        if (anchor < x0)      d = x0 - anchor;
+        else if (anchor > x1) d = anchor - x1;
+        if (d < bestDist || (tieGoesRight && d == bestDist)) { bestDist = d; best = c; }
     }
     g_row = next;
     g_col = best;
@@ -857,9 +947,7 @@ inline void move_v(int dir)
     // ⚠️ The cost is that up-then-down is no longer guaranteed to return to the
     // same key when two keys are equally near. That is true of a real keyboard
     // too -- above v is as much f as g -- and following the stagger is what
-    // was asked for.
-    const Placed *landed = placed_of(g_row, g_col);
-    if (landed) g_anchorX = (landed->r.left + landed->r.right) / 2;
+    // was asked for. ⓘ The next move measures from wherever this one lands.
     invalidate();
 }
 
@@ -950,13 +1038,14 @@ inline void press_current(const void *who)
     }
 
     uint8_t usage = k.usage;
-    if (fn_showing() && k.kind == KK_FN) {
-        const int idx = fn_index(g_row, g_col);
-        if (idx >= 0 && idx < 12) usage = kFnUsages[idx];
-    }
     uint8_t mods = active_mods();
     if (g_shiftHeld.load()) mods |= KBD_SHIFT;
     mods |= k.mod;
+    FnKey fk;
+    if (fn_showing() && fn_key(k, g_row, g_col, &fk)) {
+        usage = fk.usage;
+        if (fk.ownsShift) mods = (uint8_t)((mods & ~KBD_SHIFT) | fk.mod);
+    }
 
     uint8_t keys[6] = { usage, 0, 0, 0, 0, 0 };
     ctm_keyboard_device::set_state_for(who, mods, keys, usage != 0 ? 1 : 0);
@@ -1087,7 +1176,7 @@ inline void paint(HWND hwnd)
         if (k.kind == KK_MOD) {
             const int st = mod_state(k.mod);
             fill = st == LATCH_LOCKED ? fillLock : st == LATCH_ON ? fillLatch : fillMod;
-        } else if (k.kind == KK_FN && fnNow) {
+        } else if (fnNow && (k.kind == KK_FN || k.fnLabel != nullptr)) {
             fill = fillFn;
         } else if (k.kind == KK_ACTION) {
             fill = fillMod;
@@ -1113,8 +1202,8 @@ inline void paint(HWND hwnd)
             }
         }
 
-        // ⓘ One label decided in one place: F-keys win over shifted, which wins
-        // over the plain one.
+        // ⓘ One label decided in one place: what fn makes of a key wins over
+        // shifted, which wins over the plain one.
         const wchar_t *label = k.label;
         // ⛔ THE DRAWING'S COPY OF THE ESC SUBSTITUTION IS GONE TOO
         // (2026-09-04). Removing it from the TYPING path left this one, so esc
@@ -1122,9 +1211,9 @@ inline void paint(HWND hwnd)
         // either behaviour alone.
         // ⚠️ Second copy of one rule, which this file's own notes record as
         // having cost four build cycles already.
-        if (k.kind == KK_FN && fnNow) {
-            const int idx = fn_index(p.row, p.col);
-            if (idx >= 0 && idx < 12) label = kFnLabels[idx];
+        FnKey fk;
+        if (fnNow && (k.kind == KK_FN || k.fnLabel != nullptr)) {
+            if (fn_key(k, p.row, p.col, &fk)) label = fk.label;
         } else if (shiftNow && k.shifted != nullptr) {
             label = k.shifted;
         } else if (shiftNow && k.kind != KK_ACTION && k.kind != KK_MOD
@@ -1397,8 +1486,6 @@ inline LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             // ⓘ The click moves the PAD's highlight too. Two pointers
             // disagreeing about where you are is worse than either alone.
             g_row = r; g_col = c;
-            const Placed *pl = placed_of(r, c);
-            if (pl) g_anchorX = (pl->r.left + pl->r.right) / 2;
             // ⛔⛔ CAPTURE THE MOUSE. Without it the button-up goes to whatever
             // window is under the cursor, so releasing OUTSIDE the keyboard
             // meant we never heard it and the key stayed held down forever
@@ -1872,11 +1959,11 @@ inline bool handle_report(const void *deviceKey, const ctm_rebind::Layout &lay,
     // than a bare static: two pads share this keyboard by design, and a static
     // would let one pad's press decide the other's key.
     const bool crossFresh = edge(deviceKey, 6, cross);
-    uint8_t &heldUsage = heldUsageFor[deviceKey];
+    HeldKey &held = heldKeyFor[deviceKey];
 
     if (cross && k.kind != KK_MOD && k.kind != KK_ACTION) {
         if (crossFresh) {
-            heldUsage = k.usage;
+            held = HeldKey{ k.usage, 0, false };
             // ⛔ ESC NO LONGER BECOMES THE BACKTICK UNDER FN (rhoquinn8217,
             // 2026-09-04: "it's also shifting esc when it doesn't need to").
             //
@@ -1885,18 +1972,20 @@ inline bool handle_report(const void *deviceKey, const ctm_rebind::Layout &lay,
             // is the one face that already carries its own ` key. So the
             // substitution could only ever fire where a backtick sat two keys
             // away -- it changed a key under fn for no gain.
-            if (fn_showing() && k.kind == KK_FN) {
-                const int idx = fn_index(g_row, g_col);
-                if (idx >= 0 && idx < 12) heldUsage = kFnUsages[idx];
-            }
+            // ⓘ Sub-compact's corner key goes the other way, and was asked for:
+            // a backtick that is esc under fn, on the face with no esc key
+            // (rhoquinn8217, 2026-10-02).
+            FnKey fk;
+            if (fn_showing() && fn_key(k, g_row, g_col, &fk))
+                held = HeldKey{ fk.usage, fk.mod, fk.ownsShift };
             // ⓘ And the PRESSED MARKER latches with it: it followed the halo
             // too, so the drawing disagreed with the key actually down.
             g_pressRow = g_row; g_pressCol = g_col;
             invalidate();
         }
-        usage = heldUsage;
+        usage = held.usage;
     } else if (!cross) {
-        heldUsage = 0;
+        held = HeldKey{};
     }
 
 
@@ -1905,6 +1994,9 @@ inline bool handle_report(const void *deviceKey, const ctm_rebind::Layout &lay,
     // ⓘ A key can carry its own modifier -- " is shift+' -- so it types without
     // anything being latched first.
     if (usage != 0 && k.kind == KK_NORMAL) mods |= k.mod;
+    // ⓘ A symbol on fn types what it shows: its own shift, not the latch's
+    // or the shoulder's.
+    if (usage != 0 && held.ownsShift) mods = (uint8_t)((mods & ~KBD_SHIFT) | held.mod);
 
     // ⓘ A tap in flight outranks everything: it is a modifier with NO key, held
     // for a few reports so the host registers a press and a release.
@@ -1979,7 +2071,7 @@ inline void hide()
         g_padPrev.clear();
         // ⓘ T-142's latched key goes with it, or a key held when the keyboard
         // closed would still be the "held" one when it next opens.
-        heldUsageFor.clear();
+        heldKeyFor.clear();
         // ⓘ And each pad's held direction and shoulders, so a pad that leaves
         // with L1 down cannot hold the capitals layer on the next keyboard.
         g_dirHeldFor.clear();
