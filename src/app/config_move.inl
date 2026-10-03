@@ -73,9 +73,15 @@ inline window_move::Movers g_movers;
 // ⓘ It still OPENS at medium, and R3's index lives here for the life of the
 // listener, so a large chosen once survives every close until the listener
 // restarts.
+// ⭐⭐ TWO SINCE 2026-10-02: THE SMALL IS GONE (rhoquinn8217: *"remove advanced
+// modes smallest resize. It doesn't work well in 250% scale. This will make it
+// so that there is only 2 resizes for each mode"*). Medium is index 0 now and
+// what Advanced opens at, large is index 1, and every layout cycles two.
+// ⓘ A window-state.txt from before counted three, so state_load() moves its
+// index down one; `advanced_sizes = 2` marks a file written since.
 struct SizeShare { double w; double h; };
-inline const SizeShare kSizes[3] = { { 0.55, 0.66 }, { 0.68, 0.73 }, { 0.90, 0.94 } };
-inline std::atomic_int g_size{1};
+inline const SizeShare kSizes[2] = { { 0.68, 0.73 }, { 0.90, 0.94 } };
+inline std::atomic_int g_size{0};
 
 // ⭐ COMPACT HAS SIZES OF ITS OWN (rhoquinn8217, 2026-09-09): at 250% scaling on
 // a large screen the compact view still needs to be sized to the room, so R3
@@ -429,7 +435,7 @@ inline void set_view(bool compact, bool quick, bool restore)
     // switch -- so keeping a custom one here would put the two placers into
     // disagreement, which is the fault T-239 spent an evening on.
     clear_custom_size();
-    if (!compact) g_size.store(1);
+    if (!compact) g_size.store(0);
     else if (quick) g_sizeQuick.store(0);
     else g_sizeCompact.store(0);
     device_log::input(device_log::msg()
@@ -769,6 +775,9 @@ inline void state_save()
     out << "compact = " << (g_compact.load() ? 1 : 0) << "\n"
         << "quick = " << (g_quick.load() ? 1 : 0) << "\n"
         << "known = " << (g_known.load() ? 1 : 0) << "\n"
+        // ⓘ Marks a file that counts Advanced's TWO sizes (2026-10-02); one
+        // without it counted three, and state_load() moves its index down.
+        << "advanced_sizes = 2\n"
         << "size_advanced = " << g_size.load() << "\n"
         << "size_simple = " << g_sizeCompact.load() << "\n"
         << "size_quick = " << g_sizeQuick.load() << "\n";
@@ -805,6 +814,10 @@ inline void state_load()
     std::ifstream f(state_file());
     if (!f) return;
     std::string line;
+    // ⓘ Advanced's index is used after the whole file is read: only the whole
+    // file says whether it counted three sizes or two.
+    bool advancedTwo = false;
+    int advancedRaw = -1;
     while (std::getline(f, line)) {
         if (line.empty() || line[0] == '#') continue;
         const size_t eq = line.find('=');
@@ -859,9 +872,17 @@ inline void state_load()
         if (key == "compact") g_compact.store(n != 0);
         else if (key == "quick") g_quick.store(n != 0);
         else if (key == "known") g_known.store(n != 0);
-        else if (key == "size_advanced") g_size.store(n);
+        else if (key == "size_advanced") advancedRaw = n;
+        else if (key == "advanced_sizes") advancedTwo = (n == 2);
         else if (key == "size_simple") g_sizeCompact.store(n);
         else if (key == "size_quick") g_sizeQuick.store(n);
+    }
+    if (advancedRaw >= 0) {
+        // ⭐ The small size went on 2026-10-02 (kSizes). An index saved under
+        // three sizes is one too high under two -- medium was 1 and is 0 now
+        // -- so a window left at medium opens at medium, not at large.
+        const int idx = advancedTwo ? advancedRaw : advancedRaw - 1;
+        g_size.store(idx < 0 ? 0 : (idx > 1 ? 1 : idx));
     }
     device_log::input(device_log::msg()
         << "ui/state-load: compact=" << (g_compact.load() ? 1 : 0)
@@ -979,10 +1000,11 @@ inline void apply_size(HWND hwnd, int *outW, int *outH)
     // memory -- place() below -- and so does the last look on the way out.
 }
 
-// How many sizes this layout cycles: three in Advanced, two in the others.
+// How many sizes this layout cycles: two, in every layout since 2026-10-02
+// (Advanced had three; see kSizes).
 inline int size_count()
 {
-    return g_compact.load() ? 2 : 3;
+    return 2;
 }
 
 // R3: the next of this layout's sizes.

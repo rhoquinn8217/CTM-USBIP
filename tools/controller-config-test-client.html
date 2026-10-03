@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.50 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.51 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,11 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.51 Circle in Quick goes to Close, as in Simple, and its legend says
+            "to close". Down from Quick's auto button lands on Close and up
+            from Close on the auto button; down from Simple's config picker
+            lands on New. Circle or Escape in Advanced lands on Close in the
+            footer. (Advanced keeps two sizes, which is the listener's.)
     2.66.50 The page sizes Quick on a switch at the listener's new width,
             0.278 of the screen: 2.66.49 left it at 0.185, so a switch into
             Quick opened at the old width while the resize button stepped
@@ -1767,7 +1772,7 @@
 <div class="bar">
   <!-- ⓘ The same number as VERSION at the top of this file, by hand. It sat
        at 2.66.4 for thirty-four versions while VERSION moved on. -->
-  <span class="muted" style="font-size:12px">v2.66.50</span>
+  <span class="muted" style="font-size:12px">v2.66.51</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -2109,6 +2114,8 @@ function call(method, path, body, quiet) {
 // ⓘ Advanced's MEDIUM (rhoquinn8217, 2026-09-09: two sizes per layout, and
 // Advanced keeps small and medium). Duplicated in the listener's spawn size;
 // the two move together.
+// ⓘ The smaller of Advanced's TWO since 2026-10-02, when the small went (it
+// did not work at 250% scaling); the large is the other.
 function wantSize() {
   return { w: Math.round(screen.availWidth * 0.68),
            h: Math.round(screen.availHeight * 0.73) };
@@ -6550,6 +6557,25 @@ function gpKeyMove(delta) {
   gpMove(delta);
 }
 
+// ⭐ THREE LANDINGS BY NAME (rhoquinn8217, 2026-10-02), exceptions to
+// compactMove's nearest-centre rule: in Quick, *"pressing down from auto_link
+// button lands on close and pressing up on close lands on auto link"*; in
+// Simple, *"pressing down from the config selector lands on "New" button"*.
+// ⓘ The rows hold only enabled controls, so a greyed-out auto button is no
+// stop: up from Close then falls through to the rule, the config picker.
+function compactLanding(cur, dy, topRow, foot, bar) {
+  var auto = topRow.filter(function (e) { return e.classList.contains('cauto-btn'); })[0];
+  var close = bar.filter(function (e) { return e.classList.contains('cclose'); })[0];
+  var newBtn = foot.filter(function (e) { return e.textContent.trim() === 'New'; })[0];
+  if (QUICK) {
+    if (dy > 0 && auto && cur === auto && close) return close;
+    if (dy < 0 && close && cur === close && auto) return auto;
+    return null;
+  }
+  if (dy > 0 && cur && cur.id === 'cpick' && newBtn) return newBtn;
+  return null;
+}
+
 // ⭐ COMPACT IS A GRID (rhoquinn8217, 2026-09-09): the selector or Start on
 // top, New and Edit under it, Configurator and Close in the footer's corners.
 // Down from New lands on Configurator, down from Edit on Close -- the column
@@ -6596,6 +6622,8 @@ function compactMove(dx, dy) {
   });
   if (r < 0) return false;
   if (dy) {
+    var landing = compactLanding(cur, dy, topRow, foot, bar);
+    if (landing) return focusElement(landing);
     // DOWN LANDS ON WHAT IS ACTUALLY BELOW (rhoquinn8217, 2026-09-20:
     // *"pressing down on the edit button should bring you to the mode selector
     // in simple mode"*). This clamped the COLUMN INDEX instead, so Edit --
@@ -6775,19 +6803,20 @@ function gpKeyBack() {
   }
   if (GP_SELECTING) { gpSelectEnd(false); return; }
   if (RENAMING) { cancelRename(); return; }
-  // ⭐ IN SIMPLE, CIRCLE GOES TO THE CLOSE BUTTON RATHER THAN CLOSING
-  // (rhoquinn8217, 2026-09-20: *"circle button or esc on simple mode should
-  // not close the window anymore. It should now focus on the close button."*).
-  // One press no longer ends the session by itself -- the second press, on the
-  // button, does.
-  // ⚠️ QUICK STILL CLOSES OUTRIGHT. Only Simple was asked for, and Quick is
-  // the mid-game view where one press out is the point of it. The two legends
-  // say different things now, which is the honest reading of two behaviours.
-  if (COMPACT && !QUICK) {
+  // ⭐ IN SIMPLE AND QUICK, CIRCLE GOES TO THE CLOSE BUTTON RATHER THAN
+  // CLOSING. Simple first (rhoquinn8217, 2026-09-20: *"circle button or esc on
+  // simple mode should not close the window anymore. It should now focus on
+  // the close button."*), then Quick (2026-10-02: *"I don't want it to close
+  // right away. ... Circle moves focus to the close button."*), which had been
+  // kept closing outright as the mid-game view. One press no longer ends the
+  // session by itself -- the second press, on the button, does.
+  if (COMPACT) {
     var closeBtn = document.querySelector('#compactBox .cbar > button');
     if (closeBtn && focusElement(closeBtn)) return;
+    // ⓘ Only when there is no Close to go to: close, as before.
+    closeWindow();
+    return;
   }
-  if (COMPACT) { closeWindow(); return; }
 
   // ⛔ CIRCLE LETS GO OF A TEXT BOX (rhoquinn8217, 2026-09-03: "circle should
   // remove the white focus on the box but it doesn't").
@@ -7254,6 +7283,11 @@ function setFooterMode(on) {
   if (on) {
     GP_INDEX = 0;
     gpCollect();
+    // ⭐ ON CLOSE, NOT THE FIRST CONTROL (rhoquinn8217, 2026-10-02: *"in
+    // advance mode, pressing circle/escape should move you to the footer area
+    // but land you on the "close" button."*). The Mode picker is one step
+    // left of it.
+    focusElement(document.getElementById('closeBtn'));
     return;
   }
 
@@ -8306,7 +8340,9 @@ function paintCompact() {
             // also"*), following the input in hand like the ring's keys.
             LG.shoulder + ' controller | ' +
             LG.position + ' position | ' + LG.resize + ' resize | ' +
-            LG.close + ' close</div></div>' +
+            // ⓘ "to close", as Simple's says: Circle goes to Close now
+            // (2026-10-02) rather than closing.
+            LG.close + ' to close</div></div>' +
             modePickerHtml('cselMode') +
             '<button class="cclose" onclick="closeWindow()">Close</button></div>';
   } else {
