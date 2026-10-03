@@ -25,7 +25,9 @@
             Square/X to open the virtual keyboard, hint 11 reads "quickly
             switch", and hint 12 says the window and the keyboard open
             again just as they were left. Hints 1 and 5 name the pad's
-            buttons by their symbols, as hint 3 already did.
+            buttons by their symbols, as hint 3 already did. Hint 8 is in
+            the input in use: Q E P R from a keyboard, the pad's shoulders and
+            buttons from a pad, with no "From a keyboard" before it.
     2.66.52 Simple's footer has a twelfth hint: this window and the
             virtual keyboard keep their mode, size and location when
             they are opened again.
@@ -3443,8 +3445,17 @@ var FOOTER_HINTS = [
 
   'Drag this window by <b>any empty part of it</b>, not just the title bar.',
 
-  'From a keyboard: <b>Q</b> and <b>E</b> change controller, <b>P</b> moves ' +
-  'this window, <b>R</b> resizes it.',
+  // ⭐ IN THE INPUT YOU ARE USING (rhoquinn8217, 2026-10-03: "Can you make
+  // this hint based on what the user is currently using? Remove the 'From a
+  // keyboard'"). The legend's own three sets, so a keyboard reads Q E P R, a
+  // PlayStation pad L1 R1 and its two buttons, an Xbox pad LB RB and its two.
+  // ⓘ A function, so it is worked out each time the hint is drawn: Simple
+  // repaints when the input changes (noteInputSource, pollLastPress).
+  function () {
+    var L = padLegend(), sh = L.shoulder.split('/');
+    return '<b>' + sh[0] + '</b> and <b>' + sh[1] + '</b> change controller, <b>' +
+      L.position + '</b> moves this window, <b>' + L.resize + '</b> resizes it.';
+  },
 
   // ⓘ The wording of this one and of the two after it is rhoquinn8217's
   // own (2026-10-01), given after seeing the first eight on screen.
@@ -3468,6 +3479,12 @@ var HINT_AT = 0;
 var HINT_TIMER = null;
 var HINT_HELD = false;     // true while the pointer rests on the hint
 
+// ⓘ A hint is a string, or a function for one that follows the input in use.
+function hintHtml(i) {
+  var h = FOOTER_HINTS[i];
+  return typeof h === 'function' ? h() : h;
+}
+
 // ⛔⛔ SLOW, AND IT STOPS WHEN YOU LOOK AT IT. This footer is read WHILE
 // configuring, and text that changes under a reader is worse than text that
 // sits still.
@@ -3485,7 +3502,7 @@ function hintAdvance() {
   if (!COMPACT || QUICK) return;
   HINT_AT = (HINT_AT + 1) % FOOTER_HINTS.length;
   var el = document.querySelector('#compactBox .cinfo');
-  if (el) el.innerHTML = FOOTER_HINTS[HINT_AT];
+  if (el) el.innerHTML = hintHtml(HINT_AT);
 }
 
 // ⓘ The TIMER's path, which is the one that must hold back.
@@ -8369,7 +8386,7 @@ function paintCompact() {
             '<div class="cinfo" title="Click for the next tip" ' +
             'onmouseenter="HINT_HELD = true" onmouseleave="HINT_HELD = false" ' +
             'onmousedown="hintPressed(event)" onmouseup="hintReleased(event)">' +
-            FOOTER_HINTS[HINT_AT] + '</div>' +
+            hintHtml(HINT_AT) + '</div>' +
             '</div>' + modePickerHtml('cselMode') +
             '<button class="cclose" onclick="closeWindow()">Close</button></div>';
   }
@@ -9264,11 +9281,25 @@ function selfTest() {
        'got ' + FOOTER_HINTS.length);
     var allText = true, i;
     for (i = 0; i < FOOTER_HINTS.length; i++) {
-      if (typeof FOOTER_HINTS[i] !== 'string' || FOOTER_HINTS[i].length === 0) {
+      var h = hintHtml(i);
+      if (typeof h !== 'string' || h.length === 0) {
         allText = false;
       }
     }
     ok('no hint is empty or a non-string', allText);
+
+    // ⓘ Hint 8 follows the input in use, from the legend's own sets.
+    var savedInput = INPUT_LAST, savedKind = LAST_PRESS_KIND;
+    INPUT_LAST = 'keyboard';
+    ok('hint 8 names Q, E, P and R for a keyboard',
+       hintHtml(7).indexOf('<b>Q</b>') >= 0 && hintHtml(7).indexOf('From a keyboard') < 0, hintHtml(7));
+    INPUT_LAST = 'pad';
+    LAST_PRESS_KIND = 'xbox';
+    ok('hint 8 names LB and RB for an Xbox pad', hintHtml(7).indexOf('<b>LB</b>') >= 0, hintHtml(7));
+    LAST_PRESS_KIND = 'ds5';
+    ok('hint 8 names L1 and R1 for a DualSense', hintHtml(7).indexOf('<b>L1</b>') >= 0, hintHtml(7));
+    INPUT_LAST = savedInput;
+    LAST_PRESS_KIND = savedKind;
 
     // The rotation must return to the first hint and not run off the end.
     var savedAt = HINT_AT;
