@@ -256,6 +256,31 @@ inline void change_layout(int index)
     if (wasOpen) ctm_chord_show_ui(ordinal);
 }
 
+// The part a device's line speaks for: the first that takes a config, else the
+// first -- the part the settings page leads that device's tab with, so the
+// line names what the tab names.
+inline size_t lead_part(const std::vector<RestDeviceView> &devices,
+                        const std::vector<size_t> &parts)
+{
+    for (size_t i : parts) {
+        if (config_store::kind_supports_config(devices[i].kind)) return i;
+    }
+    return parts.front();
+}
+
+// The part whose battery a device's line shows: the lead's when it reports
+// one, else the first part that does. A receiver's parts report none.
+inline size_t battery_part(const std::vector<RestDeviceView> &devices,
+                           const std::vector<size_t> &parts)
+{
+    const size_t lead = lead_part(devices, parts);
+    if (devices[lead].batteryPercent >= 0) return lead;
+    for (size_t i : parts) {
+        if (devices[i].batteryPercent >= 0) return i;
+    }
+    return lead;
+}
+
 inline void show_menu(HWND hwnd)
 {
     HMENU menu = CreatePopupMenu();
@@ -268,7 +293,12 @@ inline void show_menu(HWND hwnd)
     // the count and the list are what is true at this moment and need no
     // keeping up to date.
     const std::vector<RestDeviceView> devices = rest_collect_devices();
-    const size_t listed = devices.size() < kMaxListed ? devices.size() : kMaxListed;
+    // ⭐ ONE LINE PER DEVICE (rhoquinn8217, 2026-10-02): the parts under one
+    // nickname are one device here, as on the settings page's tabs.
+    std::vector<std::string> names;
+    for (const RestDeviceView &d : devices) names.push_back(d.nickname);
+    const std::vector<std::vector<size_t>> groups = tray_menu::group_by_name(names);
+    const size_t listed = groups.size() < kMaxListed ? groups.size() : kMaxListed;
 
     // ---- The title, and how many are connected ------------------------------
     // ⓘ The count is of the lines the list below will show, so the two cannot
@@ -286,20 +316,21 @@ inline void show_menu(HWND hwnd)
     }
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
 
-    // ---- Controllers: a line each, and choosing one opens the window on it ---
+    // ---- Devices: a line each, and choosing one opens the window on it ------
     // ⓘ Every bridged device is here, a keyboard or a mouse included: it is
-    // the list the settings page shows.
+    // the list the settings page's tabs show, one line per device.
     const HMENU list = CreatePopupMenu();
     for (size_t i = 0; i < listed; ++i) {
-        const RestDeviceView &d = devices[i];
+        const RestDeviceView &d = devices[lead_part(devices, groups[i])];
+        const RestDeviceView &b = devices[battery_part(devices, groups[i])];
         const std::string line = tray_menu::device_line(
             d.nickname, device_names::label(d.kind, d.product, d.deviceType),
-            d.batteryPercent, d.batteryState);
+            b.batteryPercent, b.batteryState);
         AppendMenuW(list, MF_STRING, kIdDeviceFirst + static_cast<UINT>(i), widen(line).c_str());
     }
     // ⓘ Greyed with nothing bridged, and then it opens no side menu.
     AppendMenuW(menu, MF_POPUP | (listed == 0 ? MF_GRAYED : 0u),
-                reinterpret_cast<UINT_PTR>(list), tray_menu::kControllers);
+                reinterpret_cast<UINT_PTR>(list), tray_menu::kDevices);
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
 
     // ---- The config window and the keyboard ---------------------------------
@@ -341,8 +372,8 @@ inline void show_menu(HWND hwnd)
 
     if (chosen >= kIdDeviceFirst && chosen < kIdDeviceFirst + listed) {
         // ⭐ The same call the pad's own chord makes: the window opens on that
-        // controller's tab.
-        const RestDeviceView &d = devices[chosen - kIdDeviceFirst];
+        // device's tab. ⓘ The page finds a device's tab from any of its parts.
+        const RestDeviceView &d = devices[lead_part(devices, groups[chosen - kIdDeviceFirst])];
         device_log::session_w() << L"tray: opening the config window on " << widen(d.ordinal);
         ctm_chord_show_ui(d.ordinal);
         return;
