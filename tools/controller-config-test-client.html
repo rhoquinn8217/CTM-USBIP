@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.44 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.45 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,11 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.45 The device marks follow the battery gauge where the gauge sits
+            beside the name, in the tabs and on Simple's and Quick's big
+            name; with no gauge they stay right after the name. The tables
+            give the battery its own column, so there they stay after the
+            nickname.
     2.66.44 Two messages in rhoquinn8217's words: a device with no serial
             reads "(no serial - auto_link disabled)" in both tables, and a
             device that takes no config reads "Configs can only be set for
@@ -1734,7 +1739,7 @@
 <div class="bar">
   <!-- ⓘ The same number as VERSION at the top of this file, by hand. It sat
        at 2.66.4 for thirty-four versions while VERSION moved on. -->
-  <span class="muted" style="font-size:12px">v2.66.44</span>
+  <span class="muted" style="font-size:12px">v2.66.45</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -2671,8 +2676,11 @@ function renderTabs(devices) {
             ' title="' + (ready ? 'ready' : 'starting or tearing down') + '"' +
             ' onclick="showTab(\'' + esc(d.ordinal) + '\')">' +
             '<span class="tabtop">' + dot +
-              '<span class="tabname">' + esc(nameFor(d.ordinal)) + deviceIcons(parts) + '</span>' +
-              batteryTag(d) +
+              '<span class="tabname">' + esc(nameFor(d.ordinal)) + '</span>' +
+              // ⓘ The marks after the gauge (rhoquinn8217, 2026-10-02: *"move
+              // the icon after the battery icon if there is one"*); with no
+              // gauge they sit right after the name, as before.
+              batteryTag(d) + deviceIcons(parts) +
             '</span>' +
             '<em class="tabkind">' + esc(deviceLabelShort(d)) + '</em>' +
             '</button>';
@@ -8127,8 +8135,8 @@ function paintCompact() {
     // under the name, and the L1 and R1 neighbours with theirs.
     html += '<div class="ccar' + slide + '">' +
             side(prev, 'l', '\u25c2 L1') +
-            '<div class="ccur"><div class="cname">' + esc(nameFor(d.ordinal)) + deviceIcons(partsOf(d.ordinal)) +
-            batteryTag(d) + '</div>' +
+            '<div class="ccur"><div class="cname">' + esc(nameFor(d.ordinal)) +
+            batteryTag(d) + deviceIcons(partsOf(d.ordinal)) + '</div>' +
             '<div class="ckind">' + esc(deviceLabelShort(d)) + '</div></div>' +
             side(next, 'r', 'R1 \u25b8') +
             '</div>';
