@@ -83,6 +83,8 @@ inline std::atomic_bool g_gateHold{false};
 // and this runs on every report from every pad; the REST side resolves it once
 // when it is asked, with ctm_ordinal_for_device().
 inline std::atomic<const void *> g_lastPressDevice{nullptr};
+// ⓘ And its layout, for the on-screen keyboard's button symbols.
+inline std::atomic<const Layout *> g_lastPressLayout{nullptr};
 
 inline const void *last_press_device()
 {
@@ -435,6 +437,7 @@ inline void apply(const void *deviceKey,
     for (int i = 0; i < kButtonCount; ++i) {
         if (is_pressed(*layout, data, len, i)) {
             g_lastPressDevice.store(deviceKey, std::memory_order_relaxed);
+            g_lastPressLayout.store(layout, std::memory_order_relaxed);
             break;
         }
     }
@@ -1104,6 +1107,12 @@ const void *rebind_last_press_device()
     return ctm_rebind::last_press_device();
 }
 
+const char *rebind_last_press_layout()
+{
+    const ctm_rebind::Layout *l = ctm_rebind::g_lastPressLayout.load(std::memory_order_relaxed);
+    return l != nullptr ? l->name : nullptr;
+}
+
 bool ctm_rebind_gate_hold()
 {
     return ctm_rebind::gate_hold();
@@ -1122,6 +1131,11 @@ void ctm_rebind_set_config_mode(bool on)
     // `editing: false`, so the flag would latch on forever and the keyboard
     // would keep opening when it should refuse.
     // ⭐⭐ EITHER WAY, THE KEYBOARD CLOSES (T-141).
+    // ⛔ NOT ON GAINING IT ANY MORE (rhoquinn8217, 2026-10-03: "I also don't
+    // want the keyboard to close when the config window is opened"). The
+    // keyboard stays up and keeps the pad until Circle closes it. Losing
+    // focus still closes one that was opened FOR this window, to name a
+    // config; one opened over a game is not this window's to close.
     //
     // **Losing** focus ends its warrant: it was allowed to open only because a
     // field in THIS window had focus.
@@ -1134,7 +1148,7 @@ void ctm_rebind_set_config_mode(bool on)
     // the window keeps focus throughout and no transition happens.
     // ⓘ hide() arms the swallow, so a trigger held across the close does not
     // arrive as a press nobody made.
-    ctm_overlay_hide();
+    if (!on && ctm_overlay_opened_for_page()) ctm_overlay_hide();
 
     // ⓘ A fresh visit gets the explanation again.
     if (on) ctm_rebind::g_saidKeyboardRefused = false;
