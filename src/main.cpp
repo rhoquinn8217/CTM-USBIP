@@ -94,6 +94,9 @@ std::string ctm_ui_take_notice();
 // ⓘ T-141. Defined in osk.inl, beside ctm_overlay_open_steam and for the same
 // reason: rest_config.inl is included before the overlay exists.
 void ctm_overlay_hide();
+// ⓘ Whether the open keyboard was opened FOR the config window -- naming a
+// config there -- the only keyboard that window may close.
+bool ctm_overlay_opened_for_page();
 bool ctm_rebind_gate_hold();
 void ctm_rebind_clear_provisional();
 // ⓘ rebind.inl runs on the input path and needs the window check from open_ui.
@@ -141,6 +144,9 @@ void ctm_rebind_set_gate_hold(bool hold);
 // is -- the rebinder clears a bound button before the browser ever sees it.
 // ⓘ Declared here because rest_config.inl is included well before rebind.inl.
 const void *rebind_last_press_device();
+// ⓘ And that press's layout name -- "ds5", "ds4", "xbox" -- or nullptr, so
+// the on-screen keyboard opens with the right button symbols.
+const char *rebind_last_press_layout();
 
 void ctm_rebind_apply(const void *deviceKey,
                       const std::vector<unsigned char> &descriptor,

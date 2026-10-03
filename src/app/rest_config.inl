@@ -659,7 +659,10 @@ static bool rest_route_config(const RestRequest &req, std::string *out)
             // ⛔ Through a free function, NOT ctm_overlay:: directly. This file
             // is included at main.cpp:146 and the overlay at :164, so the
             // namespace does not exist yet here.
-            if (!editing) ctm_overlay_hide();
+            // ⓘ Only a keyboard opened FOR the page (rhoquinn8217, 2026-10-03):
+            // the page's first focus after it opens says "not editing", and
+            // that closed a keyboard the window had nothing to do with.
+            if (!editing && ctm_overlay_opened_for_page()) ctm_overlay_hide();
             *out = rest_http_response(200, editing ? R"({"ok":true,"editing":true})"
                                                    : R"({"ok":true,"editing":false})");
             return true;

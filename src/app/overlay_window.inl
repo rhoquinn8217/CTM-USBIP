@@ -238,13 +238,17 @@ inline bool button_down(const ctm_rebind::Layout &lay, const uint8_t *data, size
 // ⓘ KK_SHOULDER_* only changes what is PRINTED on the key -- the shortcut
 // itself is read from the pad directly. Steam prints them the same way, and it
 // is what turns a shoulder shortcut from folklore into something visible.
+// ⓘ KK_FACE_* does the same for the two face buttons that do a key's job --
+// Square is backspace and Triangle is space -- printed as the pad in hand
+// draws them: □ and △, or X and Y.
 // ⛔ DT_NOPREFIX ON EVERY LABEL. DrawTextW treats & as an accelerator marker:
 // it swallows the ampersand and underlines the next character instead, so the
 // shifted 7 simply never appeared (rhoquinn8217, 2026-09-02).
 // ⓘ KK_SPACER is not a key at all: it is the part of the tab you GRAB. It
 // draws as bare frame and the highlight skips straight over it.
 enum KeyKind { KK_NORMAL, KK_MOD, KK_FN, KK_ACTION, KK_SPACER,
-               KK_SHOULDER_L1, KK_SHOULDER_R1, KK_SHOULDER_R2 };
+               KK_SHOULDER_L1, KK_SHOULDER_R1, KK_SHOULDER_R2,
+               KK_FACE_SQUARE, KK_FACE_TRIANGLE };
 
 // What a KK_ACTION key does, carried in the usage field, which is unused there.
 // ⛔ WELL CLEAR OF THE HID USAGES. These live in the same field as a key's
@@ -368,19 +372,22 @@ inline const Key kRow4[] = {
 //
 // ⓘ For typing a name or a search term, where , . / [ ] \ ; ' are dead weight
 // and every column of them is a column of travel.
-// ⭐⭐ TEN EQUAL COLUMNS, FOR A CONTROLLER (rhoquinn8217, 2026-10-03). It is
-// typed with a pad, so what the pad already does is not on it: backspace is
-// Square and close is Circle, and tab, esc and del went with the column they
-// stood in. The digits sit straight over q a z; space is three keys, with
-// paste after it; shift, up and fn end the bottom letter row.
-// ⭐⭐ AND FN BRINGS THE SYMBOLS BACK, as a layer rather than as keys:
+// ⭐⭐ TEN EQUAL COLUMNS, FOR A CONTROLLER (rhoquinn8217, 2026-10-03). Close
+// is Circle, and tab, esc and del went with the column they stood in. The
+// digits sit straight over q a z, shift starts the bottom letter row and up
+// and fn end it, and the bottom row is ctrl, win, alt, a two-key space,
+// backspace, paste and the arrows.
+// ⓘ Backspace stays a key although Square does it, and space although
+// Triangle does: each wears its button's symbol, so the key teaches the
+// shortcut, as the Steam Deck's and Windows' pad keyboards do.
+// ⭐⭐ AND FN BRINGS THE REST BACK, as a layer rather than as keys:
 //   - 1 to 0 are F1 to F10, and q and w are F11 and F12;
-//   - twenty-two letters are the symbols the face has no key for, each as
-//     near as the grid allows to where a full keyboard has it around enter:
-//     ' " and ; : left of enter on h j k l, \ | above it on o p, - _ = + [ ]
-//     along the rest of the top letter row, , . / ? on v b n m with < > by
-//     them on x c, ` ~ on a s by the corner and { } on d f. g and z stay
-//     letters.
+//   - twenty-two letters are the symbols the face has no key for, near where
+//     a full keyboard has them around enter: ' " and ; : on h j k l, \ |
+//     on o p above enter, - _ = + [ ] on e to i, , . / ? on v b n m with < >
+//     on x c, and ` ~ { } on s d f g;
+//   - a is esc and z is tab; up and down are page up and page down, left is
+//     del and right is home; paste is copy.
 // ⛔ THE SHIFTED SYMBOLS WERE MISSING HERE (rhoquinn8217, 2026-09-04). Every
 // digit had `nullptr` where FULL and COMPACT carry L"!" and the rest -- that
 // second field IS the shifted label, so shift had nothing to show or type and
@@ -405,11 +412,11 @@ inline constexpr Key kSub1[] = {
     { L"p", nullptr, 0x13, 0, KK_NORMAL, 1.0f, L"|", 0x31, KBD_SHIFT },
 };
 inline constexpr Key kSub2[] = {
-    { L"a", nullptr, 0x04, 0, KK_NORMAL, 1.0f, L"`", 0x35, 0 },
-    { L"s", nullptr, 0x16, 0, KK_NORMAL, 1.0f, L"~", 0x35, KBD_SHIFT },
-    { L"d", nullptr, 0x07, 0, KK_NORMAL, 1.0f, L"{", 0x2f, KBD_SHIFT },
-    { L"f", nullptr, 0x09, 0, KK_NORMAL, 1.0f, L"}", 0x30, KBD_SHIFT },
-    { L"g", nullptr, 0x0a, 0, KK_NORMAL, 1.0f },
+    { L"a", nullptr, 0x04, 0, KK_NORMAL, 1.0f, L"esc", 0x29, 0 },
+    { L"s", nullptr, 0x16, 0, KK_NORMAL, 1.0f, L"`", 0x35, 0 },
+    { L"d", nullptr, 0x07, 0, KK_NORMAL, 1.0f, L"~", 0x35, KBD_SHIFT },
+    { L"f", nullptr, 0x09, 0, KK_NORMAL, 1.0f, L"{", 0x2f, KBD_SHIFT },
+    { L"g", nullptr, 0x0a, 0, KK_NORMAL, 1.0f, L"}", 0x30, KBD_SHIFT },
     { L"h", nullptr, 0x0b, 0, KK_NORMAL, 1.0f, L";", 0x33, 0 },
     { L"j", nullptr, 0x0d, 0, KK_NORMAL, 1.0f, L":", 0x33, KBD_SHIFT },
     { L"k", nullptr, 0x0e, 0, KK_NORMAL, 1.0f, L"'", 0x34, 0 },
@@ -417,26 +424,27 @@ inline constexpr Key kSub2[] = {
     { L"enter", nullptr, 0x28, 0, KK_NORMAL, 1.0f },
 };
 inline constexpr Key kSub3[] = {
-    { L"z", nullptr, 0x1d, 0, KK_NORMAL, 1.0f },
+    { L"shift", nullptr, 0, KBD_SHIFT, KK_MOD, 1.0f },
+    { L"z", nullptr, 0x1d, 0, KK_NORMAL, 1.0f, L"tab", 0x2b, 0 },
     { L"x", nullptr, 0x1b, 0, KK_NORMAL, 1.0f, L"<", 0x36, KBD_SHIFT },
     { L"c", nullptr, 0x06, 0, KK_NORMAL, 1.0f, L">", 0x37, KBD_SHIFT },
     { L"v", nullptr, 0x19, 0, KK_NORMAL, 1.0f, L",", 0x36, 0 },
     { L"b", nullptr, 0x05, 0, KK_NORMAL, 1.0f, L".", 0x37, 0 },
     { L"n", nullptr, 0x11, 0, KK_NORMAL, 1.0f, L"/", 0x38, 0 },
     { L"m", nullptr, 0x10, 0, KK_NORMAL, 1.0f, L"?", 0x38, KBD_SHIFT },
-    { L"shift", nullptr, 0, KBD_SHIFT, KK_MOD, 1.0f },
-    { L"\u2191", nullptr, 0x52, 0, KK_NORMAL, 1.0f },
+    { L"\u2191", nullptr, 0x52, 0, KK_NORMAL, 1.0f, L"PgUp", 0x4b, 0 },
     { L"fn", nullptr, 0, KBD_FN, KK_MOD, 1.0f },
 };
 inline constexpr Key kSub4[] = {
     { L"ctrl", nullptr, 0, KBD_CTRL, KK_MOD, 1.0f },
     { L"win", nullptr, 0, KBD_WIN, KK_MOD, 1.0f },
     { L"alt", nullptr, 0, KBD_ALT, KK_MOD, 1.0f },
-    { L"space", nullptr, 0x2c, 0, KK_NORMAL, 3.0f },
-    { L"paste", L"copy", ACT_PASTE, 0, KK_ACTION, 1.0f },
-    { L"\u2190", nullptr, 0x50, 0, KK_NORMAL, 1.0f },
-    { L"\u2193", nullptr, 0x51, 0, KK_NORMAL, 1.0f },
-    { L"\u2192", nullptr, 0x4f, 0, KK_NORMAL, 1.0f },
+    { L"space", nullptr, 0x2c, 0, KK_FACE_TRIANGLE, 2.0f },
+    { L"\u232b", nullptr, 0x2a, 0, KK_FACE_SQUARE, 1.0f },
+    { L"paste", L"copy", ACT_PASTE, 0, KK_ACTION, 1.0f, L"copy", 0, 0 },
+    { L"\u2190", nullptr, 0x50, 0, KK_NORMAL, 1.0f, L"del", 0x4c, 0 },
+    { L"\u2193", nullptr, 0x51, 0, KK_NORMAL, 1.0f, L"PgDn", 0x4e, 0 },
+    { L"\u2192", nullptr, 0x4f, 0, KK_NORMAL, 1.0f, L"home", 0x4a, 0 },
 };
 inline constexpr Key kTabSub[] = {
     { L"", nullptr, 0, 0, KK_SPACER, 6.67f },
@@ -605,6 +613,31 @@ inline const int kRowCount = 6;          // the tab, then five rows of keys
 
 // ⓘ The tab is shorter than a key row -- it holds icons, not letters.
 inline float row_height_factor(int r) { return r == 0 ? 0.5f : 1.0f; }
+
+// ⭐⭐ THE BUTTON SYMBOLS FOLLOW THE PAD THAT PRESSED LAST (rhoquinn8217,
+// 2026-10-03: "I also want the legend to update based on the controller used
+// similar to the config window"). The page's own rule, padLegendForKind(): a
+// DualSense or a DS4 gets PlayStation symbols, anything else Xbox letters,
+// since a pad imitating something is most likely imitating an Xbox one.
+// ⓘ Set by every press the keyboard takes (handle_report), and on opening by
+// the press that opened it -- the rebinder's record, which a keyboard that is
+// up never feeds: it takes the pad before the rebinder sees the report.
+enum Glyphs { GLYPHS_PS = 0, GLYPHS_XBOX = 1 };
+inline std::atomic_int g_glyphs{GLYPHS_PS};
+
+inline int glyphs_for(const char *layoutName)
+{
+    if (layoutName == nullptr) return GLYPHS_PS;
+    return (std::strcmp(layoutName, "ds5") == 0 || std::strcmp(layoutName, "ds4") == 0)
+        ? GLYPHS_PS : GLYPHS_XBOX;
+}
+
+// ⭐ WHETHER THIS KEYBOARD WAS OPENED FOR THE CONFIG WINDOW -- to name a config
+// there -- and so the only one that window's focus may close (rhoquinn8217,
+// 2026-10-03: "I also don't want the keyboard to close when the config window
+// is opened").
+inline std::atomic_bool g_forPage{false};
+inline bool opened_for_page() { return g_forPage.load(); }
 
 // ⓘ F1..F12 replace the digits while L2 is held. Same positions, so the row you
 // are looking at is the row that changes -- there is no key to travel to and
@@ -979,7 +1012,7 @@ inline void press_current(const void *who)
             // the key, so it says so rather than needing to be known.
             // ⓘ Not a keystroke: ctrl+v, sent as one. The only entry on the
             // face that is a combination rather than a key.
-            const bool asCopy = shift_showing();
+            const bool asCopy = shift_showing() || fn_showing();
             uint8_t pv[6] = { (uint8_t)(asCopy ? 0x06 : 0x19), 0, 0, 0, 0, 0 };
             ctm_keyboard_device::set_state_for(who, KBD_CTRL, pv, 1);
             return;
@@ -1002,9 +1035,10 @@ inline void press_current(const void *who)
             // burst, which reads as every button firing over and over --
             // measured in 2026-09-01 and the reason agent.inl detaches too.
             //
-            // ⓘ Hidden first: the config window is what the person now wants
-            // to look at, and this keyboard swallows the pad while it is up.
-            hide();
+            // ⛔ NO LONGER HIDDEN FIRST (rhoquinn8217, 2026-10-03: "I also don't
+            // want the keyboard to close when the config window is opened"). It
+            // stays up beside the window and keeps the pad; Circle closes it
+            // when the page should have it.
             std::thread([]() { ctm_chord_show_ui(std::string()); }).detach();
             return;
         }
@@ -1277,9 +1311,15 @@ inline void paint(HWND hwnd)
 
         // ⭐ AND THE SHOULDER SHORTCUT, on the key it belongs to. Without this
         // the shoulders are folklore -- discoverable only by being told.
-        const wchar_t *hint = k.kind == KK_SHOULDER_L1 ? L"L1"
-                            : k.kind == KK_SHOULDER_R1 ? L"R1"
-                            : k.kind == KK_SHOULDER_R2 ? L"R2" : nullptr;
+        // ⭐ AND THE FACE BUTTON THAT DOES THIS KEY'S JOB (2026-10-03), all in
+        // the symbols of the pad in hand: □ or X on backspace, △ or Y on space.
+        const bool xboxGlyphs = (g_glyphs.load() == GLYPHS_XBOX);
+        const wchar_t *hint = k.kind == KK_SHOULDER_L1 ? (xboxGlyphs ? L"LB" : L"L1")
+                            : k.kind == KK_SHOULDER_R1 ? (xboxGlyphs ? L"RB" : L"R1")
+                            : k.kind == KK_SHOULDER_R2 ? (xboxGlyphs ? L"RT" : L"R2")
+                            : k.kind == KK_FACE_SQUARE ? (xboxGlyphs ? L"X" : L"\u25a1")
+                            : k.kind == KK_FACE_TRIANGLE ? (xboxGlyphs ? L"Y" : L"\u25b3")
+                            : nullptr;
         if (hint != nullptr) {
             RECT s = r;
             s.right -= 5; s.top += 2;
@@ -1347,8 +1387,12 @@ inline void paint(HWND hwnd)
         // NEXT symbol rather than the one before it, so nothing reads as a
         // pair (rhoquinn8217, from a screenshot -- "it looks like it's hard to
         // associate the symbol with the description").
-        const wchar_t *legend =
-            L"\u2715 select | \u25a1 backspace | \u25b3 space | "
+        // ⭐⭐ IN THE SYMBOLS OF THE PAD IN HAND (rhoquinn8217, 2026-10-03), the
+        // page's two sets: an Xbox pad's face buttons by their letters, View
+        // as ⧉ and its stick click as RS.
+        const wchar_t *legend = g_glyphs.load() == GLYPHS_XBOX
+            ? L"A select | X backspace | Y space | \u2630 move | \u29c9 layout | RS size | B close"
+            : L"\u2715 select | \u25a1 backspace | \u25b3 space | "
             L"\u2630 move | \\|/ layout | R3 size | \u25cb close";
         // ⓘ Both widths are measured: the title's positions the legend, the
         // legend's decides whether it fits at all.
@@ -1717,6 +1761,14 @@ inline bool handle_report(const void *deviceKey, const ctm_rebind::Layout &lay,
 {
     if (!visible() || data == nullptr || len < lay.minLength) return false;
 
+    // ⓘ Any button down says which pad is in the hand, for the symbols.
+    for (int i = 0; i < ctm_rebind::kButtonCount; ++i) {
+        if (!ctm_rebind::is_pressed(lay, data, len, i)) continue;
+        const int glyphs = glyphs_for(lay.name);
+        if (g_glyphs.exchange(glyphs) != glyphs) invalidate();
+        break;
+    }
+
     // ⓘ The d-pad through the layout: a DualSense's and a DS4's are a hat, 0 up
     // and clockwise to 7, centred at 8; an Xbox pad's are four plain bits. A
     // diagonal counts as both of its directions either way.
@@ -2038,6 +2090,11 @@ inline void show(int width = 0, int height = 0, int openedByButton = -1)
 {
     if (width <= 0 || height <= 0) size_for(&width, &height);
     g_openedBy.store(openedByButton);
+    // ⓘ Opened for the page when its window is the one in front, which is
+    // when the page lets Square open it at all (osk.inl).
+    g_forPage.store(ctm_ui_has_foreground());
+    // ⓘ The symbols of the pad whose press opened it, until the next press.
+    if (const char *layoutName = rebind_last_press_layout()) g_glyphs.store(glyphs_for(layoutName));
     {
         // ⓘ The opening press must not close it, or type -- on any pad.
         std::lock_guard<std::mutex> lock(g_padMutex);

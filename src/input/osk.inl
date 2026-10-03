@@ -215,6 +215,12 @@ void ctm_overlay_hide()
     ctm_overlay::hide();
 }
 
+// ⓘ For the same two files, the question that decides whether they may close it.
+bool ctm_overlay_opened_for_page()
+{
+    return ctm_overlay::opened_for_page();
+}
+
 void ctm_osk_toggle(const std::string &section, int button, int program)
 {
     ctm_osk::toggle(section, button,
