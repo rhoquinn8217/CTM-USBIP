@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.39 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.40 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,13 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.40 "device" where the two device tables said "controller", since
+            a keyboard or a mouse is listed there too, and a symbol beside
+            each device's name says which of the three it is: a pad, a
+            keyboard or a mouse. In the tabs, in both tables, and on the
+            big name at the top of Simple and Quick. It follows the type
+            the listener reads off the device's own descriptor; a device
+            that says none of the three gets no symbol.
     2.66.39 Two things in Advanced. The Mode picker opens above the
             notices: it lives in the footer, and the footer is drawn
             under the notice strip that sits just above it, so the list
@@ -967,6 +974,12 @@
   /* Name on top, what it is underneath -- the name is for recognising the tab,
      the kind for confirming you are on the right one. */
   .tabs button .tabname { display:inline-block; }
+  /* ⭐ WHAT KIND OF DEVICE, BESIDE ITS NAME (rhoquinn8217, 2026-10-02). A
+     plain mark in the text's own colour, like the page's other marks, not a
+     coloured picture: the symbol fonts are asked for by name, and the U+FE0E
+     after each mark asks for its text form. */
+  .devsym { font-family:"Segoe UI Symbol", "Noto Sans Symbols 2", "Noto Sans Symbols", sans-serif;
+            font-style:normal; font-weight:normal; margin-right:0.3em; }
   /* ⭐ The dot, the name and the gauge on ONE centred row (2026-09-18).
      ⛔ vertical-align:middle does not centre a badge beside text: it lines the
      badge's middle up with the BASELINE PLUS HALF THE X-HEIGHT, which sits below
@@ -1699,7 +1712,7 @@
 <div class="bar">
   <!-- ⓘ The same number as VERSION at the top of this file, by hand. It sat
        at 2.66.4 for thirty-four versions while VERSION moved on. -->
-  <span class="muted" style="font-size:12px">v2.66.39</span>
+  <span class="muted" style="font-size:12px">v2.66.40</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -2578,7 +2591,7 @@ function renderTabs(devices) {
             ' title="' + (d.ready ? 'ready' : 'starting or tearing down') + '"' +
             ' onclick="showTab(\'' + esc(d.ordinal) + '\')">' +
             '<span class="tabtop">' + dot +
-              '<span class="tabname">' + esc(nameFor(d.ordinal)) + '</span>' +
+              '<span class="tabname">' + deviceSymbol(d) + esc(nameFor(d.ordinal)) + '</span>' +
               batteryTag(d) +
             '</span>' +
             '<em class="tabkind">' + esc(deviceLabelShort(d)) + '</em>' +
@@ -2656,6 +2669,28 @@ function transportOf(sessionKind) {
 // takes to build.
 function deviceLabelShort(d) {
   return d.label || d.product || d.kind || 'controller';
+}
+
+// ⭐ A CONTROLLER, KEYBOARD OR MOUSE SYMBOL BESIDE A DEVICE'S NAME
+// (rhoquinn8217, 2026-10-02: *"Put a controller, keyboard or mouse character
+// symbol next the the device name in the tabs and in the header"*).
+// ⓘ From `device_type`, which the listener reads off the device's own report
+// descriptor. A DualSense, a DS4 or an Xbox pad from a listener too old to
+// send the type is still a pad. A device that says none of the three gets no
+// symbol rather than a guess.
+// ⓘ Used beside the name in the tabs, in both device tables and on the big
+// name at the top of Simple and Quick.
+var DEVICE_SYMBOLS = {
+  controller: '\ud83c\udfae',   // U+1F3AE, a game controller
+  keyboard: '\u2328',                // U+2328, a keyboard
+  mouse: '\ud83d\uddb1'         // U+1F5B1, a three-button mouse
+};
+function deviceSymbol(d) {
+  if (!d) return '';
+  var type = d.device_type ||
+             (/^(ds5|ds4|xbox)/.test(d.kind || '') ? 'controller' : '');
+  var mark = DEVICE_SYMBOLS[type];
+  return mark ? '<span class="devsym" aria-hidden="true">' + mark + '\ufe0e</span>' : '';
 }
 
 // ⭐⭐ TWO LEGENDS, ONE PER PAD FAMILY (T-240, rhoquinn8217: *"Legend based
@@ -3860,7 +3895,7 @@ function buildDevicePane(d) {
       'Remove auto link</button>'
     : '';
 
-  var head = '<table class="devrow"><tr><th>nickname</th><th>controller</th><th>battery</th><th>serial</th>' +
+  var head = '<table class="devrow"><tr><th>nickname</th><th>device</th><th>battery</th><th>serial</th>' +
              '<th>auto linked config</th><th></th></tr>' +
              // ⭐ Same status tint as Overview. The two tables show the same
              // row, so a controller that reads green there and plain here
@@ -3870,7 +3905,7 @@ function buildDevicePane(d) {
              // ⭐ NICKNAME FIRST (rhoquinn8217, 2026-09-01): it is what a person
              // calls this controller, so it leads the row. ⓘ From the device
              // in hand, for the same reason as Overview's copy.
-             '<td>' + esc(d.nickname || nameFor(d.ordinal)) + '</td>' +
+             '<td>' + deviceSymbol(d) + esc(d.nickname || nameFor(d.ordinal)) + '</td>' +
              '<td>' + esc(deviceLabelShort(d)) + '</td>' +
              '<td>' + batteryCell(d) + '</td>' +
              '<td>' + serialCell + '</td>' +
@@ -4709,7 +4744,7 @@ function loadDevices() {
     // ⭐ THE SAME COLUMNS AS THE CONTROLLER TAB. The two tables described the
     // same thing in different words -- 'linked' here, 'auto linked config'
     // there -- so reading one taught you nothing about the other.
-    var html = '<table><tr><th>nickname</th><th>controller</th><th>battery</th><th>serial</th>' +
+    var html = '<table><tr><th>nickname</th><th>device</th><th>battery</th><th>serial</th>' +
                '<th>auto linked config</th><th></th></tr>';
     list.forEach(function(dev) {
       // ⭐ The serial is the point of this whole screen. auto_link works only
@@ -4757,7 +4792,7 @@ function loadDevices() {
               // BEFORE the device list is stored, so the lookup fell back to
               // the ordinal and Overview showed ds5_usb_1 while the controller
               // tab showed the name.
-              '<td>' + esc(dev.nickname || dev.ordinal) + '</td>' +
+              '<td>' + deviceSymbol(dev) + esc(dev.nickname || dev.ordinal) + '</td>' +
               '<td>' + esc(deviceLabelShort(dev)) + (dev.supports_config ? '' :
                   ' <span class="muted">(no config support)</span>') + '</td>' +
               '<td>' + batteryCell(dev) + '</td>' +
@@ -7949,7 +7984,7 @@ function paintCompact() {
     // under the name, and the L1 and R1 neighbours with theirs.
     html += '<div class="ccar' + slide + '">' +
             side(prev, 'l', '\u25c2 L1') +
-            '<div class="ccur"><div class="cname">' + esc(nameFor(d.ordinal)) +
+            '<div class="ccur"><div class="cname">' + deviceSymbol(d) + esc(nameFor(d.ordinal)) +
             batteryTag(d) + '</div>' +
             '<div class="ckind">' + esc(deviceLabelShort(d)) + '</div></div>' +
             side(next, 'r', 'R1 \u25b8') +
