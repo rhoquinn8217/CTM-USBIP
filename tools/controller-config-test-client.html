@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.46 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.47 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,11 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.47 One row per device in both tables, as on the tabs: its marks
+            are every kind its parts are, its battery every part's gauge.
+            And the marks follow the model name everywhere now: the tab's
+            second line, the rows, and the line under the big name in
+            Simple and Quick, the neighbours included.
     2.66.46 In the tables' rows the marks follow the device's model name
             ("DualSense (USB)"), not the nickname: the device's own table, a
             row per part, and Overview's. The tabs and Simple's and Quick's
@@ -1207,6 +1212,15 @@
   #compactBox .cside[onclick]:hover { color:#9aa4b2; }
   #compactBox .cside small { display:block; font-size:3vh; color:#3d4049; }
   #compactBox .cside .ckind { font-size:3vh; color:#3d4049; text-align:inherit; margin-top:0.4vh; }
+  /* ⓘ A long model name ("RONGYUAN 2.4G Wireless Device") and the marks after
+     it can be wider than the line, so the name shortens and the marks stay:
+     the name ends in an ellipsis, the marks keep their room. And on ONE line:
+     in Quick's short window a second line pushed the footer out of it. */
+  #compactBox .ckind { display:flex; justify-content:center; white-space:nowrap; }
+  #compactBox .cside.l .ckind { justify-content:flex-end; }
+  #compactBox .cside.r .ckind { justify-content:flex-start; }
+  #compactBox .ckind .cklabel { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+  #compactBox .ckind .devemo { flex:0 0 auto; }
   #compactBox .ccur { flex:0 1 auto; min-width:0; text-align:center; }
   /* ⭐ THE RING SLIDES the way it was pushed: R1 brings the next one in from the
      right, L1 from the left. A short, decisive move -- long enough to read as
@@ -1743,7 +1757,7 @@
 <div class="bar">
   <!-- ⓘ The same number as VERSION at the top of this file, by hand. It sat
        at 2.66.4 for thirty-four versions while VERSION moved on. -->
-  <span class="muted" style="font-size:12px">v2.66.46</span>
+  <span class="muted" style="font-size:12px">v2.66.47</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -2652,6 +2666,13 @@ function batteryTag(d) {
 // a column reads as "these two have batteries" rather than as missing data.
 function batteryCell(d) { return batteryTag(d); }
 
+// ⓘ Every part's gauge, in order, for a device of several parts. Two pads
+// under one name have a battery each, and showing one would hide the other's;
+// most devices have one gauge or none.
+function batteryTags(parts) {
+  return (parts || []).map(batteryTag).join('');
+}
+
 function renderTabs(devices) {
   LAST_DEVICES = devices || [];
   groupDevices(LAST_DEVICES);
@@ -2681,12 +2702,12 @@ function renderTabs(devices) {
             ' onclick="showTab(\'' + esc(d.ordinal) + '\')">' +
             '<span class="tabtop">' + dot +
               '<span class="tabname">' + esc(nameFor(d.ordinal)) + '</span>' +
-              // ⓘ The marks after the gauge (rhoquinn8217, 2026-10-02: *"move
-              // the icon after the battery icon if there is one"*); with no
-              // gauge they sit right after the name, as before.
-              batteryTag(d) + deviceIcons(parts) +
+              batteryTags(parts) +
             '</span>' +
-            '<em class="tabkind">' + esc(deviceLabelShort(d)) + '</em>' +
+            // ⓘ The marks follow the model name, as in the tables' rows
+            // (rhoquinn8217, 2026-10-02: *"In the tabs, move the icons after
+            // the device name to match the rows."*).
+            '<em class="tabkind">' + esc(deviceLabelShort(d)) + deviceIcons(parts) + '</em>' +
             '</button>';
   });
   // ⭐ THE EDITOR TAB (rhoquinn8217, 2026-09-01), last and pushed to the far
@@ -2798,7 +2819,6 @@ function deviceIcons(parts) {
     .map(function (type) { return DEVICE_EMOJI[type]; }).join('');
   return marks ? '<span class="devemo" aria-hidden="true">' + marks + '</span>' : '';
 }
-function deviceIcon(d) { return deviceIcons(d ? [d] : []); }
 
 // ⭐⭐ TWO LEGENDS, ONE PER PAD FAMILY (T-240, rhoquinn8217: *"Legend based
 // on controller used. Two legends, one more xbox and one for playstation."*).
@@ -3982,10 +4002,15 @@ function claimOf(serial) {
   return by;
 }
 
-// ⭐ ONE ROW PER PART (2.66.43). A device with several parts has one tab, and
-// this table is where each part is still seen on its own: what it is, its
-// battery, its serial and what claims it.
+// ⭐ ONE ROW PER DEVICE (rhoquinn8217, 2026-10-02: *"Lets combine the rows
+// with the same name and combine the icons."*; 2.66.43 to 2.66.46 drew a row
+// per part). Called with the tab's lead: the marks are every kind its parts
+// are, the battery every part's gauge, and the row waits while any part does.
+// ⓘ The serial and its claim are the lead's. The parts of one device share
+// one serial or have none (same_device.inl), so the lead's speaks for all.
 function devHeadRow(p) {
+  var parts = partsOf(p.ordinal);
+  var ready = parts.every(function (x) { return x.ready; });
   var mySerial = normSerial(p.serial);
   var claimedBy = claimOf(mySerial);
 
@@ -4020,18 +4045,16 @@ function devHeadRow(p) {
              // ⭐ Same status tint as Overview. The two tables show the same
              // row, so a controller that reads green there and plain here
              // would suggest the two disagreed about something.
-             '<tr class="' + (!p.ready ? 'r-wait'
+             '<tr class="' + (!ready ? 'r-wait'
                             : (p.linked_config ? 'r-set' : 'r-shared')) + '">' +
              // ⭐ NICKNAME FIRST (rhoquinn8217, 2026-09-01): it is what a person
              // calls this controller, so it leads the row. ⓘ From the device
              // in hand, for the same reason as Overview's copy.
              '<td>' + esc(p.nickname || nameFor(p.ordinal)) + '</td>' +
-             // ⓘ In a row the marks follow the model name; on a tab they stay
-             // on the name's line (rhoquinn8217, 2026-10-02: *"next to the
-             // nick name in the tabs but next to the device name in the
-             // rows"*).
-             '<td>' + esc(deviceLabelShort(p)) + deviceIcon(p) + '</td>' +
-             '<td>' + batteryCell(p) + '</td>' +
+             // ⓘ The marks follow the model name (rhoquinn8217, 2026-10-02:
+             // *"next to the device name in the rows"*).
+             '<td>' + esc(deviceLabelShort(p)) + deviceIcons(parts) + '</td>' +
+             '<td>' + batteryTags(parts) + '</td>' +
              '<td>' + serialCell + '</td>' +
              '<td>' + autoCell + '</td>' +
              '<td>' + autoBtn + '</td></tr>');
@@ -4067,8 +4090,8 @@ function buildDevicePane(d) {
 
   var head = '<table class="devrow"><tr><th>nickname</th><th>device</th><th>battery</th><th>serial</th>' +
              '<th>auto linked config</th><th></th></tr>' +
-             // ⭐ A row for each part of this device (devHeadRow, above).
-             partsOf(d.ordinal).map(devHeadRow).join('') + '</table>';
+             // ⭐ One row for the device, all its parts in it (devHeadRow, above).
+             devHeadRow(d) + '</table>';
 
   // ⭐ Every config is offered to a controller that takes one, whatever kind of
   // controller it is -- and none to a device that takes no config, which the
@@ -4904,7 +4927,12 @@ function loadDevices() {
     // there -- so reading one taught you nothing about the other.
     var html = '<table><tr><th>nickname</th><th>device</th><th>battery</th><th>serial</th>' +
                '<th>auto linked config</th><th></th></tr>';
-    list.forEach(function(dev) {
+    // ⭐ ONE ROW PER DEVICE, as on its tab (rhoquinn8217, 2026-10-02: *"Lets
+    // combine the rows with the same name and combine the icons."*). Grouped
+    // here because this table is built before renderTabs stores the list;
+    // renderTabs groups the same list again.
+    groupDevices(list).forEach(function(dev) {
+      var parts = partsOf(dev.ordinal);
       // ⭐ The serial is the point of this whole screen. auto_link works only
       // if it is a real per-unit value, and that has never been observed.
       var serial = dev.serial
@@ -4914,7 +4942,7 @@ function loadDevices() {
       // ⭐ THE WHOLE ROW, not a 3px edge. A bar at the left was invisible unless
       // you already knew to look for it -- and the point is noticing at a
       // glance that a controller is there and working.
-      var rowClass = !dev.ready ? 'r-wait'
+      var rowClass = !parts.every(function (p) { return p.ready; }) ? 'r-wait'
                    : (dev.linked_config ? 'r-set' : 'r-shared');
 
       // ⓘ Seen before? The table is rebuilt whenever ANYTHING about a device
@@ -4953,9 +4981,9 @@ function loadDevices() {
               // tab showed the name.
               '<td>' + esc(dev.nickname || dev.ordinal) + '</td>' +
               // ⓘ After the model name, as in the device's own table.
-              '<td>' + esc(deviceLabelShort(dev)) + deviceIcon(dev) + (dev.supports_config ? '' :
+              '<td>' + esc(deviceLabelShort(dev)) + deviceIcons(parts) + (dev.supports_config ? '' :
                   ' <span class="muted">(no config support)</span>') + '</td>' +
-              '<td>' + batteryCell(dev) + '</td>' +
+              '<td>' + batteryTags(parts) + '</td>' +
               '<td>' + serial + '</td>' +
               '<td>' + autoCell + '</td>' +
               '<td>' + autoBtn + '</td></tr>';
@@ -8135,8 +8163,9 @@ function paintCompact() {
                '<small>' + key + '</small></div>';
       }
       return '<div class="cside ' + cls + '" onclick="gpTab(' + (cls === 'l' ? -1 : 1) + ')">' +
-             '<small>' + key + '</small>' + esc(nameFor(ord)) + deviceIcons(partsOf(ord)) +
-             (od ? '<div class="ckind">' + esc(deviceLabelShort(od)) + '</div>' : '') + '</div>';
+             '<small>' + key + '</small>' + esc(nameFor(ord)) +
+             (od ? '<div class="ckind"><span class="cklabel">' + esc(deviceLabelShort(od)) +
+                   '</span>' + deviceIcons(partsOf(ord)) + '</div>' : '') + '</div>';
     };
     var slide = COMPACT_SLIDE > 0 ? ' slide-r' : COMPACT_SLIDE < 0 ? ' slide-l' : '';
     COMPACT_SLIDE = 0;
@@ -8145,8 +8174,10 @@ function paintCompact() {
     html += '<div class="ccar' + slide + '">' +
             side(prev, 'l', '\u25c2 L1') +
             '<div class="ccur"><div class="cname">' + esc(nameFor(d.ordinal)) +
-            batteryTag(d) + deviceIcons(partsOf(d.ordinal)) + '</div>' +
-            '<div class="ckind">' + esc(deviceLabelShort(d)) + '</div></div>' +
+            batteryTags(partsOf(d.ordinal)) + '</div>' +
+            // ⓘ The marks follow the model name here too, as on the tabs.
+            '<div class="ckind"><span class="cklabel">' + esc(deviceLabelShort(d)) + '</span>' +
+            deviceIcons(partsOf(d.ordinal)) + '</div></div>' +
             side(next, 'r', 'R1 \u25b8') +
             '</div>';
     if (!d.supports_config) {
