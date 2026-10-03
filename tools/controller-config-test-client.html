@@ -2,7 +2,7 @@
 <!--
   Test client for the per-controller config REST API.
 
-  VERSION 2.66.42 -- see the changelog at the bottom of this comment.
+  VERSION 2.66.50 -- see the changelog at the bottom of this comment.
 
   WHAT THIS IS FOR. Exercising the endpoints by hand, and seeing what the agent
   actually reports -- particularly whether a bridged controller comes back with
@@ -21,6 +21,41 @@
   tidy message about it.
 
   CHANGELOG
+    2.66.50 The page sizes Quick on a switch at the listener's new width,
+            0.278 of the screen: 2.66.49 left it at 0.185, so a switch into
+            Quick opened at the old width while the resize button stepped
+            through the new ones.
+    2.66.49 Quick's legend leads with the shoulder keys, as Simple's does,
+            and they follow the input in hand: L1/R1, LB/RB or Q/E. (Its
+            window is half as wide again, which is the listener's.)
+    2.66.48 The carousel's keys in Simple and Quick follow the input in
+            hand, as the footer's legend does: L1 and R1 for a PlayStation
+            pad, LB and RB for an Xbox one, Q and E from a keyboard.
+    2.66.47 One row per device in both tables, as on the tabs: its marks
+            are every kind its parts are, its battery every part's gauge.
+            And the marks follow the model name everywhere now: the tab's
+            second line, the rows, and the line under the big name in
+            Simple and Quick, the neighbours included.
+    2.66.46 In the tables' rows the marks follow the device's model name
+            ("DualSense (USB)"), not the nickname: the device's own table, a
+            row per part, and Overview's. The tabs and Simple's and Quick's
+            big name keep them on the name's line, after the gauge.
+    2.66.45 The device marks follow the battery gauge where the gauge sits
+            beside the name, in the tabs and on Simple's and Quick's big
+            name; with no gauge they stay right after the name. The tables
+            give the battery its own column, so there they stay after the
+            nickname.
+    2.66.44 Two messages in rhoquinn8217's words: a device with no serial
+            reads "(no serial - auto_link disabled)" in both tables, and a
+            device that takes no config reads "Configs can only be set for
+            controllers." in Advanced, Simple and Quick.
+    2.66.43 One tab per device, not one per part. A device the TV bridges
+            as several parts (a receiver's keyboard and mouse, a pad with a
+            keyboard half) had a tab for each, all with the same name; now
+            the parts under one name share one tab, its marks showing every
+            kind they are (⌨️🖱️), and its table has a row for each part. A
+            config set on that tab is set on every part that takes one.
+            Overview still lists each part.
     2.66.42 The device marks are the colour emoji now, and they sit right
             after the nickname rather than after the model name: in the
             tabs, in both tables' nickname column, and on the big name in
@@ -1187,6 +1222,15 @@
   #compactBox .cside[onclick]:hover { color:#9aa4b2; }
   #compactBox .cside small { display:block; font-size:3vh; color:#3d4049; }
   #compactBox .cside .ckind { font-size:3vh; color:#3d4049; text-align:inherit; margin-top:0.4vh; }
+  /* ⓘ A long model name ("RONGYUAN 2.4G Wireless Device") and the marks after
+     it can be wider than the line, so the name shortens and the marks stay:
+     the name ends in an ellipsis, the marks keep their room. And on ONE line:
+     in Quick's short window a second line pushed the footer out of it. */
+  #compactBox .ckind { display:flex; justify-content:center; white-space:nowrap; }
+  #compactBox .cside.l .ckind { justify-content:flex-end; }
+  #compactBox .cside.r .ckind { justify-content:flex-start; }
+  #compactBox .ckind .cklabel { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+  #compactBox .ckind .devemo { flex:0 0 auto; }
   #compactBox .ccur { flex:0 1 auto; min-width:0; text-align:center; }
   /* ⭐ THE RING SLIDES the way it was pushed: R1 brings the next one in from the
      right, L1 from the left. A short, decisive move -- long enough to read as
@@ -1723,7 +1767,7 @@
 <div class="bar">
   <!-- ⓘ The same number as VERSION at the top of this file, by hand. It sat
        at 2.66.4 for thirty-four versions while VERSION moved on. -->
-  <span class="muted" style="font-size:12px">v2.66.42</span>
+  <span class="muted" style="font-size:12px">v2.66.50</span>
   <label class="muted">agent</label>
   <input id="base" value="http://127.0.0.1:48055" size="26">
   <label class="muted">bearer</label>
@@ -1883,6 +1927,59 @@ function nameFor(ordinal) {
   // sends no nickname, and a made-up one here would be the exact bug that was
   // just removed.
   return (d && d.nickname) ? d.nickname : ordinal;
+}
+
+// ⭐⭐ ONE TAB PER DEVICE, NOT ONE PER PART (rhoquinn8217, 2026-10-02: *"I want
+// to combine the tabs that are the same in the config window. I want the icons
+// to combine to show a devices is controller, keyboard and/or mouse at the same
+// time."*). A keyboard-and-mouse receiver arrives as two or three bridges, and
+// had a tab for each, every one carrying the same name.
+//
+// ⭐ "THE SAME" IS THE NICKNAME, because the listener has already decided it:
+// it gives every part of one physical device one name, and never gives one
+// name to two devices (same_device.inl). The one exception, two identical
+// devices with no serial at all, was accepted there as sharing a name, and
+// shares a tab with it here -- which is what was asked: *"If a device is 2
+// controllers the config that is set for that tab will apply to both
+// controllers under the same name."*
+//
+// ⓘ A tab is keyed by one part's ordinal, its LEAD: the first part that takes
+// a config, else the first part. Everything that draws "the device on this
+// tab" draws the lead, and partsOf() gives all of them. Any part's ordinal
+// finds the tab through leadOf(), so a window opened for the keyboard half of
+// a receiver opens on the receiver.
+var GROUP_OF = Object.create(null);   // a part's ordinal -> its tab's ordinal
+var PARTS_OF = Object.create(null);   // a tab's ordinal -> every part, in order
+var DEVICE_LEADS = [];                // one device per tab, in the list's order
+
+function groupDevices(list) {
+  var groups = Object.create(null);
+  var order = [];
+  (list || []).forEach(function (d) {
+    // ⓘ No name is no group. An older listener sends none, and putting every
+    // nameless part in one tab would be the worst guess available.
+    var key = d.nickname ? 'name:' + d.nickname : 'part:' + d.ordinal;
+    if (!groups[key]) { groups[key] = []; order.push(key); }
+    groups[key].push(d);
+  });
+  GROUP_OF = Object.create(null);
+  PARTS_OF = Object.create(null);
+  DEVICE_LEADS = order.map(function (key) {
+    var parts = groups[key];
+    var lead = parts.filter(function (p) { return p.supports_config; })[0] || parts[0];
+    PARTS_OF[lead.ordinal] = parts;
+    parts.forEach(function (p) { GROUP_OF[p.ordinal] = lead.ordinal; });
+    return lead;
+  });
+  return DEVICE_LEADS;
+}
+
+function leadOf(ordinal) { return GROUP_OF[ordinal] || ordinal; }
+
+function partsOf(ordinal) {
+  var parts = PARTS_OF[leadOf(ordinal)];
+  if (parts) return parts;
+  return (LAST_DEVICES || []).filter(function (x) { return x.ordinal === ordinal; });
 }
 
 var KEYS = [];
@@ -2579,8 +2676,16 @@ function batteryTag(d) {
 // a column reads as "these two have batteries" rather than as missing data.
 function batteryCell(d) { return batteryTag(d); }
 
+// ⓘ Every part's gauge, in order, for a device of several parts. Two pads
+// under one name have a battery each, and showing one would hide the other's;
+// most devices have one gauge or none.
+function batteryTags(parts) {
+  return (parts || []).map(batteryTag).join('');
+}
+
 function renderTabs(devices) {
   LAST_DEVICES = devices || [];
+  groupDevices(LAST_DEVICES);
   // The event, not an expiry: a device in the list means bridging works now.
   if (LAST_DEVICES.length) clearBridgeWait();
   else noteBridgeMayNeedAMoment();
@@ -2589,23 +2694,30 @@ function renderTabs(devices) {
   var html = '';
   html += '<button data-tab="overview"' + (ACTIVE === 'overview' ? ' class="on"' : '') +
           ' onclick="showTab(\'overview\')">Overview</button>';
-  LAST_DEVICES.forEach(function(d) {
+  DEVICE_LEADS.forEach(function(d) {
+    var parts = partsOf(d.ordinal);
     TABS.push(d.ordinal);
     // ⓘ `ready` is the whole story here. A session that is not ready is either
     // still coming up or tearing down, and in both cases its settings may not
     // stick -- which is worth seeing without opening the tab.
-    var dot = d.ready
+    // ⓘ A device is ready when every part is: one part still coming up is the
+    // device still coming up.
+    var ready = parts.every(function (p) { return p.ready; });
+    var dot = ready
       ? '<span class="tabdot" style="background:#7fd18c"></span>'
       : '<span class="tabdot" style="background:#e0c07a"></span>';
     html += '<button data-tab="' + esc(d.ordinal) + '"' +
             (ACTIVE === d.ordinal ? ' class="on"' : '') +
-            ' title="' + (d.ready ? 'ready' : 'starting or tearing down') + '"' +
+            ' title="' + (ready ? 'ready' : 'starting or tearing down') + '"' +
             ' onclick="showTab(\'' + esc(d.ordinal) + '\')">' +
             '<span class="tabtop">' + dot +
-              '<span class="tabname">' + esc(nameFor(d.ordinal)) + deviceIcon(d) + '</span>' +
-              batteryTag(d) +
+              '<span class="tabname">' + esc(nameFor(d.ordinal)) + '</span>' +
+              batteryTags(parts) +
             '</span>' +
-            '<em class="tabkind">' + esc(deviceLabelShort(d)) + '</em>' +
+            // ⓘ The marks follow the model name, as in the tables' rows
+            // (rhoquinn8217, 2026-10-02: *"In the tabs, move the icons after
+            // the device name to match the rows."*).
+            '<em class="tabkind">' + esc(deviceLabelShort(d)) + deviceIcons(parts) + '</em>' +
             '</button>';
   });
   // ⭐ THE EDITOR TAB (rhoquinn8217, 2026-09-01), last and pushed to the far
@@ -2633,7 +2745,7 @@ function renderTabs(devices) {
   Object.keys(SEEN_DEVICES).forEach(function(k) {
     if (!here[k]) delete SEEN_DEVICES[k];
   });
-  LAST_DEVICES.forEach(function(d) {
+  DEVICE_LEADS.forEach(function(d) {
     var pane = document.createElement('div');
     pane.className = 'pane' + (ACTIVE === d.ordinal ? ' on' : '');
     pane.id = 'pane-' + d.ordinal;
@@ -2643,7 +2755,11 @@ function renderTabs(devices) {
 
   // ⚠️ If the active tab's controller has gone, fall back rather than showing
   // nothing -- an unbridge should not leave a blank page.
-  if (TABS.indexOf(ACTIVE) < 0) showTab('overview');
+  // ⓘ A tab's key moves to another part when its device gains one that takes a
+  // config, so the part is followed to its device before the tab is given up.
+  if (TABS.indexOf(ACTIVE) < 0) {
+    showTab(TABS.indexOf(leadOf(ACTIVE)) >= 0 ? leadOf(ACTIVE) : 'overview');
+  }
   if (COMPACT) compactEnsureController();
 }
 
@@ -2694,8 +2810,8 @@ function deviceLabelShort(d) {
 // rather than a guess.
 // ⓘ deviceIcons() takes several parts and shows each kind once, always in
 // this order, so one device that is a keyboard and a mouse reads ⌨️🖱️.
-var DEVICE_EMOJI = { controller: '🎮️', keyboard: '⌨️',
-                     mouse: '🖱️' };
+var DEVICE_EMOJI = { controller: '\ud83c\udfae\ufe0f', keyboard: '\u2328\ufe0f',
+                     mouse: '\ud83d\uddb1\ufe0f' };
 var DEVICE_EMOJI_ORDER = ['controller', 'keyboard', 'mouse'];
 function deviceTypeOf(d) {
   if (!d) return '';
@@ -2713,7 +2829,6 @@ function deviceIcons(parts) {
     .map(function (type) { return DEVICE_EMOJI[type]; }).join('');
   return marks ? '<span class="devemo" aria-hidden="true">' + marks + '</span>' : '';
 }
-function deviceIcon(d) { return deviceIcons(d ? [d] : []); }
 
 // ⭐⭐ TWO LEGENDS, ONE PER PAD FAMILY (T-240, rhoquinn8217: *"Legend based
 // on controller used. Two legends, one more xbox and one for playstation."*).
@@ -3076,8 +3191,7 @@ function doCopy(source, name, ordinal) {
       // opened instead -- linking would need a controller picked first, which
       // is the roundabout route the tabs exist to avoid.
       if (!ordinal) { openConfig(name); return null; }
-      return call('POST', '/api/v1/devices/' + encodeURIComponent(ordinal) + '/link',
-                  { config: name });
+      return linkParts(ordinal, { config: name });
     })
     .then(function() {
       setConn(ordinal ? 'copied to ' + name + ' and linked'
@@ -3736,6 +3850,9 @@ function createFromPreset(ordinal, preset) {
   if (preset) body.preset = preset;
   presetCancel();
   call('POST', '/api/v1/configs', body)
+    // ⓘ The create links the part it was made from; the device's other parts
+    // under the same name follow it (linkParts).
+    .then(function() { return ordinal ? linkParts(ordinal, { config: name }, ordinal) : null; })
     .then(function() {
       setConn('created ' + name + (preset ? ' from ' + preset : ''), 'good');
       loadConfigs(); loadDevices();
@@ -3754,13 +3871,31 @@ function createFromPreset(ordinal, preset) {
     .catch(function(){});
 }
 
+// ⭐ A CONFIG SET ON A TAB IS SET ON EVERY PART UNDER THAT NAME (rhoquinn8217,
+// 2026-10-02: *"If a device is 2 controllers the config that is set for that
+// tab will apply to both controllers under the same name."*). Every link made
+// from a tab comes through here: the pickers in Advanced and in Simple and
+// Quick, Unlink, Copy, and New from a preset.
+// ⓘ Only the parts that take a config: the agent refuses the rest, and a
+// receiver's keyboard half has nothing a config could change. A device with
+// none that do is asked anyway, as before, so the agent says why not.
+// ⓘ `already` is a part the link has been made for, by the create.
+function linkParts(ordinal, body, already) {
+  var parts = partsOf(ordinal).filter(function (p) { return p.supports_config; });
+  if (!parts.length) parts = [{ ordinal: ordinal }];
+  parts = parts.filter(function (p) { return p.ordinal !== already; });
+  return Promise.all(parts.map(function (p) {
+    return call('POST', '/api/v1/devices/' + encodeURIComponent(p.ordinal) + '/link', body);
+  }));
+}
+
 function applyPick(ordinal) {
   var sel = document.getElementById('pick-' + ordinal);
   if (!sel) return;
   // An empty value means unlink -- the API reads a body with no "config" as
   // exactly that, so the two spellings agree.
   var body = sel.value ? { config: sel.value } : {};
-  call('POST', '/api/v1/devices/' + encodeURIComponent(ordinal) + '/link', body)
+  linkParts(ordinal, body)
     .then(function() { loadDevices(); loadConfigs(); }).catch(function(){});
 }
 
@@ -3831,6 +3966,8 @@ function measureSticky() {
 window.addEventListener('resize', measureSticky);
 
 function showTab(name) {
+  // ⓘ Any part opens its device's tab (one tab per device, 2.66.43).
+  name = leadOf(name);
   // ⛔ A PLACE IN "Audio" MEANS NOTHING ON ANOTHER CONTROLLER (rhoquinn8217,
   // 2026-09-08). Settings are per-device, so a remembered row key would name a
   // row belonging to the pad you just left. ⓘ Cleared on any tab change,
@@ -3864,6 +4001,75 @@ function showTab(name) {
   gpCollect();       // the focusable set changed
 }
 
+// The claim on one serial: which config auto links it at bridge time.
+function claimOf(serial) {
+  var by = '';
+  CONFIGS.forEach(function(c) {
+    (c.auto_link || []).forEach(function(sn) {
+      if (serial && normSerial(sn) === serial) by = c.name;
+    });
+  });
+  return by;
+}
+
+// ⭐ ONE ROW PER DEVICE (rhoquinn8217, 2026-10-02: *"Lets combine the rows
+// with the same name and combine the icons."*; 2.66.43 to 2.66.46 drew a row
+// per part). Called with the tab's lead: the marks are every kind its parts
+// are, the battery every part's gauge, and the row waits while any part does.
+// ⓘ The serial and its claim are the lead's. The parts of one device share
+// one serial or have none (same_device.inl), so the lead's speaks for all.
+function devHeadRow(p) {
+  var parts = partsOf(p.ordinal);
+  var ready = parts.every(function (x) { return x.ready; });
+  var mySerial = normSerial(p.serial);
+  var claimedBy = claimOf(mySerial);
+
+  var serialCell = p.serial
+    ? '<code class="good">' + esc(p.serial) + '</code>'
+    // ⓘ In their words (rhoquinn8217, 2026-10-02); it read "(none reported —
+    // auto_link cannot work)".
+    : '<span class="warnc">(no serial - auto_link disabled)</span>';
+
+  // ⓘ "ready" is gone. A bridged controller that is not ready is a state you
+  // see for a moment during setup, not something worth a permanent column.
+  //
+  // ⭐ AUTO LINKED, not "linked". They are different things and the old label
+  // named neither: the linked config is what this controller reads NOW and
+  // lives with the picker below; the auto-linked one is what it will get NEXT
+  // time it bridges.
+  var autoCell = claimedBy
+    ? '<code>' + esc(claimedBy) + '</code>'
+    : '<span class="muted">none</span>';
+
+  // ⭐ Its own column rather than hiding inside the value beside it, because
+  // it is destructive. ⓘ It had Reset for company until 2.66.4, when Unlink
+  // took that job and moved to the config row where the selector is.
+  var autoBtn = claimedBy
+    ? '<button onclick="stopAutoLink(\'' + esc(claimedBy) + '\',\'' +
+      esc(mySerial) + '\',\'' + esc(whoIs(p.ordinal)) + '\')" ' +
+      'title="this controller stops claiming a config at bridge time">' +
+      'Remove auto link</button>'
+    : '';
+
+  return (
+             // ⭐ Same status tint as Overview. The two tables show the same
+             // row, so a controller that reads green there and plain here
+             // would suggest the two disagreed about something.
+             '<tr class="' + (!ready ? 'r-wait'
+                            : (p.linked_config ? 'r-set' : 'r-shared')) + '">' +
+             // ⭐ NICKNAME FIRST (rhoquinn8217, 2026-09-01): it is what a person
+             // calls this controller, so it leads the row. ⓘ From the device
+             // in hand, for the same reason as Overview's copy.
+             '<td>' + esc(p.nickname || nameFor(p.ordinal)) + '</td>' +
+             // ⓘ The marks follow the model name (rhoquinn8217, 2026-10-02:
+             // *"next to the device name in the rows"*).
+             '<td>' + esc(deviceLabelShort(p)) + deviceIcons(parts) + '</td>' +
+             '<td>' + batteryTags(parts) + '</td>' +
+             '<td>' + serialCell + '</td>' +
+             '<td>' + autoCell + '</td>' +
+             '<td>' + autoBtn + '</td></tr>');
+}
+
 // One controller's own page: what it reads, and its settings, editable here.
 function buildDevicePane(d) {
   var pane = document.getElementById('pane-' + d.ordinal);
@@ -3892,47 +4098,10 @@ function buildDevicePane(d) {
     });
   });
 
-  var serialCell = d.serial
-    ? '<code class="good">' + esc(d.serial) + '</code>'
-    : '<span class="warnc">(none reported — auto_link cannot work)</span>';
-
-  // ⓘ "ready" is gone. A bridged controller that is not ready is a state you
-  // see for a moment during setup, not something worth a permanent column.
-  //
-  // ⭐ AUTO LINKED, not "linked". They are different things and the old label
-  // named neither: the linked config is what this controller reads NOW and
-  // lives with the picker below; the auto-linked one is what it will get NEXT
-  // time it bridges.
-  var autoCell = claimedBy
-    ? '<code>' + esc(claimedBy) + '</code>'
-    : '<span class="muted">none</span>';
-
-  // ⭐ Its own column rather than hiding inside the value beside it, because
-  // it is destructive. ⓘ It had Reset for company until 2.66.4, when Unlink
-  // took that job and moved to the config row where the selector is.
-  var autoBtn = claimedBy
-    ? '<button onclick="stopAutoLink(\'' + esc(claimedBy) + '\',\'' +
-      esc(mySerial) + '\',\'' + esc(whoIs(d.ordinal)) + '\')" ' +
-      'title="this controller stops claiming a config at bridge time">' +
-      'Remove auto link</button>'
-    : '';
-
   var head = '<table class="devrow"><tr><th>nickname</th><th>device</th><th>battery</th><th>serial</th>' +
              '<th>auto linked config</th><th></th></tr>' +
-             // ⭐ Same status tint as Overview. The two tables show the same
-             // row, so a controller that reads green there and plain here
-             // would suggest the two disagreed about something.
-             '<tr class="' + (!d.ready ? 'r-wait'
-                            : (d.linked_config ? 'r-set' : 'r-shared')) + '">' +
-             // ⭐ NICKNAME FIRST (rhoquinn8217, 2026-09-01): it is what a person
-             // calls this controller, so it leads the row. ⓘ From the device
-             // in hand, for the same reason as Overview's copy.
-             '<td>' + esc(d.nickname || nameFor(d.ordinal)) + deviceIcon(d) + '</td>' +
-             '<td>' + esc(deviceLabelShort(d)) + '</td>' +
-             '<td>' + batteryCell(d) + '</td>' +
-             '<td>' + serialCell + '</td>' +
-             '<td>' + autoCell + '</td>' +
-             '<td>' + autoBtn + '</td></tr></table>';
+             // ⭐ One row for the device, all its parts in it (devHeadRow, above).
+             devHeadRow(d) + '</table>';
 
   // ⭐ Every config is offered to a controller that takes one, whatever kind of
   // controller it is -- and none to a device that takes no config, which the
@@ -4037,7 +4206,7 @@ function buildDevicePane(d) {
           (d.supports_config
             ? '<button onclick="newConfigFor(\'' + esc(d.ordinal) + '\')" ' +
               'title="create a new config and link it">New</button>'
-            : '<button disabled title="this device does not take a config">New</button>') +
+            : '<button disabled title="configs can only be set for controllers">New</button>') +
           (d.linked_config
             ? '<button onclick="renameConfig(\'' + esc(d.linked_config) + '\')" ' +
               'title="rename this config">Rename</button>' +
@@ -4047,7 +4216,7 @@ function buildDevicePane(d) {
             : '') +
           claimBtn + unlinkBtn +
           (!d.supports_config
-            ? ' <span class="muted">this device does not take a config</span>'
+            ? ' <span class="muted">Configs can only be set for controllers.</span>'
             : (usable.length ? '' : ' <span class="muted">no configs yet — press New</span>')) +
           // ⭐ Safe Edit Mode at the END of the config row, pushed right. It
           // governs what the pad may do to the settings below, so it belongs on
@@ -4768,16 +4937,22 @@ function loadDevices() {
     // there -- so reading one taught you nothing about the other.
     var html = '<table><tr><th>nickname</th><th>device</th><th>battery</th><th>serial</th>' +
                '<th>auto linked config</th><th></th></tr>';
-    list.forEach(function(dev) {
+    // ⭐ ONE ROW PER DEVICE, as on its tab (rhoquinn8217, 2026-10-02: *"Lets
+    // combine the rows with the same name and combine the icons."*). Grouped
+    // here because this table is built before renderTabs stores the list;
+    // renderTabs groups the same list again.
+    groupDevices(list).forEach(function(dev) {
+      var parts = partsOf(dev.ordinal);
       // ⭐ The serial is the point of this whole screen. auto_link works only
       // if it is a real per-unit value, and that has never been observed.
       var serial = dev.serial
         ? '<code class="good">' + esc(dev.serial) + '</code>'
-        : '<span class="warnc">(none reported — auto_link cannot work)</span>';
+        // ⓘ The same words as the device's own table (rhoquinn8217, 2026-10-02).
+        : '<span class="warnc">(no serial - auto_link disabled)</span>';
       // ⭐ THE WHOLE ROW, not a 3px edge. A bar at the left was invisible unless
       // you already knew to look for it -- and the point is noticing at a
       // glance that a controller is there and working.
-      var rowClass = !dev.ready ? 'r-wait'
+      var rowClass = !parts.every(function (p) { return p.ready; }) ? 'r-wait'
                    : (dev.linked_config ? 'r-set' : 'r-shared');
 
       // ⓘ Seen before? The table is rebuilt whenever ANYTHING about a device
@@ -4814,10 +4989,11 @@ function loadDevices() {
               // BEFORE the device list is stored, so the lookup fell back to
               // the ordinal and Overview showed ds5_usb_1 while the controller
               // tab showed the name.
-              '<td>' + esc(dev.nickname || dev.ordinal) + deviceIcon(dev) + '</td>' +
-              '<td>' + esc(deviceLabelShort(dev)) + (dev.supports_config ? '' :
+              '<td>' + esc(dev.nickname || dev.ordinal) + '</td>' +
+              // ⓘ After the model name, as in the device's own table.
+              '<td>' + esc(deviceLabelShort(dev)) + deviceIcons(parts) + (dev.supports_config ? '' :
                   ' <span class="muted">(no config support)</span>') + '</td>' +
-              '<td>' + batteryCell(dev) + '</td>' +
+              '<td>' + batteryTags(parts) + '</td>' +
               '<td>' + serial + '</td>' +
               '<td>' + autoCell + '</td>' +
               '<td>' + autoBtn + '</td></tr>';
@@ -4910,7 +5086,7 @@ function loadConfigs(isRetry) {
     if (sig !== CONFIG_SIG) {
       CONFIG_SIG = sig;
       if (LAST_DEVICES.length) preserveScroll(function() {
-        LAST_DEVICES.forEach(buildDevicePane);
+        DEVICE_LEADS.forEach(buildDevicePane);
       });
     }
     // T-232: PAINT THE EDITOR HEAD BEFORE ANY EARLY RETURN.
@@ -4975,7 +5151,7 @@ function loadConfigs(isRetry) {
 // went with Reset in 2.66.4 -- unlinking is the same act as picking
 // "(no config)", and a pick asks nothing.
 function unlinkConfirmed(ordinal) {
-  call('POST', '/api/v1/devices/' + encodeURIComponent(ordinal) + '/link', {})
+  linkParts(ordinal, {})
     .then(function() { loadDevices(); loadConfigs(); }).catch(function(){});
 }
 
@@ -6005,7 +6181,7 @@ function gpActivate() {
     // preference. `config_move.inl` gives Quick a size table of ITS OWN:
     //
     //     Simple  kCompactSizes  0.45  x 0.45  of the screen
-    //     Quick   kQuickSizes    0.185 x 0.150
+    //     Quick   kQuickSizes    0.278 x 0.150   (0.185 wide until 2026-10-02)
     //
     // ➡️ **Simple's window is THREE TIMES TALLER than Quick's.** So the
     // postcard reasoning was measured on Quick and never applied to Simple --
@@ -6716,7 +6892,7 @@ function honourOpenOnTab() {
   // ⛔ NOT CLEARED UNTIL IT LANDS. At startup the device list has not arrived
   // yet, so the tab does not exist and the first attempt cannot succeed --
   // clearing there threw the target away and the window stayed on Overview.
-  if (TABS.indexOf(OPEN_ON_TAB) < 0) return false;
+  if (TABS.indexOf(leadOf(OPEN_ON_TAB)) < 0) return false;
   showTab(OPEN_ON_TAB);
   OPEN_ON_TAB = '';                 // one open, one jump
   return true;
@@ -6905,8 +7081,8 @@ function restorePlace() {
       if (!tab) return;             // that controller is gone; stay on Overview
     }
 
-    if (tab !== 'overview' && TABS.indexOf(tab) < 0) return;
-    if (tab !== ACTIVE) showTab(tab);
+    if (tab !== 'overview' && TABS.indexOf(leadOf(tab)) < 0) return;
+    if (leadOf(tab) !== ACTIVE) showTab(tab);
 
     // ⭐ The section first: with one shown at a time, the focus list is built
     // from the visible one, so restoring the halo before the section would
@@ -7547,10 +7723,14 @@ function compactSize() {
 }
 
 // ⓘ Quick's window: the smaller of its two sizes, which rhoquinn8217 named
-// medium and large (2026-09-09) -- the half-of-Simple heights, an eighth
-// off the width; the listener's table agrees.
+// medium and large (2026-09-09); the listener's table agrees.
+// ⭐ HALF AS WIDE AGAIN SINCE 2026-10-02, at the width they dragged it to
+// (kQuickSizes in config_move.inl says why). ⛔ This number and that table
+// are TWO PLACERS: a switch sizes the window here, the resize button there,
+// and 2.66.49 changed only the listener's, so a switch opened at the old
+// width.
 function quickSize() {
-  compactHome(Math.round(screen.availWidth * 0.185),
+  compactHome(Math.round(screen.availWidth * 0.278),
               Math.round(screen.availHeight * 0.15));
 }
 
@@ -7693,7 +7873,7 @@ function compactEnsureController() {
   // are actually known -- this runs before the first device poll answers --
   // and dropped once used, or it would fight L1/R1 forever after.
   if (WANT_ORDINAL && tabs.length) {
-    var want = WANT_ORDINAL;
+    var want = leadOf(WANT_ORDINAL);
     WANT_ORDINAL = '';
     if (tabs.indexOf(want) >= 0 && ACTIVE !== want) { showTab(want); return; }
   }
@@ -7914,7 +8094,7 @@ function compactPick() {
   if (!GP_SELECT_COMMIT) return;
   var ordinal = sel.dataset.ordinal;
   var body = sel.value ? { config: sel.value } : {};
-  call('POST', '/api/v1/devices/' + encodeURIComponent(ordinal) + '/link', body)
+  linkParts(ordinal, body)
     // ⛔ NO QUESTION AFTER A PICK (rhoquinn8217, 2026-09-09, twice): Circle
     // closes at once, as it does the keyboard, and "Stay here" was a press
     // that gained nothing. A new preset still asks, because it has
@@ -7997,26 +8177,37 @@ function paintCompact() {
                '<small>' + key + '</small></div>';
       }
       return '<div class="cside ' + cls + '" onclick="gpTab(' + (cls === 'l' ? -1 : 1) + ')">' +
-             '<small>' + key + '</small>' + esc(nameFor(ord)) + deviceIcon(od) +
-             (od ? '<div class="ckind">' + esc(deviceLabelShort(od)) + '</div>' : '') + '</div>';
+             '<small>' + key + '</small>' + esc(nameFor(ord)) +
+             (od ? '<div class="ckind"><span class="cklabel">' + esc(deviceLabelShort(od)) +
+                   '</span>' + deviceIcons(partsOf(ord)) + '</div>' : '') + '</div>';
     };
     var slide = COMPACT_SLIDE > 0 ? ' slide-r' : COMPACT_SLIDE < 0 ? ' slide-l' : '';
     COMPACT_SLIDE = 0;
+    // ⭐ THE RING'S KEYS ARE THE ONES IN YOUR HAND (rhoquinn8217, 2026-10-02:
+    // *"for the carousel, L1 and R1 need to show for playsation controllers,
+    // to LB and RB for xbox controlers and Q and E from keyboard"*). The
+    // legend's own pair, so the ring and the footer follow the same last
+    // press, and repaint together when it changes.
+    var shoulder = String(LG.shoulder || 'L1/R1').split('/');
     // ⓘ Quick shows the whole ring too (rhoquinn8217, 2026-09-09): the kind
     // under the name, and the L1 and R1 neighbours with theirs.
     html += '<div class="ccar' + slide + '">' +
-            side(prev, 'l', '\u25c2 L1') +
-            '<div class="ccur"><div class="cname">' + esc(nameFor(d.ordinal)) + deviceIcon(d) +
-            batteryTag(d) + '</div>' +
-            '<div class="ckind">' + esc(deviceLabelShort(d)) + '</div></div>' +
-            side(next, 'r', 'R1 \u25b8') +
+            side(prev, 'l', '\u25c2 ' + shoulder[0]) +
+            '<div class="ccur"><div class="cname">' + esc(nameFor(d.ordinal)) +
+            batteryTags(partsOf(d.ordinal)) + '</div>' +
+            // ⓘ The marks follow the model name here too, as on the tabs.
+            '<div class="ckind"><span class="cklabel">' + esc(deviceLabelShort(d)) + '</span>' +
+            deviceIcons(partsOf(d.ordinal)) + '</div></div>' +
+            side(next, 'r', shoulder[1] + ' \u25b8') +
             '</div>';
     if (!d.supports_config) {
       // ⛔ No Start on a device that takes no config (2.65.0). A keyboard or a
       // mouse bridged beside the controllers keeps its own software, and the
       // agent would refuse the link Start ends in.
-      html += '<div class="cempty">' + esc(deviceLabelShort(d)) +
-              ' does not take a config</div>';
+      // ⭐ IN THEIR WORDS (rhoquinn8217, 2026-10-02): it read "<device> does
+      // not take a config", which named the device and not what would take
+      // one.
+      html += '<div class="cempty">Configs can only be set for controllers.</div>';
     } else if (!usable.length) {
       // ⭐ The empty state is DELIBERATELY different: a first preset deserves
       // a button that looks like it will do something, not a footer button.
@@ -8110,6 +8301,10 @@ function paintCompact() {
     // to the right -- the order here IS the order on screen.
     html += '<div class="cbar">' +
             '<div class="cbarText"><div class="clegend">' +
+            // ⓘ The shoulder keys first, as in Simple's (rhoquinn8217,
+            // 2026-10-02: *"Add L1/R1 LB/RB and Q/E in the quick mode legend
+            // also"*), following the input in hand like the ring's keys.
+            LG.shoulder + ' controller | ' +
             LG.position + ' position | ' + LG.resize + ' resize | ' +
             LG.close + ' close</div></div>' +
             modePickerHtml('cselMode') +
@@ -8759,6 +8954,9 @@ function pollDevices() {
     paintHealth();
     paintPadDestination(d);
     LAST_DEVICES = list;
+    // ⓘ Kept in step with the list even when nothing is redrawn, so a part's
+    // battery or state is never read from the list before.
+    groupDevices(list);
 
     // ⭐ AM I STILL THE CURRENT WINDOW? Two settings windows should never
     // exist, but Ctrl+Shift+T reopens a closed one and that is the browser's
@@ -8960,6 +9158,49 @@ function selfTest() {
     ok('an unknown device falls back to the ordinal',
        nameFor('ds5_usb_9') === 'ds5_usb_9');
     LAST_DEVICES = savedDevices;
+  }
+
+  // ⭐ ONE TAB PER DEVICE (2.66.43). Self-contained like the block above: worked
+  // on a made-up list, and the real one grouped again afterwards. ⓘ The link
+  // check swaps call() for a recorder, so nothing is sent.
+  {
+    groupDevices([
+      { ordinal: 'hid_1', nickname: 'Odin', kind: 'hid', device_type: 'mouse' },
+      { ordinal: 'ds4_usb_1', nickname: 'Odin', kind: 'ds4_usb',
+        device_type: 'controller', supports_config: true },
+      { ordinal: 'hid_2', nickname: 'Odin', kind: 'hid', device_type: 'keyboard' },
+      { ordinal: 'xbox_1', nickname: 'Twin', kind: 'xbox', supports_config: true },
+      { ordinal: 'xbox_2', nickname: 'Twin', kind: 'xbox', supports_config: true },
+      { ordinal: 'hid_3', nickname: '', kind: 'hid' },
+      { ordinal: 'hid_4', nickname: '', kind: 'hid' }]);
+    ok('parts under one name share one tab', DEVICE_LEADS.length === 4,
+       'got ' + DEVICE_LEADS.length + ' tabs');
+    ok('the part that takes a config leads its tab',
+       DEVICE_LEADS[0].ordinal === 'ds4_usb_1', 'got ' + DEVICE_LEADS[0].ordinal);
+    ok('any part finds its tab',
+       leadOf('hid_1') === 'ds4_usb_1' && leadOf('hid_2') === 'ds4_usb_1');
+    ok('nameless parts keep a tab each',
+       leadOf('hid_3') === 'hid_3' && leadOf('hid_4') === 'hid_4');
+    var marks = deviceIcons(partsOf('hid_1'));
+    ok('a device shows every kind it is, in order',
+       marks.indexOf(DEVICE_EMOJI.controller + DEVICE_EMOJI.keyboard +
+                     DEVICE_EMOJI.mouse) >= 0, marks);
+    ok('and each kind once',
+       deviceIcons(partsOf('xbox_1')).split(DEVICE_EMOJI.controller).length === 2);
+    var posted = [];
+    var realCall = call;
+    call = function (method, path) {
+      posted.push(method + ' ' + path);
+      return Promise.resolve({});
+    };
+    linkParts('xbox_2', { config: 'x' });
+    linkParts('hid_2', {});
+    call = realCall;
+    ok('a config set on a tab is set on every part that takes one',
+       posted.join(' | ') === 'POST /api/v1/devices/xbox_1/link | ' +
+       'POST /api/v1/devices/xbox_2/link | POST /api/v1/devices/ds4_usb_1/link',
+       'got ' + posted.join(' | '));
+    groupDevices(LAST_DEVICES);
   }
 
   // 🔗 T-248. The hints are a plain array of strings, and the one way this
